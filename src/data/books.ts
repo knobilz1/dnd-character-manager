@@ -1,0 +1,52 @@
+import type { Book } from '../types';
+
+export const BOOKS: Book[] = [
+  {
+    id: 'PHB',
+    name: "Player's Handbook",
+    shortName: 'PHB',
+    color: 'red',
+    year: 2014,
+    description: 'The core rulebook. Contains all 12 base classes, races, spells, and rules.',
+  },
+  {
+    id: 'XGtE',
+    name: "Xanathar's Guide to Everything",
+    shortName: 'XGtE',
+    color: 'amber',
+    year: 2017,
+    description: 'Expanded subclasses, new spells, and additional rules options.',
+  },
+  {
+    id: 'TCE',
+    name: "Tasha's Cauldron of Everything",
+    shortName: 'TCE',
+    color: 'purple',
+    year: 2020,
+    description: 'Optional class features, new subclasses, custom lineage, and more spells.',
+  },
+  {
+    id: 'MMoM',
+    name: 'Mordenkainen Monsters of the Multiverse',
+    shortName: 'MMoM',
+    color: 'blue',
+    year: 2022,
+    description: 'Updated and expanded playable races from across the multiverse.',
+  },
+  {
+    id: 'VGM',
+    name: "Volo's Guide to Monsters",
+    shortName: 'VGM',
+    color: 'green',
+    year: 2016,
+    description: 'Monster lore and additional playable monster races.',
+  },
+  {
+    id: 'FToD',
+    name: "Fizban's Treasury of Dragons",
+    shortName: 'FToD',
+    color: 'orange',
+    year: 2021,
+    description: 'Dragon-themed subclasses, spells, and Dragonborn variants.',
+  },
+];
