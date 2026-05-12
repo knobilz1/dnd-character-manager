@@ -1,10 +1,10 @@
 import React from 'react';
-import { Plus, Sparkles, X } from 'lucide-react';
+import { Plus, Sparkles, X, Zap } from 'lucide-react';
 import { ALL_SPELLS, getSpell } from '../../data/spells';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { SpellDetail } from '../wizard/steps/StepSpells';
-import type { Character, Spell, SpellLevel } from '../../types';
+import type { Character, Spell, SpellLevel, SlotLevel } from '../../types';
 import { getClass } from '../../data/classes';
 
 const SCHOOL_COLORS: Record<string, string> = {
@@ -21,17 +21,26 @@ interface SpellPanelProps {
   endConcentration: () => void;
   addSpellToBook: (id: string) => void;
   removeSpellFromBook: (id: string) => void;
+  useSpellSlot: (level: SlotLevel) => void;
+  usePactSlot: () => void;
 }
 
-export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook }: SpellPanelProps) {
+const PREPARED_CASTER_CLASSES = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
+
+export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [filterLevel, setFilterLevel] = React.useState<number | 'all'>('all');
 
+  const [castSpell, setCastSpell] = React.useState<Spell | null>(null);
+
   const primaryClass = character.classes[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
-  const { maxPreparedSpells } = derived;
+  const { maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel } = derived;
+  const slotsUsed = character.spellSlotsUsed;
+  const pactMagic = character.pactMagic;
+  const isWarlock = classDef?.id === 'warlock';
 
   // Group spellbook by level
   const spellbookMap = new Map(character.spellbook.map(sp => [sp.spellId, sp]));
@@ -54,18 +63,44 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
     (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const isPreparedCaster = classDef && ['cleric','druid','paladin','wizard'].includes(classDef.id);
+  const isPreparedCaster = classDef && PREPARED_CASTER_CLASSES.includes(classDef.id);
   const levels = [0,1,2,3,4,5,6,7,8,9] as SpellLevel[];
+
+  function canCast(spell: Spell, prepared: boolean, alwaysPrepared: boolean): boolean {
+    if (spell.level === 0) return true; // cantrips always castable
+    if (!isPreparedCaster) return true; // known casters
+    return prepared || alwaysPrepared;
+  }
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          {isPreparedCaster && maxPreparedSpells > 0 && (
-            <p className="text-sm text-slate-400">
-              Prepared: <span className="font-bold text-white">{preparedCount}/{maxPreparedSpells}</span>
-            </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          {/* Cantrips */}
+          {cantripsKnown > 0 && (() => {
+            const cantripCount = (byLevel[0]?.length ?? 0);
+            const ok = cantripCount <= cantripsKnown;
+            return (
+              <span className="text-slate-400">
+                Cantrips: <span className={cn('font-bold', ok ? 'text-white' : 'text-red-400')}>{cantripCount}/{cantripsKnown}</span>
+              </span>
+            );
+          })()}
+          {/* Prepared (prepared casters only) */}
+          {isPreparedCaster && maxPreparedSpells != null && maxPreparedSpells > 0 && (() => {
+            const ok = preparedCount <= maxPreparedSpells;
+            return (
+              <span className="text-slate-400">
+                Prepared: <span className={cn('font-bold', ok ? 'text-white' : 'text-red-400')}>{preparedCount}/{maxPreparedSpells}</span>
+              </span>
+            );
+          })()}
+          {/* Max spell level */}
+          {maxSpellLevel > 0 && (
+            <span className="text-slate-400">
+              Max level: <span className="font-bold text-white">L{maxSpellLevel}</span>
+            </span>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
@@ -83,13 +118,23 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
         levels.map(lvl => {
           const entries = byLevel[lvl];
           if (!entries?.length) return null;
+          const inLevelPrepared = entries.filter(e => e.prepared || e.alwaysPrepared).length;
+          const showPrepBadge = lvl > 0 && isPreparedCaster;
+          const overMaxLevel = lvl > maxSpellLevel && lvl > 0;
           return (
-            <div key={lvl} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+            <div key={lvl} className={cn('bg-slate-800 border rounded-xl overflow-hidden', overMaxLevel ? 'border-amber-700/40' : 'border-slate-700')}>
               <div className="px-4 py-2 bg-slate-750 border-b border-slate-700 flex items-center gap-2">
                 <h3 className="font-bold text-slate-300 text-sm">
                   {lvl === 0 ? 'Cantrips' : `Level ${lvl} Spells`}
                 </h3>
-                <span className="text-xs text-slate-500">({entries.length})</span>
+                <span className="text-xs text-slate-500">
+                  {showPrepBadge
+                    ? <>{inLevelPrepared}/{entries.length} prepared</>
+                    : <>({entries.length})</>}
+                </span>
+                {overMaxLevel && (
+                  <span className="ml-auto text-[10px] text-amber-400 bg-amber-900/30 px-1.5 py-0.5 rounded">no slots yet</span>
+                )}
               </div>
               <div className="divide-y divide-slate-700/50">
                 {entries.sort((a,b) => a.spell.name.localeCompare(b.spell.name)).map(({ spell, prepared, alwaysPrepared }) => (
@@ -127,7 +172,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                     </div>
 
                     {/* Concentration toggle */}
-                    {spell.concentration && prepared && (
+                    {spell.concentration && canCast(spell, prepared, alwaysPrepared) && (
                       <button
                         onClick={() => {
                           if (character.concentrationSpellId === spell.id) endConcentration();
@@ -139,8 +184,30 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                             ? 'border-amber-500 bg-amber-900/30 text-amber-300'
                             : 'border-slate-600 text-slate-500 hover:border-amber-500 hover:text-amber-300',
                         )}
+                        title={character.concentrationSpellId === spell.id ? 'End concentration' : 'Start concentration'}
                       >
                         <Sparkles size={12} />
+                      </button>
+                    )}
+
+                    {/* Cast button */}
+                    {canCast(spell, prepared, alwaysPrepared) && (
+                      <button
+                        onClick={() => {
+                          if (spell.level === 0) {
+                            // Cantrips: nothing to consume, but still trigger concentration if needed
+                            if (spell.concentration && character.concentrationSpellId !== spell.id) {
+                              startConcentration(spell.id);
+                            }
+                            return;
+                          }
+                          setCastSpell(spell);
+                        }}
+                        className="shrink-0 text-xs px-2 py-1 rounded border border-red-700 bg-red-900/30 text-red-300 hover:bg-red-800/50 transition-all flex items-center gap-1"
+                        title="Cast spell"
+                      >
+                        <Zap size={12} />
+                        <span className="hidden sm:inline">Cast</span>
                       </button>
                     )}
 
@@ -159,6 +226,77 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
           );
         })
       )}
+
+      {/* Cast slot picker dialog */}
+      <Dialog open={!!castSpell} onClose={() => setCastSpell(null)} title={castSpell ? `Cast ${castSpell.name}` : ''}>
+        {castSpell && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-400">
+              Choose a spell slot to cast this spell. Spell base level is {castSpell.level === 0 ? 'cantrip' : `L${castSpell.level}`}.
+              {castSpell.atHigherLevels && <span className="block mt-1 text-xs text-slate-500 italic">Upcasting: {castSpell.atHigherLevels}</span>}
+            </p>
+
+            {/* Pact slot option (warlock) */}
+            {isWarlock && pactMagic && pactMagic.slotLevel >= castSpell.level && pactMagic.slotsUsed < pactMagic.slotsTotal && (
+              <button
+                className="w-full text-left p-3 rounded-lg border-2 border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 transition-all"
+                onClick={() => {
+                  usePactSlot();
+                  if (castSpell.concentration) startConcentration(castSpell.id);
+                  setCastSpell(null);
+                }}
+              >
+                <p className="text-sm font-bold text-purple-300">Pact Magic Slot (L{pactMagic.slotLevel})</p>
+                <p className="text-xs text-slate-400">{pactMagic.slotsTotal - pactMagic.slotsUsed}/{pactMagic.slotsTotal} pact slots remaining</p>
+              </button>
+            )}
+
+            {/* Regular slot options >= spell level */}
+            <div className="grid gap-2">
+              {([1,2,3,4,5,6,7,8,9] as SlotLevel[])
+                .filter(lvl => lvl >= castSpell.level)
+                .map(lvl => {
+                  const total = slotTotals[lvl] ?? 0;
+                  if (total === 0) return null;
+                  const used = slotsUsed[lvl] ?? 0;
+                  const avail = total - used;
+                  const disabled = avail <= 0;
+                  return (
+                    <button
+                      key={lvl}
+                      disabled={disabled}
+                      onClick={() => {
+                        useSpellSlot(lvl);
+                        if (castSpell.concentration) startConcentration(castSpell.id);
+                        setCastSpell(null);
+                      }}
+                      className={cn(
+                        'w-full text-left p-3 rounded-lg border-2 transition-all',
+                        disabled ? 'border-slate-700 bg-slate-900 opacity-50 cursor-not-allowed'
+                                 : lvl === castSpell.level
+                                   ? 'border-red-600 bg-red-950/30 hover:bg-red-900/40'
+                                   : 'border-slate-600 bg-slate-800 hover:border-amber-500 hover:bg-amber-950/20',
+                      )}
+                    >
+                      <p className="text-sm font-bold text-white">
+                        Level {lvl} Slot {lvl > castSpell.level && <span className="text-xs text-amber-400 font-normal">(upcast)</span>}
+                      </p>
+                      <p className="text-xs text-slate-400">{avail}/{total} remaining</p>
+                    </button>
+                  );
+                })}
+            </div>
+
+            {/* No slots at all */}
+            {([1,2,3,4,5,6,7,8,9] as SlotLevel[])
+              .filter(lvl => lvl >= castSpell.level)
+              .every(lvl => (slotTotals[lvl] ?? 0) === 0) &&
+              !(isWarlock && pactMagic && pactMagic.slotLevel >= castSpell.level) && (
+                <p className="text-sm text-amber-400 italic">You don&apos;t have any slots at this level or higher.</p>
+              )}
+          </div>
+        )}
+      </Dialog>
 
       {/* Spell detail dialog */}
       <Dialog open={!!detailSpell} onClose={() => setDetailSpell(null)} title={detailSpell?.name} wide>

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
-import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS } from '../data/mechanics';
+import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
@@ -103,16 +103,23 @@ export function useCharacterDerived(character: Character | null) {
       });
     }
 
-    // Number of prepared spells (for non-spontaneous casters)
-    let maxPreparedSpells = 0;
+    // Number of prepared spells (for prepared casters only) and max spell level
+    let maxPreparedSpells: number | null = null;
+    let cantripsKnown = 0;
     if (primaryClassDef && spellcastingAbility) {
       const casterLevel = primaryClassLevel?.level ?? 0;
       const spellMod = mods[spellcastingAbility];
-      if (['cleric', 'druid', 'paladin'].includes(primaryClassDef.id)) {
-        maxPreparedSpells = Math.max(1, casterLevel + spellMod);
-      } else if (primaryClassDef.id === 'wizard') {
-        maxPreparedSpells = Math.max(1, casterLevel + spellMod);
-      }
+      maxPreparedSpells = maxPreparedSpellsFor(primaryClassDef.id, casterLevel, spellMod);
+      cantripsKnown = cantripsKnownFor(primaryClassDef.id, casterLevel);
+    }
+
+    // Highest leveled slot the character has access to
+    let maxSpellLevel = 0;
+    for (let lvl = 9; lvl >= 1; lvl--) {
+      if ((slotTotals[lvl] ?? 0) > 0) { maxSpellLevel = lvl; break; }
+    }
+    if (character.pactMagic && character.pactMagic.slotLevel > maxSpellLevel) {
+      maxSpellLevel = character.pactMagic.slotLevel;
     }
 
     return {
@@ -130,6 +137,8 @@ export function useCharacterDerived(character: Character | null) {
       spellAttackBonus,
       slotTotals,
       maxPreparedSpells,
+      maxSpellLevel,
+      cantripsKnown,
       totalLevel,
       primaryClassDef,
     };

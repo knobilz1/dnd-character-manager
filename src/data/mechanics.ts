@@ -181,3 +181,42 @@ export function totalCharacterLevel(classes: Array<{ level: number }>): number {
 export function emptySlotState(): Record<SlotLevel, number> {
   return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0 };
 }
+
+// Cantrips known by class & level (PHB tables, index = level - 1)
+export const CANTRIPS_KNOWN: Record<string, number[]> = {
+  bard:      [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  cleric:    [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
+  druid:     [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  sorcerer:  [4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6],
+  warlock:   [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  wizard:    [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
+  artificer: [2,2,2,2,2,2,2,2,2,3,3,3,3,4,4,4,4,4,4,4],
+};
+
+export function cantripsKnownFor(classId: string, level: number): number {
+  const table = CANTRIPS_KNOWN[classId];
+  if (!table) return 0;
+  return table[Math.max(0, Math.min(level, 20) - 1)] ?? 0;
+}
+
+// Number of spells a prepared caster can prepare. Returns null for spontaneous/known casters.
+export function maxPreparedSpellsFor(
+  classId: string,
+  level: number,
+  spellMod: number,
+): number | null {
+  switch (classId) {
+    case 'cleric':
+    case 'druid':
+    case 'wizard':
+      return Math.max(1, level + spellMod);
+    case 'paladin':
+      if (level < 2) return 0;
+      return Math.max(1, Math.floor(level / 2) + spellMod);
+    case 'artificer':
+      if (level < 2) return 0;
+      return Math.max(1, Math.ceil(level / 2) + spellMod);
+    default:
+      return null; // sorcerer, bard, ranger, warlock are known/spontaneous
+  }
+}

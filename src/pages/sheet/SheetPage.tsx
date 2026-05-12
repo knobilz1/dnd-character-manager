@@ -248,7 +248,9 @@ export function SheetPage() {
                 startConcentration={startConcentration}
                 endConcentration={endConcentration}
                 addSpellToBook={addSpellToBook}
-              removeSpellFromBook={removeSpellFromBook}
+                removeSpellFromBook={removeSpellFromBook}
+                useSpellSlot={useSpellSlot}
+                usePactSlot={usePactSlot}
               />
             )}
             {tab === 'character' && (
