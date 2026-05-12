@@ -234,6 +234,39 @@ export interface ClassOptionsState {
   infusions: string[];
 }
 
+export type ItemCategory =
+  | 'weapon' | 'armor' | 'shield' | 'tool' | 'pack'
+  | 'consumable' | 'gear' | 'treasure' | 'magic' | 'other';
+
+export interface InventoryItem {
+  id: string;             // unique per row in the bag
+  name: string;
+  quantity: number;
+  category: ItemCategory;
+  equipped?: boolean;
+  description?: string;
+  weight?: number;        // in pounds, per item
+  source?: 'class' | 'background' | 'manual';
+}
+
+// Equipment choice option: each option is a labeled bundle of items.
+export interface EquipmentOption {
+  label: string;
+  items: { name: string; quantity?: number; category?: ItemCategory; weight?: number }[];
+}
+
+export interface EquipmentChoice {
+  label: string;          // human-readable prompt
+  options: EquipmentOption[];
+}
+
+export interface ClassStartingEquipment {
+  classId: string;
+  choices: EquipmentChoice[];
+  fixed: { name: string; quantity?: number; category?: ItemCategory; weight?: number }[];
+  startingGold?: string;  // e.g. "4d4 × 10 gp"
+}
+
 export interface AbilityScores {
   str: number;
   dex: number;
@@ -292,6 +325,7 @@ export interface Character {
   selectedSkillProficiencies: SkillName[];
   selectedFeats: string[];
   classOptions: ClassOptionsState;
+  inventory: InventoryItem[];
   spellbook: PreparedSpell[];
   concentrationSpellId?: string;
   currentHP: number;
@@ -312,12 +346,12 @@ export interface Character {
 export type WizardStep =
   | 'books' | 'race' | 'class' | 'subclass' | 'class-options'
   | 'background' | 'ability-scores' | 'skills'
-  | 'feats' | 'spells' | 'review';
+  | 'feats' | 'spells' | 'equipment' | 'review';
 
 export const WIZARD_STEPS: WizardStep[] = [
   'books', 'race', 'class', 'subclass', 'class-options',
   'background', 'ability-scores', 'skills',
-  'feats', 'spells', 'review',
+  'feats', 'spells', 'equipment', 'review',
 ];
 
 export const STEP_LABELS: Record<WizardStep, string> = {
@@ -331,5 +365,6 @@ export const STEP_LABELS: Record<WizardStep, string> = {
   'skills': 'Skills',
   'feats': 'Feats',
   'spells': 'Spells',
+  'equipment': 'Equipment',
   'review': 'Review',
 };

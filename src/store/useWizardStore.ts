@@ -9,6 +9,8 @@ type Draft = Partial<Character> & {
   playerName: string;
   alignment: string;
   enabledBooks: BookId[];
+  equipmentChoices?: Record<number, number>;  // class-choice index → option index
+  equipmentTakeGold?: boolean;                // alternative: take starting gold instead of items
 };
 
 const INITIAL_DRAFT: Draft = {
@@ -26,6 +28,9 @@ const INITIAL_DRAFT: Draft = {
     maneuvers: [],
     infusions: [],
   },
+  inventory: [],
+  equipmentChoices: {},
+  equipmentTakeGold: false,
   spellbook: [],
   abilityScoreMethod: 'pointbuy',
   baseAbilityScores: { str: 8, dex: 8, con: 8, int: 8, wis: 8, cha: 8 },
@@ -163,6 +168,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         maneuvers: [],
         infusions: [],
       },
+      inventory: draft.inventory ?? [],
       spellbook: draft.spellbook ?? [],
       currentHP: maxHP,
       maxHP,

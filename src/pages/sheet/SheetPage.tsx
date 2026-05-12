@@ -9,6 +9,7 @@ import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
 import { TraitsPanel } from './TraitsPanel';
+import { InventoryPanel } from './InventoryPanel';
 import { getClass } from '../../data/classes';
 import { getRace } from '../../data/races';
 
@@ -27,7 +28,8 @@ export function SheetPage() {
     setExhaustion, useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, usePactSlot,
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
-    removeSpellFromBook } = useCharacterStore();
+    removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
+    toggleInventoryEquipped, renameInventoryItem } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [hpInput, setHpInput] = React.useState('');
@@ -196,6 +198,7 @@ export function SheetPage() {
             tabs={[
               { id: 'combat', label: 'Combat' },
               { id: 'spells', label: 'Spells' },
+              { id: 'inventory', label: 'Inventory' },
               { id: 'character', label: 'Character' },
             ]}
             active={tab}
@@ -251,6 +254,16 @@ export function SheetPage() {
                 removeSpellFromBook={removeSpellFromBook}
                 useSpellSlot={useSpellSlot}
                 usePactSlot={usePactSlot}
+              />
+            )}
+            {tab === 'inventory' && (
+              <InventoryPanel
+                character={character}
+                addInventoryItem={addInventoryItem}
+                removeInventoryItem={removeInventoryItem}
+                setInventoryQuantity={setInventoryQuantity}
+                toggleInventoryEquipped={toggleInventoryEquipped}
+                renameInventoryItem={renameInventoryItem}
               />
             )}
             {tab === 'character' && (

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, SlotLevel } from '../types';
+import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel } from '../types';
 import { useLibraryStore } from './useLibraryStore';
 import { emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
@@ -43,6 +43,13 @@ interface CharacterState {
   // Resources
   setResource: (key: string, value: number) => void;
 
+  // Inventory
+  addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
+  removeInventoryItem: (id: string) => void;
+  setInventoryQuantity: (id: string, qty: number) => void;
+  toggleInventoryEquipped: (id: string) => void;
+  renameInventoryItem: (id: string, name: string) => void;
+
   // Rest
   shortRest: () => void;
   longRest: () => void;
@@ -74,6 +81,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       selectedFeats: c.selectedFeats ?? [],
       selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
       spellbook: c.spellbook ?? [],
+      inventory: c.inventory ?? [],
     },
   }),
 
@@ -205,6 +213,49 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         r.key === key ? { ...r, current: Math.max(0, Math.min(value, r.max)) } : r
       );
       return { character: { ...s.character, resources } };
+    }),
+
+  addInventoryItem: (item) =>
+    set((s) => {
+      if (!s.character) return s;
+      const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID() : `item-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+      const next: InventoryItem = { id, source: 'manual', ...item };
+      return { character: { ...s.character, inventory: [...(s.character.inventory ?? []), next] } };
+    }),
+
+  removeInventoryItem: (id) =>
+    set((s) => s.character
+      ? { character: { ...s.character, inventory: (s.character.inventory ?? []).filter(i => i.id !== id) } }
+      : s),
+
+  setInventoryQuantity: (id, qty) =>
+    set((s) => {
+      if (!s.character) return s;
+      const safeQty = Math.max(0, Math.floor(qty));
+      if (safeQty === 0) {
+        return { character: { ...s.character, inventory: (s.character.inventory ?? []).filter(i => i.id !== id) } };
+      }
+      const inventory = (s.character.inventory ?? []).map(i => i.id === id ? { ...i, quantity: safeQty } : i);
+      return { character: { ...s.character, inventory } };
+    }),
+
+  toggleInventoryEquipped: (id) =>
+    set((s) => {
+      if (!s.character) return s;
+      const inventory = (s.character.inventory ?? []).map(i =>
+        i.id === id ? { ...i, equipped: !i.equipped } : i
+      );
+      return { character: { ...s.character, inventory } };
+    }),
+
+  renameInventoryItem: (id, name) =>
+    set((s) => {
+      if (!s.character) return s;
+      const inventory = (s.character.inventory ?? []).map(i =>
+        i.id === id ? { ...i, name } : i
+      );
+      return { character: { ...s.character, inventory } };
     }),
 
   shortRest: () =>

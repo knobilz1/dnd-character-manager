@@ -17,6 +17,7 @@ import { StepAbilityScores } from './steps/StepAbilityScores';
 import { StepSkills } from './steps/StepSkills';
 import { StepFeats } from './steps/StepFeats';
 import { StepSpells } from './steps/StepSpells';
+import { StepEquipment } from './steps/StepEquipment';
 import { StepReview } from './steps/StepReview';
 
 const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
@@ -30,6 +31,7 @@ const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
   'skills': StepSkills,
   'feats': StepFeats,
   'spells': StepSpells,
+  'equipment': StepEquipment,
   'review': StepReview,
 };
 
@@ -45,6 +47,7 @@ function canAdvance(step: WizardStep, draft: any): boolean {
     case 'skills': return true;
     case 'feats': return true;
     case 'spells': return true;
+    case 'equipment': return true;
     case 'review': return !!(draft.name?.trim());
     default: return true;
   }
