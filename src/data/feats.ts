@@ -335,6 +335,183 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'You awaken the ability to mentally connect with others, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You can speak telepathically to any creature you can see within 60 feet of you. Your telepathic utterances are in a language you know, and the creature understands you only if it knows that language. Your communication doesn\'t give the creature the ability to respond to you telepathically.\n• You can cast the detect thoughts spell, requiring no spell slot or components, and you must finish a long rest before you can cast it this way again. Your spellcasting ability for the spell is the ability increased by this feat. If you have spell slots of 2nd level or higher, you can cast this spell with them.',
   },
+
+  // ── REMAINING PHB FEATS ────────────────────────────────────────────────
+  {
+    id: 'linguist',
+    name: 'Linguist',
+    sourceBook: 'PHB',
+    description: 'You have studied languages and codes, gaining the following benefits:\n• Increase your Intelligence score by 1, to a maximum of 20.\n• You learn three languages of your choice.\n• You can ably create written ciphers. Others can\'t decipher a code you create unless you teach them, they succeed on an Intelligence check (DC equal to your Intelligence score + your proficiency bonus), or they use magic to decipher it.',
+    abilityScoreIncrease: { int: 1 },
+  },
+  {
+    id: 'medium-armor-master',
+    name: 'Medium Armor Master',
+    sourceBook: 'PHB',
+    prerequisite: { other: 'Proficiency with medium armor' },
+    description: 'You have practiced moving in medium armor to gain the following benefits:\n• Wearing medium armor doesn\'t impose disadvantage on your Dexterity (Stealth) checks.\n• When you wear medium armor, you can add 3, rather than 2, to your AC if you have a Dexterity of 16 or higher.',
+  },
+  {
+    id: 'mobile',
+    name: 'Mobile',
+    sourceBook: 'PHB',
+    description: 'You are exceptionally speedy and agile. You gain the following benefits:\n• Your speed increases by 10 feet.\n• When you use the Dash action, difficult terrain doesn\'t cost you extra movement on that turn.\n• When you make a melee attack against a creature, you don\'t provoke opportunity attacks from that creature for the rest of the turn, whether you hit or not.',
+  },
+
+  // ── REMAINING XGtE FEATS ───────────────────────────────────────────────
+  {
+    id: 'dragon-hide',
+    name: 'Dragon Hide',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'dragonborn' },
+    description: 'You manifest scales and claws reminiscent of your draconic ancestors:\n• Increase your Strength or Charisma score by 1, to a maximum of 20.\n• Your scales harden. While you aren\'t wearing armor, you can calculate your AC as 13 + your Dexterity modifier. You can use a shield and still gain this benefit.\n• You grow retractable claws from the tips of your fingers. The claws are natural weapons, which you can use to make unarmed strikes. If you hit with them, you deal slashing damage equal to 1d4 + your Strength modifier, instead of the bludgeoning damage normal for an unarmed strike.',
+  },
+  {
+    id: 'drow-high-magic',
+    name: 'Drow High Magic',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'elf-drow' },
+    description: 'You learn more of the magic typical of dark elves. You learn the detect magic spell and can cast it at will, without expending a spell slot. You also learn levitate and dispel magic, each of which you can cast once without expending a spell slot. You regain the ability to cast those two spells in this way when you finish a long rest. Charisma is your spellcasting ability for all three spells.',
+  },
+  {
+    id: 'dwarven-fortitude',
+    name: 'Dwarven Fortitude',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'dwarf' },
+    description: 'You have the blood of dwarf heroes flowing through your veins:\n• Increase your Constitution score by 1, to a maximum of 20.\n• Whenever you take the Dodge action in combat, you can spend one Hit Die to heal yourself. Roll the die, add your Constitution modifier, and regain a number of hit points equal to the total (minimum of 1).',
+    abilityScoreIncrease: { con: 1 },
+  },
+  {
+    id: 'fade-away',
+    name: 'Fade Away',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'gnome' },
+    description: 'Your people are clever, with a knack for illusion magic:\n• Increase your Dexterity or Intelligence score by 1, to a maximum of 20.\n• Immediately after you take damage, you can use a reaction to magically become invisible until the end of your next turn or until you attack, deal damage, or force someone to make a saving throw. Once you use this ability, you can\'t do so again until you finish a short or long rest.',
+  },
+  {
+    id: 'flames-of-phlegethos',
+    name: 'Flames of Phlegethos',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'tiefling' },
+    description: 'You learn to call on hellfire to serve your commands:\n• Increase your Intelligence or Charisma score by 1, to a maximum of 20.\n• When you roll fire damage for a spell you cast, you can reroll any roll of 1 on the fire damage dice, but you must use the new roll, even if it is another 1.\n• Whenever you cast a spell that deals fire damage, you can cause flames to wreathe you until the end of your next turn. The flames shed bright light out to 30 feet and dim light for an additional 30 feet. While the flames are present, any creature within 5 feet that hits you with a melee attack takes 1d4 fire damage.',
+  },
+  {
+    id: 'infernal-constitution',
+    name: 'Infernal Constitution',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'tiefling' },
+    description: 'Fiendish blood runs strong in you:\n• Increase your Constitution score by 1, to a maximum of 20.\n• You have resistance to cold damage and poison damage.\n• You have advantage on saving throws against being poisoned.',
+    abilityScoreIncrease: { con: 1 },
+  },
+  {
+    id: 'orcish-fury',
+    name: 'Orcish Fury',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'half-orc' },
+    description: 'Your fury burns tirelessly:\n• Increase your Strength or Constitution score by 1, to a maximum of 20.\n• When you hit with an attack using a simple or martial weapon, you can roll one of the weapon\'s damage dice an additional time and add it as extra damage of the weapon\'s damage type. Once you use this ability, you can\'t do so again until you finish a short or long rest.\n• Immediately after you use your Relentless Endurance trait, you can use your reaction to make one weapon attack.',
+  },
+  {
+    id: 'prodigy',
+    name: 'Prodigy',
+    sourceBook: 'XGtE',
+    prerequisite: { other: 'Half-elf, half-orc, or human' },
+    description: 'You have a knack for learning new things. You gain the following benefits:\n• You gain one skill proficiency of your choice, one tool proficiency of your choice, and fluency in one language of your choice.\n• Choose one skill in which you have proficiency. You gain expertise with that skill, which means your proficiency bonus is doubled for any ability check you make with it.',
+  },
+  {
+    id: 'second-chance',
+    name: 'Second Chance',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'halfling' },
+    description: 'Fortune favors you when someone tries to strike you:\n• Increase your Dexterity, Constitution, or Charisma score by 1, to a maximum of 20.\n• When a creature you can see hits you with an attack roll, you can use your reaction to force that creature to reroll. Once you use this ability, you can\'t use it again until you roll initiative at the start of combat or until you finish a short or long rest.',
+  },
+  {
+    id: 'squat-nimbleness',
+    name: 'Squat Nimbleness',
+    sourceBook: 'XGtE',
+    prerequisite: { other: 'Dwarf or a Small race' },
+    description: 'You are uncommonly nimble for your race. You gain the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Your walking speed increases by 5 feet.\n• You gain proficiency in the Acrobatics or Athletics skill (your choice).\n• You have advantage on any Strength (Athletics) or Dexterity (Acrobatics) check you make to escape from being grappled.',
+  },
+  {
+    id: 'wood-elf-magic',
+    name: 'Wood Elf Magic',
+    sourceBook: 'XGtE',
+    prerequisite: { race: 'elf-wood' },
+    description: 'You learn the magic of the primeval woods, which are revered and protected by your kind. You learn one druid cantrip of your choice. You also learn the longstrider and pass without trace spells, each of which you can cast once without expending a spell slot. You regain the ability to cast those two spells in this way when you finish a long rest. Wisdom is your spellcasting ability for all three spells.',
+  },
+
+  // ── REMAINING TCE FEATS ────────────────────────────────────────────────
+  {
+    id: 'chef',
+    name: 'Chef',
+    sourceBook: 'TCE',
+    description: 'Time spent mastering the culinary arts has paid off:\n• Increase your Constitution or Wisdom score by 1, to a maximum of 20.\n• You gain proficiency with cook\'s utensils if you don\'t already have it.\n• As part of a short rest, you can cook special food, provided you have ingredients and cook\'s utensils on hand. You can prepare enough food for a number of creatures equal to 4 + your proficiency bonus. At the end of the short rest, any creature who eats the food and spends at least one Hit Die regains an extra 1d8 hit points.\n• With one hour of work or when you finish a long rest, you can cook a number of treats equal to your proficiency bonus. These treats last 8 hours after being made. A creature can use a bonus action to eat one of those treats to gain temporary hit points equal to your proficiency bonus.',
+  },
+  {
+    id: 'crusher',
+    name: 'Crusher',
+    sourceBook: 'TCE',
+    description: 'You are practiced in the art of crushing your enemies:\n• Increase your Strength or Constitution score by 1, to a maximum of 20.\n• Once per turn, when you hit a creature with an attack that deals bludgeoning damage, you can move it 5 feet to an unoccupied space, provided the target is no more than one size larger than you.\n• When you score a critical hit that deals bludgeoning damage to a creature, attack rolls against that creature are made with advantage until the start of your next turn.',
+  },
+  {
+    id: 'eldritch-adept',
+    name: 'Eldritch Adept',
+    sourceBook: 'TCE',
+    prerequisite: { other: 'Spellcasting or Pact Magic feature' },
+    description: 'Studying occult lore, you have unlocked eldritch power within yourself: you learn one Eldritch Invocation option of your choice from the warlock class. If the invocation has a prerequisite, you can choose that invocation only if you\'re a warlock who meets the prerequisite. Whenever you gain a level, you can replace the invocation with another from the warlock class.',
+  },
+  {
+    id: 'gunner',
+    name: 'Gunner',
+    sourceBook: 'TCE',
+    description: 'You have a quick hand and keen eye when employing firearms, granting you the following benefits:\n• Increase your Dexterity score by 1, to a maximum of 20.\n• You gain proficiency with firearms.\n• You ignore the loading property of firearms.\n• Being within 5 feet of a hostile creature doesn\'t impose disadvantage on your ranged attack rolls.',
+    abilityScoreIncrease: { dex: 1 },
+  },
+  {
+    id: 'metamagic-adept',
+    name: 'Metamagic Adept',
+    sourceBook: 'TCE',
+    prerequisite: { other: 'Spellcasting or Pact Magic feature' },
+    description: 'You\'ve learned how to exert your will on your spells:\n• You learn two Metamagic options of your choice from the sorcerer class. You can use only one Metamagic option on a spell when you cast it, unless the option says otherwise.\n• You gain 2 sorcery points to spend on Metamagic. You regain all spent sorcery points when you finish a long rest.',
+  },
+  {
+    id: 'piercer',
+    name: 'Piercer',
+    sourceBook: 'TCE',
+    description: 'You have achieved a penetrating precision in combat:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Once per turn, when you hit a creature with an attack that deals piercing damage, you can reroll one of the attack\'s damage dice, and you must use the new roll.\n• When you score a critical hit that deals piercing damage to a creature, you can roll one additional damage die when determining the extra piercing damage the target takes.',
+  },
+  {
+    id: 'poisoner',
+    name: 'Poisoner',
+    sourceBook: 'TCE',
+    description: 'You can prepare and deliver deadly poisons:\n• When you make a damage roll that deals poison damage, it ignores resistance to poison damage.\n• You can apply poison to a weapon or piece of ammunition as a bonus action, instead of an action.\n• You gain proficiency with the poisoner\'s kit if you don\'t already have it. With one hour of work and 50 gp worth of materials, you can produce a number of doses of potent poison equal to your proficiency bonus. The poison retains potency for 1 hour. When you hit a creature with a weapon coated with this poison, the creature takes an extra 2d8 poison damage and must succeed on a DC 14 Constitution save or be poisoned for 1 minute.',
+  },
+  {
+    id: 'slasher',
+    name: 'Slasher',
+    sourceBook: 'TCE',
+    description: 'You\'ve learned where to cut to have the greatest results:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Once per turn, when you hit a creature with an attack that deals slashing damage, you can reduce the speed of the target by 10 feet until the start of your next turn.\n• When you score a critical hit that deals slashing damage to a creature, you grievously wound it. Until the start of your next turn, the target has disadvantage on all attack rolls.',
+  },
+
+  // ── FToD FEATS ─────────────────────────────────────────────────────────
+  {
+    id: 'gift-of-the-chromatic-dragon',
+    name: 'Gift of the Chromatic Dragon',
+    sourceBook: 'FToD',
+    description: 'You have been gifted with the power of chromatic dragons:\n• Chromatic Infusion. As a bonus action, you can touch one simple or martial weapon and infuse it with one of: acid, cold, fire, lightning, or poison. For the next minute, the weapon deals an extra 1d4 damage of the chosen type. After you use this ability, you can\'t use it again until you finish a long rest.\n• Reactive Resistance. When you take acid, cold, fire, lightning, or poison damage, you can use your reaction to give yourself resistance to that instance of damage. After you use this ability, you can\'t use it again until you finish a long rest.',
+  },
+  {
+    id: 'gift-of-the-gem-dragon',
+    name: 'Gift of the Gem Dragon',
+    sourceBook: 'FToD',
+    prerequisite: { other: '4th level' },
+    description: 'You have manifested the power of gem dragons:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Telekinetic Reprisal. When a creature within 10 feet of you deals damage to you, you can use your reaction to force the creature to make a Strength save. On failure, it takes 2d8 force damage, is pushed 10 feet, and knocked prone; on success, half damage. Prof-bonus uses per long rest.\n• Psionic Wings. Spectral wings emerge from your back, granting you a flying speed equal to your walking speed for 10 minutes. Once per long rest.',
+  },
+  {
+    id: 'gift-of-the-metallic-dragon',
+    name: 'Gift of the Metallic Dragon',
+    sourceBook: 'FToD',
+    description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. Prof-bonus uses per long rest.',
+  },
 ];
 
 export function getFeat(id: string): Feat | undefined {
