@@ -56,7 +56,26 @@ interface CharacterState {
 export const useCharacterStore = create<CharacterState>((set, get) => ({
   character: null,
 
-  load: (c) => set({ character: c }),
+  load: (c) => set({
+    // Defensive defaults for characters created before fields like
+    // classOptions existed in the schema.
+    character: {
+      ...c,
+      classOptions: c.classOptions ?? {
+        fightingStyles: [],
+        invocations: [],
+        metamagic: [],
+        maneuvers: [],
+        infusions: [],
+      },
+      spellSlotsUsed: c.spellSlotsUsed ?? emptySlotState(),
+      resources: c.resources ?? [],
+      conditions: c.conditions ?? [],
+      selectedFeats: c.selectedFeats ?? [],
+      selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
+      spellbook: c.spellbook ?? [],
+    },
+  }),
 
   save: () => {
     const { character } = get();

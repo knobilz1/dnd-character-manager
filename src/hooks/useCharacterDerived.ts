@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
-import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor } from '../data/mechanics';
+import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
@@ -90,17 +90,29 @@ export function useCharacterDerived(character: Character | null) {
       spellAttackBonus = profBonus + mods[spellcastingAbility];
     }
 
-    // Spell slots total
+    // Spell slot totals.
+    // Single-class: use that class's direct slot table.
+    // Multi-class: 5e multiclass rule — sum effective caster levels (full=1, half=1/2 floor,
+    // third=1/3 floor; pact-only doesn't contribute) and look up combined slots.
     const slotTotals: Record<number, number> = {};
-    for (const cl of character.classes) {
-      const def = getClass(cl.classId);
-      if (!def || def.spellcastingType === 'none' || def.spellcastingType === 'pact') continue;
-      const table = def.spellcastingType === 'full' ? FULL_CASTER_SLOTS :
-        def.spellcastingType === 'half' ? HALF_CASTER_SLOTS : THIRD_CASTER_SLOTS;
-      const row = table[Math.min(cl.level, 20)] ?? [];
-      row.forEach((count, idx) => {
-        slotTotals[idx + 1] = Math.max(slotTotals[idx + 1] ?? 0, count);
-      });
+    const spellcasterClasses = character.classes
+      .map(cl => ({ cl, def: getClass(cl.classId) }))
+      .filter(x => x.def && x.def.spellcastingType !== 'none' && x.def.spellcastingType !== 'pact');
+
+    if (spellcasterClasses.length === 1) {
+      const { cl, def } = spellcasterClasses[0];
+      const table = def!.spellcastingType === 'full' ? FULL_CASTER_SLOTS :
+        def!.spellcastingType === 'half' ? HALF_CASTER_SLOTS : THIRD_CASTER_SLOTS;
+      const row = table[Math.min(Math.max(cl.level, 1), 20)] ?? [];
+      row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
+    } else if (spellcasterClasses.length > 1) {
+      const row = getMulticlassSpellSlots(
+        spellcasterClasses.map(({ cl, def }) => ({
+          type: def!.spellcastingType as 'full' | 'half' | 'third' | 'pact' | 'none',
+          level: cl.level,
+        }))
+      );
+      row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
     }
 
     // Number of prepared spells (for prepared casters only) and max spell level

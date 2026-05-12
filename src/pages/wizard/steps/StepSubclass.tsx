@@ -46,6 +46,20 @@ export function StepSubclass() {
     );
   }
 
+  if (available.length === 0) {
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-2">{classDef.subclassLabel}</h2>
+        <p className="text-slate-400 mb-2">
+          No {classDef.subclassLabel} options are available from the books you have enabled.
+        </p>
+        <p className="text-sm text-slate-500">
+          Go back to the Books step and enable additional sources, or skip this step to continue without a subclass.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div>

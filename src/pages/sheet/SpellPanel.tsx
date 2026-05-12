@@ -236,6 +236,16 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
               {castSpell.atHigherLevels && <span className="block mt-1 text-xs text-slate-500 italic">Upcasting: {castSpell.atHigherLevels}</span>}
             </p>
 
+            {/* Concentration overlap warning */}
+            {castSpell.concentration && character.concentrationSpellId && character.concentrationSpellId !== castSpell.id && (() => {
+              const current = getSpell(character.concentrationSpellId);
+              return (
+                <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/40 rounded-lg px-3 py-2">
+                  ⚠ You are concentrating on <span className="font-bold">{current?.name ?? 'another spell'}</span>. Casting this will break that concentration.
+                </div>
+              );
+            })()}
+
             {/* Pact slot option (warlock) */}
             {isWarlock && pactMagic && pactMagic.slotLevel >= castSpell.level && pactMagic.slotsUsed < pactMagic.slotsTotal && (
               <button

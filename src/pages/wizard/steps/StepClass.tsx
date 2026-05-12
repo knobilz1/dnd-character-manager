@@ -18,12 +18,27 @@ export function StepClass() {
 
   function selectClass(cls: DClass) {
     setSelected(cls);
-    updateDraft({ classes: [{ classId: cls.id, level: currentLevel, hitPointsRolled: [] }] });
+    // Reset subclass + class-options + selected feats when changing class so stale
+    // selections from a different class don't bleed through.
+    updateDraft({
+      classes: [{ classId: cls.id, level: currentLevel, hitPointsRolled: [] }],
+      selectedFeats: [],
+      classOptions: { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] },
+    });
   }
 
   function setLevel(level: number) {
     if (!selected) return;
-    updateDraft({ classes: [{ classId: selected.id, level, hitPointsRolled: [] }] });
+    // Preserve subclass on level change; only the level value changes.
+    const existing = draft.classes?.[0];
+    updateDraft({
+      classes: [{
+        classId: selected.id,
+        level,
+        subclassId: existing?.subclassId,
+        hitPointsRolled: existing?.hitPointsRolled ?? [],
+      }],
+    });
   }
 
   return (
