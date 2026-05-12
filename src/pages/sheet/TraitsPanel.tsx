@@ -4,6 +4,12 @@ import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
 import { ALL_SUBCLASSES } from '../../data/subclasses';
 import { ALL_FEATS } from '../../data/feats';
+import { ALL_FIGHTING_STYLES } from '../../data/fightingStyles';
+import { ALL_INVOCATIONS } from '../../data/invocations';
+import { ALL_PACT_BOONS } from '../../data/pactBoons';
+import { ALL_METAMAGIC } from '../../data/metamagic';
+import { ALL_MANEUVERS } from '../../data/maneuvers';
+import { ALL_INFUSIONS } from '../../data/infusions';
 import { totalCharacterLevel } from '../../data/mechanics';
 import type { Character } from '../../types';
 
@@ -15,6 +21,14 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
   const subclass = primaryClass?.subclassId ? ALL_SUBCLASSES.find(s => s.id === primaryClass.subclassId) : null;
   const feats = ALL_FEATS.filter(f => character.selectedFeats.includes(f.id));
   const totalLevel = totalCharacterLevel(character.classes);
+
+  const co = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
+  const fightingStyles = ALL_FIGHTING_STYLES.filter(x => co.fightingStyles?.includes(x.id));
+  const invocations = ALL_INVOCATIONS.filter(x => co.invocations?.includes(x.id));
+  const pactBoon = co.pactBoon ? ALL_PACT_BOONS.find(p => p.id === co.pactBoon) : null;
+  const metamagic = ALL_METAMAGIC.filter(x => co.metamagic?.includes(x.id));
+  const maneuvers = ALL_MANEUVERS.filter(x => co.maneuvers?.includes(x.id));
+  const infusions = ALL_INFUSIONS.filter(x => co.infusions?.includes(x.id));
 
   return (
     <div className="space-y-4">
@@ -139,6 +153,96 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
               <div key={feat.id} className="bg-slate-900 rounded-lg p-3">
                 <p className="text-xs font-bold text-white mb-1">{feat.name}</p>
                 <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line line-clamp-4">{feat.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Fighting Styles */}
+      {fightingStyles.length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Fighting Style{fightingStyles.length > 1 ? 's' : ''}</SectionHeader>
+          <div className="space-y-2">
+            {fightingStyles.map(fs => (
+              <div key={fs.id} className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">{fs.name}</p>
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{fs.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pact Boon */}
+      {pactBoon && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Pact Boon</SectionHeader>
+          <div className="bg-slate-900 rounded-lg p-3">
+            <p className="text-xs font-bold text-white mb-1">{pactBoon.name}</p>
+            <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{pactBoon.description}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Eldritch Invocations */}
+      {invocations.length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Eldritch Invocations</SectionHeader>
+          <div className="space-y-2">
+            {invocations.map(inv => (
+              <div key={inv.id} className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">{inv.name}</p>
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{inv.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metamagic */}
+      {metamagic.length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Metamagic</SectionHeader>
+          <div className="space-y-2">
+            {metamagic.map(m => (
+              <div key={m.id} className="bg-slate-900 rounded-lg p-3">
+                <div className="flex items-baseline justify-between mb-1">
+                  <p className="text-xs font-bold text-white">{m.name}</p>
+                  <p className="text-[10px] text-yellow-400">{m.cost}</p>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{m.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Maneuvers */}
+      {maneuvers.length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Battle Master Maneuvers</SectionHeader>
+          <div className="space-y-2">
+            {maneuvers.map(m => (
+              <div key={m.id} className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">{m.name}</p>
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{m.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Infusions */}
+      {infusions.length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Artificer Infusions Known</SectionHeader>
+          <div className="space-y-2">
+            {infusions.map(inf => (
+              <div key={inf.id} className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">{inf.name}</p>
+                {inf.prerequisite && <p className="text-[10px] text-yellow-400 mb-1">Requires: {inf.prerequisite}</p>}
+                <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">{inf.description}</p>
               </div>
             ))}
           </div>

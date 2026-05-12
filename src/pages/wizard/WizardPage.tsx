@@ -11,6 +11,7 @@ import { StepBooks } from './steps/StepBooks';
 import { StepRace } from './steps/StepRace';
 import { StepClass } from './steps/StepClass';
 import { StepSubclass } from './steps/StepSubclass';
+import { StepClassOptions } from './steps/StepClassOptions';
 import { StepBackground } from './steps/StepBackground';
 import { StepAbilityScores } from './steps/StepAbilityScores';
 import { StepSkills } from './steps/StepSkills';
@@ -23,6 +24,7 @@ const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
   'race': StepRace,
   'class': StepClass,
   'subclass': StepSubclass,
+  'class-options': StepClassOptions,
   'background': StepBackground,
   'ability-scores': StepAbilityScores,
   'skills': StepSkills,
@@ -37,6 +39,7 @@ function canAdvance(step: WizardStep, draft: any): boolean {
     case 'race': return !!draft.raceId;
     case 'class': return !!draft.classes?.length && draft.classes[0].level >= 1;
     case 'subclass': return true; // subclass might not be available yet
+    case 'class-options': return true;
     case 'background': return !!draft.backgroundId;
     case 'ability-scores': return !!draft.baseAbilityScores;
     case 'skills': return true;

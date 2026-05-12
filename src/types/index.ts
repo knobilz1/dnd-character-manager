@@ -175,6 +175,65 @@ export interface Feat {
   grantsProficiency?: string[];
 }
 
+export interface FightingStyle {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  classes: string[];
+  description: string;
+}
+
+export interface EldritchInvocation {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  minLevel: number;
+  prerequisitePact?: 'blade' | 'chain' | 'tome' | 'talisman';
+  prerequisiteSpell?: string;
+  prerequisiteText?: string;
+  description: string;
+}
+
+export interface PactBoon {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  description: string;
+}
+
+export interface Metamagic {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  cost: string;
+  description: string;
+}
+
+export interface Maneuver {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  description: string;
+}
+
+export interface Infusion {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  minLevel: number;
+  prerequisite?: string;
+  description: string;
+}
+
+export interface ClassOptionsState {
+  fightingStyles: string[];
+  invocations: string[];
+  pactBoon?: string;
+  metamagic: string[];
+  maneuvers: string[];
+  infusions: string[];
+}
+
 export interface AbilityScores {
   str: number;
   dex: number;
@@ -232,6 +291,7 @@ export interface Character {
   baseAbilityScores: AbilityScores;
   selectedSkillProficiencies: SkillName[];
   selectedFeats: string[];
+  classOptions: ClassOptionsState;
   spellbook: PreparedSpell[];
   concentrationSpellId?: string;
   currentHP: number;
@@ -250,12 +310,12 @@ export interface Character {
 }
 
 export type WizardStep =
-  | 'books' | 'race' | 'class' | 'subclass'
+  | 'books' | 'race' | 'class' | 'subclass' | 'class-options'
   | 'background' | 'ability-scores' | 'skills'
   | 'feats' | 'spells' | 'review';
 
 export const WIZARD_STEPS: WizardStep[] = [
-  'books', 'race', 'class', 'subclass',
+  'books', 'race', 'class', 'subclass', 'class-options',
   'background', 'ability-scores', 'skills',
   'feats', 'spells', 'review',
 ];
@@ -265,6 +325,7 @@ export const STEP_LABELS: Record<WizardStep, string> = {
   'race': 'Race',
   'class': 'Class',
   'subclass': 'Subclass',
+  'class-options': 'Options',
   'background': 'Background',
   'ability-scores': 'Abilities',
   'skills': 'Skills',

@@ -19,6 +19,13 @@ const INITIAL_DRAFT: Draft = {
   classes: [],
   selectedSkillProficiencies: [],
   selectedFeats: [],
+  classOptions: {
+    fightingStyles: [],
+    invocations: [],
+    metamagic: [],
+    maneuvers: [],
+    infusions: [],
+  },
   spellbook: [],
   abilityScoreMethod: 'pointbuy',
   baseAbilityScores: { str: 8, dex: 8, con: 8, int: 8, wis: 8, cha: 8 },
@@ -54,7 +61,7 @@ function budgetForScores(scores: Partial<Record<AbilityKey, number>>): number {
 
 export const useWizardStore = create<WizardState>((set, get) => ({
   step: 'books',
-  draft: { ...INITIAL_DRAFT },
+  draft: structuredClone(INITIAL_DRAFT),
   pointBuyRemaining: 27,
   standardArrayUnassigned: [15, 14, 13, 12, 10, 8],
 
@@ -149,6 +156,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       baseAbilityScores: draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 },
       selectedSkillProficiencies: draft.selectedSkillProficiencies ?? [],
       selectedFeats: draft.selectedFeats ?? [],
+      classOptions: draft.classOptions ?? {
+        fightingStyles: [],
+        invocations: [],
+        metamagic: [],
+        maneuvers: [],
+        infusions: [],
+      },
       spellbook: draft.spellbook ?? [],
       currentHP: maxHP,
       maxHP,
@@ -169,5 +183,5 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   },
 
   reset: () =>
-    set({ step: 'books', draft: { ...INITIAL_DRAFT }, pointBuyRemaining: 27, standardArrayUnassigned: [15,14,13,12,10,8] }),
+    set({ step: 'books', draft: structuredClone(INITIAL_DRAFT), pointBuyRemaining: 27, standardArrayUnassigned: [15,14,13,12,10,8] }),
 }));
