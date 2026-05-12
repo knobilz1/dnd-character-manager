@@ -770,6 +770,42 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Drake\'s Breath', level: 11, description: 'As an action, command your drake to exhale draconic energy at a point within 60 feet: 30-foot cone, 8d6 damage of its damage type (Dex save half). Once per long rest.' },
     { name: 'Perfected Bond', level: 15, description: 'The drake grows: deals +2d6 damage on attacks once per turn. When attacked, you can use a reaction to swap places with the drake. Your drake gains immunity to its damage type.' },
   ]},
+
+  // ── TCE: ARTIFICER SUBCLASSES ─────────────────────────────────────────
+  { id: 'alchemist', name: 'Alchemist', classId: 'artificer', sourceBook: 'TCE', description: 'An Alchemist is an expert at combining reagents to produce mystical effects. Alchemists use their creations to give life and to leech it away.', features: [
+    { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with alchemist\'s supplies. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
+    { name: 'Alchemist Spells', level: 3, description: 'You always have certain spells prepared: Healing Word, Ray of Sickness (3rd), Flaming Sphere, Melf\'s Acid Arrow (5th), Gaseous Form, Mass Healing Word (9th), Blight, Death Ward (13th), Cloudkill, Raise Dead (17th).' },
+    { name: 'Experimental Elixir', level: 3, description: 'After a long rest, you can magically produce an experimental elixir in an empty flask. Roll on the Experimental Elixir table for the effect (Healing, Swiftness, Resilience, Boldness, Flight, Transformation). At higher levels you create more elixirs.' },
+    { name: 'Alchemical Savant', level: 5, description: 'When you cast a spell using alchemist\'s supplies as a focus, you add your Intelligence modifier to one healing or acid/fire/necrotic/poison damage roll of the spell.' },
+    { name: 'Restorative Reagents', level: 9, description: 'When a creature drinks one of your elixirs, it gains temporary HP equal to 2d6 + your Intelligence modifier. You can also cast Lesser Restoration without expending a spell slot, a number of times equal to your Int modifier per long rest.' },
+    { name: 'Chemical Mastery', level: 15, description: 'You gain resistance to acid and poison damage and are immune to the poisoned condition. You can cast Greater Restoration and Heal once per long rest each without expending a spell slot.' },
+  ]},
+  { id: 'armorer', name: 'Armorer', classId: 'artificer', sourceBook: 'TCE', description: 'An artificer who specializes as an Armorer modifies armor to function almost like a second skin.', features: [
+    { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with heavy armor and smith\'s tools.' },
+    { name: 'Armorer Spells', level: 3, description: 'You always have certain spells prepared: Magic Missile, Thunderwave (3rd), Mirror Image, Shatter (5th), Hypnotic Pattern, Lightning Bolt (9th), Fire Shield, Greater Invisibility (13th), Passwall, Wall of Force (17th).' },
+    { name: 'Arcane Armor', level: 3, description: 'Your armor becomes Arcane Armor. It includes integrated weapons, requires no Strength minimum, you can don/doff as an action, and it includes thieves\' tools/smith\'s tools.' },
+    { name: 'Armor Model', level: 3, description: 'Choose a model — Guardian or Infiltrator — granting unique features:\n• Guardian: Thunder Gauntlets (magical melee weapon, 1d8 thunder), Defensive Field (bonus action temp HP).\n• Infiltrator: Lightning Launcher (magical ranged weapon, 1d6 lightning), Powered Steps, Dampening Field.' },
+    { name: 'Extra Attack', level: 5, description: 'You can attack twice when you take the Attack action.' },
+    { name: 'Armor Modifications', level: 9, description: 'You learn to extend infusion magic to your Arcane Armor. You can have up to 4 infusions in armor pieces. The number of infused items doesn\'t count against your max.' },
+    { name: 'Perfected Armor', level: 15, description: 'Guardian: Pull and deal damage when a creature within 30 feet hits an ally. Infiltrator: Crit on 19-20 with Lightning Launcher; on hit, target sheds bright light and grants advantage on attacks against it.' },
+  ]},
+  { id: 'artillerist', name: 'Artillerist', classId: 'artificer', sourceBook: 'TCE', description: 'An Artillerist specializes in using magic to hurl energy, projectiles, and explosions on a battlefield.', features: [
+    { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with woodcarver\'s tools. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
+    { name: 'Artillerist Spells', level: 3, description: 'You always have certain spells prepared: Shield, Thunderwave (3rd), Scorching Ray, Shatter (5th), Fireball, Wind Wall (9th), Ice Storm, Wall of Fire (13th), Cone of Cold, Wall of Force (17th).' },
+    { name: 'Eldritch Cannon', level: 3, description: 'You can use your action to magically create a Small or Tiny Eldritch Cannon in an unoccupied space within 5 feet. Choose Flamethrower, Force Ballista, or Protector. It lasts 1 hour or until destroyed/dismissed. Once per long rest unless you expend a spell slot.' },
+    { name: 'Arcane Firearm', level: 5, description: 'You can turn a wand, staff, or rod into an arcane firearm — a magical conduit for your artificer spells. When you cast an artificer spell through it, you add 1d8 to the spell\'s damage roll.' },
+    { name: 'Explosive Cannon', level: 9, description: 'Each of your Eldritch Cannon options deals more damage (Flamethrower 2d8, Force Ballista 3d8, Protector 2d8). As an action, you can command your cannon to detonate, dealing force damage to creatures within 20 feet.' },
+    { name: 'Fortified Position', level: 15, description: 'You and your allies have half cover while within 10 feet of a cannon you create. You can have two cannons at the same time.' },
+  ]},
+  { id: 'battle-smith', name: 'Battle Smith', classId: 'artificer', sourceBook: 'TCE', description: 'Armies require protection, and someone has to put things back together if defenses fail. A combination of protector and medic, a Battle Smith is an expert at defending allies and repairing both materiel and personnel.', features: [
+    { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with martial weapons and smith\'s tools.' },
+    { name: 'Battle Smith Spells', level: 3, description: 'You always have certain spells prepared: Heroism, Shield (3rd), Branding Smite, Warding Bond (5th), Aura of Vitality, Conjure Barrage (9th), Aura of Purity, Fire Shield (13th), Banishing Smite, Mass Cure Wounds (17th).' },
+    { name: 'Battle Ready', level: 3, description: 'You can use your Intelligence modifier instead of Strength or Dexterity for the attack and damage rolls of magic weapons. You gain proficiency with martial weapons.' },
+    { name: 'Steel Defender', level: 3, description: 'You magically create a steel defender — a Medium construct ally. It uses statistics based on your Intelligence modifier and artificer level. It obeys your commands and acts on your initiative.' },
+    { name: 'Extra Attack', level: 5, description: 'You can attack twice when you take the Attack action.' },
+    { name: 'Arcane Jolt', level: 9, description: 'When you hit a target with a magic weapon attack or your steel defender hits, you can channel magical energy: deal an extra 2d6 force damage, or restore 2d6 HP to one creature within 30 feet. Int-mod uses per long rest.' },
+    { name: 'Improved Defender', level: 15, description: 'Your Arcane Jolt damage/healing increases to 4d6. When your steel defender uses its Deflect Attack reaction, the attacker takes force damage equal to 1d4 + Int mod.' },
+  ]},
 ];
 
 export function getSubclassesForClass(classId: string): Subclass[] {
