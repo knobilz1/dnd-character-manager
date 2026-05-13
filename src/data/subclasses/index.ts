@@ -71,14 +71,24 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Superior Critical', level: 15, description: 'Starting at 15th level, your weapon attacks score a critical hit on a roll of 18–20.' },
     { name: 'Survivor', level: 18, description: 'At 18th level, you attain the pinnacle of resilience in battle. At the start of each of your turns, you regain hit points equal to 5 + your Constitution modifier if you have no more than half of your hit points left.' },
   ]},
-  { id: 'battle-master', name: 'Battle Master', classId: 'fighter', sourceBook: 'PHB', description: 'Those who emulate the archetype of the Battle Master employ martial techniques passed down through generations.', features: [
+  { id: 'battle-master', name: 'Battle Master', classId: 'fighter', sourceBook: 'PHB', description: 'Those who emulate the archetype of the Battle Master employ martial techniques passed down through generations.',
+    resources: [
+      {
+        name: 'Superiority Dice',
+        key: 'superiority_dice',
+        rechargeOn: 'short',
+        // Subclass resource keyed on the multiclass\'s fighter level; tables here are by class level.
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:4,6:4,7:5,8:5,9:5,10:5,11:5,12:5,13:5,14:5,15:6,16:6,17:6,18:6,19:6,20:6 },
+      },
+    ],
+    features: [
     { name: 'Combat Superiority', level: 3, description: 'When you choose this archetype at 3rd level, you learn maneuvers that are fueled by special dice called superiority dice (d8, upgrading to d10 at 10th level and d12 at 18th level). You learn three maneuvers of your choice. You have four superiority dice. You regain all of your expended superiority dice when you finish a short or long rest.' },
     { name: 'Student of War', level: 3, description: 'At 3rd level, you gain proficiency with one type of artisan\'s tools of your choice.' },
     { name: 'Know Your Enemy', level: 7, description: 'If you spend at least 1 minute observing or interacting with another creature outside combat, you can learn certain information about its capabilities compared to your own.' },
     { name: 'Improved Combat Superiority', level: 10, description: 'At 10th level, your superiority dice turn into d10s. At 18th level, they turn into d12s.' },
     { name: 'Relentless', level: 15, description: 'Starting at 15th level, when you roll initiative and have no superiority dice remaining, you regain 1 superiority die.' },
   ]},
-  { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', features: [
+  { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', spellcastingType: 'third', features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.', },
     { name: 'Weapon Bond', level: 3, description: 'At 3rd level, you learn a ritual that creates a magical bond between yourself and one weapon.' },
     { name: 'War Magic', level: 7, description: 'Beginning at 7th level, when you use your action to cast a cantrip, you can make one weapon attack as a bonus action.' },
@@ -142,7 +152,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Impostor', level: 13, description: 'At 13th level, you gain the ability to unerringly mimic another person\'s speech, writing, and behavior.' },
     { name: 'Death Strike', level: 17, description: 'Starting at 17th level, you become a master of instant death. When you attack and hit a creature that is surprised, it must make a Constitution saving throw (DC 8 + your Dexterity modifier + your proficiency bonus). On a failed save, double the damage of your attack against the creature.' },
   ]},
-  { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', features: [
+  { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.' },
     { name: 'Mage Hand Legerdemain', level: 3, description: 'Starting at 3rd level, when you cast mage hand, you can make the spectral hand invisible, and you can perform the following additional tasks with it.' },
     { name: 'Magical Ambush', level: 9, description: 'Starting at 9th level, if you are hidden from a creature when you cast a spell on it, the creature has disadvantage on any saving throw it makes against the spell this turn.' },
@@ -240,7 +250,17 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── PHB: DRUID CIRCLES ────────────────────────────────────────────────
-  { id: 'circle-of-the-land', name: 'Circle of the Land', classId: 'druid', sourceBook: 'PHB', description: 'The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites through a vast oral tradition.', features: [
+  { id: 'circle-of-the-land', name: 'Circle of the Land', classId: 'druid', sourceBook: 'PHB', description: 'The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites through a vast oral tradition.',
+    resources: [
+      {
+        name: 'Natural Recovery',
+        key: 'natural_recovery',
+        rechargeOn: 'long',
+        // Once per long rest from druid level 2 onward.
+        maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
+    features: [
     { name: 'Bonus Cantrip', level: 2, description: 'You learn one additional druid cantrip of your choice.' },
     { name: 'Natural Recovery', level: 2, description: 'During a short rest, you can recover expended spell slots up to a combined level equal to half your druid level (rounded up) once per long rest.' },
     { name: 'Circle Spells', level: 3, description: 'Your mystical connection to the land infuses you with the ability to cast certain spells. Choose a land type (arctic, coast, desert, forest, grassland, mountain, swamp, or Underdark) to determine your bonus spells.' },

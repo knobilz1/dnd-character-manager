@@ -142,7 +142,14 @@ export const ALL_CLASSES: DClass[] = [
     skillChoices: { count: 2, from: ['Arcana', 'Animal Handling', 'Insight', 'Medicine', 'Nature', 'Perception', 'Religion', 'Survival'] },
     spellcastingType: 'full',
     spellcastingAbility: 'wis',
-    resources: [],
+    resources: [
+      {
+        name: 'Wild Shape',
+        key: 'wild_shape',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:'unlimited' },
+      },
+    ],
     subclassLabel: 'Druid Circle',
     subclassLevel: 2,
     multiclassPrerequisites: { wis: 13 },
@@ -185,6 +192,12 @@ export const ALL_CLASSES: DClass[] = [
         key: 'second_wind',
         rechargeOn: 'short',
         maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: 'Indomitable',
+        key: 'indomitable',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:2,14:2,15:2,16:2,17:3,18:3,19:3,20:3 },
       },
     ],
     subclassLabel: 'Martial Archetype',

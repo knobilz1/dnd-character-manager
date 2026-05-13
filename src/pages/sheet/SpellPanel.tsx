@@ -66,8 +66,13 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
   const isPreparedCaster = classDef && PREPARED_CASTER_CLASSES.includes(classDef.id);
   const levels = [0,1,2,3,4,5,6,7,8,9] as SpellLevel[];
 
+  // Total slots available across all levels (excluding pact magic).
+  const totalSlots = Object.values(slotTotals ?? {}).reduce((sum: number, n) => sum + (n as number), 0);
+  const hasAnyCastingResource = totalSlots > 0 || (pactMagic && pactMagic.slotsTotal > 0);
+
   function canCast(spell: Spell, prepared: boolean, alwaysPrepared: boolean): boolean {
     if (spell.level === 0) return true; // cantrips always castable
+    if (!hasAnyCastingResource) return false; // no spell slots yet (e.g. level-1 paladin/ranger)
     if (!isPreparedCaster) return true; // known casters
     return prepared || alwaysPrepared;
   }
@@ -107,6 +112,13 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
           <Plus size={14} /> Add Spell
         </Button>
       </div>
+
+      {/* Half-caster gating hint (paladin/ranger/artificer at level 1 have no slots yet). */}
+      {classDef && ['paladin', 'ranger', 'artificer'].includes(classDef.id) && maxSpellLevel === 0 && (
+        <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/40 rounded-lg px-3 py-2">
+          {classDef.name}s gain spellcasting at level 2. You can still add spells you plan to learn later.
+        </div>
+      )}
 
       {character.spellbook.length === 0 ? (
         <div className="text-center py-16 text-slate-500">

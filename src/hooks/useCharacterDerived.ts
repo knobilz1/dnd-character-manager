@@ -2,8 +2,25 @@ import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
 import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
 import { getClass } from '../data/classes';
+import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
+
+// Eldritch Knight and Arcane Trickster get spellcasting via subclass.
+// Look up the effective spellcasting type for a class+subclass combo.
+function effectiveSpellcasting(classId: string, subclassId: string | undefined) {
+  const def = getClass(classId);
+  if (def && def.spellcastingType !== 'none') {
+    return { type: def.spellcastingType, ability: def.spellcastingAbility };
+  }
+  if (!subclassId) return null;
+  const sub = getSubclass(subclassId);
+  if (sub?.spellcastingType && sub.spellcastingType !== 'none') {
+    // Third-caster subclasses use Int by RAW (EK, AT). Allow subclass to specify if added later.
+    return { type: sub.spellcastingType, ability: 'int' as AbilityKey };
+  }
+  return null;
+}
 
 export function useCharacterDerived(character: Character | null) {
   return useMemo(() => {
@@ -80,37 +97,34 @@ export function useCharacterDerived(character: Character | null) {
     // Speed
     const speed = race?.speed ?? 30;
 
-    // Spellcasting
+    // Spellcasting (incl. third-caster subclasses Eldritch Knight / Arcane Trickster).
+    const primaryEff = primaryClassLevel
+      ? effectiveSpellcasting(primaryClassLevel.classId, primaryClassLevel.subclassId)
+      : null;
     let spellcastingAbility: AbilityKey | null = null;
     let spellSaveDC = 0;
     let spellAttackBonus = 0;
-    if (primaryClassDef?.spellcastingAbility) {
-      spellcastingAbility = primaryClassDef.spellcastingAbility;
+    if (primaryEff?.ability) {
+      spellcastingAbility = primaryEff.ability;
       spellSaveDC = 8 + profBonus + mods[spellcastingAbility];
       spellAttackBonus = profBonus + mods[spellcastingAbility];
     }
 
-    // Spell slot totals.
-    // Single-class: use that class's direct slot table.
-    // Multi-class: 5e multiclass rule — sum effective caster levels (full=1, half=1/2 floor,
-    // third=1/3 floor; pact-only doesn't contribute) and look up combined slots.
+    // Spell slot totals — counts each class's effective spellcasting type (from subclass if needed).
     const slotTotals: Record<number, number> = {};
     const spellcasterClasses = character.classes
-      .map(cl => ({ cl, def: getClass(cl.classId) }))
-      .filter(x => x.def && x.def.spellcastingType !== 'none' && x.def.spellcastingType !== 'pact');
+      .map(cl => ({ cl, eff: effectiveSpellcasting(cl.classId, cl.subclassId) }))
+      .filter(x => x.eff && x.eff.type !== 'none' && x.eff.type !== 'pact') as Array<{ cl: typeof character.classes[number]; eff: { type: 'full' | 'half' | 'third'; ability: AbilityKey } }>;
 
     if (spellcasterClasses.length === 1) {
-      const { cl, def } = spellcasterClasses[0];
-      const table = def!.spellcastingType === 'full' ? FULL_CASTER_SLOTS :
-        def!.spellcastingType === 'half' ? HALF_CASTER_SLOTS : THIRD_CASTER_SLOTS;
+      const { cl, eff } = spellcasterClasses[0];
+      const table = eff.type === 'full' ? FULL_CASTER_SLOTS :
+        eff.type === 'half' ? HALF_CASTER_SLOTS : THIRD_CASTER_SLOTS;
       const row = table[Math.min(Math.max(cl.level, 1), 20)] ?? [];
       row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
     } else if (spellcasterClasses.length > 1) {
       const row = getMulticlassSpellSlots(
-        spellcasterClasses.map(({ cl, def }) => ({
-          type: def!.spellcastingType as 'full' | 'half' | 'third' | 'pact' | 'none',
-          level: cl.level,
-        }))
+        spellcasterClasses.map(({ cl, eff }) => ({ type: eff.type, level: cl.level }))
       );
       row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
     }

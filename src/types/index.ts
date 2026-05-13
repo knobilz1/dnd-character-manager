@@ -117,6 +117,7 @@ export interface Subclass {
   alwaysPreparedSpells?: Record<number, string[]>;
   expandedSpells?: Record<number, string[]>;
   spellcastingType?: SpellcastingType;
+  resources?: ClassResourceDefinition[];
 }
 
 export interface Spell {

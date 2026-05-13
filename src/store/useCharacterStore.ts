@@ -3,6 +3,7 @@ import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel } 
 import { useLibraryStore } from './useLibraryStore';
 import { emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
+import { getSubclass } from '../data/subclasses';
 
 interface CharacterState {
   character: Character | null;
@@ -77,7 +78,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       },
       spellSlotsUsed: c.spellSlotsUsed ?? emptySlotState(),
       resources: c.resources ?? [],
-      conditions: c.conditions ?? [],
+      // Strip 'Exhaustion' from the conditions array — it is tracked via exhaustionLevel.
+      // Older characters may have it set both ways; migrate to the canonical representation.
+      conditions: (c.conditions ?? []).filter((cond) => cond !== 'Exhaustion'),
       selectedFeats: c.selectedFeats ?? [],
       selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
       spellbook: c.spellbook ?? [],
@@ -261,15 +264,22 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   shortRest: () =>
     set((s) => {
       if (!s.character) return s;
-      // Recharge short-rest resources
-      const resources = s.character.resources.map((r) => {
-        const cl = s.character!.classes.find((c) => {
-          const def = getClass(c.classId);
-          return def?.resources.some((rd) => rd.key === r.key && rd.rechargeOn === 'short');
-        });
-        if (cl) return { ...r, current: r.max };
-        return r;
-      });
+      // Build a set of resource keys that recharge on a short rest, from class AND subclass.
+      const shortRestKeys = new Set<string>();
+      for (const cl of s.character.classes) {
+        const def = getClass(cl.classId);
+        if (!def) continue;
+        for (const rd of def.resources) {
+          if (rd.rechargeOn === 'short') shortRestKeys.add(rd.key);
+        }
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        for (const rd of sub?.resources ?? []) {
+          if (rd.rechargeOn === 'short') shortRestKeys.add(rd.key);
+        }
+      }
+      const resources = s.character.resources.map((r) =>
+        shortRestKeys.has(r.key) ? { ...r, current: r.max } : r
+      );
       // Restore pact magic on short rest
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
       return { character: { ...s.character, resources, pactMagic } };

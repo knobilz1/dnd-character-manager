@@ -11,10 +11,27 @@ import { SpellPanel } from './SpellPanel';
 import { TraitsPanel } from './TraitsPanel';
 import { InventoryPanel } from './InventoryPanel';
 import { getClass } from '../../data/classes';
+import { getSubclass } from '../../data/subclasses';
+
+// Find a resource definition by key, checking both class and subclass.
+function getResourceDef(character: any, key: string) {
+  for (const cl of character.classes ?? []) {
+    const def = getClass(cl.classId);
+    const fromClass = def?.resources.find((rd: any) => rd.key === key);
+    if (fromClass) return fromClass;
+    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+    const fromSub = sub?.resources?.find((rd: any) => rd.key === key);
+    if (fromSub) return fromSub;
+  }
+  return undefined;
+}
 import { getRace } from '../../data/races';
 
+// Exhaustion is tracked separately via exhaustionLevel; it has its own +/- UI
+// and a dedicated button in the Add Condition dialog, so it's omitted here to
+// prevent duplicate tracking on a single character.
 const CONDITION_LIST: Condition[] = [
-  'Blinded','Charmed','Deafened','Exhaustion','Frightened','Grappled',
+  'Blinded','Charmed','Deafened','Frightened','Grappled',
   'Incapacitated','Invisible','Paralyzed','Petrified','Poisoned','Prone',
   'Restrained','Stunned','Unconscious',
 ];
@@ -514,8 +531,7 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
           <SectionHeader>Class Resources</SectionHeader>
           <div className="space-y-3">
             {resources.map((r: any) => {
-              const classDef2 = classDef;
-              const resourceDef = classDef2?.resources.find((rd: any) => rd.key === r.key);
+              const resourceDef = getResourceDef(character, r.key);
               return (
                 <div key={r.key} className="flex items-center justify-between gap-3">
                   <div>

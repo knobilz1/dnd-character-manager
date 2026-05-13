@@ -3,6 +3,7 @@ import type { Character, BookId, AbilityKey, WizardStep } from '../types';
 import { WIZARD_STEPS } from '../types';
 import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
+import { getSubclass } from '../data/subclasses';
 
 type Draft = Partial<Character> & {
   name: string;
@@ -119,11 +120,15 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     const primaryClass = draft.classes[0];
     const classDef = getClass(primaryClass.classId);
 
-    // Compute maxHP
+    // Compute maxHP — level 1 grants max-die + Con mod; each subsequent level
+    // grants average of (hitDie/2 + 1 + Con mod) per 5e fixed-HP rules, with a
+    // minimum of 1 hit point per level (even with very low Con).
     const hitDie = classDef?.hitDie ?? 8;
     const conMod = Math.floor(((draft.baseAbilityScores?.con ?? 10) - 10) / 2);
     const level = primaryClass.level;
-    const maxHP = hitDie + conMod + (level - 1) * (Math.floor(hitDie / 2) + 1 + conMod);
+    const lvl1HP = Math.max(1, hitDie + conMod);
+    const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
+    const maxHP = lvl1HP + (level - 1) * perLevelHP;
 
     // Compute pact magic if warlock
     let pactMagic = undefined;
@@ -133,12 +138,14 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       if (pm) pactMagic = { slotsTotal: pm.slots, slotsUsed: 0, slotLevel: pm.slotLevel };
     }
 
-    // Build resources
+    // Build resources from both class and (if selected) subclass definitions.
     const resources = [];
     for (const cl of draft.classes) {
       const def = getClass(cl.classId);
       if (!def) continue;
-      for (const rd of def.resources) {
+      const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+      const allRds = [...def.resources, ...(sub?.resources ?? [])];
+      for (const rd of allRds) {
         const max = rd.maxPerLevel[cl.level] ?? 0;
         if (max === 'unlimited' || max > 0) {
           resources.push({ key: rd.key, current: max === 'unlimited' ? 99 : max, max: max === 'unlimited' ? 99 : max });
