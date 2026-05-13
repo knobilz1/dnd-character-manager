@@ -176,6 +176,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         infusions: [],
       },
       inventory: draft.inventory ?? [],
+      hitDiceUsed: {},
       spellbook: draft.spellbook ?? [],
       currentHP: maxHP,
       maxHP,

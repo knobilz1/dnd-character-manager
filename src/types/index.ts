@@ -327,6 +327,9 @@ export interface Character {
   selectedFeats: string[];
   classOptions: ClassOptionsState;
   inventory: InventoryItem[];
+  // Hit dice spent per class, keyed by class id. e.g. { fighter: 2, wizard: 1 }
+  // Total dice are derived from class levels; remaining = level - used.
+  hitDiceUsed: Record<string, number>;
   spellbook: PreparedSpell[];
   concentrationSpellId?: string;
   currentHP: number;

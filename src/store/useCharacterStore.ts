@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel } from '../types';
 import { useLibraryStore } from './useLibraryStore';
-import { emptySlotState } from '../data/mechanics';
+import { emptySlotState, PACT_MAGIC_TABLE } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 
@@ -51,6 +51,11 @@ interface CharacterState {
   toggleInventoryEquipped: (id: string) => void;
   renameInventoryItem: (id: string, name: string) => void;
 
+  // Level up / hit dice
+  levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string) => void;
+  useHitDie: (classId: string) => void;
+  restoreHitDie: (classId: string) => void;
+
   // Rest
   shortRest: () => void;
   longRest: () => void;
@@ -85,6 +90,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
       spellbook: c.spellbook ?? [],
       inventory: c.inventory ?? [],
+      hitDiceUsed: c.hitDiceUsed ?? {},
     },
   }),
 
@@ -261,6 +267,109 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, inventory } };
     }),
 
+  levelUp: (classId, hpGained, hpRoll, subclassPick) =>
+    set((s) => {
+      if (!s.character) return s;
+      // Find the matching class entry; if the character doesn't have this class yet
+      // (multiclass dip), append a new ClassLevel.
+      let foundClass = false;
+      const classes = s.character.classes.map(cl => {
+        if (cl.classId !== classId) return cl;
+        foundClass = true;
+        return {
+          ...cl,
+          level: cl.level + 1,
+          subclassId: cl.subclassId ?? subclassPick,
+          hitPointsRolled: [...(cl.hitPointsRolled ?? []), hpRoll],
+        };
+      });
+      if (!foundClass) {
+        classes.push({ classId, level: 1, subclassId: subclassPick, hitPointsRolled: [hpRoll] });
+      }
+      // Apply HP gain. Heal the character by the gained amount so a level-up while
+      // damaged increases both max and current HP without overhealing past the new max.
+      const newMaxHP = s.character.maxHP + hpGained;
+      const newCurrentHP = Math.min(newMaxHP, s.character.currentHP + hpGained);
+
+      // Rebuild resources from class+subclass definitions at the new level.
+      const classDef = getClass(classId);
+      const subDef = (() => {
+        const cl = classes.find(c => c.classId === classId);
+        return cl?.subclassId ? getSubclass(cl.subclassId) : undefined;
+      })();
+      const allRds = [...(classDef?.resources ?? []), ...(subDef?.resources ?? [])];
+      const newLevel = classes.find(c => c.classId === classId)!.level;
+      const oldResources = new Map(s.character.resources.map(r => [r.key, r] as const));
+      const resources = [...s.character.resources];
+      for (const rd of allRds) {
+        const max = rd.maxPerLevel[newLevel] ?? 0;
+        const normalisedMax = max === 'unlimited' ? 99 : max;
+        const existing = oldResources.get(rd.key);
+        if (existing) {
+          // Bump the max; keep current usage but don't exceed the new max.
+          const idx = resources.findIndex(r => r.key === rd.key);
+          if (idx >= 0) {
+            resources[idx] = { ...existing, max: normalisedMax, current: Math.min(existing.current + Math.max(0, normalisedMax - existing.max), normalisedMax) };
+          }
+        } else if (normalisedMax > 0) {
+          // New resource unlocked at this level.
+          resources.push({ key: rd.key, current: normalisedMax, max: normalisedMax });
+        }
+      }
+
+      // Refresh pact magic if this is a warlock level up.
+      let pactMagic = s.character.pactMagic;
+      if (classId === 'warlock') {
+        const pm = PACT_MAGIC_TABLE[newLevel];
+        if (pm) {
+          pactMagic = {
+            slotsTotal: pm.slots,
+            slotLevel: pm.slotLevel,
+            slotsUsed: Math.min(s.character.pactMagic?.slotsUsed ?? 0, pm.slots),
+          };
+        }
+      }
+
+      return {
+        character: {
+          ...s.character,
+          classes,
+          maxHP: newMaxHP,
+          currentHP: newCurrentHP,
+          resources,
+          pactMagic,
+        },
+      };
+    }),
+
+  useHitDie: (classId) =>
+    set((s) => {
+      if (!s.character) return s;
+      const cl = s.character.classes.find(c => c.classId === classId);
+      if (!cl) return s;
+      const used = s.character.hitDiceUsed?.[classId] ?? 0;
+      if (used >= cl.level) return s; // none remaining
+      return {
+        character: {
+          ...s.character,
+          hitDiceUsed: { ...(s.character.hitDiceUsed ?? {}), [classId]: used + 1 },
+        },
+      };
+    }),
+
+  restoreHitDie: (classId) =>
+    set((s) => {
+      if (!s.character) return s;
+      const used = s.character.hitDiceUsed?.[classId] ?? 0;
+      if (used <= 0) return s;
+      return {
+        character: {
+          ...s.character,
+          hitDiceUsed: { ...(s.character.hitDiceUsed ?? {}), [classId]: used - 1 },
+        },
+      };
+    }),
+
   shortRest: () =>
     set((s) => {
       if (!s.character) return s;
@@ -291,18 +400,30 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const maxHP = s.character.maxHP;
       const resources = s.character.resources.map((r) => ({ ...r, current: r.max }));
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
+      // Restore up to half (rounded down, min 1) of each class's used hit dice.
+      const hitDiceUsed: Record<string, number> = { ...(s.character.hitDiceUsed ?? {}) };
+      for (const cl of s.character.classes) {
+        const used = hitDiceUsed[cl.classId] ?? 0;
+        if (used > 0) {
+          const regain = Math.max(1, Math.floor(cl.level / 2));
+          hitDiceUsed[cl.classId] = Math.max(0, used - regain);
+        }
+      }
       return {
         character: {
           ...s.character,
           currentHP: maxHP,
           tempHP: 0,
           deathSaves: { successes: 0, failures: 0 },
-          conditions: s.character.conditions.filter(c => c === 'Exhaustion'),
+          // Exhaustion is tracked via exhaustionLevel only; conditions list
+          // should never contain 'Exhaustion'. Clear all conditions on long rest.
+          conditions: [],
           exhaustionLevel: Math.max(0, s.character.exhaustionLevel - 1) as ExhaustionLevel,
           spellSlotsUsed: emptySlotState(),
           concentrationSpellId: undefined,
           resources,
           pactMagic,
+          hitDiceUsed,
         },
       };
     }),

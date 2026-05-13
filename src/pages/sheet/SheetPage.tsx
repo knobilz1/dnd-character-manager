@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5 } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -8,6 +8,7 @@ import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper } from '../
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
+import { LevelUpDialog } from './LevelUpDialog';
 import { TraitsPanel } from './TraitsPanel';
 import { InventoryPanel } from './InventoryPanel';
 import { getClass } from '../../data/classes';
@@ -46,13 +47,14 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem } = useCharacterStore();
+    toggleInventoryEquipped, renameInventoryItem, levelUp, useHitDie, restoreHitDie } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
   const [restConfirm, setRestConfirm] = React.useState<'short'|'long'|null>(null);
+  const [levelUpOpen, setLevelUpOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
 
   // Load character on mount
@@ -124,6 +126,11 @@ export function SheetPage() {
           >
             <Star size={18} />
           </button>
+          {totalLevel < 20 && (
+            <Button variant="outline" size="sm" onClick={() => setLevelUpOpen(true)}>
+              <ChevronUp size={14} /> Level Up
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={() => setRestConfirm('short')}>
             <Sun size={14} /> Short Rest
           </Button>
@@ -258,6 +265,8 @@ export function SheetPage() {
                 spellSlotsUsed={character.spellSlotsUsed}
                 concentrationSpellId={character.concentrationSpellId}
                 endConcentration={endConcentration}
+                useHitDie={useHitDie}
+                restoreHitDie={restoreHitDie}
               />
             )}
             {tab === 'spells' && (
@@ -290,6 +299,14 @@ export function SheetPage() {
         </div>
       </div>
 
+      {/* Level Up */}
+      <LevelUpDialog
+        open={levelUpOpen}
+        onClose={() => setLevelUpOpen(false)}
+        character={character}
+        onConfirm={(classId, hpGained, hpRoll, subclassPick) => levelUp(classId, hpGained, hpRoll, subclassPick)}
+      />
+
       {/* Rest confirm */}
       <Dialog open={!!restConfirm} onClose={() => setRestConfirm(null)} title={restConfirm === 'long' ? 'Long Rest' : 'Short Rest'}>
         <p className="text-slate-300 mb-6">
@@ -314,7 +331,8 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
   classDef, resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
-  restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration }: any) {
+  restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
+  useHitDie, restoreHitDie }: any) {
 
   return (
     <div className="space-y-4">
@@ -545,6 +563,52 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
           </div>
         </div>
       )}
+
+      {/* Hit Dice */}
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+        <SectionHeader>Hit Dice</SectionHeader>
+        <div className="space-y-3">
+          {character.classes.map((cl: any) => {
+            const def = getClass(cl.classId);
+            if (!def) return null;
+            const used = character.hitDiceUsed?.[cl.classId] ?? 0;
+            const total = cl.level;
+            const remaining = total - used;
+            return (
+              <div key={cl.classId}>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium text-white">
+                    {def.name} <span className="text-slate-400 font-normal">d{def.hitDie}</span>
+                  </p>
+                  <p className="text-xs text-slate-500">{remaining}/{total} remaining</p>
+                </div>
+                <div className="flex gap-1.5 flex-wrap">
+                  {Array.from({ length: total }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => i < used ? restoreHitDie(cl.classId) : useHitDie(cl.classId)}
+                      className={cn(
+                        'h-7 px-2 rounded border-2 transition-all text-xs font-bold flex items-center gap-1',
+                        i < used
+                          ? 'border-slate-600 bg-slate-700 text-slate-600'
+                          : 'border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/40',
+                      )}
+                      title={i < used ? 'Click to restore (long rest gives back half rounded down)' : 'Click to spend on a short rest'}
+                    >
+                      <Dice5 size={10} />
+                      d{def.hitDie}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-[11px] text-slate-500 mt-1">
+            Spend a hit die on a short rest to regain 1d{character.classes[0] ? getClass(character.classes[0].classId)?.hitDie : '?'} + CON modifier HP.
+            Long rest recovers up to half your max hit dice (rounded down, minimum 1) per class.
+          </p>
+        </div>
+      </div>
 
       {/* Spell slots */}
       {(Object.values(slotTotals).some((v: any) => v > 0) || pactMagic) && (
