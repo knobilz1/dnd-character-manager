@@ -20,8 +20,9 @@ type Tier = 'crit-fail' | 'bad' | 'neutral' | 'good' | 'crit-success';
 function getTier(result: number, die: Die): Tier {
   if (result === 1) return 'crit-fail';
   if (result === die) return 'crit-success';
-  if (result < 10) return 'bad';
-  if (result <= 15) return 'neutral';
+  const pct = result / die;
+  if (pct <= 0.5) return 'bad';
+  if (pct <= 0.7) return 'neutral';
   return 'good';
 }
 
