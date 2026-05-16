@@ -41,8 +41,8 @@ const DIE_SHAPE: Record<Die, React.ReactElement> = {
   6:   <rect x="10" y="10" width="80" height="80" rx="6" />,
   8:   <polygon points="50,6 90,50 50,94 10,50" />,
   10:  <polygon points="50,5 88,54 50,94 12,54" />,
-  12:  <polygon points="50,8 90,37 75,84 25,84 10,37" />,
-  20:  <polygon points="50,12 88,78 12,78" />,
+  12:  <polygon points="50,8 86,29 86,71 50,92 14,71 14,29" />,
+  20:  <polygon points="50,7 80,20 93,50 80,80 50,93 20,80 7,50 20,20" />,
   100: <circle cx="50" cy="50" r="43" />,
 };
 
