@@ -26,6 +26,33 @@ export function DiceRoller() {
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Drag state
+  const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
+  const dragging = React.useRef(false);
+  const dragOffset = React.useRef({ x: 0, y: 0 });
+  const panelRef = React.useRef<HTMLDivElement>(null);
+
+  function onDragStart(e: React.MouseEvent) {
+    if (!panelRef.current) return;
+    dragging.current = true;
+    const rect = panelRef.current.getBoundingClientRect();
+    dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    e.preventDefault();
+  }
+
+  React.useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragging.current) return;
+      const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, window.innerWidth - (panelRef.current?.offsetWidth ?? 288)));
+      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - (panelRef.current?.offsetHeight ?? 400)));
+      setPos({ x, y });
+    }
+    function onUp() { dragging.current = false; }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
   function roll(sides: Die) {
     if (rolling) return;
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -69,9 +96,16 @@ export function DiceRoller() {
       </button>
 
       {open && (
-        <div className="fixed bottom-6 right-6 z-40 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2.5 bg-slate-800 border-b border-slate-700">
+        <div
+          ref={panelRef}
+          className="fixed z-40 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+          style={pos ? { left: pos.x, top: pos.y } : { bottom: 24, right: 24 }}
+        >
+          {/* Header — drag handle */}
+          <div
+            className="flex items-center justify-between px-4 py-2.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"
+            onMouseDown={onDragStart}
+          >
             <span className="text-sm font-bold text-white flex items-center gap-2">
               <Dice5 size={14} className="text-red-400" /> Dice Roller
             </span>
