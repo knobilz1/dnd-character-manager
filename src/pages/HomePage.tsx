@@ -55,7 +55,7 @@ export function HomePage() {
         createCharacter(imported);
         navigate(`/character/${imported.id}`);
       } catch {
-        setImportError('Could not read file. Make sure it\'s a valid DnD Sheet JSON export.');
+        setImportError('Could not read file. Make sure it\'s a valid Tavern Sheet JSON export.');
       }
     };
     reader.readAsText(file);
@@ -71,9 +71,9 @@ export function HomePage() {
           <div>
             <h1 className="text-3xl font-bold text-white flex items-center gap-3">
               <Sword className="text-red-500" size={32} />
-              D&D Character Manager
+              Tavern Sheet
             </h1>
-            <p className="text-slate-400 mt-1">Your personal adventure awaits</p>
+            <p className="text-slate-400 mt-1">Unofficial 5e character manager · fan project</p>
           </div>
           <div className="flex gap-2">
             <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />

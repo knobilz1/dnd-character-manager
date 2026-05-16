@@ -1,6 +1,8 @@
-# D&D Character Manager
+# Tavern Sheet
 
-A full-featured D&D 5e character sheet app built with React, TypeScript, and Tauri. Runs as a native desktop app on Mac and Windows, or in the browser.
+An unofficial, fan-made 5e character sheet app built with React, TypeScript, and Tauri. Runs as a native desktop app on Mac and Windows, or in the browser.
+
+> **Disclaimer:** Tavern Sheet is an unofficial fan project not affiliated with, endorsed by, or produced by Wizards of the Coast. Dungeons & Dragons is a trademark of Wizards of the Coast LLC. Rules content included in this app is sourced from the [Systems Reference Document 5.1](https://dnd.wizards.com/resources/systems-reference-document) (CC BY 4.0) and is used in accordance with Wizards of the Coast's [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy). This app is free, non-commercial, and intended for personal use.
 
 ## Features
 
