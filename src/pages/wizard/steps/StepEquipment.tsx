@@ -70,17 +70,21 @@ export function StepEquipment() {
     }
 
     // Background equipment (always — bg equipment is a flat list of strings)
+    let bgGP = 0;
     if (bg) {
       for (const eqStr of bg.equipment) {
-        // Split off a leading gp amount (e.g. "15 gp"), leave others as gear.
-        const isGold = /^\d+\s*gp$/i.test(eqStr.trim());
-        items.push({
-          id: newId(),
-          name: eqStr,
-          quantity: 1,
-          category: isGold ? 'treasure' : 'gear',
-          source: 'background',
-        });
+        const goldMatch = eqStr.trim().match(/^(\d+)\s*gp$/i);
+        if (goldMatch) {
+          bgGP += parseInt(goldMatch[1], 10);
+        } else {
+          items.push({
+            id: newId(),
+            name: eqStr,
+            quantity: 1,
+            category: 'gear',
+            source: 'background',
+          });
+        }
       }
     }
 
@@ -94,6 +98,12 @@ export function StepEquipment() {
     );
     if (!sameItems) {
       updateDraft({ inventory: items });
+    }
+
+    // Route background gold into currencies rather than leaving it as an inventory item.
+    const currentGP = draft.currencies?.gp ?? 0;
+    if (currentGP !== bgGP) {
+      updateDraft({ currencies: { cp: 0, sp: 0, ep: 0, gp: bgGP, pp: 0 } });
     }
   }, [primaryClass?.classId, draft.backgroundId, JSON.stringify(choices), takeGold]);
 

@@ -1,4 +1,4 @@
-import { Textarea, SectionHeader } from '../../components/ui';
+import { Textarea, SectionHeader, HoverCard } from '../../components/ui';
 import { getBackground } from '../../data/backgrounds';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
@@ -11,9 +11,11 @@ import { ALL_METAMAGIC } from '../../data/metamagic';
 import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { totalCharacterLevel } from '../../data/mechanics';
+import { useCharacterStore } from '../../store/useCharacterStore';
 import type { Character } from '../../types';
 
 export function TraitsPanel({ character, setNotes }: { character: Character; setNotes: (n: string) => void }) {
+  const { setExperiencePoints, updateCurrency } = useCharacterStore();
   const bg = getBackground(character.backgroundId);
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -62,9 +64,7 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
             value={character.experiencePoints}
             onChange={e => {
               const xp = Number(e.target.value);
-              if (!isNaN(xp)) {
-                // Direct store call handled by parent passing setExperiencePoints
-              }
+              if (!isNaN(xp) && xp >= 0) setExperiencePoints(xp);
             }}
             className="w-28 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm"
           />
@@ -112,13 +112,26 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
               .filter(f => f.level <= primaryClass.level)
               .sort((a, b) => a.level - b.level)
               .map((f, i) => (
-                <div key={i} className="bg-slate-900 rounded-lg p-3">
+                <HoverCard
+                  key={i}
+                  content={
+                    <div>
+                      <div className="flex items-center gap-1 mb-2">
+                        <span className="text-xs bg-slate-700 text-slate-300 px-1 py-0.5 rounded">Lv.{f.level}</span>
+                        <span className="text-xs font-bold text-white">{f.name}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{f.description}</p>
+                    </div>
+                  }
+                >
+                <div className="bg-slate-900 rounded-lg p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">Lv.{f.level}</span>
                     <p className="text-xs font-bold text-white">{f.name}</p>
                   </div>
                   <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">{f.description}</p>
                 </div>
+                </HoverCard>
               ))}
           </div>
         </div>
@@ -150,10 +163,20 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
           <SectionHeader>Feats</SectionHeader>
           <div className="space-y-2">
             {feats.map(feat => (
-              <div key={feat.id} className="bg-slate-900 rounded-lg p-3">
+              <HoverCard
+                key={feat.id}
+                content={
+                  <div>
+                    <p className="font-bold text-white text-sm mb-2">{feat.name}</p>
+                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{feat.description}</p>
+                  </div>
+                }
+              >
+              <div className="bg-slate-900 rounded-lg p-3">
                 <p className="text-xs font-bold text-white mb-1">{feat.name}</p>
                 <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line line-clamp-4">{feat.description}</p>
               </div>
+              </HoverCard>
             ))}
           </div>
         </div>
@@ -255,11 +278,21 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
         <div className="grid grid-cols-5 gap-2">
           {(['cp','sp','ep','gp','pp'] as const).map(coin => (
             <div key={coin} className="text-center">
-              <p className="text-xs text-slate-400 uppercase mb-1">{coin}</p>
-              <p className="font-bold text-white">{character.currencies[coin]}</p>
+              <label className="text-xs text-slate-400 uppercase block mb-1">{coin}</label>
+              <input
+                type="number"
+                min={0}
+                value={character.currencies[coin]}
+                onChange={e => {
+                  const v = Math.floor(Number(e.target.value));
+                  if (!isNaN(v)) updateCurrency(coin, v);
+                }}
+                className="w-full bg-slate-900 border border-slate-600 rounded px-1 py-1 text-white text-sm text-center focus:outline-none focus:border-yellow-500"
+              />
             </div>
           ))}
         </div>
+        <p className="text-xs text-slate-500 mt-2">Click any value to edit. Changes save automatically.</p>
       </div>
 
       {/* Notes */}

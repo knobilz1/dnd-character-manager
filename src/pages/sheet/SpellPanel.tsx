@@ -44,7 +44,11 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
 
   // Group spellbook by level
   const spellbookMap = new Map(character.spellbook.map(sp => [sp.spellId, sp]));
-  const preparedCount = character.spellbook.filter(sp => sp.isPrepared && !sp.isAlwaysPrepared).length;
+  const preparedCount = character.spellbook.filter(sp => {
+    if (!sp.isPrepared || sp.isAlwaysPrepared) return false;
+    const spell = getSpell(sp.spellId);
+    return spell && spell.level > 0;
+  }).length;
 
   const byLevel: Record<number, { spell: Spell; prepared: boolean; alwaysPrepared: boolean }[]> = {};
   for (const sp of character.spellbook) {
@@ -92,15 +96,23 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
               </span>
             );
           })()}
-          {/* Prepared (prepared casters only) */}
-          {isPreparedCaster && maxPreparedSpells != null && maxPreparedSpells > 0 && (() => {
-            const ok = preparedCount <= maxPreparedSpells;
-            return (
-              <span className="text-slate-400">
-                Prepared: <span className={cn('font-bold', ok ? 'text-white' : 'text-red-400')}>{preparedCount}/{maxPreparedSpells}</span>
-              </span>
-            );
-          })()}
+          {/* Prepared (prepared casters only) — per-level breakdown */}
+          {isPreparedCaster && maxPreparedSpells != null && maxPreparedSpells > 0 && (
+            <span className="text-slate-400">
+              Prepared <span className={cn('font-bold', preparedCount <= maxPreparedSpells ? 'text-white' : 'text-red-400')}>({preparedCount}/{maxPreparedSpells})</span>:{' '}
+              {([1,2,3,4,5,6,7,8,9] as SpellLevel[])
+                .filter(lvl => (byLevel[lvl]?.length ?? 0) > 0)
+                .map(lvl => {
+                  const entries = byLevel[lvl];
+                  const prepAtLevel = entries.filter(e => e.prepared || e.alwaysPrepared).length;
+                  return (
+                    <span key={lvl} className="font-bold text-white mr-1.5">
+                      {prepAtLevel}/{entries.length}<span className="font-normal text-slate-500"> L{lvl}</span>
+                    </span>
+                  );
+                })}
+            </span>
+          )}
           {/* Max spell level */}
           {maxSpellLevel > 0 && (
             <span className="text-slate-400">

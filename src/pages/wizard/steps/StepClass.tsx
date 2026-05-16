@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWizardStore } from '../../../store/useWizardStore';
 import { ALL_CLASSES } from '../../../data/classes';
-import { Badge, NumberStepper } from '../../../components/ui';
+import { Badge, NumberStepper, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import type { DClass } from '../../../types';
 
@@ -58,8 +58,51 @@ export function StepClass() {
 
         <div className="grid gap-2 sm:grid-cols-2">
           {ALL_CLASSES.map(cls => (
-            <div
+            <HoverCard
               key={cls.id}
+              content={
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-white text-sm">{cls.name}</span>
+                    <span className="text-xs text-slate-400">d{cls.hitDie} · {cls.sourceBook}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                    <div>
+                      <p className="text-slate-400 mb-0.5">Primary Ability</p>
+                      <p className="text-white">{cls.primaryAbility.map(a => a.toUpperCase()).join(', ')}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 mb-0.5">Saving Throws</p>
+                      <p className="text-white">{cls.savingThrows.map(s => s.toUpperCase()).join(', ')}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 mb-0.5">Armor</p>
+                      <p className="text-white">{cls.armorProficiencies.length ? cls.armorProficiencies.join(', ') : 'None'}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 mb-0.5">Spellcasting</p>
+                      <p className="text-white capitalize">{cls.spellcastingType === 'none' ? 'None' : cls.spellcastingType}</p>
+                    </div>
+                  </div>
+                  {cls.resources.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-slate-400 mb-1">Resources</p>
+                      <p className="text-xs text-white">{cls.resources.map(r => r.name).join(', ')}</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-400 mb-1">Key Features</p>
+                  <div className="space-y-1">
+                    {cls.features.filter(f => f.level <= 5).slice(0, 4).map((f, i) => (
+                      <div key={i} className="flex items-start gap-1">
+                        <span className="text-xs bg-slate-700 text-slate-400 px-1 rounded shrink-0">Lv.{f.level}</span>
+                        <span className="text-xs text-slate-300">{f.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              }
+            >
+            <div
               onClick={() => selectClass(cls)}
               className={cn(
                 'p-3 rounded-lg border-2 cursor-pointer transition-all',
@@ -79,6 +122,7 @@ export function StepClass() {
                 )}
               </div>
             </div>
+            </HoverCard>
           ))}
         </div>
       </div>
@@ -130,7 +174,19 @@ export function StepClass() {
                   .filter(f => f.level <= currentLevel)
                   .sort((a, b) => a.level - b.level)
                   .map((feature, i) => (
-                    <div key={i} className="bg-slate-900 rounded-lg p-3">
+                    <HoverCard
+                      key={i}
+                      content={
+                        <div>
+                          <div className="flex items-center gap-1 mb-2">
+                            <span className="text-xs bg-slate-700 text-slate-300 px-1 py-0.5 rounded">Lv.{feature.level}</span>
+                            <span className="text-xs font-bold text-white">{feature.name}</span>
+                          </div>
+                          <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{feature.description}</p>
+                        </div>
+                      }
+                    >
+                    <div className="bg-slate-900 rounded-lg p-3">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">Lv.{feature.level}</span>
                         <h5 className="font-bold text-white text-sm">{feature.name}</h5>
@@ -138,6 +194,7 @@ export function StepClass() {
                       </div>
                       <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">{feature.description}</p>
                     </div>
+                    </HoverCard>
                   ))}
               </div>
             </div>

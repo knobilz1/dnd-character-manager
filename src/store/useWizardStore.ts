@@ -4,6 +4,7 @@ import { WIZARD_STEPS } from '../types';
 import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
+import { getRace } from '../data/races';
 
 type Draft = Partial<Character> & {
   name: string;
@@ -30,6 +31,7 @@ const INITIAL_DRAFT: Draft = {
     infusions: [],
   },
   inventory: [],
+  currencies: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   equipmentChoices: {},
   equipmentTakeGold: false,
   spellbook: [],
@@ -124,7 +126,10 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     // grants average of (hitDie/2 + 1 + Con mod) per 5e fixed-HP rules, with a
     // minimum of 1 hit point per level (even with very low Con).
     const hitDie = classDef?.hitDie ?? 8;
-    const conMod = Math.floor(((draft.baseAbilityScores?.con ?? 10) - 10) / 2);
+    const race = getRace(draft.raceId!);
+    const racialCon = (race?.abilityScoreIncreases as any)?.con ?? 0;
+    const effectiveCon = (draft.baseAbilityScores?.con ?? 10) + racialCon;
+    const conMod = Math.floor((effectiveCon - 10) / 2);
     const level = primaryClass.level;
     const lvl1HP = Math.max(1, hitDie + conMod);
     const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
@@ -190,7 +195,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       inspiration: false,
       experiencePoints: 0,
       notes: '',
-      currencies: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      currencies: draft.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
     };
 
     return character;

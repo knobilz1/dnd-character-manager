@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 
 // Button
@@ -59,6 +60,7 @@ export function Badge({ color = 'slate', className, children, ...props }: BadgeP
     blue: 'bg-blue-900/50 text-blue-300 border-blue-700',
     green: 'bg-green-900/50 text-green-300 border-green-700',
     orange: 'bg-orange-900/50 text-orange-300 border-orange-700',
+    teal: 'bg-teal-900/50 text-teal-300 border-teal-700',
     slate: 'bg-slate-700 text-slate-300 border-slate-600',
   };
   return (
@@ -276,6 +278,74 @@ export function StatBox({ label, score, modifier }: StatBoxProps) {
       <span className="text-3xl font-bold text-white">{modStr}</span>
       <div className="w-8 h-px bg-slate-600 my-1" />
       <span className="text-sm text-slate-400">{score}</span>
+    </div>
+  );
+}
+
+// HoverCard — shows full content in a floating panel after hovering for 3 s.
+// Wraps any element; the popup disappears on mouse-leave with a brief grace period
+// so the user can move their cursor into the popup to scroll it.
+const HOVER_CARD_W = 340;
+const HOVER_DELAY_MS = 3000;
+
+interface HoverCardProps {
+  content: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function HoverCard({ content, children, className }: HoverCardProps) {
+  const [visible, setVisible] = React.useState(false);
+  const [pos, setPos] = React.useState({ top: 0, left: 0 });
+  const showTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const anchorRef = React.useRef<HTMLDivElement>(null);
+
+  const clearShow = () => { if (showTimer.current) { clearTimeout(showTimer.current); showTimer.current = null; } };
+  const clearHide = () => { if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; } };
+
+  function openCard() {
+    if (!anchorRef.current) return;
+    const r = anchorRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const top = spaceBelow >= 240
+      ? r.bottom + 8
+      : Math.max(8, r.top - 328); // 320 max-h + 8 gap
+    const left = Math.max(8, Math.min(
+      r.left + r.width / 2 - HOVER_CARD_W / 2,
+      window.innerWidth - HOVER_CARD_W - 8
+    ));
+    setPos({ top, left });
+    setVisible(true);
+  }
+
+  const onEnter = () => {
+    clearHide();
+    if (!visible) showTimer.current = setTimeout(openCard, HOVER_DELAY_MS);
+  };
+
+  const onLeave = () => {
+    clearShow();
+    // Short grace period so the cursor can travel to the popup card
+    hideTimer.current = setTimeout(() => setVisible(false), 150);
+  };
+
+  React.useEffect(() => () => { clearShow(); clearHide(); }, []);
+
+  return (
+    <div ref={anchorRef} className={className} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      {children}
+      {visible && createPortal(
+        <div
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: HOVER_CARD_W, zIndex: 9999 }}
+          className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl p-4 max-h-80 overflow-y-auto"
+          onMouseEnter={clearHide}
+          onMouseLeave={() => setVisible(false)}
+        >
+          {content}
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

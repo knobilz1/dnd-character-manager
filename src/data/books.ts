@@ -49,4 +49,12 @@ export const BOOKS: Book[] = [
     year: 2021,
     description: 'Dragon-themed subclasses, spells, and Dragonborn variants.',
   },
+  {
+    id: 'EGtW',
+    name: "Explorer's Guide to Wildemount",
+    shortName: 'EGtW',
+    color: 'teal',
+    year: 2020,
+    description: 'Critical Role campaign setting with Dunamancy magic, Echo Knight, and Wildemount races.',
+  },
 ];

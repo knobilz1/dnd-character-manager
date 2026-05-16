@@ -1,6 +1,6 @@
 import { useWizardStore } from '../../../store/useWizardStore';
 import { ALL_SUBCLASSES } from '../../../data/subclasses';
-import { Badge } from '../../../components/ui';
+import { Badge, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
 
@@ -70,8 +70,31 @@ export function StepSubclass() {
 
         <div className="space-y-3">
           {available.map(sub => (
-            <div
+            <HoverCard
               key={sub.id}
+              content={
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-bold text-white text-sm">{sub.name}</span>
+                    <Badge color="slate">{sub.sourceBook}</Badge>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed mb-3">{sub.description}</p>
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Features</p>
+                  <div className="space-y-2">
+                    {sub.features.map((f, i) => (
+                      <div key={i}>
+                        <div className="flex items-center gap-1 mb-0.5">
+                          <span className="text-xs bg-slate-700 text-slate-300 px-1 py-0.5 rounded">Lv.{f.level}</span>
+                          <span className="text-xs font-bold text-white">{f.name}</span>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed">{f.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              }
+            >
+            <div
               onClick={() => select(sub.id)}
               className={cn(
                 'p-4 rounded-xl border-2 cursor-pointer transition-all',
@@ -86,6 +109,7 @@ export function StepSubclass() {
               </div>
               <p className="text-sm text-slate-400 line-clamp-2">{sub.description}</p>
             </div>
+            </HoverCard>
           ))}
         </div>
       </div>
@@ -103,13 +127,26 @@ export function StepSubclass() {
               <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Features</h4>
               <div className="space-y-2">
                 {sub.features.map((f, i) => (
-                  <div key={i} className="bg-slate-900 rounded-lg p-3">
+                  <HoverCard
+                    key={i}
+                    content={
+                      <div>
+                        <div className="flex items-center gap-1 mb-2">
+                          <span className="text-xs bg-slate-700 text-slate-300 px-1 py-0.5 rounded">Lv.{f.level}</span>
+                          <span className="text-xs font-bold text-white">{f.name}</span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{f.description}</p>
+                      </div>
+                    }
+                  >
+                  <div className="bg-slate-900 rounded-lg p-3">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">Lv.{f.level}</span>
                       <h5 className="font-bold text-white text-sm">{f.name}</h5>
                     </div>
                     <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">{f.description}</p>
                   </div>
+                  </HoverCard>
                 ))}
               </div>
             </div>

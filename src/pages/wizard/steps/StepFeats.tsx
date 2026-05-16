@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWizardStore } from '../../../store/useWizardStore';
 import { ALL_FEATS } from '../../../data/feats';
-import { Badge, Dialog } from '../../../components/ui';
+import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { ASI_LEVELS } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
@@ -55,9 +55,23 @@ export function StepFeats() {
         {available.map(feat => {
           const isSelected = selected.has(feat.id);
           const canSelect = isSelected || selected.size < asiCount;
+          const prereq = feat.prerequisite;
           return (
-            <div
+            <HoverCard
               key={feat.id}
+              content={
+                <div>
+                  <p className="font-bold text-white text-sm mb-1">{feat.name}</p>
+                  {prereq && (
+                    <p className="text-xs text-yellow-400 mb-2">
+                      Requires: {prereq.other ?? prereq.race ?? (prereq.spellcasting ? 'Spellcasting' : prereq.ability ? Object.entries(prereq.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') : prereq.proficiency ?? '')}
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{feat.description}</p>
+                </div>
+              }
+            >
+            <div
               className={cn(
                 'p-3 rounded-lg border-2 transition-all',
                 isSelected ? 'border-red-500 bg-red-950/30' : 'border-slate-700 bg-slate-800',
@@ -104,6 +118,7 @@ export function StepFeats() {
                 </button>
               </div>
             </div>
+            </HoverCard>
           );
         })}
       </div>

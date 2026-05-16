@@ -467,7 +467,8 @@ export const ALL_CLASSES: DClass[] = [
         name: 'Arcane Recovery',
         key: 'arcane_recovery',
         rechargeOn: 'long',
-        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+        // Charges = ceil(wizardLevel / 2). Each spell slot recovered costs charges equal to its level.
+        maxPerLevel: { 1:1,2:1,3:2,4:2,5:3,6:3,7:4,8:4,9:5,10:5,11:6,12:6,13:7,14:7,15:8,16:8,17:9,18:9,19:10,20:10 },
       },
     ],
     subclassLabel: 'Arcane Tradition',

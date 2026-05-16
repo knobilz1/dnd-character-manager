@@ -4,6 +4,7 @@ import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
+import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS } from '../data/feats';
 
 // Eldritch Knight and Arcane Trickster get spellcasting via subclass.
@@ -47,18 +48,18 @@ export function useCharacterDerived(character: Character | null) {
         }
       }
     }
-    // Cap at 20 (unless a feature raises it)
+    // Cap at 20 (unless a feature raises it); guard against undefined scores
     for (const k of Object.keys(finalScores) as AbilityKey[]) {
-      finalScores[k] = Math.min(finalScores[k], 20);
+      finalScores[k] = Math.min(finalScores[k] ?? 10, 20);
     }
 
     const mods: Record<AbilityKey, number> = {
-      str: abilityMod(finalScores.str),
-      dex: abilityMod(finalScores.dex),
-      con: abilityMod(finalScores.con),
-      int: abilityMod(finalScores.int),
-      wis: abilityMod(finalScores.wis),
-      cha: abilityMod(finalScores.cha),
+      str: abilityMod(finalScores.str ?? 10),
+      dex: abilityMod(finalScores.dex ?? 10),
+      con: abilityMod(finalScores.con ?? 10),
+      int: abilityMod(finalScores.int ?? 10),
+      wis: abilityMod(finalScores.wis ?? 10),
+      cha: abilityMod(finalScores.cha ?? 10),
     };
 
     // AC (unarmored default; classes with Unarmored Defense use different formulas)
@@ -77,9 +78,12 @@ export function useCharacterDerived(character: Character | null) {
       savingThrows[k] = mods[k] + (savingThrowProficiencies.has(k) ? profBonus : 0);
     }
 
-    // Skill bonuses
-    const skillProfs = new Set(character.selectedSkillProficiencies);
-    // Add background-granted skills
+    // Skill bonuses — merge class choices with background-granted proficiencies
+    const bg = getBackground(character.backgroundId);
+    const skillProfs = new Set<string>([
+      ...character.selectedSkillProficiencies,
+      ...(bg?.skillProficiencies ?? []),
+    ]);
     const skills: Record<string, number> = {};
     for (const [skill, ability] of Object.entries(SKILL_ABILITY)) {
       const base = mods[ability as AbilityKey];
@@ -156,7 +160,9 @@ export function useCharacterDerived(character: Character | null) {
       initiative,
       speed,
       savingThrows,
+      savingThrowProficiencies,
       skills,
+      allSkillProficiencies: skillProfs,
       passivePerception,
       spellcastingAbility,
       spellSaveDC,

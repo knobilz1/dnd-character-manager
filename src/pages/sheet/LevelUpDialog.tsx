@@ -1,66 +1,205 @@
 import React from 'react';
-import { Dialog, Button, Badge } from '../../components/ui';
+import { Dialog, Button, Badge, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { getClass } from '../../data/classes';
 import { getSubclass, ALL_SUBCLASSES } from '../../data/subclasses';
-import { abilityMod } from '../../data/mechanics';
-import type { Character } from '../../types';
+import { getRace } from '../../data/races';
+import {
+  abilityMod, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor,
+  FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
+} from '../../data/mechanics';
+import { getEligibleFeats } from '../../data/feats';
+import { ALL_SPELLS } from '../../data/spells';
+import { ALL_INVOCATIONS } from '../../data/invocations';
+import { ALL_PACT_BOONS } from '../../data/pactBoons';
+import { ALL_METAMAGIC } from '../../data/metamagic';
+import { ALL_MANEUVERS } from '../../data/maneuvers';
+import { ALL_INFUSIONS } from '../../data/infusions';
+import { useCharacterStore } from '../../store/useCharacterStore';
+import { useCharacterDerived } from '../../hooks/useCharacterDerived';
+import type { Character, AbilityKey, ASIChoice, Feat } from '../../types';
 
 interface LevelUpDialogProps {
   open: boolean;
   onClose: () => void;
   character: Character;
-  onConfirm: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string) => void;
+  onConfirm: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice) => void;
 }
 
 type HpMethod = 'average' | 'roll';
+type ASIMode = 'asi' | 'feat';
+
+const ABILITY_KEYS: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+const ABILITY_LABELS: Record<AbilityKey, string> = {
+  str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA',
+};
+
+function warlockInvocationCount(level: number): number {
+  if (level < 2) return 0;
+  if (level >= 18) return 8;
+  if (level >= 15) return 7;
+  if (level >= 12) return 6;
+  if (level >= 9) return 5;
+  if (level >= 7) return 4;
+  if (level >= 5) return 3;
+  return 2;
+}
+
+function sorcererMetamagicCount(level: number): number {
+  if (level >= 17) return 4;
+  if (level >= 10) return 3;
+  if (level >= 3) return 2;
+  return 0;
+}
+
+function battleMasterManeuverCount(level: number): number {
+  if (level >= 15) return 9;
+  if (level >= 10) return 7;
+  if (level >= 7) return 5;
+  return 3;
+}
+
+function artificerInfusionCount(level: number): number {
+  if (level < 2) return 0;
+  if (level >= 18) return 12;
+  if (level >= 14) return 10;
+  if (level >= 10) return 8;
+  if (level >= 6) return 6;
+  return 4;
+}
+
+// Compact selector for class options (invocations, metamagic, maneuvers, infusions)
+interface OptionPickerProps {
+  items: { id: string; name: string; description: string; meta?: string }[];
+  selected: string[];
+  max: number;
+  onToggle: (id: string) => void;
+}
+function CompactOptionPicker({ items, selected, max, onToggle }: OptionPickerProps) {
+  const sel = new Set(selected);
+  const [search, setSearch] = React.useState('');
+  const filtered = items.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+  return (
+    <div>
+      <input
+        type="text"
+        placeholder="Search…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 mb-2 focus:outline-none focus:border-red-500"
+      />
+      <div className="grid gap-1.5 sm:grid-cols-2 max-h-52 overflow-y-auto scrollbar-thin pr-1">
+        {filtered.map(item => {
+          const isSelected = sel.has(item.id);
+          const canSelect = isSelected || sel.size < max;
+          return (
+            <HoverCard key={item.id} content={
+              <div>
+                <p className="font-bold text-white text-sm mb-1">{item.name}</p>
+                {item.meta && <p className="text-xs text-yellow-400 mb-1">{item.meta}</p>}
+                <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{item.description}</p>
+              </div>
+            }>
+              <button
+                onClick={() => { if (canSelect || isSelected) onToggle(item.id); }}
+                className={cn(
+                  'w-full p-2 rounded-lg border text-left transition-all',
+                  isSelected ? 'border-red-500 bg-red-950/30' : 'border-slate-700 bg-slate-800',
+                  canSelect ? 'hover:border-slate-500 cursor-pointer' : 'opacity-50 cursor-not-allowed',
+                )}
+              >
+                <div className="flex items-start justify-between gap-1">
+                  <span className="text-xs font-bold text-white leading-snug flex-1">{item.name}</span>
+                  {isSelected && <span className="text-red-400 text-xs shrink-0">✓</span>}
+                </div>
+                {item.meta && <p className="text-[10px] text-yellow-400 mt-0.5">{item.meta}</p>}
+                <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-1">{item.description}</p>
+              </button>
+            </HoverCard>
+          );
+        })}
+        {filtered.length === 0 && (
+          <p className="text-xs text-slate-500 italic col-span-2">No results.</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDialogProps) {
-  // For now, support single-class only — level up the primary class.
-  // Multiclass dip is a future feature and would surface a class picker here.
+  const { addSpellToBook, updateClassOptions } = useCharacterStore();
+  const derived = useCharacterDerived(character);
   const primary = character.classes[0];
   const classDef = primary ? getClass(primary.classId) : null;
   const currentLevel = primary?.level ?? 1;
   const newLevel = currentLevel + 1;
 
-  const conMod = abilityMod(character.baseAbilityScores.con);
+  const conMod = derived?.mods.con ?? abilityMod(character.baseAbilityScores.con);
   const hitDie = classDef?.hitDie ?? 8;
   const averagePerLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
 
   const [method, setMethod] = React.useState<HpMethod>('average');
   const [rollResult, setRollResult] = React.useState<number | null>(null);
   const [pendingSubclass, setPendingSubclass] = React.useState<string | undefined>(undefined);
+  const [asiMode, setASIMode] = React.useState<ASIMode>('asi');
+  const [asiIncreases, setASIIncreases] = React.useState<Partial<Record<AbilityKey, number>>>({});
+  const [selectedFeat, setSelectedFeat] = React.useState<string | undefined>(undefined);
+  const [featSearch, setFeatSearch] = React.useState('');
+  const [detailFeat, setDetailFeat] = React.useState<Feat | null>(null);
 
-  // Reset state whenever the dialog reopens.
+  // Spell / option selection state
+  const [pendingCantrips, setPendingCantrips] = React.useState<string[]>([]);
+  const [pendingSpells, setPendingSpells] = React.useState<string[]>([]);
+  const [spellSearch, setSpellSearch] = React.useState('');
+  const [spellLevelFilter, setSpellLevelFilter] = React.useState<number | 'all'>('all');
+  const [pendingPactBoon, setPendingPactBoon] = React.useState<string | undefined>(undefined);
+  const [pendingInvocations, setPendingInvocations] = React.useState<string[]>([]);
+  const [pendingMetamagic, setPendingMetamagic] = React.useState<string[]>([]);
+  const [pendingManeuvers, setPendingManeuvers] = React.useState<string[]>([]);
+  const [pendingInfusions, setPendingInfusions] = React.useState<string[]>([]);
+
   React.useEffect(() => {
     if (open) {
       setMethod('average');
       setRollResult(null);
       setPendingSubclass(undefined);
+      setASIMode('asi');
+      setASIIncreases({});
+      setSelectedFeat(undefined);
+      setFeatSearch('');
+      setDetailFeat(null);
+      setPendingCantrips([]);
+      setPendingSpells([]);
+      setSpellSearch('');
+      setSpellLevelFilter('all');
+      setPendingPactBoon(undefined);
+      setPendingInvocations([]);
+      setPendingMetamagic([]);
+      setPendingManeuvers([]);
+      setPendingInfusions([]);
     }
   }, [open]);
 
   if (!classDef) return null;
+
+  const classId = classDef.id;
 
   function rollHitDie() {
     const roll = Math.floor(Math.random() * hitDie) + 1;
     setRollResult(roll);
   }
 
-  // New features unlocked at the new level (from class + selected subclass).
   const sub = primary?.subclassId ? getSubclass(primary.subclassId) : null;
   const newFeatures = [
     ...classDef.features.filter(f => f.level === newLevel).map(f => ({ source: 'Class', ...f })),
     ...(sub?.features ?? []).filter(f => f.level === newLevel).map(f => ({ source: sub!.name, ...f })),
   ];
 
-  // Is this the level the player needs to pick a subclass?
   const needsSubclass = newLevel === classDef.subclassLevel && !primary?.subclassId;
   const availableSubclasses = needsSubclass
     ? ALL_SUBCLASSES.filter(s => s.classId === classDef.id && character.enabledBooks.includes(s.sourceBook))
     : [];
 
-  // ASI level?
   const isASI = newFeatures.some(f => (f as any).isASI);
 
   const hpRoll = method === 'roll' ? (rollResult ?? 0) : averagePerLevel - conMod;
@@ -68,14 +207,202 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     ? Math.max(1, (rollResult ?? 0) + conMod)
     : averagePerLevel;
 
-  const canConfirm = method === 'average' || rollResult != null;
+  // Effective scores (base + racial + feat bonuses) for display and cap-checking
+  const race = getRace(character.raceId);
+  const racialBonuses = race?.abilityScoreIncreases ?? {};
+  const effectiveScore = (k: AbilityKey) =>
+    derived?.finalScores[k] ?? ((character.baseAbilityScores[k] ?? 0) + ((racialBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0));
+
+  const pointsSpent = Object.values(asiIncreases).reduce((a, b) => a + (b ?? 0), 0);
+
+  function adjustIncrease(key: AbilityKey, delta: number) {
+    const current = asiIncreases[key] ?? 0;
+    const newVal = current + delta;
+    if (newVal < 0) return;
+    if (newVal > 2) return;
+    const effective = effectiveScore(key);
+    if (delta > 0 && effective + newVal > 20) return;
+    if (delta > 0 && pointsSpent >= 2) return;
+    setASIIncreases(prev => ({ ...prev, [key]: newVal === 0 ? 0 : newVal }));
+  }
+
+  const eligibleFeats = React.useMemo(
+    () => getEligibleFeats(character, character.enabledBooks),
+    [character]
+  );
+  const filteredFeats = eligibleFeats.filter(f =>
+    f.name.toLowerCase().includes(featSearch.toLowerCase())
+  );
+
+  const asiChoiceValid = !isASI || (
+    asiMode === 'feat'
+      ? selectedFeat != null
+      : pointsSpent === 2
+  );
+
+  function buildASIChoice(): ASIChoice | undefined {
+    if (!isASI) return undefined;
+    if (asiMode === 'feat' && selectedFeat) return { type: 'feat', featId: selectedFeat };
+    if (asiMode === 'asi' && pointsSpent === 2) {
+      const increases: Partial<Record<AbilityKey, number>> = {};
+      for (const [k, v] of Object.entries(asiIncreases)) {
+        if ((v ?? 0) > 0) increases[k as AbilityKey] = v;
+      }
+      return { type: 'asi', increases };
+    }
+    return undefined;
+  }
 
   function confirm() {
     if (!primary) return;
     if (needsSubclass && !pendingSubclass) return;
-    onConfirm(primary.classId, hpGained, hpRoll, pendingSubclass);
+
+    // Add spells and cantrips to the spellbook
+    for (const id of [...pendingCantrips, ...pendingSpells]) {
+      addSpellToBook(id);
+    }
+
+    // Merge pending class options with existing
+    const existing = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
+    if (pendingPactBoon || pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length || pendingInfusions.length) {
+      updateClassOptions({
+        ...(pendingPactBoon ? { pactBoon: pendingPactBoon } : {}),
+        invocations: [...new Set([...existing.invocations, ...pendingInvocations])],
+        metamagic: [...new Set([...existing.metamagic, ...pendingMetamagic])],
+        maneuvers: [...new Set([...existing.maneuvers, ...pendingManeuvers])],
+        infusions: [...new Set([...existing.infusions, ...pendingInfusions])],
+      });
+    }
+
+    onConfirm(primary.classId, hpGained, hpRoll, pendingSubclass, buildASIChoice());
     onClose();
   }
+
+  // ── Spell slot changes ───────────────────────────────────────────────────
+  const slotTable =
+    classDef.spellcastingType === 'full' ? FULL_CASTER_SLOTS :
+    classDef.spellcastingType === 'half' ? HALF_CASTER_SLOTS :
+    classDef.spellcastingType === 'third' ? THIRD_CASTER_SLOTS : null;
+  const oldSlots: number[] = slotTable?.[currentLevel] ?? Array(9).fill(0);
+  const newSlots: number[] = slotTable?.[newLevel] ?? Array(9).fill(0);
+  const slotsGained = oldSlots.map((old, i) => Math.max(0, (newSlots[i] ?? 0) - old));
+
+  const isWarlock = classId === 'warlock';
+  const oldPact = isWarlock ? PACT_MAGIC_TABLE[currentLevel] : null;
+  const newPact = isWarlock ? PACT_MAGIC_TABLE[newLevel] : null;
+  const pactSlotsGained = (oldPact && newPact) ? Math.max(0, newPact.slots - oldPact.slots) : 0;
+  const pactLevelGained = (oldPact && newPact) ? Math.max(0, newPact.slotLevel - oldPact.slotLevel) : 0;
+
+  const hasSlotChanges = slotsGained.some(g => g > 0) || pactSlotsGained > 0 || pactLevelGained > 0;
+
+  // ── Cantrip changes ──────────────────────────────────────────────────────
+  const oldCantripCount = cantripsKnownFor(classId, currentLevel);
+  const newCantripCount = cantripsKnownFor(classId, newLevel);
+  const cantripsGained = newCantripCount - oldCantripCount;
+
+  const spellbookIds = new Set(character.spellbook.map(sp => sp.spellId));
+  const enabledBooks = character.enabledBooks;
+
+  const availableCantrips = ALL_SPELLS.filter(s =>
+    s.level === 0 &&
+    enabledBooks.includes(s.sourceBook) &&
+    s.classes.includes(classId) &&
+    !spellbookIds.has(s.id) &&
+    !pendingCantrips.includes(s.id)
+  );
+
+  // ── Spell known/prepared changes ─────────────────────────────────────────
+  const hasSpellcasting = classDef.spellcastingType !== 'none';
+  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger'].includes(classId);
+  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'].includes(classId);
+
+  const spellsKnownGained = isKnownCaster
+    ? Math.max(0, spellsKnownFor(classId, newLevel) - spellsKnownFor(classId, currentLevel))
+    : 0;
+
+  const spellcastingAbility = classDef.spellcastingAbility as AbilityKey | undefined;
+  const spellMod = spellcastingAbility
+    ? (derived?.mods[spellcastingAbility] ?? abilityMod((character.baseAbilityScores[spellcastingAbility] ?? 10) + ((racialBonuses as any)[spellcastingAbility] ?? 0)))
+    : 0;
+  const oldMaxPrepared = isPreparedCaster ? (maxPreparedSpellsFor(classId, currentLevel, spellMod) ?? 0) : 0;
+  const newMaxPrepared = isPreparedCaster ? (maxPreparedSpellsFor(classId, newLevel, spellMod) ?? 0) : 0;
+
+  // Max spell level unlocked at new level (from regular slot table)
+  const newMaxSpellLevel = newSlots.reduce((max, count, i) => count > 0 ? i + 1 : max, 0);
+  // Also account for pact magic
+  const effectiveMaxSpellLevel = isWarlock ? (newPact?.slotLevel ?? 0) : newMaxSpellLevel;
+
+  const availableSpells = ALL_SPELLS.filter(s =>
+    s.level > 0 &&
+    s.level <= effectiveMaxSpellLevel &&
+    enabledBooks.includes(s.sourceBook) &&
+    s.classes.includes(classId) &&
+    !spellbookIds.has(s.id) &&
+    !pendingSpells.includes(s.id) &&
+    (spellLevelFilter === 'all' || s.level === spellLevelFilter) &&
+    (spellSearch === '' || s.name.toLowerCase().includes(spellSearch.toLowerCase()))
+  );
+
+  // Level options for the spell level filter (only levels up to effectiveMaxSpellLevel)
+  const spellLevelOptions = Array.from({ length: effectiveMaxSpellLevel }, (_, i) => i + 1);
+
+  // ── Class options ────────────────────────────────────────────────────────
+  const classOpts = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
+
+  const needsPactBoon = isWarlock && newLevel >= 3 && !classOpts.pactBoon;
+
+  const canConfirm =
+    (method === 'average' || rollResult != null) &&
+    (!needsSubclass || pendingSubclass != null) &&
+    (!needsPactBoon || pendingPactBoon != null) &&
+    asiChoiceValid;
+
+  const pactBoonsAvail = needsPactBoon
+    ? ALL_PACT_BOONS.filter(p => enabledBooks.includes(p.sourceBook))
+    : [];
+
+  const newInvocationMax = isWarlock ? warlockInvocationCount(newLevel) : 0;
+  // totalNew* = how many new slots granted this level-up (static, doesn't shrink as user picks)
+  const totalNewInvocations = Math.max(0, newInvocationMax - classOpts.invocations.length);
+  const invocationsRemaining = Math.max(0, totalNewInvocations - pendingInvocations.length);
+  const allPickedInvocations = [...classOpts.invocations, ...pendingInvocations];
+
+  const isSorcerer = classId === 'sorcerer';
+  const newMetamagicMax = isSorcerer ? sorcererMetamagicCount(newLevel) : 0;
+  const totalNewMetamagic = Math.max(0, newMetamagicMax - classOpts.metamagic.length);
+  const metamagicRemaining = Math.max(0, totalNewMetamagic - pendingMetamagic.length);
+  const allPickedMetamagic = [...classOpts.metamagic, ...pendingMetamagic];
+
+  const isBattleMaster = classId === 'fighter' && (primary?.subclassId === 'battle-master' || pendingSubclass === 'battle-master');
+  const newManeuverMax = isBattleMaster ? battleMasterManeuverCount(newLevel) : 0;
+  const totalNewManeuvers = Math.max(0, newManeuverMax - classOpts.maneuvers.length);
+  const maneuversRemaining = Math.max(0, totalNewManeuvers - pendingManeuvers.length);
+  const allPickedManeuvers = [...classOpts.maneuvers, ...pendingManeuvers];
+
+  const isArtificer = classId === 'artificer';
+  const newInfusionMax = isArtificer ? artificerInfusionCount(newLevel) : 0;
+  const totalNewInfusions = Math.max(0, newInfusionMax - classOpts.infusions.length);
+  const infusionsRemaining = Math.max(0, totalNewInfusions - pendingInfusions.length);
+  const allPickedInfusions = [...classOpts.infusions, ...pendingInfusions];
+
+  const invocationsAvail = ALL_INVOCATIONS
+    .filter(i => enabledBooks.includes(i.sourceBook))
+    .filter(i => i.minLevel <= newLevel)
+    .filter(i => !i.prerequisitePact || i.prerequisitePact === (classOpts.pactBoon?.replace('pact-of-the-', '') as any))
+    .filter(i => !allPickedInvocations.includes(i.id));
+
+  const metamagicAvail = ALL_METAMAGIC
+    .filter(m => enabledBooks.includes(m.sourceBook))
+    .filter(m => !allPickedMetamagic.includes(m.id));
+
+  const maneuversAvail = ALL_MANEUVERS
+    .filter(m => enabledBooks.includes(m.sourceBook))
+    .filter(m => !allPickedManeuvers.includes(m.id));
+
+  const infusionsAvail = ALL_INFUSIONS
+    .filter(i => enabledBooks.includes(i.sourceBook))
+    .filter(i => i.minLevel <= newLevel)
+    .filter(i => !allPickedInfusions.includes(i.id));
 
   return (
     <Dialog open={open} onClose={onClose} title={`Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
@@ -132,8 +459,31 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
             </h3>
             <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin">
               {availableSubclasses.map(s => (
-                <button
+                <HoverCard
                   key={s.id}
+                  content={
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-bold text-white text-sm">{s.name}</span>
+                        <Badge color="slate">{s.sourceBook}</Badge>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed mb-3">{s.description}</p>
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Features</p>
+                      <div className="space-y-2">
+                        {s.features.map((f, i) => (
+                          <div key={i}>
+                            <div className="flex items-center gap-1 mb-0.5">
+                              <span className="text-xs bg-slate-700 text-slate-300 px-1 py-0.5 rounded">Lv.{f.level}</span>
+                              <span className="text-xs font-bold text-white">{f.name}</span>
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">{f.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  }
+                >
+                <button
                   onClick={() => setPendingSubclass(s.id === pendingSubclass ? undefined : s.id)}
                   className={cn(
                     'w-full p-3 rounded-lg border-2 text-left transition-all',
@@ -146,6 +496,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                   </div>
                   <p className="text-xs text-slate-400 line-clamp-2">{s.description}</p>
                 </button>
+                </HoverCard>
               ))}
             </div>
           </section>
@@ -174,40 +525,604 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
               ))}
             </div>
           )}
-          {isASI && (
-            <p className="text-xs text-yellow-300 mt-2">
-              ⚠ Increase your ability scores (+2 to one or +1 to two) or pick a feat. The character sheet doesn't yet edit base scores
-              after creation — use the Feats step in the wizard, or edit ability scores manually in storage. (Tracking ASIs post-creation is a separate feature.)
-            </p>
-          )}
         </section>
 
-        {/* Reminders for spells / class options */}
-        {(classDef.spellcastingType !== 'none' || ['warlock','sorcerer','fighter','artificer'].includes(classDef.id)) && (
-          <section className="text-xs text-slate-400 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 leading-relaxed">
-            <p className="text-slate-300 font-medium mb-1">Remember to update:</p>
-            <ul className="list-disc list-inside space-y-0.5">
-              {classDef.spellcastingType !== 'none' && (
-                <>
-                  <li>New spells known/prepared on the Spells tab (your max level may have increased)</li>
-                  <li>Cantrips known if your class table grants more</li>
-                </>
+        {/* ASI / Feat picker */}
+        {isASI && (
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+              Ability Score Improvement or Feat
+            </h3>
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <button
+                onClick={() => setASIMode('asi')}
+                className={cn(
+                  'p-3 rounded-lg border-2 text-left transition-all',
+                  asiMode === 'asi' ? 'border-amber-500 bg-amber-950/20' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                )}
+              >
+                <p className="text-sm font-bold text-white">Ability Score Improvement</p>
+                <p className="text-xs text-slate-400">+2 to one score, or +1 to two scores</p>
+              </button>
+              <button
+                onClick={() => setASIMode('feat')}
+                className={cn(
+                  'p-3 rounded-lg border-2 text-left transition-all',
+                  asiMode === 'feat' ? 'border-amber-500 bg-amber-950/20' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                )}
+              >
+                <p className="text-sm font-bold text-white">Take a Feat</p>
+                <p className="text-xs text-slate-400">
+                  {eligibleFeats.length} feat{eligibleFeats.length !== 1 ? 's' : ''} available
+                </p>
+              </button>
+            </div>
+
+            {asiMode === 'asi' && (
+              <div>
+                <p className="text-xs text-slate-400 mb-3">
+                  Points to spend: <span className={cn('font-bold', pointsSpent === 2 ? 'text-green-400' : 'text-amber-300')}>{pointsSpent}/2</span>
+                  <span className="text-slate-500 ml-2">· Scores shown are effective (base + racial)</span>
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {ABILITY_KEYS.map(key => {
+                    const increase = asiIncreases[key] ?? 0;
+                    const effective = effectiveScore(key);
+                    const atCap = effective + increase >= 20;
+                    const canAdd = !atCap && pointsSpent < 2;
+                    const canSub = increase > 0;
+                    return (
+                      <div key={key} className={cn(
+                        'bg-slate-900 rounded-lg p-2 text-center border',
+                        increase > 0 ? 'border-amber-600/60' : 'border-slate-700'
+                      )}>
+                        <div className="text-xs font-bold text-slate-400 mb-1">{ABILITY_LABELS[key]}</div>
+                        <div className="text-xl font-bold text-white leading-none">
+                          {effective + increase}
+                        </div>
+                        {increase > 0 && (
+                          <div className="text-xs text-green-400 font-medium">+{increase}</div>
+                        )}
+                        {atCap && increase === 0 && (
+                          <div className="text-xs text-slate-500">max</div>
+                        )}
+                        <div className="flex items-center justify-center gap-1 mt-2">
+                          <button
+                            onClick={() => adjustIncrease(key, -1)}
+                            disabled={!canSub}
+                            className="w-6 h-6 rounded bg-slate-700 text-white text-sm font-bold hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >−</button>
+                          <button
+                            onClick={() => adjustIncrease(key, +1)}
+                            disabled={!canAdd}
+                            className="w-6 h-6 rounded bg-slate-700 text-white text-sm font-bold hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >+</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {pointsSpent === 2 && (
+                  <p className="text-xs text-green-400 mt-2">
+                    ✓ Ability score increases locked in — confirm to apply.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {asiMode === 'feat' && (
+              <div>
+                {eligibleFeats.length === 0 ? (
+                  <p className="text-sm text-slate-500 italic">
+                    No feats are available for your character (check enabled books or prerequisites).
+                  </p>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      placeholder="Search feats…"
+                      value={featSearch}
+                      onChange={e => setFeatSearch(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 mb-3 focus:outline-none focus:border-amber-500"
+                    />
+                    <div className="grid gap-2 sm:grid-cols-2 max-h-64 overflow-y-auto scrollbar-thin pr-1">
+                      {filteredFeats.map(feat => {
+                        const isSelected = selectedFeat === feat.id;
+                        const prereq = feat.prerequisite;
+                        return (
+                          <HoverCard
+                            key={feat.id}
+                            content={
+                              <div>
+                                <p className="font-bold text-white text-sm mb-1">{feat.name}</p>
+                                {prereq && (
+                                  <p className="text-xs text-yellow-400 mb-2">
+                                    Requires: {prereq.other ?? prereq.race ?? (prereq.spellcasting ? 'Spellcasting' : prereq.ability ? Object.entries(prereq.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') : prereq.proficiency ?? '')}
+                                  </p>
+                                )}
+                                <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{feat.description}</p>
+                              </div>
+                            }
+                          >
+                          <button
+                            onClick={() => setSelectedFeat(isSelected ? undefined : feat.id)}
+                            className={cn(
+                              'p-3 rounded-lg border-2 text-left transition-all w-full',
+                              isSelected
+                                ? 'border-amber-500 bg-amber-950/20'
+                                : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-1 mb-1">
+                              <span className="text-sm font-bold text-white leading-tight">{feat.name}</span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                {isSelected && <span className="text-amber-400 text-xs">✓</span>}
+                                <Badge color={feat.sourceBook === 'PHB' ? 'red' : feat.sourceBook === 'XGtE' ? 'amber' : 'purple'}>
+                                  {feat.sourceBook}
+                                </Badge>
+                              </div>
+                            </div>
+                            {prereq && (prereq.ability || prereq.spellcasting || prereq.proficiency || prereq.race || prereq.other) && (
+                              <p className="text-xs text-yellow-400 mb-1">
+                                Req: {
+                                  prereq.other ? prereq.other :
+                                  prereq.race ? `${prereq.race} race` :
+                                  prereq.spellcasting ? 'Spellcasting' :
+                                  prereq.ability ? Object.entries(prereq.ability).map(([k, v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
+                                  prereq.proficiency ?? ''
+                                }
+                              </p>
+                            )}
+                            <p className="text-xs text-slate-400 line-clamp-2">{feat.description.split('\n')[0]}</p>
+                          </button>
+                          </HoverCard>
+                        );
+                      })}
+                      {filteredFeats.length === 0 && (
+                        <p className="text-sm text-slate-500 italic col-span-2">No feats match "{featSearch}".</p>
+                      )}
+                    </div>
+                    {selectedFeat && (
+                      <p className="text-xs text-green-400 mt-2">
+                        ✓ {eligibleFeats.find(f => f.id === selectedFeat)?.name} selected — confirm to apply.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ─── Spell Slots Gained ───────────────────────────────────────────── */}
+        {hasSlotChanges && (
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+              Spell Slots Gained
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {slotsGained.map((gain, idx) =>
+                gain > 0 ? (
+                  <span key={idx} className="text-xs bg-blue-900/40 border border-blue-700 text-blue-200 rounded-lg px-2 py-1 font-medium">
+                    +{gain} Level {idx + 1} slot{gain > 1 ? 's' : ''}
+                  </span>
+                ) : null
               )}
-              {classDef.id === 'warlock' && newLevel >= 2 && <li>You may know an additional Eldritch Invocation</li>}
-              {classDef.id === 'sorcerer' && (newLevel === 10 || newLevel === 17) && <li>You learn a new Metamagic option</li>}
-              {classDef.id === 'fighter' && primary?.subclassId === 'battle-master' && newLevel >= 7 && <li>Battle Master maneuvers known may have increased</li>}
-              {classDef.id === 'artificer' && (newLevel === 6 || newLevel === 10 || newLevel === 14 || newLevel === 18) && <li>Your Infusions Known increased</li>}
-            </ul>
+              {pactSlotsGained > 0 && (
+                <span className="text-xs bg-purple-900/40 border border-purple-700 text-purple-200 rounded-lg px-2 py-1 font-medium">
+                  +{pactSlotsGained} Pact slot{pactSlotsGained > 1 ? 's' : ''}
+                </span>
+              )}
+              {pactLevelGained > 0 && (
+                <span className="text-xs bg-purple-900/40 border border-purple-700 text-purple-200 rounded-lg px-2 py-1 font-medium">
+                  Pact slots now Level {newPact?.slotLevel}
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Cantrip Picker ───────────────────────────────────────────────── */}
+        {cantripsGained > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                New Cantrip{cantripsGained > 1 ? 's' : ''}
+              </h3>
+              <span className={cn('text-xs font-bold', pendingCantrips.length >= cantripsGained ? 'text-green-400' : 'text-amber-300')}>
+                {pendingCantrips.length}/{cantripsGained} chosen
+              </span>
+            </div>
+            {pendingCantrips.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingCantrips.map(id => {
+                  const sp = ALL_SPELLS.find(s => s.id === id);
+                  return sp ? (
+                    <button
+                      key={id}
+                      onClick={() => setPendingCantrips(prev => prev.filter(x => x !== id))}
+                      className="text-xs bg-red-900/40 border border-red-700 text-red-200 rounded-lg px-2 py-0.5 hover:bg-red-800/50 transition-colors"
+                    >
+                      {sp.name} ×
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+            <div className="grid gap-1.5 sm:grid-cols-2 max-h-44 overflow-y-auto scrollbar-thin pr-1">
+              {availableCantrips.map(sp => {
+                const canAdd = pendingCantrips.length < cantripsGained;
+                return (
+                  <HoverCard key={sp.id} content={
+                    <div>
+                      <p className="font-bold text-white text-sm mb-1">{sp.name}</p>
+                      <p className="text-xs text-slate-400 mb-1">{sp.school} cantrip</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{sp.description}</p>
+                    </div>
+                  }>
+                    <button
+                      onClick={() => { if (canAdd) setPendingCantrips(prev => [...prev, sp.id]); }}
+                      disabled={!canAdd}
+                      className={cn(
+                        'w-full p-2 rounded-lg border text-left transition-all',
+                        canAdd ? 'border-slate-700 bg-slate-800 hover:border-slate-500 cursor-pointer' : 'border-slate-700 bg-slate-800 opacity-50 cursor-not-allowed',
+                      )}
+                    >
+                      <p className="text-xs font-bold text-white">{sp.name}</p>
+                      <p className="text-[10px] text-slate-500">{sp.school}</p>
+                    </button>
+                  </HoverCard>
+                );
+              })}
+              {availableCantrips.length === 0 && (
+                <p className="text-xs text-slate-500 italic col-span-2">No more cantrips available from enabled books.</p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Spell Picker ─────────────────────────────────────────────────── */}
+        {hasSpellcasting && effectiveMaxSpellLevel > 0 && (isPreparedCaster || spellsKnownGained > 0) && (
+          <section>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Spells</h3>
+              <span className="text-xs text-slate-400">
+                {isKnownCaster && spellsKnownGained > 0 && (
+                  <span className={cn('font-bold', pendingSpells.length >= spellsKnownGained ? 'text-green-400' : 'text-amber-300')}>
+                    {pendingSpells.length}/{spellsKnownGained} learned
+                  </span>
+                )}
+                {isPreparedCaster && newMaxPrepared > oldMaxPrepared && (
+                  <span className="text-white font-bold">
+                    Prepared limit: {oldMaxPrepared} → {newMaxPrepared}
+                  </span>
+                )}
+                {isPreparedCaster && newMaxPrepared === oldMaxPrepared && (
+                  <span className="text-slate-500">
+                    Prepared limit: {newMaxPrepared}
+                  </span>
+                )}
+              </span>
+            </div>
+            {isKnownCaster && spellsKnownGained > 0 && (
+              <p className="text-xs text-slate-400 mb-2">
+                You learn {spellsKnownGained} new spell{spellsKnownGained > 1 ? 's' : ''}. Pick from the list below.
+              </p>
+            )}
+            {isPreparedCaster && (
+              <p className="text-xs text-slate-400 mb-2">
+                Add spells to your spellbook — you can choose which to prepare each day.
+              </p>
+            )}
+
+            {/* Selected spells */}
+            {pendingSpells.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingSpells.map(id => {
+                  const sp = ALL_SPELLS.find(s => s.id === id);
+                  return sp ? (
+                    <button
+                      key={id}
+                      onClick={() => setPendingSpells(prev => prev.filter(x => x !== id))}
+                      className="text-xs bg-red-900/40 border border-red-700 text-red-200 rounded-lg px-2 py-0.5 hover:bg-red-800/50 transition-colors"
+                    >
+                      L{sp.level} {sp.name} ×
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+
+            {/* Search + level filter */}
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                placeholder="Search spells…"
+                value={spellSearch}
+                onChange={e => setSpellSearch(e.target.value)}
+                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500"
+              />
+              <select
+                value={spellLevelFilter}
+                onChange={e => setSpellLevelFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-red-500"
+              >
+                <option value="all">All levels</option>
+                {spellLevelOptions.map(lvl => (
+                  <option key={lvl} value={lvl}>Level {lvl}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid gap-1.5 sm:grid-cols-2 max-h-52 overflow-y-auto scrollbar-thin pr-1">
+              {availableSpells.map(sp => {
+                const canAdd = isPreparedCaster || (isKnownCaster && pendingSpells.length < spellsKnownGained);
+                return (
+                  <HoverCard key={sp.id} content={
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-bold text-white text-sm">{sp.name}</span>
+                        <Badge color="slate">L{sp.level}</Badge>
+                      </div>
+                      <p className="text-xs text-slate-400 mb-2">{sp.school} · {sp.castingTime} · {sp.range}</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{sp.description}</p>
+                    </div>
+                  }>
+                    <button
+                      onClick={() => { if (canAdd) setPendingSpells(prev => [...prev, sp.id]); }}
+                      disabled={!canAdd}
+                      className={cn(
+                        'w-full p-2 rounded-lg border text-left transition-all',
+                        canAdd ? 'border-slate-700 bg-slate-800 hover:border-slate-500 cursor-pointer' : 'border-slate-700 bg-slate-800 opacity-50 cursor-not-allowed',
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="text-xs font-bold text-white leading-snug">{sp.name}</p>
+                        <Badge color="slate" className="shrink-0">L{sp.level}</Badge>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5">{sp.school} · {sp.castingTime}</p>
+                    </button>
+                  </HoverCard>
+                );
+              })}
+              {availableSpells.length === 0 && (
+                <p className="text-xs text-slate-500 italic col-span-2">
+                  {spellSearch || spellLevelFilter !== 'all' ? 'No spells match your filter.' : 'No more spells available from enabled books.'}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Pact Boon ───────────────────────────────────────────────────── */}
+        {needsPactBoon && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Pact Boon</h3>
+              {pendingPactBoon
+                ? <span className="text-xs font-bold text-green-400">1/1 chosen</span>
+                : <span className="text-xs font-bold text-amber-300">0/1 chosen</span>}
+            </div>
+            <div className="space-y-2">
+              {pactBoonsAvail.map(boon => (
+                <HoverCard
+                  key={boon.id}
+                  content={
+                    <div>
+                      <p className="font-bold text-white text-sm mb-2">{boon.name}</p>
+                      <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{boon.description}</p>
+                    </div>
+                  }
+                >
+                  <button
+                    onClick={() => setPendingPactBoon(pendingPactBoon === boon.id ? undefined : boon.id)}
+                    className={cn(
+                      'w-full p-3 rounded-lg border-2 text-left transition-all',
+                      pendingPactBoon === boon.id ? 'border-purple-500 bg-purple-950/30' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-sm font-bold text-white">{boon.name}</p>
+                      {pendingPactBoon === boon.id && <span className="text-purple-400 text-xs">✓</span>}
+                    </div>
+                    <p className="text-xs text-slate-400 line-clamp-2">{boon.description}</p>
+                  </button>
+                </HoverCard>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Eldritch Invocations ─────────────────────────────────────────── */}
+        {isWarlock && totalNewInvocations > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Eldritch Invocations</h3>
+              <span className={cn('text-xs font-bold', pendingInvocations.length >= totalNewInvocations ? 'text-green-400' : 'text-amber-300')}>
+                {pendingInvocations.length}/{totalNewInvocations} chosen
+              </span>
+            </div>
+            {pendingInvocations.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingInvocations.map(id => {
+                  const inv = ALL_INVOCATIONS.find(i => i.id === id);
+                  return inv ? (
+                    <button key={id} onClick={() => setPendingInvocations(prev => prev.filter(x => x !== id))}
+                      className="text-xs bg-purple-900/40 border border-purple-700 text-purple-200 rounded-lg px-2 py-0.5 hover:bg-purple-800/50 transition-colors">
+                      {inv.name} ×
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+            <CompactOptionPicker
+              items={invocationsAvail.map(i => ({
+                id: i.id, name: i.name, description: i.description,
+                meta: [
+                  i.minLevel > 1 ? `Lvl ${i.minLevel}` : null,
+                  i.prerequisitePact ? `Pact of the ${i.prerequisitePact[0].toUpperCase() + i.prerequisitePact.slice(1)}` : null,
+                  i.prerequisiteSpell ? `Req: ${i.prerequisiteSpell.replace(/-/g, ' ')}` : null,
+                ].filter(Boolean).join(' · ') || undefined,
+              }))}
+              selected={[]}
+              max={invocationsRemaining}
+              onToggle={id => {
+                if (pendingInvocations.includes(id)) {
+                  setPendingInvocations(prev => prev.filter(x => x !== id));
+                } else if (pendingInvocations.length < totalNewInvocations) {
+                  setPendingInvocations(prev => [...prev, id]);
+                }
+              }}
+            />
+          </section>
+        )}
+
+        {/* ─── Metamagic ────────────────────────────────────────────────────── */}
+        {isSorcerer && totalNewMetamagic > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Metamagic</h3>
+              <span className={cn('text-xs font-bold', pendingMetamagic.length >= totalNewMetamagic ? 'text-green-400' : 'text-amber-300')}>
+                {pendingMetamagic.length}/{totalNewMetamagic} chosen
+              </span>
+            </div>
+            {pendingMetamagic.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingMetamagic.map(id => {
+                  const mm = ALL_METAMAGIC.find(m => m.id === id);
+                  return mm ? (
+                    <button key={id} onClick={() => setPendingMetamagic(prev => prev.filter(x => x !== id))}
+                      className="text-xs bg-orange-900/40 border border-orange-700 text-orange-200 rounded-lg px-2 py-0.5 hover:bg-orange-800/50 transition-colors">
+                      {mm.name} ×
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+            <CompactOptionPicker
+              items={metamagicAvail.map(m => ({ id: m.id, name: m.name, description: m.description, meta: m.cost }))}
+              selected={[]}
+              max={metamagicRemaining}
+              onToggle={id => {
+                if (pendingMetamagic.includes(id)) {
+                  setPendingMetamagic(prev => prev.filter(x => x !== id));
+                } else if (pendingMetamagic.length < totalNewMetamagic) {
+                  setPendingMetamagic(prev => [...prev, id]);
+                }
+              }}
+            />
+          </section>
+        )}
+
+        {/* ─── Battle Master Maneuvers ──────────────────────────────────────── */}
+        {isBattleMaster && totalNewManeuvers > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Battle Master Maneuvers</h3>
+              <span className={cn('text-xs font-bold', pendingManeuvers.length >= totalNewManeuvers ? 'text-green-400' : 'text-amber-300')}>
+                {pendingManeuvers.length}/{totalNewManeuvers} chosen
+              </span>
+            </div>
+            {pendingManeuvers.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingManeuvers.map(id => {
+                  const man = ALL_MANEUVERS.find(m => m.id === id);
+                  return man ? (
+                    <button key={id} onClick={() => setPendingManeuvers(prev => prev.filter(x => x !== id))}
+                      className="text-xs bg-green-900/40 border border-green-700 text-green-200 rounded-lg px-2 py-0.5 hover:bg-green-800/50 transition-colors">
+                      {man.name} ×
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+            <CompactOptionPicker
+              items={maneuversAvail.map(m => ({ id: m.id, name: m.name, description: m.description }))}
+              selected={[]}
+              max={maneuversRemaining}
+              onToggle={id => {
+                if (pendingManeuvers.includes(id)) {
+                  setPendingManeuvers(prev => prev.filter(x => x !== id));
+                } else if (pendingManeuvers.length < totalNewManeuvers) {
+                  setPendingManeuvers(prev => [...prev, id]);
+                }
+              }}
+            />
+          </section>
+        )}
+
+        {/* ─── Artificer Infusions ──────────────────────────────────────────── */}
+        {isArtificer && totalNewInfusions > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Artificer Infusions</h3>
+              <span className={cn('text-xs font-bold', pendingInfusions.length >= totalNewInfusions ? 'text-green-400' : 'text-amber-300')}>
+                {pendingInfusions.length}/{totalNewInfusions} chosen
+              </span>
+            </div>
+            {pendingInfusions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingInfusions.map(id => {
+                  const inf = ALL_INFUSIONS.find(i => i.id === id);
+                  return inf ? (
+                    <button key={id} onClick={() => setPendingInfusions(prev => prev.filter(x => x !== id))}
+                      className="text-xs bg-teal-900/40 border border-teal-700 text-teal-200 rounded-lg px-2 py-0.5 hover:bg-teal-800/50 transition-colors">
+                      {inf.name} ×
+                    </button>
+                  ) : null;
+                })}
+              </div>
+            )}
+            <CompactOptionPicker
+              items={infusionsAvail.map(i => ({
+                id: i.id, name: i.name, description: i.description,
+                meta: i.minLevel > 2 ? `Lvl ${i.minLevel}` : (i.prerequisite ?? undefined),
+              }))}
+              selected={[]}
+              max={infusionsRemaining}
+              onToggle={id => {
+                if (pendingInfusions.includes(id)) {
+                  setPendingInfusions(prev => prev.filter(x => x !== id));
+                } else if (pendingInfusions.length < totalNewInfusions) {
+                  setPendingInfusions(prev => [...prev, id]);
+                }
+              }}
+            />
           </section>
         )}
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={confirm} disabled={!canConfirm || (needsSubclass && !pendingSubclass)}>
+          <Button onClick={confirm} disabled={!canConfirm}>
             Confirm Level {newLevel}
           </Button>
         </div>
       </div>
+
+      {/* Feat detail dialog */}
+      <Dialog open={!!detailFeat} onClose={() => setDetailFeat(null)} title={detailFeat?.name}>
+        {detailFeat && (
+          <div>
+            <div className="flex gap-2 mb-3">
+              <Badge>{detailFeat.sourceBook}</Badge>
+              {detailFeat.abilityScoreIncrease && <Badge color="green">+1 to ability</Badge>}
+            </div>
+            {detailFeat.prerequisite && (
+              <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3 mb-4">
+                <p className="text-xs font-bold text-yellow-300 mb-1">Prerequisite</p>
+                <p className="text-xs text-yellow-200">
+                  {detailFeat.prerequisite.other ??
+                   (detailFeat.prerequisite.spellcasting ? 'Spellcasting ability' :
+                    detailFeat.prerequisite.ability ? Object.entries(detailFeat.prerequisite.ability).map(([k, v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
+                    detailFeat.prerequisite.proficiency ?? '')}
+                </p>
+              </div>
+            )}
+            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{detailFeat.description}</p>
+          </div>
+        )}
+      </Dialog>
     </Dialog>
   );
 }

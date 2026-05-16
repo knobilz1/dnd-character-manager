@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWizardStore } from '../../../store/useWizardStore';
 import { ALL_SPELLS } from '../../../data/spells';
-import { Badge, Dialog } from '../../../components/ui';
+import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
 import type { Spell, SpellLevel } from '../../../types';
@@ -90,8 +90,11 @@ export function StepSpells() {
         {classSpells.map(spell => {
           const isSelected = selectedIds.has(spell.id);
           return (
-            <div
+            <HoverCard
               key={spell.id}
+              content={<SpellDetail spell={spell} />}
+            >
+            <div
               className={cn(
                 'p-3 rounded-lg border-2 transition-all',
                 isSelected ? 'border-red-500 bg-red-950/30' : 'border-slate-700 bg-slate-800 hover:border-slate-500',
@@ -130,6 +133,7 @@ export function StepSpells() {
                 </button>
               </div>
             </div>
+            </HoverCard>
           );
         })}
       </div>

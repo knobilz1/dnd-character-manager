@@ -117,6 +117,7 @@ export const ASI_LEVELS: Record<string, number[]> = {
   sorcerer:   [4, 8, 12, 16, 19],
   warlock:    [4, 8, 12, 16, 19],
   wizard:     [4, 8, 12, 16, 19],
+  artificer:  [4, 8, 12, 16, 19],
 };
 
 export const POINT_BUY_COSTS: Record<number, number> = {
@@ -180,6 +181,20 @@ export function totalCharacterLevel(classes: Array<{ level: number }>): number {
 
 export function emptySlotState(): Record<SlotLevel, number> {
   return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0 };
+}
+
+// Spells known by class & level for spontaneous casters (index = level - 1)
+export const SPELLS_KNOWN: Partial<Record<string, number[]>> = {
+  bard:     [4,5,6,7,8,9,10,11,12,14,15,15,16,18,19,19,20,22,22,22],
+  sorcerer: [2,3,4,5,6,7,8,9,10,11,12,12,13,13,14,14,15,15,15,15],
+  warlock:  [2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15],
+  ranger:   [0,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11],
+};
+
+export function spellsKnownFor(classId: string, level: number): number {
+  const table = SPELLS_KNOWN[classId];
+  if (!table) return 0;
+  return table[Math.max(0, Math.min(level, 20) - 1)] ?? 0;
 }
 
 // Cantrips known by class & level (PHB tables, index = level - 1)

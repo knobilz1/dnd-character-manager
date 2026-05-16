@@ -1,4 +1,7 @@
-import type { Feat } from '../types';
+import type { Feat, Character, AbilityKey, BookId } from '../types';
+import { getClass } from './classes';
+import { getSubclass } from './subclasses';
+import { getRace } from './races';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -516,4 +519,76 @@ export const ALL_FEATS: Feat[] = [
 
 export function getFeat(id: string): Feat | undefined {
   return ALL_FEATS.find(f => f.id === id);
+}
+
+function checkArmorProficiency(profKey: string, character: Character): boolean {
+  const allArmor = character.classes
+    .map(cl => getClass(cl.classId))
+    .filter(Boolean)
+    .flatMap(cd => cd!.armorProficiencies.map(x => x.toLowerCase()));
+  const p = profKey.toLowerCase();
+  if (p.includes('light')) return allArmor.some(x => x.includes('light') || x.includes('medium') || x.includes('heavy') || x.includes('all armor'));
+  if (p.includes('medium')) return allArmor.some(x => x.includes('medium') || x.includes('heavy') || x.includes('all armor'));
+  if (p.includes('heavy')) return allArmor.some(x => x.includes('heavy') || x.includes('all armor'));
+  return false;
+}
+
+function checkMartialWeaponProficiency(character: Character): boolean {
+  return character.classes
+    .map(cl => getClass(cl.classId))
+    .filter(Boolean)
+    .some(cd => cd!.weaponProficiencies.some(p => p.toLowerCase().includes('martial')));
+}
+
+/** Returns feats the character is eligible to choose (book-filtered, prereqs met, not already taken). */
+export function getEligibleFeats(character: Character, enabledBooks: BookId[]): Feat[] {
+  const alreadyTaken = new Set(character.selectedFeats ?? []);
+  const totalLevel = character.classes.reduce((s, c) => s + c.level, 0);
+
+  const race = getRace(character.raceId);
+  const racialBonuses = race?.abilityScoreIncreases ?? {};
+  const effectiveScore = (k: AbilityKey) =>
+    (character.baseAbilityScores[k] ?? 0) + ((racialBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0);
+
+  const canCast = character.classes.some(cl => {
+    const def = getClass(cl.classId);
+    if (def && def.spellcastingType !== 'none') return true;
+    if (cl.subclassId) {
+      const sub = getSubclass(cl.subclassId);
+      if (sub?.spellcastingType && sub.spellcastingType !== 'none') return true;
+    }
+    return false;
+  });
+
+  return ALL_FEATS.filter(feat => {
+    if (!enabledBooks.includes(feat.sourceBook)) return false;
+    if (alreadyTaken.has(feat.id)) return false;
+
+    const prereq = feat.prerequisite;
+    if (!prereq) return true;
+
+    if (prereq.race) {
+      const raceId = character.raceId;
+      // 'halfling' matches 'halfling-lightfoot'; 'halfling-lightfoot' only matches exactly
+      if (raceId !== prereq.race && !raceId.startsWith(prereq.race)) return false;
+    }
+    if (prereq.minLevel !== undefined && totalLevel < prereq.minLevel) return false;
+    if (prereq.ability) {
+      for (const [k, min] of Object.entries(prereq.ability)) {
+        if (effectiveScore(k as AbilityKey) < (min as number)) return false;
+      }
+    }
+    if (prereq.spellcasting && !canCast) return false;
+    if (prereq.proficiency) {
+      const p = prereq.proficiency.toLowerCase();
+      if (p.includes('martial')) {
+        if (!checkMartialWeaponProficiency(character)) return false;
+      } else if (p.includes('armor')) {
+        if (!checkArmorProficiency(prereq.proficiency, character)) return false;
+      }
+    }
+    if (prereq.classId && !character.classes.some(cl => cl.classId === prereq.classId)) return false;
+    // prereq.other is free-text — can't enforce programmatically, show it but allow selection
+    return true;
+  });
 }

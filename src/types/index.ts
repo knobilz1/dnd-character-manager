@@ -5,7 +5,8 @@ export type BookId =
   | 'MMoM'
   | 'VGM'
   | 'FToD'
-  | 'SCoC';
+  | 'SCoC'
+  | 'EGtW';
 
 export interface Book {
   id: BookId;
@@ -163,7 +164,12 @@ export interface FeatPrerequisite {
   proficiency?: string;
   race?: string;
   classId?: string;
+  other?: string;
 }
+
+export type ASIChoice =
+  | { type: 'feat'; featId: string }
+  | { type: 'asi'; increases: Partial<Record<AbilityKey, number>> };
 
 export interface Feat {
   id: string;

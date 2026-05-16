@@ -1,6 +1,6 @@
 import React from 'react';
 import { useWizardStore } from '../../../store/useWizardStore';
-import { Badge, Dialog } from '../../../components/ui';
+import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { ALL_FIGHTING_STYLES } from '../../../data/fightingStyles';
 import { ALL_INVOCATIONS } from '../../../data/invocations';
@@ -10,7 +10,7 @@ import { ALL_MANEUVERS } from '../../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../../data/infusions';
 import type { BookId, ClassOptionsState } from '../../../types';
 
-function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' {
+function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' {
   switch (b) {
     case 'PHB': return 'red';
     case 'XGtE': return 'amber';
@@ -18,6 +18,8 @@ function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | '
     case 'MMoM': return 'blue';
     case 'VGM': return 'green';
     case 'FToD': return 'orange';
+    case 'EGtW': return 'teal';
+    default: return 'slate' as any;
   }
 }
 
@@ -58,8 +60,20 @@ function OptionSection({ title, helpText, items, selectedIds, max, onToggle, rad
           const isSelected = selected.has(item.id);
           const canSelect = isSelected || selected.size < max;
           return (
-            <div
+            <HoverCard
               key={item.id}
+              content={
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-bold text-white text-sm">{item.name}</span>
+                    <Badge color={bookColor(item.sourceBook)}>{item.sourceBook}</Badge>
+                  </div>
+                  {item.meta && <p className="text-xs text-yellow-400 mb-2">{item.meta}</p>}
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{item.description}</p>
+                </div>
+              }
+            >
+            <div
               className={cn(
                 'p-3 rounded-lg border-2 transition-all',
                 isSelected ? 'border-red-500 bg-red-950/30' : 'border-slate-700 bg-slate-800',
@@ -82,6 +96,7 @@ function OptionSection({ title, helpText, items, selectedIds, max, onToggle, rad
               {item.meta && <p className="text-xs text-yellow-400 mb-1">{item.meta}</p>}
               <p className="text-xs text-slate-400 line-clamp-2">{item.description}</p>
             </div>
+            </HoverCard>
           );
         })}
       </div>
