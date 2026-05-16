@@ -5,14 +5,14 @@ import { cn } from '../../utils/cn';
 const DICE = [4, 6, 8, 10, 12, 20, 100] as const;
 type Die = typeof DICE[number];
 
-const DIE_STYLE: Record<Die, { btn: string; label: string }> = {
-  4:   { btn: 'from-red-800 to-red-950 border-red-600 hover:border-red-400',     label: 'D4'   },
-  6:   { btn: 'from-orange-800 to-orange-950 border-orange-600 hover:border-orange-400', label: 'D6'  },
-  8:   { btn: 'from-yellow-700 to-yellow-950 border-yellow-600 hover:border-yellow-400', label: 'D8'  },
-  10:  { btn: 'from-green-800 to-green-950 border-green-600 hover:border-green-400',   label: 'D10' },
-  12:  { btn: 'from-teal-800 to-teal-950 border-teal-600 hover:border-teal-400',     label: 'D12' },
-  20:  { btn: 'from-blue-800 to-blue-950 border-blue-600 hover:border-blue-400',     label: 'D20' },
-  100: { btn: 'from-purple-800 to-purple-950 border-purple-600 hover:border-purple-400', label: 'D100'},
+const DIE_STYLE: Record<Die, { btn: string; label: string; glow: string }> = {
+  4:   { btn: 'from-red-800 to-red-950 border-red-600 hover:border-red-400',         label: 'D4',   glow: '#f87171' },
+  6:   { btn: 'from-orange-800 to-orange-950 border-orange-600 hover:border-orange-400', label: 'D6',   glow: '#fb923c' },
+  8:   { btn: 'from-yellow-700 to-yellow-950 border-yellow-600 hover:border-yellow-400', label: 'D8',   glow: '#facc15' },
+  10:  { btn: 'from-green-800 to-green-950 border-green-600 hover:border-green-400',     label: 'D10',  glow: '#4ade80' },
+  12:  { btn: 'from-teal-800 to-teal-950 border-teal-600 hover:border-teal-400',         label: 'D12',  glow: '#2dd4bf' },
+  20:  { btn: 'from-blue-800 to-blue-950 border-blue-600 hover:border-blue-400',         label: 'D20',  glow: '#60a5fa' },
+  100: { btn: 'from-purple-800 to-purple-950 border-purple-600 hover:border-purple-400', label: 'D100', glow: '#c084fc' },
 };
 
 interface HistoryEntry { die: Die; result: number }
@@ -24,7 +24,7 @@ export function DiceRoller() {
   const [resultKey, setResultKey] = React.useState(0);
   const [rolling, setRolling] = React.useState(false);
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
-  const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Drag state
   const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
@@ -55,14 +55,13 @@ export function DiceRoller() {
 
   function roll(sides: Die) {
     if (rolling) return;
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (intervalRef.current) clearTimeout(intervalRef.current);
     setActiveDie(sides);
     setRolling(true);
 
     let frame = 0;
-    const frames = 20;
-    // Speed up then slow down
-    const delay = (f: number) => f < frames * 0.6 ? 35 : f < frames * 0.85 ? 70 : 110;
+    const frames = 22;
+    const delay = (f: number) => f < frames * 0.5 ? 30 : f < frames * 0.75 ? 55 : f < frames * 0.9 ? 90 : 130;
 
     const tick = () => {
       frame++;
@@ -77,19 +76,18 @@ export function DiceRoller() {
         setRolling(false);
       }
     };
-    intervalRef.current = setTimeout(tick, 35);
+    intervalRef.current = setTimeout(tick, 30);
   }
 
-  React.useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current); }, []);
+  React.useEffect(() => () => { if (intervalRef.current) clearTimeout(intervalRef.current); }, []);
+
+  const glowColor = activeDie ? DIE_STYLE[activeDie].glow : '#ffffff';
 
   return (
     <>
       <button
         onClick={() => setOpen(o => !o)}
-        className={cn(
-          'p-1.5 rounded transition-colors',
-          open ? 'text-red-400' : 'text-slate-500 hover:text-red-400',
-        )}
+        className={cn('p-1.5 rounded transition-colors', open ? 'text-red-400' : 'text-slate-500 hover:text-red-400')}
         title="Dice roller"
       >
         <Dice5 size={18} />
@@ -115,22 +113,38 @@ export function DiceRoller() {
           </div>
 
           {/* Result display */}
-          <div className="flex flex-col items-center justify-center py-5 min-h-[100px]">
+          <div
+            className="flex flex-col items-center justify-center py-6 min-h-[120px] relative overflow-hidden"
+            style={rolling ? { animation: 'dice-shake 0.12s infinite' } : undefined}
+          >
+            {/* Background flash on land */}
+            {display !== null && !rolling && (
+              <div
+                key={`flash-${resultKey}`}
+                className="absolute inset-0 rounded-none pointer-events-none"
+                style={{ animation: 'dice-flash 0.6s ease-out forwards', background: glowColor }}
+              />
+            )}
+
             {display !== null ? (
               <>
                 <div
                   key={resultKey}
-                  className={cn(
-                    'text-6xl font-black tabular-nums transition-none',
-                    rolling ? 'text-slate-400 scale-95' : 'text-white',
-                  )}
-                  style={!rolling ? { animation: 'dice-pop 0.35s cubic-bezier(0.34,1.56,0.64,1) both' } : undefined}
+                  className="text-7xl font-black tabular-nums relative z-10"
+                  style={rolling
+                    ? { color: '#94a3b8', filter: 'blur(1.5px)', transform: 'scale(0.92)' }
+                    : {
+                        animation: 'dice-land 0.55s cubic-bezier(0.22, 1, 0.36, 1) both',
+                        color: '#ffffff',
+                        textShadow: `0 0 24px ${glowColor}, 0 0 60px ${glowColor}`,
+                      }
+                  }
                 >
                   {display}
                 </div>
                 {activeDie && (
-                  <p className="text-xs text-slate-500 mt-1">
-                    {rolling ? `Rolling d${activeDie}…` : `d${activeDie === 100 ? '100' : activeDie}`}
+                  <p className="text-xs text-slate-500 mt-2 relative z-10">
+                    {rolling ? `Rolling d${activeDie}…` : `d${activeDie}`}
                   </p>
                 )}
               </>
@@ -147,11 +161,12 @@ export function DiceRoller() {
                 onClick={() => roll(sides)}
                 disabled={rolling}
                 className={cn(
-                  'bg-gradient-to-b border rounded-lg py-2 flex flex-col items-center gap-0.5 transition-all active:scale-95 disabled:opacity-40',
+                  'bg-gradient-to-b border rounded-lg py-2.5 flex flex-col items-center transition-all active:scale-90 disabled:opacity-40',
                   DIE_STYLE[sides].btn,
-                  activeDie === sides && !rolling ? 'ring-2 ring-white/30' : '',
+                  activeDie === sides && !rolling ? 'ring-2 ring-white/40 scale-105' : '',
                   sides === 20 ? 'col-span-2' : '',
                 )}
+                style={activeDie === sides && !rolling ? { boxShadow: `0 0 12px ${DIE_STYLE[sides].glow}88` } : undefined}
               >
                 <span className="text-xs font-bold text-white">{DIE_STYLE[sides].label}</span>
               </button>
@@ -167,6 +182,7 @@ export function DiceRoller() {
                   <span
                     key={i}
                     className="text-xs bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-slate-300"
+                    style={i === 0 ? { borderColor: DIE_STYLE[h.die].glow + '66' } : undefined}
                   >
                     d{h.die} <span className="text-white font-bold">{h.result}</span>
                   </span>
@@ -177,12 +193,25 @@ export function DiceRoller() {
         </div>
       )}
 
-      {/* Pop animation keyframe */}
       <style>{`
-        @keyframes dice-pop {
-          0%   { transform: scale(0.4); opacity: 0; }
-          70%  { transform: scale(1.15); opacity: 1; }
-          100% { transform: scale(1);   opacity: 1; }
+        @keyframes dice-shake {
+          0%   { transform: translate(0, 0) rotate(0deg); }
+          20%  { transform: translate(-4px, 2px) rotate(-4deg); }
+          40%  { transform: translate(4px, -2px) rotate(4deg); }
+          60%  { transform: translate(-3px, 3px) rotate(-3deg); }
+          80%  { transform: translate(3px, -1px) rotate(3deg); }
+          100% { transform: translate(-1px, 1px) rotate(-1deg); }
+        }
+        @keyframes dice-land {
+          0%   { transform: perspective(600px) rotateX(90deg) scale(0.3); opacity: 0; }
+          45%  { transform: perspective(600px) rotateX(-18deg) scale(1.35); opacity: 1; }
+          70%  { transform: perspective(600px) rotateX(8deg) scale(0.95); }
+          85%  { transform: perspective(600px) rotateX(-4deg) scale(1.04); }
+          100% { transform: perspective(600px) rotateX(0deg) scale(1); }
+        }
+        @keyframes dice-flash {
+          0%   { opacity: 0.18; }
+          100% { opacity: 0; }
         }
       `}</style>
     </>
