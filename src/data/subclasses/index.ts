@@ -95,7 +95,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Eldritch Strike', level: 10, description: 'At 10th level, you learn how to make your weapon strikes undercut a creature\'s resistance to your spells.' },
     { name: 'Arcane Charge', level: 15, description: 'At 15th level, you gain the ability to teleport up to 30 feet to an unoccupied space you can see when you use your Action Surge.' },
     { name: 'Improved War Magic', level: 18, description: 'Starting at 18th level, when you use your action to cast a spell, you can make one weapon attack as a bonus action.' },
-  ], spellcastingType: 'third'},
+  ]},
   // Monk
   { id: 'way-of-the-open-hand', name: 'Way of the Open Hand', classId: 'monk', sourceBook: 'PHB', description: 'Monks of the Way of the Open Hand are the ultimate masters of martial arts combat, whether armed or unarmed.', features: [
     { name: 'Open Hand Technique', level: 3, description: 'Starting when you choose this tradition at 3rd level, you can manipulate your enemy\'s ki when you harness your own. Whenever you hit a creature with one of the attacks granted by your Flurry of Blows, you can impose one of the following effects on that target: It must succeed on a Dexterity saving throw or be knocked prone. It must make a Strength saving throw. If it fails, you can push it up to 15 feet away from you. It can\'t take reactions until the end of your next turn.' },
@@ -158,7 +158,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Magical Ambush', level: 9, description: 'Starting at 9th level, if you are hidden from a creature when you cast a spell on it, the creature has disadvantage on any saving throw it makes against the spell this turn.' },
     { name: 'Versatile Trickster', level: 13, description: 'At 13th level, you gain the ability to distract targets with your mage hand.' },
     { name: 'Spell Thief', level: 17, description: 'At 17th level, you gain the ability to magically steal the knowledge of how to cast a spell from another spellcaster.' },
-  ], spellcastingType: 'third'},
+  ]},
   // Sorcerer
   { id: 'draconic-bloodline', name: 'Draconic Bloodline', classId: 'sorcerer', sourceBook: 'PHB', description: 'Your innate magic comes from draconic magic that was mingled with your blood or that of your ancestors. Most often, sorcerers with this origin trace their descent back to a mighty sorcerer of ancient times who made a bargain with a dragon or who might even have claimed a dragon parent.', features: [
     { name: 'Dragon Ancestor', level: 1, description: 'At 1st level, you choose one type of dragon as your ancestor. The damage type associated with each dragon is used by features you gain later.' },

@@ -423,7 +423,7 @@ export function SheetPage() {
 function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMode, applyHP,
   setCurrentHP, setTempHP, setMaxHP, addDeathSuccess, addDeathFailure, resetDeathSaves,
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
-  classDef, resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
+  resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
   useHitDie, restoreHitDie }: any) {

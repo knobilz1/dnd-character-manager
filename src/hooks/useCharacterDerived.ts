@@ -118,7 +118,7 @@ export function useCharacterDerived(character: Character | null) {
     const slotTotals: Record<number, number> = {};
     const spellcasterClasses = character.classes
       .map(cl => ({ cl, eff: effectiveSpellcasting(cl.classId, cl.subclassId) }))
-      .filter(x => x.eff && x.eff.type !== 'none' && x.eff.type !== 'pact') as Array<{ cl: typeof character.classes[number]; eff: { type: 'full' | 'half' | 'third'; ability: AbilityKey } }>;
+      .filter(x => x.eff && (x.eff.type as string) !== 'none' && (x.eff.type as string) !== 'pact') as Array<{ cl: typeof character.classes[number]; eff: { type: 'full' | 'half' | 'third'; ability: AbilityKey } }>;
 
     if (spellcasterClasses.length === 1) {
       const { cl, eff } = spellcasterClasses[0];
