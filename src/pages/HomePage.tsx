@@ -1,12 +1,13 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw } from 'lucide-react';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog } from '../components/ui';
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { totalCharacterLevel } from '../data/mechanics';
 import type { Character } from '../types';
+import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 
 function exportCharacter(character: Character) {
   const json = JSON.stringify(character, null, 2);
@@ -19,7 +20,7 @@ function exportCharacter(character: Character) {
   URL.revokeObjectURL(url);
 }
 
-export function HomePage() {
+export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: () => void; checkStatus?: UpdateCheckStatus }) {
   const navigate = useNavigate();
   const { characters, deleteCharacter, createCharacter } = useLibraryStore();
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
@@ -188,6 +189,23 @@ export function HomePage() {
           <Button variant="danger" onClick={confirmDelete}>Delete</Button>
         </div>
       </Dialog>
+
+      {/* Footer */}
+      {checkForUpdates && (
+        <div className="mt-8 flex justify-center">
+          <button
+            onClick={checkForUpdates}
+            disabled={checkStatus === 'checking'}
+            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={checkStatus === 'checking' ? 'animate-spin' : ''} />
+            {checkStatus === 'checking' && 'Checking for updates…'}
+            {checkStatus === 'up-to-date' && 'Up to date ✓'}
+            {checkStatus === 'available' && 'Update available'}
+            {(checkStatus === 'idle' || !checkStatus) && 'Check for updates'}
+          </button>
+        </div>
+      )}
 
       {/* Import error dialog */}
       <Dialog open={!!importError} onClose={() => setImportError(null)} title="Import Failed">

@@ -1,31 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
-// Only import Tauri APIs when running as a desktop app
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+export type UpdateCheckStatus = 'idle' | 'checking' | 'up-to-date' | 'available';
 
 export function useAppUpdater() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [checkStatus, setCheckStatus] = useState<UpdateCheckStatus>('idle');
 
-  useEffect(() => {
-    if (!isTauri) return;
-    const check = async () => {
-      try {
-        const { check } = await import('@tauri-apps/plugin-updater');
-        const update = await check();
-        if (update?.available) {
-          setUpdateAvailable(true);
-          setUpdateVersion(update.version ?? null);
-        }
-      } catch {
-        // Silently ignore — network offline, no release yet, etc.
+  const runCheck = useCallback(async (silent = true) => {
+    if (!isTauri) {
+      if (!silent) setCheckStatus('up-to-date');
+      return;
+    }
+    setCheckStatus('checking');
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update?.available) {
+        setUpdateAvailable(true);
+        setUpdateVersion(update.version ?? null);
+        setCheckStatus('available');
+      } else {
+        setCheckStatus('up-to-date');
       }
-    };
-    // Check after a short delay so it doesn't block startup
-    const t = setTimeout(check, 3000);
-    return () => clearTimeout(t);
+    } catch {
+      setCheckStatus(silent ? 'idle' : 'up-to-date');
+    }
   }, []);
+
+  // Auto-check 3s after startup
+  useEffect(() => {
+    const t = setTimeout(() => runCheck(true), 3000);
+    return () => clearTimeout(t);
+  }, [runCheck]);
 
   async function installUpdate() {
     if (!isTauri || !updateAvailable) return;
@@ -44,5 +54,12 @@ export function useAppUpdater() {
     }
   }
 
-  return { updateAvailable, updateVersion, installing, installUpdate };
+  return {
+    updateAvailable,
+    updateVersion,
+    installing,
+    installUpdate,
+    checkStatus,
+    checkForUpdates: () => runCheck(false),
+  };
 }
