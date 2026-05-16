@@ -11,6 +11,7 @@ import { SpellPanel } from './SpellPanel';
 import { LevelUpDialog } from './LevelUpDialog';
 import { TraitsPanel } from './TraitsPanel';
 import { InventoryPanel } from './InventoryPanel';
+import { DiceRoller } from './DiceRoller';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
@@ -118,6 +119,7 @@ export function SheetPage() {
         </div>
         <div className="flex items-center gap-2">
           {saved && <span className="text-xs text-green-400">Saved ✓</span>}
+          <DiceRoller />
           <button
             onClick={() => {
               const json = JSON.stringify(character, null, 2);
