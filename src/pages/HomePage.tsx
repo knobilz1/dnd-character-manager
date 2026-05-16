@@ -1,16 +1,30 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, Sword, Shield } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload } from 'lucide-react';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog } from '../components/ui';
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { totalCharacterLevel } from '../data/mechanics';
+import type { Character } from '../types';
+
+function exportCharacter(character: Character) {
+  const json = JSON.stringify(character, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${character.name || 'character'}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { characters, deleteCharacter } = useLibraryStore();
+  const { characters, deleteCharacter, createCharacter } = useLibraryStore();
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [importError, setImportError] = React.useState<string | null>(null);
+  const importRef = React.useRef<HTMLInputElement>(null);
 
   function handleOpen(id: string) {
     navigate(`/character/${id}`);
@@ -25,6 +39,30 @@ export function HomePage() {
     setDeleteId(null);
   }
 
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string) as Character;
+        if (!data.name || !data.classes || !data.baseAbilityScores) {
+          setImportError('Invalid character file — missing required fields.');
+          return;
+        }
+        // Assign a fresh ID so it never collides with existing characters
+        const imported: Character = { ...data, id: crypto.randomUUID(), updatedAt: Date.now() };
+        createCharacter(imported);
+        navigate(`/character/${imported.id}`);
+      } catch {
+        setImportError('Could not read file. Make sure it\'s a valid DnD Sheet JSON export.');
+      }
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-imported if needed
+    e.target.value = '';
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 p-6">
       <div className="max-w-5xl mx-auto">
@@ -37,10 +75,17 @@ export function HomePage() {
             </h1>
             <p className="text-slate-400 mt-1">Your personal adventure awaits</p>
           </div>
-          <Button onClick={handleCreate} size="lg">
-            <Plus size={20} />
-            New Character
-          </Button>
+          <div className="flex gap-2">
+            <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+            <Button variant="outline" size="lg" onClick={() => importRef.current?.click()}>
+              <Upload size={18} />
+              Import
+            </Button>
+            <Button onClick={handleCreate} size="lg">
+              <Plus size={20} />
+              New Character
+            </Button>
+          </div>
         </div>
 
         {/* Character list */}
@@ -69,13 +114,23 @@ export function HomePage() {
                   className="bg-slate-800 border border-slate-700 rounded-xl p-5 hover:border-slate-500 transition-all cursor-pointer group relative"
                   onClick={() => handleOpen(character.id)}
                 >
-                  {/* Delete button */}
-                  <button
-                    onClick={e => { e.stopPropagation(); setDeleteId(character.id); }}
-                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all p-1 rounded"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {/* Card actions */}
+                  <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button
+                      onClick={e => { e.stopPropagation(); exportCharacter(character); }}
+                      className="text-slate-500 hover:text-blue-400 transition-colors p-1 rounded"
+                      title="Export character"
+                    >
+                      <Download size={16} />
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); setDeleteId(character.id); }}
+                      className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded"
+                      title="Delete character"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
 
                   {/* Character info */}
                   <div className="flex items-start justify-between mb-3">
@@ -131,6 +186,14 @@ export function HomePage() {
         <div className="flex gap-3 justify-end">
           <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
           <Button variant="danger" onClick={confirmDelete}>Delete</Button>
+        </div>
+      </Dialog>
+
+      {/* Import error dialog */}
+      <Dialog open={!!importError} onClose={() => setImportError(null)} title="Import Failed">
+        <p className="text-slate-300 mb-6">{importError}</p>
+        <div className="flex justify-end">
+          <Button onClick={() => setImportError(null)}>OK</Button>
         </div>
       </Dialog>
     </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5 } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -118,6 +118,22 @@ export function SheetPage() {
         </div>
         <div className="flex items-center gap-2">
           {saved && <span className="text-xs text-green-400">Saved ✓</span>}
+          <button
+            onClick={() => {
+              const json = JSON.stringify(character, null, 2);
+              const blob = new Blob([json], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${character.name || 'character'}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="p-1.5 rounded text-slate-500 hover:text-blue-400 transition-colors"
+            title="Export character"
+          >
+            <Download size={18} />
+          </button>
           {character.inspiration && (
             <span className="text-xs bg-yellow-700/50 text-yellow-300 px-2 py-0.5 rounded border border-yellow-600">✦ Inspired</span>
           )}
