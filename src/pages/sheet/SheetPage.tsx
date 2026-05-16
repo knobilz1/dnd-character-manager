@@ -13,6 +13,7 @@ import { TraitsPanel } from './TraitsPanel';
 import { InventoryPanel } from './InventoryPanel';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
+import { getSpell } from '../../data/spells';
 
 // Find a resource definition by key, checking both class and subclass.
 function getResourceDef(character: any, key: string) {
@@ -47,13 +48,14 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, levelUp, useHitDie, restoreHitDie } = useCharacterStore();
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, levelUp, useHitDie, restoreHitDie } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
   const [restConfirm, setRestConfirm] = React.useState<'short'|'long'|null>(null);
+  const [arcaneOpen, setArcaneOpen] = React.useState(false);
   const [levelUpOpen, setLevelUpOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
 
@@ -77,7 +79,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, savingThrows, skills, passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -178,7 +180,7 @@ export function SheetPage() {
             <div className="space-y-1">
               {abilityKeys.map(k => {
                 const val = savingThrows[k];
-                const isProficient = classDef?.savingThrows.includes(k);
+                const isProficient = savingThrowProficiencies.has(k);
                 return (
                   <div key={k} className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800">
                     <div className="flex items-center gap-2">
@@ -199,7 +201,7 @@ export function SheetPage() {
             <SectionHeader>Skills</SectionHeader>
             <div className="space-y-0.5">
               {Object.entries(skills).map(([skill, bonus]) => {
-                const isProficient = character.selectedSkillProficiencies.includes(skill as any);
+                const isProficient = allSkillProficiencies.has(skill);
                 return (
                   <div key={skill} className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800">
                     <div className="flex items-center gap-1.5">
@@ -290,6 +292,7 @@ export function SheetPage() {
                 setInventoryQuantity={setInventoryQuantity}
                 toggleInventoryEquipped={toggleInventoryEquipped}
                 renameInventoryItem={renameInventoryItem}
+                setInventoryDescription={setInventoryDescription}
               />
             )}
             {tab === 'character' && (
@@ -304,16 +307,84 @@ export function SheetPage() {
         open={levelUpOpen}
         onClose={() => setLevelUpOpen(false)}
         character={character}
-        onConfirm={(classId, hpGained, hpRoll, subclassPick) => levelUp(classId, hpGained, hpRoll, subclassPick)}
+        onConfirm={(classId, hpGained, hpRoll, subclassPick, asiChoice) => levelUp(classId, hpGained, hpRoll, subclassPick, asiChoice)}
       />
 
       {/* Rest confirm */}
       <Dialog open={!!restConfirm} onClose={() => setRestConfirm(null)} title={restConfirm === 'long' ? 'Long Rest' : 'Short Rest'}>
-        <p className="text-slate-300 mb-6">
+        <p className="text-slate-300 mb-4">
           {restConfirm === 'long'
             ? 'Taking a long rest will restore all HP, spell slots, and class resources. Conditions (except Exhaustion) are cleared.'
-            : 'Taking a short rest will restore short-rest resources (Ki, Channel Divinity, Action Surge, Warlock pact slots).'}
+            : 'Taking a short rest will restore short-rest resources (Ki, Channel Divinity, Action Surge, Warlock pact slots). Spend hit dice below to recover HP.'}
         </p>
+
+        {/* Hit Dice — shown on short rest */}
+        {restConfirm === 'short' && (
+          <div className="mb-5 p-3 bg-slate-900 rounded-lg border border-slate-700">
+            <p className="text-sm font-medium text-white mb-0.5">Hit Dice</p>
+            <p className="text-xs text-slate-400 mb-3">Click a die to spend it and roll HP. Click a spent die to restore it.</p>
+            <div className="space-y-3">
+              {character.classes.map((cl: any) => {
+                const def = getClass(cl.classId);
+                if (!def) return null;
+                const used = character.hitDiceUsed?.[cl.classId] ?? 0;
+                const total = cl.level;
+                const remaining = total - used;
+                return (
+                  <div key={cl.classId}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-medium text-slate-300">
+                        {def.name} <span className="text-slate-500">d{def.hitDie}</span>
+                      </p>
+                      <p className="text-xs text-slate-500">{remaining}/{total}</p>
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {Array.from({ length: total }).map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            if (i < used) {
+                              restoreHitDie(cl.classId);
+                            } else {
+                              const roll = Math.ceil(Math.random() * def.hitDie);
+                              const gained = Math.max(1, roll + mods.con);
+                              useHitDie(cl.classId);
+                              healHP(gained);
+                            }
+                          }}
+                          className={cn(
+                            'h-7 px-2 rounded border-2 transition-all text-xs font-bold flex items-center gap-1',
+                            i < used
+                              ? 'border-slate-600 bg-slate-700 text-slate-600'
+                              : 'border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800/40',
+                          )}
+                          title={i < used ? 'Click to restore' : `Roll d${def.hitDie} + CON (${mods.con >= 0 ? '+' : ''}${mods.con}) HP`}
+                        >
+                          <Dice5 size={10} />
+                          d{def.hitDie}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Arcane Recovery — shown on short rest */}
+        {restConfirm === 'short' && (() => {
+          const ar = character.resources.find((r: any) => r.key === 'arcane_recovery');
+          if (!ar || ar.current <= 0) return null;
+          return (
+            <div className="mb-5 p-3 bg-slate-900 rounded-lg border border-slate-700">
+              <p className="text-sm font-medium text-white mb-0.5">Arcane Recovery</p>
+              <p className="text-xs text-slate-400 mb-2">{ar.current}/{ar.max} charge{ar.max !== 1 ? 's' : ''} remaining · recover expended spell slots (max 5th level)</p>
+              <Button size="sm" variant="outline" onClick={() => setArcaneOpen(true)}>Use Arcane Recovery</Button>
+            </div>
+          );
+        })()}
+
         <div className="flex gap-3 justify-end">
           <Button variant="secondary" onClick={() => setRestConfirm(null)}>Cancel</Button>
           <Button onClick={() => doRest(restConfirm!)}>
@@ -322,6 +393,29 @@ export function SheetPage() {
           </Button>
         </div>
       </Dialog>
+
+      {/* Arcane Recovery (accessible from short rest) */}
+      {(() => {
+        const ar = character.resources.find((r: any) => r.key === 'arcane_recovery');
+        if (!ar) return null;
+        return (
+          <ArcaneRecoveryDialog
+            open={arcaneOpen}
+            onClose={() => setArcaneOpen(false)}
+            budget={ar.current}
+            slotTotals={slotTotals}
+            spellSlotsUsed={character.spellSlotsUsed}
+            onConfirm={(recovering: Record<number, number>) => {
+              for (const [lvlStr, count] of Object.entries(recovering)) {
+                const lvl = Number(lvlStr) as SlotLevel;
+                for (let i = 0; i < count; i++) restoreSpellSlot(lvl);
+              }
+              const spent = Object.entries(recovering).reduce((s, [lvl, n]) => s + Number(lvl) * n, 0);
+              setResource('arcane_recovery', ar.current - spent);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -342,7 +436,7 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="text-amber-400" />
             <span className="text-amber-300 font-medium text-sm">
-              Concentrating on: <span className="text-amber-200 font-bold">{concentrationSpellId.replace(/-/g,' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}</span>
+              Concentrating on: <span className="text-amber-200 font-bold">{getSpell(concentrationSpellId)?.name ?? concentrationSpellId}</span>
             </span>
           </div>
           <button onClick={endConcentration} className="text-xs text-amber-400 hover:text-amber-200 px-2 py-1 rounded border border-amber-700 hover:border-amber-500 transition-colors">
@@ -544,11 +638,11 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
       </div>
 
       {/* Class Resources */}
-      {resources.length > 0 && (
+      {resources.filter((r: any) => r.key !== 'arcane_recovery').length > 0 && (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
           <SectionHeader>Class Resources</SectionHeader>
           <div className="space-y-3">
-            {resources.map((r: any) => {
+            {resources.filter((r: any) => r.key !== 'arcane_recovery').map((r: any) => {
               const resourceDef = getResourceDef(character, r.key);
               return (
                 <div key={r.key} className="flex items-center justify-between gap-3">
@@ -695,5 +789,91 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
         </div>
       )}
     </div>
+  );
+}
+
+
+function ArcaneRecoveryDialog({ open, onClose, budget, slotTotals, spellSlotsUsed, onConfirm }: {
+  open: boolean;
+  onClose: () => void;
+  budget: number;
+  slotTotals: Record<number, number>;
+  spellSlotsUsed: Record<number, number>;
+  onConfirm: (recovering: Record<number, number>) => void;
+}) {
+  const [recovering, setRecovering] = React.useState<Record<number, number>>({});
+
+  React.useEffect(() => { if (open) setRecovering({}); }, [open]);
+
+  const spent = Object.entries(recovering).reduce((s, [lvl, count]) => s + Number(lvl) * count, 0);
+  const remaining = budget - spent;
+
+  function adjust(level: number, delta: number) {
+    setRecovering(prev => {
+      const current = prev[level] ?? 0;
+      const newVal = current + delta;
+      if (newVal < 0) return prev;
+      if (newVal > (spellSlotsUsed[level] ?? 0)) return prev;
+      if (delta > 0 && level > remaining) return prev;
+      return { ...prev, [level]: newVal };
+    });
+  }
+
+  const hasAnythingExpired = [1, 2, 3, 4, 5].some(
+    lvl => (slotTotals[lvl] ?? 0) > 0 && (spellSlotsUsed[lvl] ?? 0) > 0
+  );
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Arcane Recovery">
+      <p className="text-sm text-slate-400 mb-1">
+        Choose expended spell slots to recover. Each slot costs charges equal to its level —
+        combined cost must not exceed <span className="text-white font-bold">{budget}</span> charge{budget !== 1 ? 's' : ''}.
+        Slots of 6th level or higher cannot be recovered.
+      </p>
+      <p className="text-xs text-slate-500 mb-4">
+        Charges used: <span className={cn('font-bold', spent > 0 ? 'text-white' : 'text-slate-400')}>{spent}/{budget}</span>
+      </p>
+
+      <div className="space-y-2 mb-5">
+        {[1, 2, 3, 4, 5].map(lvl => {
+          const total = slotTotals[lvl] ?? 0;
+          const expended = spellSlotsUsed[lvl] ?? 0;
+          if (total === 0 || expended === 0) return null;
+          const count = recovering[lvl] ?? 0;
+          const canAdd = expended > count && remaining >= lvl;
+          return (
+            <div key={lvl} className="flex items-center justify-between bg-slate-900 rounded-lg p-3">
+              <div>
+                <p className="text-sm font-medium text-white">Level {lvl} slot</p>
+                <p className="text-xs text-slate-500">{expended} expended · costs {lvl} charge{lvl !== 1 ? 's' : ''}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => adjust(lvl, -1)}
+                  disabled={count <= 0}
+                  className="w-7 h-7 rounded bg-slate-700 text-white font-bold text-sm hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                >−</button>
+                <span className="w-6 text-center text-white font-bold text-sm">{count}</span>
+                <button
+                  onClick={() => adjust(lvl, +1)}
+                  disabled={!canAdd}
+                  className="w-7 h-7 rounded bg-slate-700 text-white font-bold text-sm hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                >+</button>
+              </div>
+            </div>
+          );
+        })}
+        {!hasAnythingExpired && (
+          <p className="text-sm text-slate-500 italic py-2">No expended spell slots (levels 1–5) to recover.</p>
+        )}
+      </div>
+
+      <div className="flex gap-2 justify-end">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button onClick={() => { onConfirm(recovering); onClose(); }} disabled={spent === 0}>
+          Recover Slots
+        </Button>
+      </div>
+    </Dialog>
   );
 }

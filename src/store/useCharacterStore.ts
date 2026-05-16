@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel } from '../types';
+import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState } from '../types';
+import { getRace } from '../data/races';
 import { useLibraryStore } from './useLibraryStore';
 import { emptySlotState, PACT_MAGIC_TABLE } from '../data/mechanics';
 import { getClass } from '../data/classes';
@@ -50,9 +51,11 @@ interface CharacterState {
   setInventoryQuantity: (id: string, qty: number) => void;
   toggleInventoryEquipped: (id: string) => void;
   renameInventoryItem: (id: string, name: string) => void;
+  setInventoryDescription: (id: string, description: string | undefined) => void;
 
   // Level up / hit dice
-  levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string) => void;
+  levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice) => void;
+  updateClassOptions: (partial: Partial<ClassOptionsState>) => void;
   useHitDie: (classId: string) => void;
   restoreHitDie: (classId: string) => void;
 
@@ -64,35 +67,101 @@ interface CharacterState {
   toggleInspiration: () => void;
   setNotes: (notes: string) => void;
   setExperiencePoints: (xp: number) => void;
+  updateCurrency: (coin: 'cp' | 'sp' | 'ep' | 'gp' | 'pp', value: number) => void;
 }
 
 export const useCharacterStore = create<CharacterState>((set, get) => ({
   character: null,
 
-  load: (c) => set({
-    // Defensive defaults for characters created before fields like
-    // classOptions existed in the schema.
-    character: {
-      ...c,
-      classOptions: c.classOptions ?? {
-        fightingStyles: [],
-        invocations: [],
-        metamagic: [],
-        maneuvers: [],
-        infusions: [],
+  load: (c) => {
+    // Migrate old characters that were created before the resources field existed.
+    // If resources is empty but the character has classes, compute them from the
+    // class/subclass definitions at the character's current level. For classes with
+    // genuinely no tracked resources (Ranger, Rogue), the loop produces nothing and
+    // the empty array remains — so the migration is safe for all classes.
+    let resources = c.resources ?? [];
+    if (resources.length === 0 && (c.classes?.length ?? 0) > 0) {
+      for (const cl of c.classes!) {
+        const def = getClass(cl.classId);
+        if (!def) continue;
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        for (const rd of [...def.resources, ...(sub?.resources ?? [])]) {
+          const max = rd.maxPerLevel[cl.level] ?? 0;
+          if (max === 'unlimited' || max > 0) {
+            const normMax = max === 'unlimited' ? 99 : max as number;
+            resources.push({ key: rd.key, current: normMax, max: normMax });
+          }
+        }
+      }
+    }
+
+    // Old schema stored HP as hitPoints.max/current/temp; new schema uses maxHP/currentHP/tempHP.
+    const oldHP = (c as any).hitPoints as { max?: number; current?: number; temp?: number } | undefined;
+
+    // Re-sync resource maxes against current class definitions.
+    // Needed when class data changes after a character was saved (e.g. arcane_recovery
+    // was previously 1 at all levels; now it's ceil(level/2)).
+    // Proportionally scales current: full → still full, empty → still empty.
+    resources = resources.map(r => {
+      for (const cl of (c.classes ?? [])) {
+        const def = getClass(cl.classId);
+        const classDef = def?.resources.find(rd => rd.key === r.key);
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        const subDef = sub?.resources?.find(rd => rd.key === r.key);
+        const rd = classDef ?? subDef;
+        if (!rd) continue;
+        const rawMax = rd.maxPerLevel[cl.level] ?? 0;
+        const normMax = rawMax === 'unlimited' ? 99 : rawMax as number;
+        if (normMax !== r.max) {
+          const newCurrent = r.max > 0
+            ? Math.min(Math.round(r.current / r.max * normMax), normMax)
+            : normMax;
+          return { ...r, max: normMax, current: newCurrent };
+        }
+        return r;
+      }
+      return r;
+    });
+
+    set({
+      // Defensive defaults for characters created before fields like
+      // classOptions existed in the schema.
+      character: {
+        ...c,
+        maxHP: c.maxHP ?? oldHP?.max ?? 10,
+        currentHP: c.currentHP ?? oldHP?.current ?? c.maxHP ?? oldHP?.max ?? 10,
+        tempHP: c.tempHP ?? oldHP?.temp ?? 0,
+        exhaustionLevel: c.exhaustionLevel ?? 0,
+        classOptions: c.classOptions ?? {
+          fightingStyles: [],
+          invocations: [],
+          metamagic: [],
+          maneuvers: [],
+          infusions: [],
+        },
+        // Ensure all 9 slot levels are present; {} is truthy so can't use ?? alone.
+        spellSlotsUsed: (c.spellSlotsUsed && Object.keys(c.spellSlotsUsed).length === 9)
+          ? c.spellSlotsUsed
+          : { ...emptySlotState(), ...(c.spellSlotsUsed ?? {}) },
+        resources,
+        // Strip 'Exhaustion' from the conditions array — it is tracked via exhaustionLevel.
+        // Older characters may have it set both ways; migrate to the canonical representation.
+        conditions: (c.conditions ?? []).filter((cond) => cond !== 'Exhaustion'),
+        selectedFeats: c.selectedFeats ?? [],
+        selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
+        spellbook: c.spellbook ?? [],
+        inventory: c.inventory ?? [],
+        hitDiceUsed: c.hitDiceUsed ?? {},
+        currencies: c.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        experiencePoints: c.experiencePoints ?? 0,
+        enabledBooks: c.enabledBooks ?? ['PHB'],
+        deathSaves: c.deathSaves ?? { successes: 0, failures: 0 },
+        notes: c.notes ?? '',
+        alignment: c.alignment ?? '',
+        playerName: c.playerName ?? '',
       },
-      spellSlotsUsed: c.spellSlotsUsed ?? emptySlotState(),
-      resources: c.resources ?? [],
-      // Strip 'Exhaustion' from the conditions array — it is tracked via exhaustionLevel.
-      // Older characters may have it set both ways; migrate to the canonical representation.
-      conditions: (c.conditions ?? []).filter((cond) => cond !== 'Exhaustion'),
-      selectedFeats: c.selectedFeats ?? [],
-      selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
-      spellbook: c.spellbook ?? [],
-      inventory: c.inventory ?? [],
-      hitDiceUsed: c.hitDiceUsed ?? {},
-    },
-  }),
+    });
+  },
 
   save: () => {
     const { character } = get();
@@ -267,7 +336,16 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, inventory } };
     }),
 
-  levelUp: (classId, hpGained, hpRoll, subclassPick) =>
+  setInventoryDescription: (id, description) =>
+    set((s) => {
+      if (!s.character) return s;
+      const inventory = (s.character.inventory ?? []).map(i =>
+        i.id === id ? { ...i, description: description || undefined } : i
+      );
+      return { character: { ...s.character, inventory } };
+    }),
+
+  levelUp: (classId, hpGained, hpRoll, subclassPick, asiChoice) =>
     set((s) => {
       if (!s.character) return s;
       // Find the matching class entry; if the character doesn't have this class yet
@@ -330,6 +408,29 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         }
       }
 
+      // Apply ASI or feat choice
+      let baseAbilityScores = { ...s.character.baseAbilityScores };
+      let selectedFeats = [...(s.character.selectedFeats ?? [])];
+      if (asiChoice) {
+        if (asiChoice.type === 'feat') {
+          if (!selectedFeats.includes(asiChoice.featId)) {
+            selectedFeats = [...selectedFeats, asiChoice.featId];
+          }
+        } else {
+          const race = getRace(s.character.raceId);
+          const racialBonuses = race?.abilityScoreIncreases ?? {};
+          for (const [k, inc] of Object.entries(asiChoice.increases)) {
+            const key = k as AbilityKey;
+            const racial = (racialBonuses as Partial<Record<AbilityKey, number>>)[key] ?? 0;
+            const maxBase = 20 - racial;
+            baseAbilityScores = {
+              ...baseAbilityScores,
+              [key]: Math.min(maxBase, (baseAbilityScores[key] ?? 0) + (inc as number)),
+            };
+          }
+        }
+      }
+
       return {
         character: {
           ...s.character,
@@ -338,8 +439,17 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           currentHP: newCurrentHP,
           resources,
           pactMagic,
+          baseAbilityScores,
+          selectedFeats,
         },
       };
+    }),
+
+  updateClassOptions: (partial) =>
+    set((s) => {
+      if (!s.character) return s;
+      const existing = s.character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
+      return { character: { ...s.character, classOptions: { ...existing, ...partial } } };
     }),
 
   useHitDie: (classId) =>
@@ -386,6 +496,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           if (rd.rechargeOn === 'short') shortRestKeys.add(rd.key);
         }
       }
+      // Bard level 5+ (Font of Inspiration): bardic inspiration also recharges on short rest.
+      const bardLevel = s.character.classes.find(c => c.classId === 'bard')?.level ?? 0;
+      if (bardLevel >= 5) shortRestKeys.add('bardic_inspiration');
+
       const resources = s.character.resources.map((r) =>
         shortRestKeys.has(r.key) ? { ...r, current: r.max } : r
       );
@@ -436,4 +550,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setExperiencePoints: (xp) =>
     set((s) => s.character ? { character: { ...s.character, experiencePoints: xp } } : s),
+
+  updateCurrency: (coin, value) =>
+    set((s) => {
+      if (!s.character) return s;
+      return { character: { ...s.character, currencies: { ...s.character.currencies, [coin]: Math.max(0, Math.floor(value)) } } };
+    }),
 }));
