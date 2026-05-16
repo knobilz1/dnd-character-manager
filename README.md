@@ -1,73 +1,75 @@
-# React + TypeScript + Vite
+# D&D Character Manager
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A full-featured D&D 5e character sheet app built with React, TypeScript, and Tauri. Runs as a native desktop app on Mac and Windows, or in the browser.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Character creation wizard** — race, class, subclass, background, ability scores, skills, feats, spells, and starting equipment
+- **Character sheet** — HP tracking, conditions, death saves, exhaustion, inspiration
+- **Combat tab** — spell slots, pact magic, class resources, hit dice, short/long rest
+- **Spell management** — full spellbook, prepared spells, concentration tracking
+- **Inventory** — item database with autocomplete (PHB, DMG, XGtE, TCE, EGtW, FToD), weight tracking, equip/unequip
+- **Traits & notes** — personality, ideals, bonds, flaws, free-text notes
+- **Level up** — ASI / feat choices, subclass selection, HP rolling
+- **Export / Import** — save characters as JSON files and load them on any device
+- **Auto-updates** — desktop app checks for new versions automatically on startup
+- **Multiclass support** — spell slot merging, per-class hit dice, resource tracking
 
-## React Compiler
+## Supported Source Books
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+PHB · DMG · XGtE · TCE · EGtW · FToD
 
-## Expanding the ESLint configuration
+## Running Locally (browser)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Requires [Node.js](https://nodejs.org) 18+.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open [http://localhost:5173](http://localhost:5173).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Running as Desktop App (dev mode)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Requires Node.js and [Rust](https://rustup.rs).
+
+```bash
+npm install
+npm run tauri:dev
 ```
+
+## Building Desktop Installers
+
+```bash
+npm run tauri:build
+```
+
+Output:
+- **macOS**: `src-tauri/target/release/bundle/dmg/DnD Sheet_x.x.x_x64.dmg`
+- **Windows**: `src-tauri/target/release/bundle/nsis/DnD Sheet_x.x.x_x64-setup.exe`
+
+## Releasing a New Version
+
+Releases are built automatically by GitHub Actions for Mac (Intel + Apple Silicon) and Windows.
+
+1. Bump the version in `src-tauri/tauri.conf.json` (`"version": "x.x.x"`)
+2. Tag and push:
+
+```bash
+git add src-tauri/tauri.conf.json
+git commit -m "Bump version to x.x.x"
+git tag vx.x.x
+git push && git push --tags
+```
+
+GitHub Actions builds the installers and publishes a release. Installed copies of the app will show an update prompt automatically within a few seconds of opening.
+
+## Tech Stack
+
+- [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org)
+- [Vite](https://vite.dev) — build tool
+- [Tauri v2](https://tauri.app) — desktop app wrapper
+- [Zustand](https://zustand-demo.pmnd.rs) — state management (persisted to localStorage)
+- [Tailwind CSS v4](https://tailwindcss.com)
+- [Lucide React](https://lucide.dev) — icons
