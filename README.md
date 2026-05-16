@@ -21,6 +21,24 @@ An unofficial, fan-made 5e character sheet app built with React, TypeScript, and
 
 PHB · DMG · XGtE · TCE · EGtW · FToD
 
+## Installing the Desktop App
+
+### macOS
+1. Download the `.dmg` for your Mac from the [latest release](https://github.com/knobilz1/dnd-character-manager/releases/latest)
+   - Apple Silicon (M1/M2/M3): `aarch64.dmg`
+   - Intel Mac: `x64.dmg`
+2. Open the DMG and drag **Tavern Sheet** into Applications
+3. macOS will block the app on first launch because it isn't signed with a paid Apple certificate. Fix it with one of these:
+   - **Option A** — Open Terminal and run:
+     ```bash
+     xattr -dr com.apple.quarantine "/Applications/Tavern Sheet.app"
+     ```
+   - **Option B** — Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**
+
+### Windows
+1. Download the `x64-setup.exe` from the [latest release](https://github.com/knobilz1/dnd-character-manager/releases/latest)
+2. Run the installer — Windows SmartScreen may warn you since the app isn't commercially signed; click **More info → Run anyway**
+
 ## Running Locally (browser)
 
 Requires [Node.js](https://nodejs.org) 18+.

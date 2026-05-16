@@ -57,12 +57,19 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            See commits for details. The app will prompt you to update automatically.
+            See commits for details. If you already have the app installed it will prompt you to update automatically.
 
             ### Install
-            - **Mac (Apple Silicon)**: Download `DnD.Sheet_*_aarch64.dmg`
-            - **Mac (Intel)**: Download `DnD.Sheet_*_x64.dmg`
-            - **Windows**: Download `DnD.Sheet_*_x64-setup.exe`
+            - **Mac (Apple Silicon)**: Download `Tavern.Sheet_*_aarch64.dmg`
+            - **Mac (Intel)**: Download `Tavern.Sheet_*_x64.dmg`
+            - **Windows**: Download `Tavern.Sheet_*_x64-setup.exe`
+
+            ### macOS security warning
+            macOS blocks unsigned apps. After installing, open Terminal and run:
+            ```
+            xattr -dr com.apple.quarantine "/Applications/Tavern Sheet.app"
+            ```
+            Or go to **System Settings → Privacy & Security → Open Anyway**.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
