@@ -31,10 +31,20 @@ const TIER: Record<Tier, { color: string; shadow: string; flash: string; anim: s
   'bad':          { color: '#f87171', shadow: '0 0 18px #dc262688, 0 0 40px #dc262644',                 flash: '#3b0000', anim: 'dice-land-bad 0.55s forwards',      scale: 1.0,  label: '' },
   'neutral':      { color: '#fbbf24', shadow: '0 0 18px #fbbf2488, 0 0 40px #fbbf2444',                 flash: '#3b2000', anim: 'dice-land 0.55s forwards',          scale: 1.0,  label: '' },
   'good':         { color: '#4ade80', shadow: '0 0 18px #4ade8088, 0 0 40px #4ade8044',                 flash: '#003b15', anim: 'dice-land-good 0.55s forwards',     scale: 1.0,  label: '' },
-  'crit-success': { color: '#fde047', shadow: '0 0 30px #fde047, 0 0 60px #fbbf24, 0 0 100px #f59e0b', flash: '#3b2e00', anim: 'dice-crit-success 0.9s forwards',  scale: 1.15, label: '🎉 Natural 20!' },
+  'crit-success': { color: '#bbf7d0', shadow: '0 0 30px #4ade80, 0 0 60px #22c55e, 0 0 110px #166534', flash: '#003b15', anim: 'dice-crit-success 0.9s forwards',  scale: 1.15, label: '🎉 Natural 20!' },
 };
 
 const SPARKS = [0, 45, 90, 135, 180, 225, 270, 315];
+
+const DIE_SHAPE: Record<Die, React.ReactElement> = {
+  4:   <polygon points="50,5 93,87 7,87" />,
+  6:   <rect x="10" y="10" width="80" height="80" rx="6" />,
+  8:   <polygon points="50,6 90,50 50,94 10,50" />,
+  10:  <polygon points="50,5 88,54 50,94 12,54" />,
+  12:  <polygon points="50,8 90,37 75,84 25,84 10,37" />,
+  20:  <polygon points="50,12 88,78 12,78" />,
+  100: <circle cx="50" cy="50" r="43" />,
+};
 
 interface HistoryEntry { die: Die; result: number; tier: Tier }
 
@@ -157,6 +167,19 @@ export function DiceRoller() {
                 className="absolute inset-0 pointer-events-none"
                 style={{ background: t.flash, animation: 'dice-flash 0.7s ease-out forwards' }}
               />
+            )}
+
+            {/* Die shape outline */}
+            {activeDie !== null && (
+              <svg
+                viewBox="0 0 100 100"
+                className="absolute pointer-events-none"
+                style={{ width: 160, height: 160, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: rolling ? 0.1 : 0.2 }}
+              >
+                <g fill="none" stroke={rolling ? '#64748b' : t.color} strokeWidth="2.5">
+                  {DIE_SHAPE[activeDie]}
+                </g>
+              </svg>
             )}
 
             {/* Celebration sparks for nat 20 */}
