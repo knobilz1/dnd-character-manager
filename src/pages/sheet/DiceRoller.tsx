@@ -15,18 +15,38 @@ const DIE_STYLE: Record<Die, { btn: string; label: string; glow: string }> = {
   100: { btn: 'from-purple-800 to-purple-950 border-purple-600 hover:border-purple-400', label: 'D100', glow: '#c084fc' },
 };
 
-interface HistoryEntry { die: Die; result: number }
+type Tier = 'crit-fail' | 'bad' | 'neutral' | 'good' | 'crit-success';
+
+function getTier(result: number, die: Die): Tier {
+  if (result === 1) return 'crit-fail';
+  if (result === die) return 'crit-success';
+  if (result < 10) return 'bad';
+  if (result <= 15) return 'neutral';
+  return 'good';
+}
+
+const TIER: Record<Tier, { color: string; shadow: string; flash: string; anim: string; scale: number; label: string }> = {
+  'crit-fail':    { color: '#ef4444', shadow: '0 0 30px #dc2626, 0 0 70px #991b1b, 0 0 120px #7f1d1d', flash: '#7f1d1d', anim: 'dice-crit-fail 0.9s forwards',    scale: 1.7,  label: '💀 Critical Fail' },
+  'bad':          { color: '#f87171', shadow: '0 0 18px #dc262688, 0 0 40px #dc262644',                 flash: '#3b0000', anim: 'dice-land-bad 0.55s forwards',      scale: 1.0,  label: '' },
+  'neutral':      { color: '#fbbf24', shadow: '0 0 18px #fbbf2488, 0 0 40px #fbbf2444',                 flash: '#3b2000', anim: 'dice-land 0.55s forwards',          scale: 1.0,  label: '' },
+  'good':         { color: '#4ade80', shadow: '0 0 18px #4ade8088, 0 0 40px #4ade8044',                 flash: '#003b15', anim: 'dice-land-good 0.55s forwards',     scale: 1.0,  label: '' },
+  'crit-success': { color: '#fde047', shadow: '0 0 30px #fde047, 0 0 60px #fbbf24, 0 0 100px #f59e0b', flash: '#3b2e00', anim: 'dice-crit-success 0.9s forwards',  scale: 1.15, label: '🎉 Natural 20!' },
+};
+
+const SPARKS = [0, 45, 90, 135, 180, 225, 270, 315];
+
+interface HistoryEntry { die: Die; result: number; tier: Tier }
 
 export function DiceRoller() {
   const [open, setOpen] = React.useState(false);
   const [activeDie, setActiveDie] = React.useState<Die | null>(null);
   const [display, setDisplay] = React.useState<number | null>(null);
+  const [tier, setTier] = React.useState<Tier>('neutral');
   const [resultKey, setResultKey] = React.useState(0);
   const [rolling, setRolling] = React.useState(false);
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
-  const intervalRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Drag state
   const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
   const dragging = React.useRef(false);
   const dragOffset = React.useRef({ x: 0, y: 0 });
@@ -44,7 +64,7 @@ export function DiceRoller() {
     function onMove(e: MouseEvent) {
       if (!dragging.current) return;
       const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, window.innerWidth - (panelRef.current?.offsetWidth ?? 288)));
-      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - (panelRef.current?.offsetHeight ?? 400)));
+      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, window.innerHeight - (panelRef.current?.offsetHeight ?? 420)));
       setPos({ x, y });
     }
     function onUp() { dragging.current = false; }
@@ -55,7 +75,7 @@ export function DiceRoller() {
 
   function roll(sides: Die) {
     if (rolling) return;
-    if (intervalRef.current) clearTimeout(intervalRef.current);
+    if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setRolling(true);
 
@@ -67,21 +87,33 @@ export function DiceRoller() {
       frame++;
       setDisplay(Math.ceil(Math.random() * sides));
       if (frame < frames) {
-        intervalRef.current = setTimeout(tick, delay(frame));
+        timerRef.current = setTimeout(tick, delay(frame));
       } else {
         const result = Math.ceil(Math.random() * sides);
+        const t = getTier(result, sides);
         setDisplay(result);
+        setTier(t);
         setResultKey(k => k + 1);
-        setHistory(h => [{ die: sides, result }, ...h].slice(0, 8));
+        setHistory(h => [{ die: sides, result, tier: t }, ...h].slice(0, 8));
         setRolling(false);
       }
     };
-    intervalRef.current = setTimeout(tick, 30);
+    timerRef.current = setTimeout(tick, 30);
   }
 
-  React.useEffect(() => () => { if (intervalRef.current) clearTimeout(intervalRef.current); }, []);
+  React.useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  const glowColor = activeDie ? DIE_STYLE[activeDie].glow : '#ffffff';
+  const t = TIER[tier];
+  const isCritFail = tier === 'crit-fail';
+  const isCritSuccess = tier === 'crit-success';
+
+  const TIER_HISTORY_COLOR: Record<Tier, string> = {
+    'crit-fail': '#ef444488',
+    'bad': '#f8717188',
+    'neutral': '#fbbf2488',
+    'good': '#4ade8088',
+    'crit-success': '#fde04788',
+  };
 
   return (
     <>
@@ -99,7 +131,7 @@ export function DiceRoller() {
           className="fixed z-40 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
           style={pos ? { left: pos.x, top: pos.y } : { bottom: 24, right: 24 }}
         >
-          {/* Header — drag handle */}
+          {/* Header */}
           <div
             className="flex items-center justify-between px-4 py-2.5 bg-slate-800 border-b border-slate-700 cursor-grab active:cursor-grabbing select-none"
             onMouseDown={onDragStart}
@@ -112,41 +144,63 @@ export function DiceRoller() {
             </button>
           </div>
 
-          {/* Result display */}
+          {/* Result area */}
           <div
-            className="flex flex-col items-center justify-center py-6 min-h-[120px] relative overflow-hidden"
+            className="flex flex-col items-center justify-center min-h-[140px] relative overflow-hidden py-4"
             style={rolling ? { animation: 'dice-shake 0.12s infinite' } : undefined}
           >
-            {/* Background flash on land */}
+            {/* Background flash */}
             {display !== null && !rolling && (
               <div
                 key={`flash-${resultKey}`}
-                className="absolute inset-0 rounded-none pointer-events-none"
-                style={{ animation: 'dice-flash 0.6s ease-out forwards', background: glowColor }}
+                className="absolute inset-0 pointer-events-none"
+                style={{ background: t.flash, animation: 'dice-flash 0.7s ease-out forwards' }}
               />
+            )}
+
+            {/* Celebration sparks for nat 20 */}
+            {isCritSuccess && !rolling && display !== null && (
+              <div key={`sparks-${resultKey}`} className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                {SPARKS.map((deg, i) => (
+                  <div
+                    key={i}
+                    className="absolute w-1.5 h-1.5 rounded-full"
+                    style={{
+                      background: ['#fde047','#fb923c','#4ade80','#60a5fa','#c084fc','#f472b6','#fde047','#4ade80'][i],
+                      animation: `spark-out 0.7s ${i * 0.04}s ease-out forwards`,
+                      '--deg': `${deg}deg`,
+                    } as React.CSSProperties}
+                  />
+                ))}
+              </div>
             )}
 
             {display !== null ? (
               <>
                 <div
                   key={resultKey}
-                  className="text-7xl font-black tabular-nums relative z-10"
+                  className="font-black tabular-nums relative z-10 leading-none"
                   style={rolling
-                    ? { color: '#94a3b8', filter: 'blur(1.5px)', transform: 'scale(0.92)' }
+                    ? { color: '#64748b', filter: 'blur(2px)', fontSize: '4.5rem', transform: 'scale(0.9)' }
                     : {
-                        animation: 'dice-land 0.55s cubic-bezier(0.22, 1, 0.36, 1) both',
-                        color: '#ffffff',
-                        textShadow: `0 0 24px ${glowColor}, 0 0 60px ${glowColor}`,
+                        fontSize: isCritFail ? '6rem' : isCritSuccess ? '5.5rem' : '4.5rem',
+                        color: t.color,
+                        textShadow: t.shadow,
+                        animation: t.anim,
+                        transform: `scale(${t.scale})`,
                       }
                   }
                 >
                   {display}
                 </div>
-                {activeDie && (
-                  <p className="text-xs text-slate-500 mt-2 relative z-10">
-                    {rolling ? `Rolling d${activeDie}…` : `d${activeDie}`}
-                  </p>
-                )}
+                <p
+                  className="text-xs mt-3 relative z-10 font-semibold"
+                  style={{ color: rolling ? '#475569' : t.color, opacity: rolling ? 1 : 0.85 }}
+                >
+                  {rolling
+                    ? `Rolling d${activeDie}…`
+                    : t.label || `d${activeDie}`}
+                </p>
               </>
             ) : (
               <p className="text-slate-600 text-sm">Pick a die to roll</p>
@@ -166,7 +220,7 @@ export function DiceRoller() {
                   activeDie === sides && !rolling ? 'ring-2 ring-white/40 scale-105' : '',
                   sides === 20 ? 'col-span-2' : '',
                 )}
-                style={activeDie === sides && !rolling ? { boxShadow: `0 0 12px ${DIE_STYLE[sides].glow}88` } : undefined}
+                style={activeDie === sides && !rolling ? { boxShadow: `0 0 14px ${DIE_STYLE[sides].glow}99` } : undefined}
               >
                 <span className="text-xs font-bold text-white">{DIE_STYLE[sides].label}</span>
               </button>
@@ -181,10 +235,10 @@ export function DiceRoller() {
                 {history.map((h, i) => (
                   <span
                     key={i}
-                    className="text-xs bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-slate-300"
-                    style={i === 0 ? { borderColor: DIE_STYLE[h.die].glow + '66' } : undefined}
+                    className="text-xs bg-slate-800 border rounded px-2 py-0.5 text-slate-300"
+                    style={{ borderColor: TIER_HISTORY_COLOR[h.tier] }}
                   >
-                    d{h.die} <span className="text-white font-bold">{h.result}</span>
+                    d{h.die} <span className="font-bold" style={{ color: TIER[h.tier].color }}>{h.result}</span>
                   </span>
                 ))}
               </div>
@@ -195,23 +249,60 @@ export function DiceRoller() {
 
       <style>{`
         @keyframes dice-shake {
-          0%   { transform: translate(0, 0) rotate(0deg); }
-          20%  { transform: translate(-4px, 2px) rotate(-4deg); }
-          40%  { transform: translate(4px, -2px) rotate(4deg); }
-          60%  { transform: translate(-3px, 3px) rotate(-3deg); }
-          80%  { transform: translate(3px, -1px) rotate(3deg); }
-          100% { transform: translate(-1px, 1px) rotate(-1deg); }
+          0%   { transform: translate(0,0) rotate(0deg); }
+          20%  { transform: translate(-4px,2px) rotate(-4deg); }
+          40%  { transform: translate(4px,-2px) rotate(4deg); }
+          60%  { transform: translate(-3px,3px) rotate(-3deg); }
+          80%  { transform: translate(3px,-1px) rotate(3deg); }
+          100% { transform: translate(-1px,1px) rotate(-1deg); }
         }
         @keyframes dice-land {
-          0%   { transform: perspective(600px) rotateX(90deg) scale(0.3); opacity: 0; }
-          45%  { transform: perspective(600px) rotateX(-18deg) scale(1.35); opacity: 1; }
+          0%   { transform: perspective(600px) rotateX(90deg) scale(0.3); opacity:0; }
+          45%  { transform: perspective(600px) rotateX(-18deg) scale(1.35); opacity:1; }
           70%  { transform: perspective(600px) rotateX(8deg) scale(0.95); }
           85%  { transform: perspective(600px) rotateX(-4deg) scale(1.04); }
           100% { transform: perspective(600px) rotateX(0deg) scale(1); }
         }
+        @keyframes dice-land-bad {
+          0%   { transform: perspective(600px) rotateX(90deg) scale(0.3); opacity:0; }
+          40%  { transform: perspective(600px) rotateX(-10deg) scale(1.1); opacity:1; }
+          70%  { transform: perspective(600px) rotateX(4deg) scale(0.97); }
+          100% { transform: perspective(600px) rotateX(0deg) scale(1); }
+        }
+        @keyframes dice-land-good {
+          0%   { transform: perspective(600px) rotateX(90deg) scale(0.3); opacity:0; }
+          40%  { transform: perspective(600px) rotateX(-22deg) scale(1.45); opacity:1; }
+          65%  { transform: perspective(600px) rotateX(10deg) scale(0.92); }
+          80%  { transform: perspective(600px) rotateX(-5deg) scale(1.06); }
+          100% { transform: perspective(600px) rotateX(0deg) scale(1); }
+        }
+        @keyframes dice-crit-fail {
+          0%   { transform: scale(0.2) rotate(-15deg); opacity:0; filter:blur(8px); }
+          25%  { transform: scale(1.9) rotate(3deg); opacity:1; filter:blur(0); }
+          35%  { transform: scale(1.7) rotate(-6deg) translateX(-8px); }
+          45%  { transform: scale(1.72) rotate(6deg) translateX(8px); }
+          55%  { transform: scale(1.70) rotate(-4deg) translateX(-5px); }
+          65%  { transform: scale(1.71) rotate(4deg) translateX(5px); }
+          75%  { transform: scale(1.70) rotate(-2deg) translateX(-2px); }
+          85%  { transform: scale(1.71) rotate(1deg); }
+          100% { transform: scale(1.7) rotate(0deg); }
+        }
+        @keyframes dice-crit-success {
+          0%   { transform: scale(0.1) rotate(-30deg); opacity:0; }
+          30%  { transform: scale(1.4) rotate(8deg); opacity:1; }
+          50%  { transform: scale(0.95) rotate(-4deg); }
+          65%  { transform: scale(1.3) rotate(3deg); }
+          80%  { transform: scale(1.05) rotate(-2deg); }
+          90%  { transform: scale(1.18) rotate(1deg); }
+          100% { transform: scale(1.15) rotate(0deg); }
+        }
         @keyframes dice-flash {
-          0%   { opacity: 0.18; }
-          100% { opacity: 0; }
+          0%   { opacity:0.22; }
+          100% { opacity:0; }
+        }
+        @keyframes spark-out {
+          0%   { transform: rotate(var(--deg)) translateX(0) scale(1); opacity:1; }
+          100% { transform: rotate(var(--deg)) translateX(70px) scale(0); opacity:0; }
         }
       `}</style>
     </>
