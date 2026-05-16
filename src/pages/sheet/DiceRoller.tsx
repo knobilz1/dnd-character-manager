@@ -91,8 +91,8 @@ export function DiceRoller() {
     setRolling(true);
 
     let frame = 0;
-    const frames = 22;
-    const delay = (f: number) => f < frames * 0.5 ? 30 : f < frames * 0.75 ? 55 : f < frames * 0.9 ? 90 : 130;
+    const frames = 26;
+    const delay = (f: number) => Math.round(28 + Math.pow(f / frames, 2) * 230);
 
     const tick = () => {
       frame++;
