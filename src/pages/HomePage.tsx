@@ -19,8 +19,10 @@ function exportCharacter(character: Character) {
   const a = document.createElement('a');
   a.href = url;
   a.download = `${character.name || 'character'}.json`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: () => void; checkStatus?: UpdateCheckStatus }) {

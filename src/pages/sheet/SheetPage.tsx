@@ -147,8 +147,10 @@ export function SheetPage() {
               const a = document.createElement('a');
               a.href = url;
               a.download = `${character.name || 'character'}.json`;
+              document.body.appendChild(a);
               a.click();
-              URL.revokeObjectURL(url);
+              document.body.removeChild(a);
+              setTimeout(() => URL.revokeObjectURL(url), 100);
             }}
             className="p-1.5 rounded text-slate-500 hover:text-blue-400 transition-colors"
             title="Export character"
