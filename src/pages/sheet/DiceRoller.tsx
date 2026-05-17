@@ -233,7 +233,9 @@ export function DiceRoller() {
                 >
                   {rolling
                     ? `Rolling d${activeDie}…`
-                    : t.label || `d${activeDie}`}
+                    : tier === 'crit-success'
+                      ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
+                      : t.label || `d${activeDie}`}
                 </p>
               </>
             ) : (
