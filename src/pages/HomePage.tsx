@@ -219,6 +219,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             {checkStatus === 'checking' && 'Checking for updates…'}
             {checkStatus === 'up-to-date' && 'Up to date ✓'}
             {checkStatus === 'available' && 'Update available'}
+            {checkStatus === 'error' && 'Check failed — try again'}
             {(checkStatus === 'idle' || !checkStatus) && 'Check for updates'}
           </button>
         </div>
