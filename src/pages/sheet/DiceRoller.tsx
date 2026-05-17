@@ -36,6 +36,12 @@ const TIER: Record<Tier, { color: string; shadow: string; flash: string; anim: s
 
 const SPARKS = [0, 45, 90, 135, 180, 225, 270, 315];
 
+const SHAKE_ANIM: Record<0 | 1 | 2, string> = {
+  0: 'dice-shake-heavy 0.10s infinite',
+  1: 'dice-shake-med   0.18s infinite',
+  2: 'dice-shake-light 0.32s infinite',
+};
+
 const DIE_SHAPE: Record<Die, React.ReactElement> = {
   4:   <polygon points="50,5 93,87 7,87" />,
   6:   <rect x="10" y="10" width="80" height="80" rx="6" />,
@@ -55,6 +61,7 @@ export function DiceRoller() {
   const [tier, setTier] = React.useState<Tier>('neutral');
   const [resultKey, setResultKey] = React.useState(0);
   const [rolling, setRolling] = React.useState(false);
+  const [shakePhase, setShakePhase] = React.useState<0 | 1 | 2>(0);
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,13 +96,16 @@ export function DiceRoller() {
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setRolling(true);
+    setShakePhase(0);
 
     let frame = 0;
-    const frames = 26;
-    const delay = (f: number) => Math.round(28 + Math.pow(f / frames, 2) * 230);
+    const frames = 28;
+    const delay = (f: number) => Math.round(22 + Math.pow(f / frames, 2.5) * 300);
 
     const tick = () => {
       frame++;
+      const progress = frame / frames;
+      setShakePhase(progress < 0.45 ? 0 : progress < 0.75 ? 1 : 2);
       setDisplay(Math.ceil(Math.random() * sides));
       if (frame < frames) {
         timerRef.current = setTimeout(tick, delay(frame));
@@ -158,7 +168,7 @@ export function DiceRoller() {
           {/* Result area */}
           <div
             className="flex flex-col items-center justify-center min-h-[140px] relative overflow-hidden py-4"
-            style={rolling ? { animation: 'dice-shake 0.12s infinite' } : undefined}
+            style={rolling ? { animation: SHAKE_ANIM[shakePhase] } : undefined}
           >
             {/* Background flash */}
             {display !== null && !rolling && (
@@ -205,7 +215,7 @@ export function DiceRoller() {
                   key={resultKey}
                   className="font-black tabular-nums relative z-10 leading-none"
                   style={rolling
-                    ? { color: '#64748b', filter: 'blur(2px)', fontSize: '4.5rem', transform: 'scale(0.9)' }
+                    ? { color: '#64748b', filter: ['blur(2px)','blur(1px)','none'][shakePhase], fontSize: '4.5rem', transform: ['scale(0.88)','scale(0.94)','scale(1)'][shakePhase] }
                     : {
                         fontSize: isCritFail ? '6rem' : isCritSuccess ? '5.5rem' : '4.5rem',
                         color: t.color,
@@ -272,13 +282,29 @@ export function DiceRoller() {
       )}
 
       <style>{`
-        @keyframes dice-shake {
+        @keyframes dice-shake-heavy {
           0%   { transform: translate(0,0) rotate(0deg); }
-          20%  { transform: translate(-4px,2px) rotate(-4deg); }
-          40%  { transform: translate(4px,-2px) rotate(4deg); }
-          60%  { transform: translate(-3px,3px) rotate(-3deg); }
-          80%  { transform: translate(3px,-1px) rotate(3deg); }
-          100% { transform: translate(-1px,1px) rotate(-1deg); }
+          20%  { transform: translate(-5px,3px) rotate(-5deg); }
+          40%  { transform: translate(5px,-3px) rotate(5deg); }
+          60%  { transform: translate(-4px,3px) rotate(-3deg); }
+          80%  { transform: translate(4px,-2px) rotate(3deg); }
+          100% { transform: translate(-2px,1px) rotate(-1deg); }
+        }
+        @keyframes dice-shake-med {
+          0%   { transform: translate(0,0) rotate(0deg); }
+          20%  { transform: translate(-2px,1px) rotate(-2deg); }
+          40%  { transform: translate(2px,-1px) rotate(2deg); }
+          60%  { transform: translate(-2px,2px) rotate(-1.5deg); }
+          80%  { transform: translate(2px,-1px) rotate(1deg); }
+          100% { transform: translate(-1px,0px) rotate(-0.5deg); }
+        }
+        @keyframes dice-shake-light {
+          0%   { transform: translate(0,0) rotate(0deg); }
+          20%  { transform: translate(-1px,0px) rotate(-0.8deg); }
+          40%  { transform: translate(1px,-1px) rotate(0.8deg); }
+          60%  { transform: translate(-1px,0px) rotate(-0.4deg); }
+          80%  { transform: translate(0px,-1px) rotate(0.4deg); }
+          100% { transform: translate(0px,0px) rotate(0deg); }
         }
         @keyframes dice-land {
           0%   { transform: perspective(600px) rotateX(90deg) scale(0.3); opacity:0; }
