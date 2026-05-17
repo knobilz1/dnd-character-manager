@@ -45,12 +45,39 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Write signing key to file (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_KEY" ]; then
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY secret is not set — update bundles will not be signed and latest.json will not be generated."
+          else
+            echo "$TAURI_KEY" > /tmp/tauri-signing.key
+            echo "TAURI_SIGNING_PRIVATE_KEY_PATH=/tmp/tauri-signing.key" >> $GITHUB_ENV
+            echo "Signing key written to /tmp/tauri-signing.key"
+          fi
+
+      - name: Write signing key to file (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:TAURI_KEY)) {
+            Write-Output "::warning::TAURI_SIGNING_PRIVATE_KEY secret is not set — update bundles will not be signed."
+          } else {
+            $env:TAURI_KEY | Out-File -FilePath "$env:TEMP\tauri-signing.key" -Encoding utf8 -NoNewline
+            "TAURI_SIGNING_PRIVATE_KEY_PATH=$env:TEMP\tauri-signing.key" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Output "Signing key written"
+          }
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'DnD Sheet ${{ github.ref_name }}'
