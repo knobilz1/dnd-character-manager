@@ -1,19 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Character } from '../types';
-import { hashCharacter } from '../utils/hashCharacter';
 
 export interface Snapshot {
   id: string;
   characterId: string;
   timestamp: number;
   label: string;
-  hash: string;
+  saveNumber: number;
   data: Character;
 }
 
 interface SnapshotState {
   snapshots: Snapshot[];
+  nextSaveNumber: Record<string, number>;
   saveSnapshot: (char: Character, label: string) => void;
   deleteSnapshot: (id: string) => void;
   snapshotsFor: (characterId: string) => Snapshot[];
@@ -25,21 +25,26 @@ export const useSnapshotStore = create<SnapshotState>()(
   persist(
     (set, get) => ({
       snapshots: [],
+      nextSaveNumber: {},
 
       saveSnapshot: (char, label) => {
+        const next = (get().nextSaveNumber[char.id] ?? 1);
         const snapshot: Snapshot = {
           id: crypto.randomUUID(),
           characterId: char.id,
           timestamp: Date.now(),
           label,
-          hash: hashCharacter(char),
+          saveNumber: next,
           data: structuredClone(char),
         };
         set(state => {
           const mine = [snapshot, ...state.snapshots.filter(s => s.characterId === char.id)]
             .slice(0, MAX_PER_CHARACTER);
           const others = state.snapshots.filter(s => s.characterId !== char.id);
-          return { snapshots: [...others, ...mine] };
+          return {
+            snapshots: [...others, ...mine],
+            nextSaveNumber: { ...state.nextSaveNumber, [char.id]: next + 1 },
+          };
         });
       },
 

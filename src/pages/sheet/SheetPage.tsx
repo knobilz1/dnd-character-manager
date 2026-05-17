@@ -14,7 +14,6 @@ import { InventoryPanel } from './InventoryPanel';
 import { DiceRoller } from './DiceRoller';
 import { SnapshotPanel } from './SnapshotPanel';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
-import { hashCharacter } from '../../utils/hashCharacter';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
@@ -65,10 +64,6 @@ export function SheetPage() {
   const [saved, setSaved] = React.useState(false);
 
   const { saveSnapshot } = useSnapshotStore();
-  const currentHash = React.useMemo(
-    () => character ? hashCharacter(character) : '00000000',
-    [character]
-  );
 
   // Load character on mount
   React.useEffect(() => {
@@ -347,7 +342,6 @@ export function SheetPage() {
         open={snapshotOpen}
         onClose={() => setSnapshotOpen(false)}
         character={character}
-        currentHash={currentHash}
       />
 
       {/* Level Up */}
