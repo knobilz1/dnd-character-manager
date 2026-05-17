@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -12,6 +12,9 @@ import { LevelUpDialog } from './LevelUpDialog';
 import { TraitsPanel } from './TraitsPanel';
 import { InventoryPanel } from './InventoryPanel';
 import { DiceRoller } from './DiceRoller';
+import { SnapshotPanel } from './SnapshotPanel';
+import { useSnapshotStore } from '../../store/useSnapshotStore';
+import { hashCharacter } from '../../utils/hashCharacter';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
@@ -58,7 +61,14 @@ export function SheetPage() {
   const [restConfirm, setRestConfirm] = React.useState<'short'|'long'|null>(null);
   const [arcaneOpen, setArcaneOpen] = React.useState(false);
   const [levelUpOpen, setLevelUpOpen] = React.useState(false);
+  const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+
+  const { saveSnapshot } = useSnapshotStore();
+  const currentHash = React.useMemo(
+    () => character ? hashCharacter(character) : '00000000',
+    [character]
+  );
 
   // Load character on mount
   React.useEffect(() => {
@@ -95,7 +105,12 @@ export function SheetPage() {
   }
 
   function doRest(type: 'short'|'long') {
-    if (type === 'short') shortRest(); else longRest();
+    if (type === 'long') {
+      saveSnapshot(character!, 'Before Long Rest');
+      longRest();
+    } else {
+      shortRest();
+    }
     setRestConfirm(null);
   }
 
@@ -119,6 +134,13 @@ export function SheetPage() {
         </div>
         <div className="flex items-center gap-2">
           {saved && <span className="text-xs text-green-400">Saved ✓</span>}
+          <button
+            onClick={() => setSnapshotOpen(true)}
+            className="p-1.5 rounded text-slate-500 hover:text-violet-400 transition-colors"
+            title="Character history"
+          >
+            <History size={18} />
+          </button>
           <DiceRoller />
           <button
             onClick={() => {
@@ -320,12 +342,23 @@ export function SheetPage() {
         </div>
       </div>
 
+      {/* Snapshot history */}
+      <SnapshotPanel
+        open={snapshotOpen}
+        onClose={() => setSnapshotOpen(false)}
+        character={character}
+        currentHash={currentHash}
+      />
+
       {/* Level Up */}
       <LevelUpDialog
         open={levelUpOpen}
         onClose={() => setLevelUpOpen(false)}
         character={character}
-        onConfirm={(classId, hpGained, hpRoll, subclassPick, asiChoice) => levelUp(classId, hpGained, hpRoll, subclassPick, asiChoice)}
+        onConfirm={(classId, hpGained, hpRoll, subclassPick, asiChoice) => {
+          saveSnapshot(character!, 'Before Level Up');
+          levelUp(classId, hpGained, hpRoll, subclassPick, asiChoice);
+        }}
       />
 
       {/* Rest confirm */}
