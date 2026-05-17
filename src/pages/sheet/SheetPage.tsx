@@ -139,7 +139,9 @@ export function SheetPage() {
           <DiceRoller />
           <button
             onClick={() => {
-              const json = JSON.stringify(character, null, 2);
+              const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
+              const payload = { tavernSheet: true, version: 1, character, snapshots };
+              const json = JSON.stringify(payload, null, 2);
               const blob = new Blob([json], { type: 'application/json' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');

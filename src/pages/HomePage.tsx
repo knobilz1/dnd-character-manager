@@ -8,9 +8,12 @@ import { getRace } from '../data/races';
 import { totalCharacterLevel } from '../data/mechanics';
 import type { Character } from '../types';
 import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
+import { useSnapshotStore } from '../store/useSnapshotStore';
 
 function exportCharacter(character: Character) {
-  const json = JSON.stringify(character, null, 2);
+  const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
+  const payload = { tavernSheet: true, version: 1, character, snapshots };
+  const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -46,15 +49,27 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const data = JSON.parse(ev.target?.result as string) as Character;
+        const parsed = JSON.parse(ev.target?.result as string);
+
+        // Support both new envelope format and legacy plain-character files
+        const isEnvelope = parsed?.tavernSheet === true && parsed?.character;
+        const data: Character = isEnvelope ? parsed.character : parsed;
+
         if (!data.name || !data.classes || !data.baseAbilityScores) {
           setImportError('Invalid character file — missing required fields.');
           return;
         }
-        // Assign a fresh ID so it never collides with existing characters
-        const imported: Character = { ...data, id: crypto.randomUUID(), updatedAt: Date.now() };
+
+        const newId = crypto.randomUUID();
+        const imported: Character = { ...data, id: newId, updatedAt: Date.now() };
         createCharacter(imported);
-        navigate(`/character/${imported.id}`);
+
+        // Restore snapshot history if present
+        if (isEnvelope && Array.isArray(parsed.snapshots) && parsed.snapshots.length > 0) {
+          useSnapshotStore.getState().importSnapshots(newId, parsed.snapshots);
+        }
+
+        navigate(`/character/${newId}`);
       } catch {
         setImportError('Could not read file. Make sure it\'s a valid Tavern Sheet JSON export.');
       }

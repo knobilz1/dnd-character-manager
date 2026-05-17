@@ -16,6 +16,7 @@ interface SnapshotState {
   nextSaveNumber: Record<string, number>;
   saveSnapshot: (char: Character, label: string) => void;
   deleteSnapshot: (id: string) => void;
+  importSnapshots: (characterId: string, snaps: Snapshot[]) => void;
   snapshotsFor: (characterId: string) => Snapshot[];
 }
 
@@ -50,6 +51,23 @@ export const useSnapshotStore = create<SnapshotState>()(
 
       deleteSnapshot: (id) =>
         set(state => ({ snapshots: state.snapshots.filter(s => s.id !== id) })),
+
+      importSnapshots: (characterId, snaps) => {
+        if (snaps.length === 0) return;
+        const maxNum = Math.max(...snaps.map(s => s.saveNumber ?? 0));
+        const remapped = snaps.map(s => ({
+          ...s,
+          id: crypto.randomUUID(),
+          characterId,
+        }));
+        set(state => {
+          const others = state.snapshots.filter(s => s.characterId !== characterId);
+          return {
+            snapshots: [...others, ...remapped],
+            nextSaveNumber: { ...state.nextSaveNumber, [characterId]: maxNum + 1 },
+          };
+        });
+      },
 
       snapshotsFor: (characterId) =>
         get().snapshots
