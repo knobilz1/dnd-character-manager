@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { save } from '@tauri-apps/plugin-dialog';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
@@ -144,7 +144,7 @@ export function SheetPage() {
               const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
               const payload = { tavernSheet: true, version: 1, character, snapshots };
               const json = JSON.stringify(payload, null, 2);
-              const path = await save({
+              const path = await saveDialog({
                 defaultPath: `${character.name || 'character'}.json`,
                 filters: [{ name: 'JSON', extensions: ['json'] }],
               });
