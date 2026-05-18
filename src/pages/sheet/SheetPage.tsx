@@ -1,5 +1,7 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
@@ -138,19 +140,15 @@ export function SheetPage() {
           </button>
           <DiceRoller />
           <button
-            onClick={() => {
+            onClick={async () => {
               const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
               const payload = { tavernSheet: true, version: 1, character, snapshots };
               const json = JSON.stringify(payload, null, 2);
-              const blob = new Blob([json], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `${character.name || 'character'}.json`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              setTimeout(() => URL.revokeObjectURL(url), 100);
+              const path = await save({
+                defaultPath: `${character.name || 'character'}.json`,
+                filters: [{ name: 'JSON', extensions: ['json'] }],
+              });
+              if (path) await writeTextFile(path, json);
             }}
             className="p-1.5 rounded text-slate-500 hover:text-blue-400 transition-colors"
             title="Export character"
