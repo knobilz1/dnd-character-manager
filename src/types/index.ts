@@ -15,6 +15,7 @@ export interface Book {
   color: string;
   description: string;
   year: number;
+  category?: 'sourcebook' | 'module';
 }
 
 export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
