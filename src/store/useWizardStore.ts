@@ -29,6 +29,7 @@ const INITIAL_DRAFT: Draft = {
     metamagic: [],
     maneuvers: [],
     infusions: [],
+    optionalFeatures: [],
   },
   inventory: [],
   currencies: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },

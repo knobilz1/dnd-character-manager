@@ -15,6 +15,7 @@ import { ALL_PACT_BOONS } from '../../data/pactBoons';
 import { ALL_METAMAGIC } from '../../data/metamagic';
 import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
+import { ALL_OPTIONAL_CLASS_FEATURES } from '../../data/optionalClassFeatures';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import type { Character, AbilityKey, ASIChoice, Feat } from '../../types';
@@ -157,6 +158,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const [pendingMetamagic, setPendingMetamagic] = React.useState<string[]>([]);
   const [pendingManeuvers, setPendingManeuvers] = React.useState<string[]>([]);
   const [pendingInfusions, setPendingInfusions] = React.useState<string[]>([]);
+  const [pendingOptionalFeatures, setPendingOptionalFeatures] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     if (open) {
@@ -177,6 +179,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
       setPendingMetamagic([]);
       setPendingManeuvers([]);
       setPendingInfusions([]);
+      setPendingOptionalFeatures([]);
     }
   }, [open]);
 
@@ -263,14 +266,15 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     }
 
     // Merge pending class options with existing
-    const existing = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
-    if (pendingPactBoon || pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length || pendingInfusions.length) {
+    const existing = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] };
+    if (pendingPactBoon || pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length || pendingInfusions.length || pendingOptionalFeatures.length) {
       updateClassOptions({
         ...(pendingPactBoon ? { pactBoon: pendingPactBoon } : {}),
         invocations: [...new Set([...existing.invocations, ...pendingInvocations])],
         metamagic: [...new Set([...existing.metamagic, ...pendingMetamagic])],
         maneuvers: [...new Set([...existing.maneuvers, ...pendingManeuvers])],
         infusions: [...new Set([...existing.infusions, ...pendingInfusions])],
+        optionalFeatures: [...new Set([...(existing.optionalFeatures ?? []), ...pendingOptionalFeatures])],
       });
     }
 
@@ -347,7 +351,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const spellLevelOptions = Array.from({ length: effectiveMaxSpellLevel }, (_, i) => i + 1);
 
   // ── Class options ────────────────────────────────────────────────────────
-  const classOpts = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
+  const classOpts = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] };
 
   const needsPactBoon = isWarlock && newLevel >= 3 && !classOpts.pactBoon;
 
@@ -403,6 +407,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     .filter(i => enabledBooks.includes(i.sourceBook))
     .filter(i => i.minLevel <= newLevel)
     .filter(i => !allPickedInfusions.includes(i.id));
+
+  const existingOptionalFeatures = classOpts.optionalFeatures ?? [];
+  const optionalFeaturesNewAtLevel = ALL_OPTIONAL_CLASS_FEATURES
+    .filter(f => enabledBooks.includes(f.sourceBook))
+    .filter(f => f.classId === classId)
+    .filter(f => f.minLevel === newLevel);
 
   return (
     <Dialog open={open} onClose={onClose} title={`Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
@@ -1089,6 +1099,55 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                 }
               }}
             />
+          </section>
+        )}
+
+        {/* ─── Optional Class Features (TCE) ───────────────────────────────── */}
+        {optionalFeaturesNewAtLevel.length > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Optional Class Features</h3>
+              <span className="text-xs text-slate-500">TCE · toggle to enable</span>
+            </div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {optionalFeaturesNewAtLevel.map(f => {
+                const alreadyEnabled = existingOptionalFeatures.includes(f.id);
+                const isPending = pendingOptionalFeatures.includes(f.id);
+                const isOn = alreadyEnabled || isPending;
+                return (
+                  <HoverCard key={f.id} content={
+                    <div>
+                      <p className="font-bold text-white text-sm mb-1">{f.name}</p>
+                      <p className="text-xs text-purple-300 mb-1">Optional Feature · Lvl {f.minLevel}</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{f.description}</p>
+                    </div>
+                  }>
+                    <button
+                      onClick={() => {
+                        if (alreadyEnabled) return;
+                        setPendingOptionalFeatures(prev =>
+                          prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id]
+                        );
+                      }}
+                      disabled={alreadyEnabled}
+                      className={cn(
+                        'w-full p-2.5 rounded-lg border-2 text-left transition-all',
+                        isOn
+                          ? 'border-purple-500 bg-purple-950/30'
+                          : 'border-slate-700 bg-slate-800 hover:border-slate-500',
+                        alreadyEnabled && 'opacity-60 cursor-default',
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-white">{f.name}</p>
+                        {isOn && <span className="text-purple-400 text-xs">✓</span>}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2">{f.description}</p>
+                    </button>
+                  </HoverCard>
+                );
+              })}
+            </div>
           </section>
         )}
 

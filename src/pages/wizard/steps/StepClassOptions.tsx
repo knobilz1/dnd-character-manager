@@ -8,6 +8,7 @@ import { ALL_PACT_BOONS } from '../../../data/pactBoons';
 import { ALL_METAMAGIC } from '../../../data/metamagic';
 import { ALL_MANEUVERS } from '../../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../../data/infusions';
+import { ALL_OPTIONAL_CLASS_FEATURES } from '../../../data/optionalClassFeatures';
 import type { BookId, ClassOptionsState } from '../../../types';
 
 function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' {
@@ -125,7 +126,7 @@ export function StepClassOptions() {
   const subclassId = primaryClass?.subclassId;
 
   const opts: ClassOptionsState = draft.classOptions ?? {
-    fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [],
+    fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [],
   };
 
   function patch(partial: Partial<ClassOptionsState>) {
@@ -205,8 +206,15 @@ export function StepClassOptions() {
     .filter(i => enabledBooks.has(i.sourceBook))
     .filter(i => i.minLevel <= level);
 
+  // ── Optional Class Features (TCE) ────────────────────────────────────
+  const optionalFeaturesAvail = ALL_OPTIONAL_CLASS_FEATURES
+    .filter(f => enabledBooks.has(f.sourceBook))
+    .filter(f => f.classId === classId)
+    .filter(f => f.minLevel <= level);
+
   const nothingToChoose =
-    !hasFightingStyle && !isWarlock && !isSorcerer && !isBattleMaster && !isArtificer;
+    !hasFightingStyle && !isWarlock && !isSorcerer && !isBattleMaster && !isArtificer &&
+    optionalFeaturesAvail.length === 0;
 
   return (
     <div>
@@ -304,6 +312,20 @@ export function StepClassOptions() {
           selectedIds={opts.infusions}
           max={infusionsKnownCount}
           onToggle={(id) => toggleList('infusions', id, infusionsKnownCount)}
+        />
+      )}
+
+      {optionalFeaturesAvail.length > 0 && (
+        <OptionSection
+          title="Optional Class Features"
+          helpText="These TCE optional features replace or supplement existing class features. Toggle on any you want to use."
+          items={optionalFeaturesAvail.map(f => ({
+            id: f.id, name: f.name, sourceBook: f.sourceBook, description: f.description,
+            meta: `Lvl ${f.minLevel}`,
+          }))}
+          selectedIds={opts.optionalFeatures}
+          max={Infinity}
+          onToggle={(id) => toggleList('optionalFeatures', id, Infinity)}
         />
       )}
     </div>

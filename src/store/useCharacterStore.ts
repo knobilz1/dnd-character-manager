@@ -448,7 +448,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   updateClassOptions: (partial) =>
     set((s) => {
       if (!s.character) return s;
-      const existing = s.character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
+      const existing = s.character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] };
       return { character: { ...s.character, classOptions: { ...existing, ...partial } } };
     }),
 

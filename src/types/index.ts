@@ -232,6 +232,15 @@ export interface Infusion {
   description: string;
 }
 
+export interface OptionalClassFeature {
+  id: string;
+  name: string;
+  sourceBook: BookId;
+  classId: string;
+  minLevel: number;
+  description: string;
+}
+
 export interface ClassOptionsState {
   fightingStyles: string[];
   invocations: string[];
@@ -239,6 +248,7 @@ export interface ClassOptionsState {
   metamagic: string[];
   maneuvers: string[];
   infusions: string[];
+  optionalFeatures: string[];
 }
 
 export type ItemCategory =
