@@ -2,6 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog } from '../components/ui';
 import { getClass } from '../data/classes';
@@ -11,19 +13,15 @@ import type { Character } from '../types';
 import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 import { useSnapshotStore } from '../store/useSnapshotStore';
 
-function exportCharacter(character: Character) {
+async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
   const payload = { tavernSheet: true, version: 1, character, snapshots };
   const json = JSON.stringify(payload, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${character.name || 'character'}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 100);
+  const path = await save({
+    defaultPath: `${character.name || 'character'}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (path) await writeTextFile(path, json);
 }
 
 export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: () => void; checkStatus?: UpdateCheckStatus }) {
