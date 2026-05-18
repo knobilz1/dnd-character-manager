@@ -1226,6 +1226,26 @@ export const ALL_RACES: Race[] = [
     languages: ['Common', 'one of your choice'],
     isSubrace: false,
   },
+
+  // ── AcqInc: VERDAN ────────────────────────────────────────────────────
+  {
+    id: 'verdan',
+    name: 'Verdan',
+    sourceBook: 'AcqInc',
+    size: 'Small',
+    speed: 30,
+    abilityScoreIncreases: { con: 1, cha: 2 },
+    traits: [
+      { name: 'Black Blood Healing', description: 'When you roll a 1 or 2 on any Hit Die you spend at the end of a short rest, you can reroll the die and must use the new roll.' },
+      { name: 'Limited Telepathy', description: 'You can telepathically speak to any creature you can see within 30 feet of you. The creature understands you only if the two of you share a language. Communication is limited to simple ideas, emotions, and words.' },
+      { name: 'Persuasive', description: 'You have proficiency in the Persuasion skill.' },
+      { name: 'Telepathic Insight', description: 'You have advantage on all Wisdom and Charisma saving throws.' },
+      { name: 'Surprise Growth', description: 'At 5th level, your size becomes Medium as you experience a dramatic growth spurt, gaining at least 2 feet in height.' },
+    ],
+    languages: ['Common', 'Goblin', 'one language of your choice'],
+    proficiencies: ['Persuasion'],
+    isSubrace: false,
+  },
 ];
 
 export function getRace(id: string): Race | undefined {
