@@ -45,6 +45,8 @@ interface WizardState {
   draft: Draft;
   pointBuyRemaining: number;
   standardArrayUnassigned: number[];
+  rolledValues: number[];
+  rolledDice: number[][];
 
   setStep: (step: WizardStep) => void;
   goNext: () => void;
@@ -52,6 +54,7 @@ interface WizardState {
   updateDraft: (patch: Partial<Draft>) => void;
   setPointBuyScore: (ability: AbilityKey, score: number) => void;
   assignStandardArray: (ability: AbilityKey, value: number) => void;
+  rollAllDice: () => void;
   finalize: () => Character | null;
   reset: () => void;
 }
@@ -73,6 +76,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   draft: structuredClone(INITIAL_DRAFT),
   pointBuyRemaining: 27,
   standardArrayUnassigned: [15, 14, 13, 12, 10, 8],
+  rolledValues: [],
+  rolledDice: [],
 
   setStep: (step) => set({ step }),
 
@@ -113,6 +118,19 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       return {
         draft: { ...s.draft, baseAbilityScores: current },
         standardArrayUnassigned: unassigned,
+      };
+    }),
+
+  rollAllDice: () =>
+    set((s) => {
+      const results = Array.from({ length: 6 }, () => {
+        const dice = Array.from({ length: 4 }, () => Math.floor(Math.random() * 6) + 1).sort((a, b) => a - b);
+        return { dice, total: dice[1] + dice[2] + dice[3] };
+      });
+      return {
+        rolledValues: results.map(r => r.total),
+        rolledDice: results.map(r => r.dice),
+        draft: { ...s.draft, baseAbilityScores: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 } },
       };
     }),
 
@@ -204,5 +222,5 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   },
 
   reset: () =>
-    set({ step: 'books', draft: structuredClone(INITIAL_DRAFT), pointBuyRemaining: 27, standardArrayUnassigned: [15,14,13,12,10,8] }),
+    set({ step: 'books', draft: structuredClone(INITIAL_DRAFT), pointBuyRemaining: 27, standardArrayUnassigned: [15,14,13,12,10,8], rolledValues: [], rolledDice: [] }),
 }));

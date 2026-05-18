@@ -49,7 +49,7 @@ export type ExhaustionLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export type SpellcastingType = 'full' | 'half' | 'third' | 'pact' | 'none';
 
-export type AbilityScoreMethod = 'pointbuy' | 'standard_array' | 'manual';
+export type AbilityScoreMethod = 'pointbuy' | 'standard_array' | 'manual' | 'roll';
 
 export interface Trait {
   name: string;
