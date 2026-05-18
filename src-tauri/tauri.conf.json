@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlERkE1MTlDRDhDNDM4NUUKUldSZU9NVFluRkg2blN4UHdlNDZXZ2Qybi9YSnFkVmFkUGlSNk1Yam1EZ21DVWFPQ0lydGFiMXcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGODZERDg4QTI4QkNCODgKUldTSXk0dWlpTjJHajJtMm9KQ1ZDUG1NVTRhOUV1cXQxWDN1TGErbGpDa0pNTGtXaFpZUUd5MWwK",
       "endpoints": [
         "https://github.com/knobilz1/dnd-character-manager/releases/latest/download/latest.json"
       ]
