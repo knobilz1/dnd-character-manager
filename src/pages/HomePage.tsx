@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw } from 'lucide-react';
+import { getVersion } from '@tauri-apps/api/app';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog } from '../components/ui';
 import { getClass } from '../data/classes';
@@ -31,6 +32,11 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
+  const [appVersion, setAppVersion] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   function handleOpen(id: string) {
     navigate(`/character/${id}`);
@@ -232,6 +238,12 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           <Button onClick={() => setImportError(null)}>OK</Button>
         </div>
       </Dialog>
+
+      {appVersion && (
+        <div className="fixed bottom-3 right-4 text-xs text-slate-600 select-none pointer-events-none">
+          v{appVersion}
+        </div>
+      )}
     </div>
   );
 }
