@@ -180,6 +180,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         metamagic: [],
         maneuvers: [],
         infusions: [],
+        optionalFeatures: [],
       },
       inventory: draft.inventory ?? [],
       hitDiceUsed: {},

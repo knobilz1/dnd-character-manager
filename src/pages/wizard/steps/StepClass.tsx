@@ -23,7 +23,7 @@ export function StepClass() {
     updateDraft({
       classes: [{ classId: cls.id, level: currentLevel, hitPointsRolled: [] }],
       selectedFeats: [],
-      classOptions: { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] },
+      classOptions: { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] },
     });
   }
 
