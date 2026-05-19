@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, X, Shield, Sword, Pencil } from 'lucide-react';
+import { Plus, X, Shield, Sword, Pencil, RotateCcw } from 'lucide-react';
 import { Button, Dialog, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Character, InventoryItem, ItemCategory } from '../../types';
@@ -30,6 +30,7 @@ interface InventoryPanelProps {
   toggleInventoryEquipped: (id: string) => void;
   renameInventoryItem: (id: string, name: string) => void;
   setInventoryDescription: (id: string, description: string | undefined) => void;
+  setItemCharges: (id: string, charges: number) => void;
 }
 
 export function InventoryPanel({
@@ -40,10 +41,11 @@ export function InventoryPanel({
   toggleInventoryEquipped,
   renameInventoryItem,
   setInventoryDescription,
+  setItemCharges,
 }: InventoryPanelProps) {
   const [addOpen, setAddOpen] = React.useState(false);
   const [draftItem, setDraftItem] = React.useState<{
-    name: string; quantity: number; category: ItemCategory; weight?: number; description?: string;
+    name: string; quantity: number; category: ItemCategory; weight?: number; description?: string; maxCharges?: number;
   }>({ name: '', quantity: 1, category: 'gear' });
   const [suggestions, setSuggestions] = React.useState<ItemTemplate[]>([]);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
@@ -63,12 +65,15 @@ export function InventoryPanel({
 
   function handleAdd() {
     if (!draftItem.name.trim()) return;
+    const mc = draftItem.maxCharges && draftItem.maxCharges > 0 ? draftItem.maxCharges : undefined;
     addInventoryItem({
       name: draftItem.name.trim(),
       quantity: Math.max(1, draftItem.quantity),
       category: draftItem.category,
       weight: draftItem.weight,
       description: draftItem.description,
+      maxCharges: mc,
+      charges: mc,
     });
     setDraftItem({ name: '', quantity: 1, category: 'gear' });
     setSuggestions([]);
@@ -90,6 +95,7 @@ export function InventoryPanel({
       category: item.category,
       weight: item.weight,
       description: item.description ?? d.description,
+      maxCharges: undefined,
     }));
     setSuggestions([]);
     setShowSuggestions(false);
@@ -135,6 +141,7 @@ export function InventoryPanel({
                       onToggleEquipped={() => toggleInventoryEquipped(item.id)}
                       onRename={name => renameInventoryItem(item.id, name)}
                       onDescriptionChange={desc => setInventoryDescription(item.id, desc)}
+                      onChargesChange={charges => setItemCharges(item.id, charges)}
                     />
                   </HoverCard>
                 ))}
@@ -204,16 +211,30 @@ export function InventoryPanel({
               </select>
             </div>
           </div>
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Weight (lb, optional)</label>
-            <input
-              type="number"
-              min={0}
-              step={0.1}
-              value={draftItem.weight ?? ''}
-              onChange={e => setDraftItem({ ...draftItem, weight: e.target.value === '' ? undefined : Number(e.target.value) })}
-              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-red-500"
-            />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Weight (lb, optional)</label>
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                value={draftItem.weight ?? ''}
+                onChange={e => setDraftItem({ ...draftItem, weight: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-red-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Max Charges (optional)</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={draftItem.maxCharges ?? ''}
+                onChange={e => setDraftItem({ ...draftItem, maxCharges: e.target.value === '' ? undefined : Math.max(1, parseInt(e.target.value) || 1) })}
+                placeholder="e.g. 3"
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm focus:outline-none focus:border-red-500 placeholder-slate-600"
+              />
+            </div>
           </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">
@@ -233,6 +254,56 @@ export function InventoryPanel({
           </div>
         </div>
       </Dialog>
+    </div>
+  );
+}
+
+function ChargeCounter({ charges, maxCharges, onChange }: { charges: number; maxCharges: number; onChange: (c: number) => void }) {
+  const usePips = maxCharges <= 10;
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      {usePips ? (
+        <div className="flex gap-0.5">
+          {Array.from({ length: maxCharges }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => onChange(i < charges ? charges - 1 : charges + 1)}
+              title={i < charges ? 'Click to use a charge' : 'Charge spent'}
+              className={cn(
+                'w-3 h-3 rounded-full border transition-all',
+                i < charges
+                  ? 'bg-pink-500 border-pink-400 hover:bg-pink-400'
+                  : 'bg-slate-700 border-slate-600 hover:border-slate-400',
+              )}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => onChange(charges - 1)}
+            disabled={charges <= 0}
+            className="w-5 h-5 rounded bg-slate-800 border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 disabled:opacity-30 transition-all flex items-center justify-center text-xs"
+          >−</button>
+          <span className="text-xs font-mono text-pink-300 w-10 text-center">{charges}/{maxCharges}</span>
+          <button
+            onClick={() => onChange(charges + 1)}
+            disabled={charges >= maxCharges}
+            className="w-5 h-5 rounded bg-slate-800 border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 disabled:opacity-30 transition-all flex items-center justify-center text-xs"
+          >+</button>
+        </div>
+      )}
+      <button
+        onClick={() => onChange(maxCharges)}
+        title="Reset charges"
+        className={cn(
+          'transition-colors',
+          charges < maxCharges ? 'text-pink-400 hover:text-pink-200' : 'text-slate-600 cursor-default',
+        )}
+      >
+        <RotateCcw size={11} />
+      </button>
+      <span className="text-[10px] text-slate-500">charges</span>
     </div>
   );
 }
@@ -286,9 +357,10 @@ interface InventoryRowProps {
   onToggleEquipped: () => void;
   onRename: (n: string) => void;
   onDescriptionChange: (d: string | undefined) => void;
+  onChargesChange: (c: number) => void;
 }
 
-function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename, onDescriptionChange }: InventoryRowProps) {
+function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename, onDescriptionChange, onChargesChange }: InventoryRowProps) {
   const [editingName, setEditingName] = React.useState(false);
   const [nameDraft, setNameDraft] = React.useState(item.name);
   const [editingDesc, setEditingDesc] = React.useState(false);
@@ -342,6 +414,13 @@ function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename,
           )}
           {item.weight != null && item.weight > 0 && (
             <p className="text-xs text-slate-500">{(item.weight * item.quantity).toFixed(2)} lb</p>
+          )}
+          {item.maxCharges != null && (
+            <ChargeCounter
+              charges={item.charges ?? item.maxCharges}
+              maxCharges={item.maxCharges}
+              onChange={onChargesChange}
+            />
           )}
         </div>
 

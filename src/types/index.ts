@@ -267,6 +267,8 @@ export interface InventoryItem {
   description?: string;
   weight?: number;        // in pounds, per item
   source?: 'class' | 'background' | 'manual';
+  maxCharges?: number;    // optional charge tracking (e.g. magic items)
+  charges?: number;       // current charges remaining
 }
 
 // Equipment choice option: each option is a labeled bundle of items.

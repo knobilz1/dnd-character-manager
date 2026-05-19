@@ -52,6 +52,7 @@ interface CharacterState {
   toggleInventoryEquipped: (id: string) => void;
   renameInventoryItem: (id: string, name: string) => void;
   setInventoryDescription: (id: string, description: string | undefined) => void;
+  setItemCharges: (id: string, charges: number) => void;
 
   // Level up / hit dice
   levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice) => void;
@@ -341,6 +342,15 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       if (!s.character) return s;
       const inventory = (s.character.inventory ?? []).map(i =>
         i.id === id ? { ...i, description: description || undefined } : i
+      );
+      return { character: { ...s.character, inventory } };
+    }),
+
+  setItemCharges: (id, charges) =>
+    set((s) => {
+      if (!s.character) return s;
+      const inventory = (s.character.inventory ?? []).map(i =>
+        i.id === id ? { ...i, charges: Math.max(0, Math.min(charges, i.maxCharges ?? charges)) } : i
       );
       return { character: { ...s.character, inventory } };
     }),
