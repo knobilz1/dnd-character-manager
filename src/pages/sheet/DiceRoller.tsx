@@ -73,18 +73,64 @@ function TwoDie({ die, value, rolling, shakePhase, dieState, dir, resultKey, tie
     ? 'dice-winner-lunge-right 0.45s forwards'
     : 'dice-winner-lunge-left 0.45s forwards';
   const loserAnim = dir === 'left'
-    ? 'dice-smacked-left 0.5s 0.1s forwards'
-    : 'dice-smacked-right 0.5s 0.1s forwards';
+    ? 'dice-smacked-left 0.9s 0.12s forwards'
+    : 'dice-smacked-right 0.9s 0.12s forwards';
 
   const anim = dieState === 'winner' ? winnerAnim : dieState === 'loser' ? loserAnim : undefined;
   const color = dieState === 'winner' ? t.color : dieState === 'loser' ? '#475569' : '#64748b';
   const shadow = dieState === 'winner' ? t.shadow : undefined;
+
+  const EXPLOSION_COLORS = ['#f59e0b','#ef4444','#fbbf24','#f97316','#fde047','#fb923c','#ef4444','#fbbf24'];
+  const EXPLOSION_DEGS = [0, 45, 90, 135, 180, 225, 270, 315];
 
   return (
     <div
       className="relative flex flex-col items-center justify-center"
       style={{ width: 80, height: 80 }}
     >
+      {/* Comical explosion — fires when this die loses */}
+      {dieState === 'loser' && (
+        <div key={`exp-${resultKey}-${dir}`} className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+          {/* 💥 emoji burst */}
+          <span
+            style={{
+              fontSize: '2.4rem',
+              position: 'absolute',
+              animation: 'smack-boom 0.65s 0.12s ease-out forwards',
+              opacity: 0,
+              lineHeight: 1,
+            }}
+          >💥</span>
+          {/* Radiating particles */}
+          {EXPLOSION_DEGS.map((deg, i) => (
+            <div
+              key={i}
+              className="absolute rounded-full"
+              style={{
+                width: 7, height: 7,
+                background: EXPLOSION_COLORS[i],
+                animation: `smack-particle 0.55s ${0.12 + i * 0.018}s ease-out forwards`,
+                opacity: 0,
+                '--deg': `${deg}deg`,
+              } as React.CSSProperties}
+            />
+          ))}
+          {/* Star flashes */}
+          {[22, 112, 202, 292].map((deg, i) => (
+            <div
+              key={`star-${i}`}
+              className="absolute"
+              style={{
+                fontSize: '0.85rem',
+                animation: `smack-particle 0.48s ${0.15 + i * 0.03}s ease-out forwards`,
+                opacity: 0,
+                '--deg': `${deg}deg`,
+              } as React.CSSProperties}
+            >★</div>
+          ))}
+        </div>
+      )}
+
       {/* Die shape outline */}
       {die != null && (
         <svg
@@ -541,16 +587,36 @@ export function DiceRoller() {
           78%  { transform: translateX(-2px) scale(1.18); }
           100% { transform: translateX(0) scale(1.2); }
         }
-        /* Two-dice: loser gets smacked out of frame */
+        /* Two-dice: loser gets violently smacked out of frame */
         @keyframes dice-smacked-left {
-          0%   { transform: translateX(0) rotate(0deg) scale(1); opacity: 1; }
-          12%  { transform: translateX(-8px) rotate(-6deg) scale(0.92); opacity: 0.85; }
-          100% { transform: translateX(-200px) rotate(-40deg) scale(0.2); opacity: 0; }
+          0%   { transform: translateX(0)    rotate(0deg)   scale(1);    opacity: 1; }
+          6%   { transform: translateX(10px)  rotate(12deg)  scale(1.15); opacity: 1; }
+          18%  { transform: translateX(-30px) rotate(-35deg) scale(0.85); opacity: 1; }
+          32%  { transform: translateX(-80px) rotate(-75deg) scale(0.65); opacity: 0.9; }
+          55%  { transform: translateX(-160px) rotate(-130deg) scale(0.38); opacity: 0.55; }
+          100% { transform: translateX(-300px) rotate(-200deg) scale(0.05); opacity: 0; }
         }
         @keyframes dice-smacked-right {
-          0%   { transform: translateX(0) rotate(0deg) scale(1); opacity: 1; }
-          12%  { transform: translateX(8px) rotate(6deg) scale(0.92); opacity: 0.85; }
-          100% { transform: translateX(200px) rotate(40deg) scale(0.2); opacity: 0; }
+          0%   { transform: translateX(0)    rotate(0deg)   scale(1);    opacity: 1; }
+          6%   { transform: translateX(-10px) rotate(-12deg) scale(1.15); opacity: 1; }
+          18%  { transform: translateX(30px)  rotate(35deg)  scale(0.85); opacity: 1; }
+          32%  { transform: translateX(80px)  rotate(75deg)  scale(0.65); opacity: 0.9; }
+          55%  { transform: translateX(160px) rotate(130deg) scale(0.38); opacity: 0.55; }
+          100% { transform: translateX(300px) rotate(200deg) scale(0.05); opacity: 0; }
+        }
+        /* Explosion emoji pop */
+        @keyframes smack-boom {
+          0%   { transform: scale(0) rotate(-15deg); opacity: 0; }
+          25%  { transform: scale(1.6) rotate(8deg);  opacity: 1; }
+          55%  { transform: scale(1.3) rotate(-4deg); opacity: 0.85; }
+          80%  { transform: scale(1.1) rotate(2deg);  opacity: 0.4; }
+          100% { transform: scale(0.8) rotate(0deg);  opacity: 0; }
+        }
+        /* Explosion particles & stars */
+        @keyframes smack-particle {
+          0%   { transform: rotate(var(--deg)) translateX(0px)  scale(1.2); opacity: 1; }
+          40%  { opacity: 1; }
+          100% { transform: rotate(var(--deg)) translateX(52px) scale(0);   opacity: 0; }
         }
       `}</style>
     </>
