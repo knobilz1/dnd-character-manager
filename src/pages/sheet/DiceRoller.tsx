@@ -356,6 +356,16 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
             ))}
           </div>
 
+          {/* Exhaustion reminder — always visible when panel is open */}
+          {exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (
+            <div className="mx-4 mb-1 px-2.5 py-1.5 rounded-lg bg-orange-950/60 border border-orange-800/60 flex items-start gap-1.5">
+              <span className="text-orange-400 text-[11px] shrink-0 mt-px">⚠</span>
+              <p className="text-[11px] text-orange-300 leading-tight">
+                {EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)]}
+              </p>
+            </div>
+          )}
+
           {/* Result area */}
           <div
             className="flex flex-col items-center justify-center min-h-[140px] relative overflow-hidden py-4"
@@ -419,12 +429,6 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
                         ? '💀 Critical Fail'
                         : `${mode === 'advantage' ? '⬆ Adv' : '⬇ Dis'} → ${display} (took ${twoFinal.winner === 1 ? twoFinal.v1 : twoFinal.v2})`}
                     </p>
-                    {/* Exhaustion reminder */}
-                    {exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (
-                      <p className="text-[10px] text-orange-400 mt-1.5 relative z-10 text-center px-3 leading-tight">
-                        ⚠ {EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)]}
-                      </p>
-                    )}
                   </>
                 )}
               </>
@@ -467,12 +471,6 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
                         : tier === 'crit-success' ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
                         : t.label || `d${activeDie}`}
                     </p>
-                    {/* Exhaustion reminder */}
-                    {!rolling && exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (
-                      <p className="text-[10px] text-orange-400 mt-2 relative z-10 text-center px-3 leading-tight">
-                        ⚠ {EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)]}
-                      </p>
-                    )}
                   </>
                 ) : (
                   <p className="text-slate-600 text-sm">Pick a die to roll</p>
