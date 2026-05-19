@@ -281,6 +281,177 @@
   100% { background-position:   0% 50%; }
 }
 
+/* ── Deep Sea mode 🌊 ───────────────────────────────────────────────────── */
+[data-theme="deepsea"] {
+  color-scheme: dark;
+
+  --color-slate-950: #000810;
+  --color-slate-900: #010d1a;   /* near-black ocean page bg */
+  --color-slate-800: #051525;   /* deep navy card bg */
+  --color-slate-700: #0b2540;   /* navy buttons / active */
+  --color-slate-600: #0e4c72;   /* ocean-blue borders */
+  --color-slate-500: #0e7490;   /* teal muted */
+  --color-slate-400: #22d3ee;   /* bright cyan labels */
+  --color-slate-300: #67e8f9;   /* light cyan secondary text */
+  --color-slate-200: #a5f3fc;
+  --color-slate-100: #cffafe;
+  --color-slate-50:  #ecfeff;
+  --color-white:     #e0f9ff;
+}
+
+[data-theme="deepsea"] [class*="bg-red-"],
+[data-theme="deepsea"] [class*="bg-green-"],
+[data-theme="deepsea"] [class*="bg-emerald-"],
+[data-theme="deepsea"] [class*="bg-blue-"],
+[data-theme="deepsea"] [class*="bg-indigo-"],
+[data-theme="deepsea"] [class*="bg-violet-"],
+[data-theme="deepsea"] [class*="bg-purple-"],
+[data-theme="deepsea"] [class*="bg-teal-"],
+[data-theme="deepsea"] [class*="bg-cyan-"],
+[data-theme="deepsea"] [class*="bg-amber-"],
+[data-theme="deepsea"] [class*="bg-yellow-"],
+[data-theme="deepsea"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+[data-theme="deepsea"] .min-h-screen {
+  background: linear-gradient(-45deg, #010d1a, #041e38, #011820, #05253a);
+  background-size: 400% 400%;
+  animation: deepsea-bg 12s ease infinite;
+}
+
+[data-theme="deepsea"] .bg-slate-800 {
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.15), 0 0 50px rgba(14, 116, 144, 0.1);
+}
+
+[data-theme="deepsea"] body { color: #67e8f9; }
+
+[data-theme="deepsea"] .scrollbar-thin { scrollbar-color: #0e7490 #051525; }
+[data-theme="deepsea"] .scrollbar-thin::-webkit-scrollbar-track { background: #051525; }
+[data-theme="deepsea"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #0e7490; }
+
+@keyframes deepsea-bg {
+  0%   { background-position:   0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
+}
+
+/* ── Deep Sea overlay keyframes ─────────────────────────────────────────── */
+
+/* Wave layers — translate + scale only (GPU composited, no paint triggers).
+   The static border-radius on each layer is set inline in the component;
+   these keyframes only touch compositor properties so they stay off the CPU. */
+@keyframes wave-a {
+  0%   { transform: translateX(0)   translateY(0)    scaleY(1);    }
+  25%  { transform: translateX(-3%) translateY(-7px) scaleY(1.04); }
+  50%  { transform: translateX(-6%) translateY(4px)  scaleY(0.97); }
+  75%  { transform: translateX(-3%) translateY(-9px) scaleY(1.03); }
+  100% { transform: translateX(0)   translateY(0)    scaleY(1);    }
+}
+@keyframes wave-b {
+  0%   { transform: translateX(2%)  translateY(0)    scaleY(1);    }
+  33%  { transform: translateX(-2%) translateY(-8px) scaleY(0.96); }
+  66%  { transform: translateX(-5%) translateY(5px)  scaleY(1.05); }
+  100% { transform: translateX(2%)  translateY(0)    scaleY(1);    }
+}
+@keyframes wave-c {
+  0%   { transform: translateX(-1%) translateY(-4px) scaleY(1.02); }
+  40%  { transform: translateX(3%)  translateY(6px)  scaleY(0.96); }
+  70%  { transform: translateX(-4%) translateY(-7px) scaleY(1.04); }
+  100% { transform: translateX(-1%) translateY(-4px) scaleY(1.02); }
+}
+
+/* Bubbles — float upward, sway left/right */
+@keyframes bubble-rise-a {
+  0%   { transform: translateY(100vh) translateX(0);     opacity: 0;    }
+  8%   {                                                  opacity: 0.65; }
+  30%  { transform: translateY(70vh)  translateX(14px);                 }
+  55%  { transform: translateY(44vh)  translateX(-10px);                }
+  80%  { transform: translateY(18vh)  translateX(16px);                 }
+  93%  {                                                  opacity: 0.4;  }
+  100% { transform: translateY(-6vh)  translateX(-4px);  opacity: 0;    }
+}
+@keyframes bubble-rise-b {
+  0%   { transform: translateY(100vh) translateX(0);     opacity: 0;    }
+  8%   {                                                  opacity: 0.55; }
+  35%  { transform: translateY(65vh)  translateX(-18px);                }
+  60%  { transform: translateY(40vh)  translateX(12px);                 }
+  85%  { transform: translateY(14vh)  translateX(-14px);                }
+  93%  {                                                  opacity: 0.35; }
+  100% { transform: translateY(-6vh)  translateX(6px);   opacity: 0;    }
+}
+
+/* Jellyfish — gentle pulsing bob in place */
+@keyframes jelly-float {
+  0%   { transform: translateY(0)     rotate(-4deg) scale(1);    }
+  20%  { transform: translateY(-18px) rotate(4deg)  scale(1.04); }
+  45%  { transform: translateY(-8px)  rotate(-6deg) scale(0.97); }
+  70%  { transform: translateY(-24px) rotate(5deg)  scale(1.05); }
+  100% { transform: translateY(0)     rotate(-4deg) scale(1);    }
+}
+
+/* Fish — swim left (flip so fish faces left) */
+@keyframes fish-swim-left {
+  0%   { transform: translateX(115vw) scaleX(-1); opacity: 0;    }
+  5%   {                                           opacity: 0.85; }
+  95%  {                                           opacity: 0.85; }
+  100% { transform: translateX(-15vw) scaleX(-1); opacity: 0;    }
+}
+/* Fish — swim right (default orientation faces right) */
+@keyframes fish-swim-right {
+  0%   { transform: translateX(-15vw) scaleX(1); opacity: 0;    }
+  5%   {                                          opacity: 0.85; }
+  95%  {                                          opacity: 0.85; }
+  100% { transform: translateX(115vw) scaleX(1); opacity: 0;    }
+}
+
+/* ── Halloween keyframes ────────────────────────────────────────────────── */
+
+/* Ghost: slow, ethereal drift — barely-there lateral sway, floats gently down */
+@keyframes haunt-ghost {
+  0%   { transform: translateY(-24px) translateX(0)    rotate(0deg)  scale(1);    opacity: 0;    }
+  7%   {                                                                           opacity: 0.72; }
+  25%  { transform: translateY(25vh)  translateX(14px)  rotate(6deg)  scale(1.06);               }
+  50%  { transform: translateY(52vh)  translateX(-10px) rotate(-5deg) scale(0.94);               }
+  75%  { transform: translateY(76vh)  translateX(12px)  rotate(4deg)  scale(1.03);               }
+  93%  {                                                                           opacity: 0.55; }
+  100% { transform: translateY(110vh) translateX(-6px)  rotate(-2deg) scale(1);   opacity: 0;    }
+}
+
+/* Pumpkin: tumbles with a gentle wobble as it falls */
+@keyframes haunt-pumpkin {
+  0%   { transform: translateY(-24px) translateX(0)    rotate(-8deg); opacity: 0;    }
+  7%   {                                                               opacity: 0.82; }
+  28%  { transform: translateY(28vh)  translateX(18px)  rotate(9deg);               }
+  52%  { transform: translateY(52vh)  translateX(-14px) rotate(-7deg);              }
+  76%  { transform: translateY(76vh)  translateX(16px)  rotate(8deg);               }
+  93%  {                                                               opacity: 0.65; }
+  100% { transform: translateY(110vh) translateX(-4px)  rotate(-5deg); opacity: 0;    }
+}
+
+/* Zombie / Skull: lurches side to side as it shambles downward */
+@keyframes haunt-shamble {
+  0%   { transform: translateY(-24px) translateX(0)    rotate(-6deg); opacity: 0;    }
+  7%   {                                                               opacity: 0.7;  }
+  20%  { transform: translateY(20vh)  translateX(-22px) rotate(6deg);               }
+  40%  { transform: translateY(40vh)  translateX(20px)  rotate(-5deg);              }
+  60%  { transform: translateY(60vh)  translateX(-18px) rotate(5deg);               }
+  80%  { transform: translateY(80vh)  translateX(16px)  rotate(-4deg);              }
+  93%  {                                                               opacity: 0.55; }
+  100% { transform: translateY(110vh) translateX(-8px)  rotate(0deg);  opacity: 0;    }
+}
+
+/* Bat: fast, erratic swooping dive — sharp direction changes */
+@keyframes haunt-bat {
+  0%   { transform: translateY(-20px) translateX(0)    rotate(-20deg) scaleX(1);  opacity: 0;    }
+  6%   {                                                                           opacity: 0.85; }
+  22%  { transform: translateY(22vh)  translateX(30px)  rotate(15deg) scaleX(1);                }
+  44%  { transform: translateY(44vh)  translateX(-26px) rotate(-18deg) scaleX(-1);              }
+  66%  { transform: translateY(66vh)  translateX(22px)  rotate(14deg) scaleX(1);                }
+  88%  { transform: translateY(88vh)  translateX(-18px) rotate(-12deg) scaleX(-1); opacity: 0.7; }
+  100% { transform: translateY(110vh) translateX(8px)   rotate(0deg)  scaleX(1);  opacity: 0;    }
+}
+
 /* ── Snow keyframes (four sway patterns) ────────────────────────────────── */
 @keyframes snow-a {
   0%   { transform: translateY(-12px) translateX(0px);   opacity: 0;    }

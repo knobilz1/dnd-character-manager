@@ -357,7 +357,8 @@ const THEME_META: Record<Theme, { color: string; emoji: string | null; title: st
   dark:      { color: 'text-yellow-400 hover:text-yellow-200',  emoji: null,  title: 'Party mode 🎉'        },
   party:     { color: 'text-fuchsia-300 hover:text-white',      emoji: '🎉',  title: 'Halloween mode 🎃'     },
   halloween: { color: 'text-orange-400 hover:text-orange-200',  emoji: '🎃',  title: 'Christmas mode 🎄'     },
-  christmas: { color: 'text-green-400 hover:text-yellow-300',   emoji: '🎄',  title: 'Switch to light mode'  },
+  christmas: { color: 'text-green-400 hover:text-yellow-300',   emoji: '🎄',  title: 'Deep sea mode 🌊'      },
+  deepsea:   { color: 'text-cyan-400 hover:text-cyan-200',      emoji: '🌊',  title: 'Switch to light mode'  },
   light:     { color: 'text-slate-500 hover:text-slate-700',    emoji: null,  title: 'Switch to dark mode'   },
 };
 
