@@ -648,49 +648,41 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
           </div>
         </div>
 
-        {/* Death saves — always visible, urgent styling at 0 HP */}
-        <div className={cn(
-          'mt-4 border-t pt-3 transition-colors',
-          character.currentHP === 0 ? 'border-red-700' : 'border-slate-700',
-        )}>
-          <div className="flex items-center justify-between mb-2">
-            <SectionHeader className={cn('mb-0', character.currentHP > 0 && 'opacity-50')}>
-              Death Saving Throws
-            </SectionHeader>
-            <button
-              onClick={resetDeathSaves}
-              className={cn('text-xs hover:text-white transition-colors', character.currentHP > 0 ? 'text-slate-600 hover:text-slate-400' : 'text-slate-400')}
-            >
-              Reset
-            </button>
-          </div>
-          <div className={cn('flex justify-between items-center', character.currentHP > 0 && 'opacity-50')}>
-            <div>
-              <p className="text-xs text-green-400 mb-1">Successes</p>
-              <div className="flex gap-2">
-                {[0,1,2].map(i => (
-                  <button
-                    key={i}
-                    onClick={() => i < character.deathSaves.successes ? null : addDeathSuccess()}
-                    className={cn('w-8 h-8 rounded-full border-2 transition-all', i < character.deathSaves.successes ? 'border-green-500 bg-green-500' : 'border-slate-500 hover:border-green-600')}
-                  />
-                ))}
-              </div>
+        {/* Death saves — only shown at 0 HP */}
+        {character.currentHP === 0 && (
+          <div className="mt-4 border-t border-red-700 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <SectionHeader className="mb-0">Death Saving Throws</SectionHeader>
+              <button onClick={resetDeathSaves} className="text-xs text-slate-400 hover:text-white transition-colors">Reset</button>
             </div>
-            <div>
-              <p className="text-xs text-red-400 mb-1 text-right">Failures</p>
-              <div className="flex gap-2">
-                {[0,1,2].map(i => (
-                  <button
-                    key={i}
-                    onClick={() => i < character.deathSaves.failures ? null : addDeathFailure()}
-                    className={cn('w-8 h-8 rounded-full border-2 transition-all', i < character.deathSaves.failures ? 'border-red-500 bg-red-500' : 'border-slate-500 hover:border-red-600')}
-                  />
-                ))}
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-xs text-green-400 mb-1">Successes</p>
+                <div className="flex gap-2">
+                  {[0,1,2].map(i => (
+                    <button
+                      key={i}
+                      onClick={() => i < character.deathSaves.successes ? null : addDeathSuccess()}
+                      className={cn('w-8 h-8 rounded-full border-2 transition-all', i < character.deathSaves.successes ? 'border-green-500 bg-green-500' : 'border-slate-500 hover:border-green-600')}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-red-400 mb-1 text-right">Failures</p>
+                <div className="flex gap-2">
+                  {[0,1,2].map(i => (
+                    <button
+                      key={i}
+                      onClick={() => i < character.deathSaves.failures ? null : addDeathFailure()}
+                      className={cn('w-8 h-8 rounded-full border-2 transition-all', i < character.deathSaves.failures ? 'border-red-500 bg-red-500' : 'border-slate-500 hover:border-red-600')}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Conditions */}
