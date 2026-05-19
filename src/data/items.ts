@@ -784,3 +784,8 @@ export function searchItems(query: string, limit = 8): ItemTemplate[] {
   results.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
   return results.slice(0, limit).map(r => r.item);
 }
+
+export function getItemByName(name: string): ItemTemplate | undefined {
+  const lower = name.toLowerCase();
+  return ALL_ITEMS.find(i => i.name.toLowerCase() === lower);
+}

@@ -2,6 +2,7 @@ import React from 'react';
 import { useWizardStore } from '../../../store/useWizardStore';
 import { getClassStartingEquipment } from '../../../data/startingEquipment';
 import { getBackground } from '../../../data/backgrounds';
+import { getItemByName } from '../../../data/items';
 import { cn } from '../../../utils/cn';
 import type { InventoryItem, ItemCategory } from '../../../types';
 
@@ -41,12 +42,14 @@ export function StepEquipment() {
     if (classEq && !takeGold) {
       // Class fixed items
       for (const f of classEq.fixed) {
+        const template = getItemByName(f.name);
         items.push({
           id: newId(),
           name: f.name,
           quantity: f.quantity ?? 1,
-          category: f.category ?? 'other',
-          weight: f.weight,
+          category: f.category ?? template?.category ?? 'other',
+          weight: f.weight ?? template?.weight,
+          description: template?.description,
           source: 'class',
         });
       }
@@ -57,12 +60,14 @@ export function StepEquipment() {
         const opt = choice.options[optIdx];
         if (!opt) return;
         for (const it of opt.items) {
+          const template = getItemByName(it.name);
           items.push({
             id: newId(),
             name: it.name,
             quantity: it.quantity ?? 1,
-            category: it.category ?? 'other',
-            weight: it.weight,
+            category: it.category ?? template?.category ?? 'other',
+            weight: it.weight ?? template?.weight,
+            description: template?.description,
             source: 'class',
           });
         }
@@ -77,11 +82,14 @@ export function StepEquipment() {
         if (goldMatch) {
           bgGP += parseInt(goldMatch[1], 10);
         } else {
+          const template = getItemByName(eqStr.trim());
           items.push({
             id: newId(),
-            name: eqStr,
+            name: eqStr.trim(),
             quantity: 1,
-            category: 'gear',
+            category: template?.category ?? 'gear',
+            weight: template?.weight,
+            description: template?.description,
             source: 'background',
           });
         }
