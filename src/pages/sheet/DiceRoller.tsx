@@ -163,8 +163,18 @@ function TwoDie({ die, value, rolling, shakePhase, dieState, dir, resultKey, tie
   );
 }
 
+// Exhaustion reminders shown under roll results.
+const EXHAUSTION_REMINDER: Record<number, string> = {
+  1: 'Disadvantage on ability checks (Exhaustion 1)',
+  2: 'Disadvantage on ability checks · Speed halved (Exhaustion 2)',
+  3: 'Disadvantage on checks, attacks & saves (Exhaustion 3)',
+  4: 'Disadvantage on checks, attacks & saves · HP max halved (Exhaustion 4)',
+  5: 'Disadvantage on all rolls · Speed 0 · HP max halved (Exhaustion 5)',
+  6: '☠ Dead (Exhaustion 6)',
+};
+
 // ── Main component ──────────────────────────────────────────────────────────
-export function DiceRoller() {
+export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }) {
   const [open, setOpen] = React.useState(false);
   const [mode, setMode] = React.useState<Mode>('normal');
   const [activeDie, setActiveDie] = React.useState<Die | null>(null);
@@ -401,13 +411,21 @@ export function DiceRoller() {
 
                 {/* Winner result label */}
                 {!rolling && twoFinal && display !== null && (
-                  <p className="text-xs mt-3 relative z-10 font-semibold" style={{ color: t.color }}>
-                    {tier === 'crit-success'
-                      ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
-                      : tier === 'crit-fail'
-                      ? '💀 Critical Fail'
-                      : `${mode === 'advantage' ? '⬆ Adv' : '⬇ Dis'} → ${display} (took ${twoFinal.winner === 1 ? twoFinal.v1 : twoFinal.v2})`}
-                  </p>
+                  <>
+                    <p className="text-xs mt-3 relative z-10 font-semibold" style={{ color: t.color }}>
+                      {tier === 'crit-success'
+                        ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
+                        : tier === 'crit-fail'
+                        ? '💀 Critical Fail'
+                        : `${mode === 'advantage' ? '⬆ Adv' : '⬇ Dis'} → ${display} (took ${twoFinal.winner === 1 ? twoFinal.v1 : twoFinal.v2})`}
+                    </p>
+                    {/* Exhaustion reminder */}
+                    {exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (
+                      <p className="text-[10px] text-orange-400 mt-1.5 relative z-10 text-center px-3 leading-tight">
+                        ⚠ {EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)]}
+                      </p>
+                    )}
+                  </>
                 )}
               </>
             ) : (
@@ -449,6 +467,12 @@ export function DiceRoller() {
                         : tier === 'crit-success' ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
                         : t.label || `d${activeDie}`}
                     </p>
+                    {/* Exhaustion reminder */}
+                    {!rolling && exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (
+                      <p className="text-[10px] text-orange-400 mt-2 relative z-10 text-center px-3 leading-tight">
+                        ⚠ {EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)]}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p className="text-slate-600 text-sm">Pick a die to roll</p>

@@ -166,7 +166,7 @@ export function SheetPage() {
           >
             <History size={18} />
           </button>
-          <DiceRoller />
+          <DiceRoller exhaustionLevel={exhaustionLevel} />
           <button
             onClick={async () => {
               const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
