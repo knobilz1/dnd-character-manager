@@ -205,7 +205,10 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const isASI = newFeatures.some(f => (f as any).isASI);
 
-  const hpRoll = method === 'roll' ? (rollResult ?? 0) : averagePerLevel - conMod;
+  // hpRoll is the raw die result (before Con mod) stored in hitPointsRolled history.
+  // For average, this is always floor(hitDie/2)+1 — never derived from the clamped
+  // averagePerLevel, which would inflate the stored value when Con is very negative.
+  const hpRoll = method === 'roll' ? (rollResult ?? 0) : Math.floor(hitDie / 2) + 1;
   const hpGained = method === 'roll'
     ? Math.max(1, (rollResult ?? 0) + conMod)
     : averagePerLevel;
@@ -283,15 +286,22 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   }
 
   // ── Spell slot changes ───────────────────────────────────────────────────
+  const isWarlock = classId === 'warlock';
+
+  // Eldritch Knight and Arcane Trickster have spellcastingType: 'third' on
+  // their subclass, not on the Fighter/Rogue class def (which stays 'none').
+  // Fall back to subclass spellcasting type so their slot gains show up here.
+  const effectiveSpellcastingType = classDef.spellcastingType !== 'none'
+    ? classDef.spellcastingType
+    : (sub?.spellcastingType ?? 'none');
   const slotTable =
-    classDef.spellcastingType === 'full' ? FULL_CASTER_SLOTS :
-    classDef.spellcastingType === 'half' ? HALF_CASTER_SLOTS :
-    classDef.spellcastingType === 'third' ? THIRD_CASTER_SLOTS : null;
+    effectiveSpellcastingType === 'full'  ? FULL_CASTER_SLOTS  :
+    effectiveSpellcastingType === 'half'  ? HALF_CASTER_SLOTS  :
+    effectiveSpellcastingType === 'third' ? THIRD_CASTER_SLOTS : null;
   const oldSlots: number[] = slotTable?.[currentLevel] ?? Array(9).fill(0);
   const newSlots: number[] = slotTable?.[newLevel] ?? Array(9).fill(0);
   const slotsGained = oldSlots.map((old, i) => Math.max(0, (newSlots[i] ?? 0) - old));
 
-  const isWarlock = classId === 'warlock';
   const oldPact = isWarlock ? PACT_MAGIC_TABLE[currentLevel] : null;
   const newPact = isWarlock ? PACT_MAGIC_TABLE[newLevel] : null;
   const pactSlotsGained = (oldPact && newPact) ? Math.max(0, newPact.slots - oldPact.slots) : 0;
@@ -365,27 +375,26 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     ? ALL_PACT_BOONS.filter(p => enabledBooks.includes(p.sourceBook))
     : [];
 
-  const newInvocationMax = isWarlock ? warlockInvocationCount(newLevel) : 0;
-  // totalNew* = how many new slots granted this level-up (static, doesn't shrink as user picks)
-  const totalNewInvocations = Math.max(0, newInvocationMax - classOpts.invocations.length);
+  // totalNew* measures what the level-up TABLE grants (newLevel count minus prevLevel count),
+  // NOT the difference against what's stored. Using stored length was wrong: if options were
+  // set during the wizard they'd be counted as "already leveled-up", showing 0 new picks at
+  // levels that do grant new ones.
+  const totalNewInvocations = isWarlock ? Math.max(0, warlockInvocationCount(newLevel) - warlockInvocationCount(currentLevel)) : 0;
   const invocationsRemaining = Math.max(0, totalNewInvocations - pendingInvocations.length);
   const allPickedInvocations = [...classOpts.invocations, ...pendingInvocations];
 
   const isSorcerer = classId === 'sorcerer';
-  const newMetamagicMax = isSorcerer ? sorcererMetamagicCount(newLevel) : 0;
-  const totalNewMetamagic = Math.max(0, newMetamagicMax - classOpts.metamagic.length);
+  const totalNewMetamagic = isSorcerer ? Math.max(0, sorcererMetamagicCount(newLevel) - sorcererMetamagicCount(currentLevel)) : 0;
   const metamagicRemaining = Math.max(0, totalNewMetamagic - pendingMetamagic.length);
   const allPickedMetamagic = [...classOpts.metamagic, ...pendingMetamagic];
 
   const isBattleMaster = classId === 'fighter' && (primary?.subclassId === 'battle-master' || pendingSubclass === 'battle-master');
-  const newManeuverMax = isBattleMaster ? battleMasterManeuverCount(newLevel) : 0;
-  const totalNewManeuvers = Math.max(0, newManeuverMax - classOpts.maneuvers.length);
+  const totalNewManeuvers = isBattleMaster ? Math.max(0, battleMasterManeuverCount(newLevel) - battleMasterManeuverCount(currentLevel)) : 0;
   const maneuversRemaining = Math.max(0, totalNewManeuvers - pendingManeuvers.length);
   const allPickedManeuvers = [...classOpts.maneuvers, ...pendingManeuvers];
 
   const isArtificer = classId === 'artificer';
-  const newInfusionMax = isArtificer ? artificerInfusionCount(newLevel) : 0;
-  const totalNewInfusions = Math.max(0, newInfusionMax - classOpts.infusions.length);
+  const totalNewInfusions = isArtificer ? Math.max(0, artificerInfusionCount(newLevel) - artificerInfusionCount(currentLevel)) : 0;
   const infusionsRemaining = Math.max(0, totalNewInfusions - pendingInfusions.length);
   const allPickedInfusions = [...classOpts.infusions, ...pendingInfusions];
 
