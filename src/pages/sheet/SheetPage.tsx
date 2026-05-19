@@ -163,10 +163,21 @@ export function SheetPage() {
           {saved && <span className="text-xs text-green-400">Saved ✓</span>}
           <button
             onClick={toggleTheme}
-            className="p-1.5 rounded text-slate-500 hover:text-yellow-400 transition-colors"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              theme === 'dark'  && 'text-yellow-400 hover:text-yellow-200',
+              theme === 'light' && 'text-slate-500  hover:text-slate-700',
+              theme === 'party' && 'text-fuchsia-300 hover:text-white',
+            )}
+            title={
+              theme === 'dark'  ? 'Party mode 🎉' :
+              theme === 'party' ? 'Switch to light mode' :
+                                  'Switch to dark mode'
+            }
           >
-            <SunMoon size={18} />
+            {theme === 'dark'  && <SunMoon size={18} />}
+            {theme === 'light' && <SunMoon size={18} />}
+            {theme === 'party' && <span className="text-base leading-none">🎉</span>}
           </button>
           <button
             onClick={() => setSnapshotOpen(true)}

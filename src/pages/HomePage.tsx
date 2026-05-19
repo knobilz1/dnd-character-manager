@@ -6,6 +6,7 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog } from '../components/ui';
+import { cn } from '../utils/cn';
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { totalCharacterLevel } from '../data/mechanics';
@@ -102,10 +103,21 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           <div className="flex items-center gap-2">
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg text-slate-500 hover:text-yellow-400 hover:bg-slate-800 transition-colors"
-              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className={cn(
+                'p-2 rounded-lg transition-colors hover:bg-slate-800',
+                theme === 'dark'  && 'text-yellow-400 hover:text-yellow-200',
+                theme === 'light' && 'text-slate-500  hover:text-slate-700',
+                theme === 'party' && 'text-fuchsia-300 hover:text-white',
+              )}
+              title={
+                theme === 'dark'  ? 'Party mode 🎉' :
+                theme === 'party' ? 'Switch to light mode' :
+                                    'Switch to dark mode'
+              }
             >
-              <SunMoon size={20} />
+              {theme === 'dark'  && <SunMoon size={20} />}
+              {theme === 'light' && <SunMoon size={20} />}
+              {theme === 'party' && <span className="text-xl leading-none">🎉</span>}
             </button>
             <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             <Button variant="outline" size="lg" onClick={() => importRef.current?.click()}>

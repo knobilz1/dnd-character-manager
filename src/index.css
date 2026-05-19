@@ -101,3 +101,72 @@
 [data-theme="light"] .scrollbar-thin::-webkit-scrollbar-thumb {
   background-color: #cbd5e1;
 }
+
+/* ── Party mode 🎉 ───────────────────────────────────────────────────────── */
+[data-theme="party"] {
+  color-scheme: dark;
+
+  /* Replace the neutral slate scale with vivid purple/violet */
+  --color-slate-950: #08001a;
+  --color-slate-900: #100030;   /* deep purple page bg */
+  --color-slate-800: #1e0650;   /* rich purple card bg */
+  --color-slate-700: #3b0f92;   /* vivid purple buttons / active */
+  --color-slate-600: #7c2af4;   /* neon purple borders */
+  --color-slate-500: #a855f7;   /* medium purple muted */
+  --color-slate-400: #d8b4fe;   /* light lavender labels */
+  --color-slate-300: #ede9fe;   /* lavender secondary text */
+  --color-slate-200: #f5f3ff;
+  --color-slate-100: #fdfcff;
+  --color-slate-50:  #ffffff;
+  --color-white: #ffffff;
+}
+
+/* Vivid coloured backgrounds keep white text in party mode too */
+[data-theme="party"] [class*="bg-red-"],
+[data-theme="party"] [class*="bg-green-"],
+[data-theme="party"] [class*="bg-emerald-"],
+[data-theme="party"] [class*="bg-blue-"],
+[data-theme="party"] [class*="bg-indigo-"],
+[data-theme="party"] [class*="bg-violet-"],
+[data-theme="party"] [class*="bg-purple-"],
+[data-theme="party"] [class*="bg-teal-"],
+[data-theme="party"] [class*="bg-cyan-"],
+[data-theme="party"] [class*="bg-amber-"],
+[data-theme="party"] [class*="bg-yellow-"],
+[data-theme="party"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+/* Animated rainbow gradient on the main page wrappers — more specific than
+   .bg-slate-900 so it wins without !important */
+[data-theme="party"] .min-h-screen {
+  background: linear-gradient(-45deg, #200050, #4d0028, #001450, #003040);
+  background-size: 400% 400%;
+  animation: party-bg 5s ease infinite;
+}
+
+/* Soft neon glow around every card */
+[data-theme="party"] .bg-slate-800 {
+  box-shadow: 0 0 22px rgba(124, 42, 244, 0.45), 0 0 55px rgba(124, 42, 244, 0.15);
+}
+
+/* Scrollbars */
+[data-theme="party"] .scrollbar-thin {
+  scrollbar-color: #7c2af4 #1e0650;
+}
+[data-theme="party"] .scrollbar-thin::-webkit-scrollbar-track {
+  background: #1e0650;
+}
+[data-theme="party"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #7c2af4;
+}
+
+[data-theme="party"] body {
+  color: #ede9fe;
+}
+
+@keyframes party-bg {
+  0%   { background-position:   0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
+}
