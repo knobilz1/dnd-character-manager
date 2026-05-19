@@ -170,3 +170,113 @@
   50%  { background-position: 100% 50%; }
   100% { background-position:   0% 50%; }
 }
+
+/* ── Halloween mode 🎃 ───────────────────────────────────────────────────── */
+[data-theme="halloween"] {
+  color-scheme: dark;
+
+  --color-slate-950: #06000e;
+  --color-slate-900: #0b0015;   /* near-black purple page bg */
+  --color-slate-800: #160025;   /* deep purple card bg */
+  --color-slate-700: #2c004a;   /* dark purple buttons / active */
+  --color-slate-600: #9a3412;   /* blood-orange borders */
+  --color-slate-500: #ea580c;   /* orange muted */
+  --color-slate-400: #fb923c;   /* pumpkin-orange labels */
+  --color-slate-300: #fed7aa;   /* pale orange secondary text */
+  --color-slate-200: #fff7ed;
+  --color-slate-100: #fdfcff;
+  --color-slate-50:  #ffffff;
+  --color-white: #ffffff;
+}
+
+[data-theme="halloween"] [class*="bg-red-"],
+[data-theme="halloween"] [class*="bg-green-"],
+[data-theme="halloween"] [class*="bg-emerald-"],
+[data-theme="halloween"] [class*="bg-blue-"],
+[data-theme="halloween"] [class*="bg-indigo-"],
+[data-theme="halloween"] [class*="bg-violet-"],
+[data-theme="halloween"] [class*="bg-purple-"],
+[data-theme="halloween"] [class*="bg-teal-"],
+[data-theme="halloween"] [class*="bg-cyan-"],
+[data-theme="halloween"] [class*="bg-amber-"],
+[data-theme="halloween"] [class*="bg-yellow-"],
+[data-theme="halloween"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+[data-theme="halloween"] .min-h-screen {
+  background: linear-gradient(-45deg, #0b0015, #1c0500, #0b000e, #0e0400);
+  background-size: 400% 400%;
+  animation: halloween-bg 8s ease infinite;
+}
+
+[data-theme="halloween"] .bg-slate-800 {
+  box-shadow: 0 0 20px rgba(234, 88, 12, 0.25), 0 0 50px rgba(234, 88, 12, 0.08);
+}
+
+[data-theme="halloween"] body { color: #fed7aa; }
+
+[data-theme="halloween"] .scrollbar-thin { scrollbar-color: #ea580c #160025; }
+[data-theme="halloween"] .scrollbar-thin::-webkit-scrollbar-track { background: #160025; }
+[data-theme="halloween"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #ea580c; }
+
+@keyframes halloween-bg {
+  0%   { background-position:   0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
+}
+
+/* ── Christmas mode 🎄 ───────────────────────────────────────────────────── */
+[data-theme="christmas"] {
+  color-scheme: dark;
+
+  --color-slate-950: #030a06;
+  --color-slate-900: #050f08;   /* near-black forest green page bg */
+  --color-slate-800: #0c1e10;   /* deep forest green card bg */
+  --color-slate-700: #153820;   /* dark green buttons / active */
+  --color-slate-600: #166534;   /* forest-green borders */
+  --color-slate-500: #b45309;   /* warm amber muted */
+  --color-slate-400: #fbbf24;   /* gold labels */
+  --color-slate-300: #fde68a;   /* warm cream secondary text */
+  --color-slate-200: #fef9c3;
+  --color-slate-100: #fdfce8;
+  --color-slate-50:  #ffffff;
+  --color-white: #ffffff;
+}
+
+[data-theme="christmas"] [class*="bg-red-"],
+[data-theme="christmas"] [class*="bg-green-"],
+[data-theme="christmas"] [class*="bg-emerald-"],
+[data-theme="christmas"] [class*="bg-blue-"],
+[data-theme="christmas"] [class*="bg-indigo-"],
+[data-theme="christmas"] [class*="bg-violet-"],
+[data-theme="christmas"] [class*="bg-purple-"],
+[data-theme="christmas"] [class*="bg-teal-"],
+[data-theme="christmas"] [class*="bg-cyan-"],
+[data-theme="christmas"] [class*="bg-amber-"],
+[data-theme="christmas"] [class*="bg-yellow-"],
+[data-theme="christmas"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+[data-theme="christmas"] .min-h-screen {
+  background: linear-gradient(-45deg, #071a0d, #1a0808, #051407, #120505);
+  background-size: 400% 400%;
+  animation: christmas-bg 8s ease infinite;
+}
+
+[data-theme="christmas"] .bg-slate-800 {
+  box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), 0 0 50px rgba(22, 101, 52, 0.15);
+}
+
+[data-theme="christmas"] body { color: #fde68a; }
+
+[data-theme="christmas"] .scrollbar-thin { scrollbar-color: #16a34a #0c1e10; }
+[data-theme="christmas"] .scrollbar-thin::-webkit-scrollbar-track { background: #0c1e10; }
+[data-theme="christmas"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #16a34a; }
+
+@keyframes christmas-bg {
+  0%   { background-position:   0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
+}

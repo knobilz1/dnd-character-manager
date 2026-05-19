@@ -1,6 +1,8 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { SunMoon } from 'lucide-react';
 import { cn } from '../../utils/cn';
+import type { Theme } from '../../store/useThemeStore';
 
 // Button
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -347,5 +349,33 @@ export function HoverCard({ content, children, className }: HoverCardProps) {
         document.body
       )}
     </div>
+  );
+}
+
+// Theme Toggle Button — cycles through all themes
+const THEME_META: Record<Theme, { color: string; emoji: string | null; title: string }> = {
+  dark:      { color: 'text-yellow-400 hover:text-yellow-200',  emoji: null,  title: 'Party mode 🎉'        },
+  party:     { color: 'text-fuchsia-300 hover:text-white',      emoji: '🎉',  title: 'Halloween mode 🎃'     },
+  halloween: { color: 'text-orange-400 hover:text-orange-200',  emoji: '🎃',  title: 'Christmas mode 🎄'     },
+  christmas: { color: 'text-green-400 hover:text-yellow-300',   emoji: '🎄',  title: 'Switch to light mode'  },
+  light:     { color: 'text-slate-500 hover:text-slate-700',    emoji: null,  title: 'Switch to dark mode'   },
+};
+
+export function ThemeToggleButton({ theme, onToggle, size = 18 }: {
+  theme: Theme;
+  onToggle: () => void;
+  size?: number;
+}) {
+  const meta = THEME_META[theme];
+  return (
+    <button
+      onClick={onToggle}
+      className={cn('p-1.5 rounded transition-colors', meta.color)}
+      title={meta.title}
+    >
+      {meta.emoji
+        ? <span className="leading-none select-none" style={{ fontSize: size }}>{meta.emoji}</span>
+        : <SunMoon size={size} />}
+    </button>
   );
 }

@@ -2,11 +2,11 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, SunMoon } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper } from '../../components/ui';
+import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
@@ -161,24 +161,7 @@ export function SheetPage() {
         </div>
         <div className="flex items-center gap-2">
           {saved && <span className="text-xs text-green-400">Saved ✓</span>}
-          <button
-            onClick={toggleTheme}
-            className={cn(
-              'p-1.5 rounded transition-colors',
-              theme === 'dark'  && 'text-yellow-400 hover:text-yellow-200',
-              theme === 'light' && 'text-slate-500  hover:text-slate-700',
-              theme === 'party' && 'text-fuchsia-300 hover:text-white',
-            )}
-            title={
-              theme === 'dark'  ? 'Party mode 🎉' :
-              theme === 'party' ? 'Switch to light mode' :
-                                  'Switch to dark mode'
-            }
-          >
-            {theme === 'dark'  && <SunMoon size={18} />}
-            {theme === 'light' && <SunMoon size={18} />}
-            {theme === 'party' && <span className="text-base leading-none">🎉</span>}
-          </button>
+          <ThemeToggleButton theme={theme} onToggle={toggleTheme} size={18} />
           <button
             onClick={() => setSnapshotOpen(true)}
             className="p-1.5 rounded text-slate-500 hover:text-violet-400 transition-colors"
