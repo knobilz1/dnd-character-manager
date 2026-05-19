@@ -745,7 +745,6 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
             );
           })}
           <p className="text-[11px] text-slate-500 mt-1">
-            Spend a hit die on a short rest to regain 1d{character.classes[0] ? getClass(character.classes[0].classId)?.hitDie : '?'} + CON modifier HP.
             Long rest recovers up to half your max hit dice (rounded down, minimum 1) per class.
           </p>
         </div>
