@@ -4,6 +4,7 @@ import { cn } from '../../utils/cn';
 
 const DICE = [4, 6, 8, 10, 12, 20, 100] as const;
 type Die = typeof DICE[number];
+type Mode = 'normal' | 'advantage' | 'disadvantage';
 
 const DIE_STYLE: Record<Die, { btn: string; label: string; glow: string }> = {
   4:   { btn: 'from-red-800 to-red-950 border-red-600 hover:border-red-400',         label: 'D4',   glow: '#f87171' },
@@ -52,19 +53,91 @@ const DIE_SHAPE: Record<Die, React.ReactElement> = {
   100: <circle cx="50" cy="50" r="43" />,
 };
 
-interface HistoryEntry { die: Die; result: number; tier: Tier }
+interface HistoryEntry { die: Die; result: number; tier: Tier; mode?: Mode }
 
+// ── TwoDie ─────────────────────────────────────────────────────────────────
+// Renders one die in the side-by-side advantage/disadvantage layout.
+function TwoDie({ die, value, rolling, shakePhase, dieState, dir, resultKey, tier }: {
+  die: Die;
+  value: number | null;
+  rolling: boolean;
+  shakePhase: 0 | 1 | 2;
+  dieState: 'idle' | 'winner' | 'loser';
+  dir: 'left' | 'right'; // physical position of this die
+  resultKey: number;
+  tier: Tier;
+}) {
+  const t = TIER[tier];
+  // winner lunges toward opposite side; loser gets smacked in the same direction as lunge
+  const winnerAnim = dir === 'left'
+    ? 'dice-winner-lunge-right 0.45s forwards'
+    : 'dice-winner-lunge-left 0.45s forwards';
+  const loserAnim = dir === 'left'
+    ? 'dice-smacked-left 0.5s 0.1s forwards'
+    : 'dice-smacked-right 0.5s 0.1s forwards';
+
+  const anim = dieState === 'winner' ? winnerAnim : dieState === 'loser' ? loserAnim : undefined;
+  const color = dieState === 'winner' ? t.color : dieState === 'loser' ? '#475569' : '#64748b';
+  const shadow = dieState === 'winner' ? t.shadow : undefined;
+
+  return (
+    <div
+      className="relative flex flex-col items-center justify-center"
+      style={{ width: 80, height: 80 }}
+    >
+      {/* Die shape outline */}
+      {die != null && (
+        <svg
+          viewBox="0 0 100 100"
+          className="absolute pointer-events-none"
+          style={{ width: 76, height: 76, top: 2, left: 2, opacity: rolling ? 0.12 : dieState === 'loser' ? 0.18 : 0.25 }}
+        >
+          <g fill="none" stroke={color} strokeWidth="2.5">{DIE_SHAPE[die]}</g>
+        </svg>
+      )}
+      {/* Number */}
+      {value !== null && (
+        <span
+          key={`${resultKey}-${dir}`}
+          className="font-black tabular-nums relative z-10 leading-none select-none"
+          style={rolling
+            ? { color: '#64748b', filter: ['blur(2px)', 'blur(1px)', 'none'][shakePhase], fontSize: '2.2rem' }
+            : {
+                fontSize: dieState === 'winner' ? '2.5rem' : '2rem',
+                color,
+                textShadow: shadow,
+                animation: anim,
+              }
+          }
+        >
+          {value}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────────────────
 export function DiceRoller() {
   const [open, setOpen] = React.useState(false);
+  const [mode, setMode] = React.useState<Mode>('normal');
   const [activeDie, setActiveDie] = React.useState<Die | null>(null);
+
+  // Single-die state
   const [display, setDisplay] = React.useState<number | null>(null);
   const [tier, setTier] = React.useState<Tier>('neutral');
   const [resultKey, setResultKey] = React.useState(0);
+
+  // Two-dice state
+  const [twoDisplay, setTwoDisplay] = React.useState<{ v1: number; v2: number } | null>(null);
+  const [twoFinal, setTwoFinal] = React.useState<{ v1: number; v2: number; winner: 1 | 2 } | null>(null);
+
   const [rolling, setRolling] = React.useState(false);
   const [shakePhase, setShakePhase] = React.useState<0 | 1 | 2>(0);
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Dragging
   const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
   const dragging = React.useRef(false);
   const dragOffset = React.useRef({ x: 0, y: 0 });
@@ -91,12 +164,17 @@ export function DiceRoller() {
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, []);
 
+  React.useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
   function roll(sides: Die) {
     if (rolling) return;
+    if (mode !== 'normal') { rollTwo(sides); return; }
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setRolling(true);
     setShakePhase(0);
+    setTwoDisplay(null);
+    setTwoFinal(null);
 
     let frame = 0;
     const frames = 28;
@@ -115,25 +193,62 @@ export function DiceRoller() {
         setDisplay(result);
         setTier(t);
         setResultKey(k => k + 1);
-        setHistory(h => [{ die: sides, result, tier: t }, ...h].slice(0, 8));
+        setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' }, ...h].slice(0, 8));
         setRolling(false);
       }
     };
     timerRef.current = setTimeout(tick, 30);
   }
 
-  React.useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+  function rollTwo(sides: Die) {
+    if (rolling) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setActiveDie(sides);
+    setRolling(true);
+    setShakePhase(0);
+    setTwoFinal(null);
+    setDisplay(null);
+
+    let frame = 0;
+    const frames = 28;
+    const delay = (f: number) => Math.round(22 + Math.pow(f / frames, 2.5) * 300);
+
+    const tick = () => {
+      frame++;
+      const progress = frame / frames;
+      setShakePhase(progress < 0.45 ? 0 : progress < 0.75 ? 1 : 2);
+      setTwoDisplay({ v1: Math.ceil(Math.random() * sides), v2: Math.ceil(Math.random() * sides) });
+      if (frame < frames) {
+        timerRef.current = setTimeout(tick, delay(frame));
+      } else {
+        const v1 = Math.ceil(Math.random() * sides);
+        const v2 = Math.ceil(Math.random() * sides);
+        // Advantage: take higher; disadvantage: take lower. Tie → die 1 wins.
+        const winner: 1 | 2 = mode === 'advantage'
+          ? (v1 >= v2 ? 1 : 2)
+          : (v1 <= v2 ? 1 : 2);
+        const finalVal = winner === 1 ? v1 : v2;
+        const t = getTier(finalVal, sides);
+        setTwoDisplay({ v1, v2 });
+        setTwoFinal({ v1, v2, winner });
+        setDisplay(finalVal);
+        setTier(t);
+        setResultKey(k => k + 1);
+        setHistory(h => [{ die: sides, result: finalVal, tier: t, mode }, ...h].slice(0, 8));
+        setRolling(false);
+      }
+    };
+    timerRef.current = setTimeout(tick, 30);
+  }
 
   const t = TIER[tier];
   const isCritFail = tier === 'crit-fail';
   const isCritSuccess = tier === 'crit-success';
+  const isTwoDice = mode !== 'normal';
 
   const TIER_HISTORY_COLOR: Record<Tier, string> = {
-    'crit-fail': '#ef444488',
-    'bad': '#f8717188',
-    'neutral': '#fbbf2488',
-    'good': '#4ade8088',
-    'crit-success': '#fde04788',
+    'crit-fail': '#ef444488', 'bad': '#f8717188', 'neutral': '#fbbf2488',
+    'good': '#4ade8088', 'crit-success': '#fde04788',
   };
 
   return (
@@ -165,81 +280,134 @@ export function DiceRoller() {
             </button>
           </div>
 
+          {/* Mode toggle */}
+          <div className="flex gap-1 px-4 pt-3 pb-1">
+            {(['normal', 'advantage', 'disadvantage'] as Mode[]).map(m => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setTwoDisplay(null); setTwoFinal(null); setDisplay(null); }}
+                className={cn(
+                  'flex-1 text-[11px] font-bold py-1 rounded border transition-all',
+                  mode === m
+                    ? m === 'advantage'   ? 'bg-green-800/60 border-green-500 text-green-300'
+                    : m === 'disadvantage' ? 'bg-red-900/60 border-red-600 text-red-300'
+                    : 'bg-slate-700 border-slate-500 text-white'
+                    : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-500',
+                )}
+              >
+                {m === 'normal' ? 'Normal' : m === 'advantage' ? '⬆ ADV' : '⬇ DIS'}
+              </button>
+            ))}
+          </div>
+
           {/* Result area */}
           <div
             className="flex flex-col items-center justify-center min-h-[140px] relative overflow-hidden py-4"
             style={rolling ? { animation: SHAKE_ANIM[shakePhase] } : undefined}
           >
             {/* Background flash */}
-            {display !== null && !rolling && (
-              <div
-                key={`flash-${resultKey}`}
-                className="absolute inset-0 pointer-events-none"
-                style={{ background: t.flash, animation: 'dice-flash 0.7s ease-out forwards' }}
-              />
+            {display !== null && !rolling && !isTwoDice && (
+              <div key={`flash-${resultKey}`} className="absolute inset-0 pointer-events-none"
+                style={{ background: t.flash, animation: 'dice-flash 0.7s ease-out forwards' }} />
+            )}
+            {display !== null && !rolling && isTwoDice && (
+              <div key={`flash2-${resultKey}`} className="absolute inset-0 pointer-events-none"
+                style={{ background: t.flash, animation: 'dice-flash 0.7s ease-out forwards' }} />
             )}
 
-            {/* Die shape outline */}
-            {activeDie !== null && (
-              <svg
-                viewBox="0 0 100 100"
-                className="absolute pointer-events-none"
-                style={{ width: 160, height: 160, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: rolling ? 0.1 : 0.2 }}
-              >
-                <g fill="none" stroke={rolling ? '#64748b' : t.color} strokeWidth="2.5">
-                  {DIE_SHAPE[activeDie]}
-                </g>
-              </svg>
-            )}
-
-            {/* Celebration sparks for nat 20 */}
-            {isCritSuccess && !rolling && display !== null && (
-              <div key={`sparks-${resultKey}`} className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                {SPARKS.map((deg, i) => (
-                  <div
-                    key={i}
-                    className="absolute w-1.5 h-1.5 rounded-full"
-                    style={{
-                      background: ['#fde047','#fb923c','#4ade80','#60a5fa','#c084fc','#f472b6','#fde047','#4ade80'][i],
-                      animation: `spark-out 0.7s ${i * 0.04}s ease-out forwards`,
-                      '--deg': `${deg}deg`,
-                    } as React.CSSProperties}
-                  />
-                ))}
-              </div>
-            )}
-
-            {display !== null ? (
+            {isTwoDice ? (
+              // ── Two-dice layout ──────────────────────────────────────────
               <>
-                <div
-                  key={resultKey}
-                  className="font-black tabular-nums relative z-10 leading-none"
-                  style={rolling
-                    ? { color: '#64748b', filter: ['blur(2px)','blur(1px)','none'][shakePhase], fontSize: '4.5rem', transform: ['scale(0.88)','scale(0.94)','scale(1)'][shakePhase] }
-                    : {
-                        fontSize: isCritFail ? '6rem' : isCritSuccess ? '5.5rem' : '4.5rem',
-                        color: t.color,
-                        textShadow: t.shadow,
-                        animation: t.anim,
-                        transform: `scale(${t.scale})`,
-                      }
-                  }
-                >
-                  {display}
-                </div>
-                <p
-                  className="text-xs mt-3 relative z-10 font-semibold"
-                  style={{ color: rolling ? '#475569' : t.color, opacity: rolling ? 1 : 0.85 }}
-                >
-                  {rolling
-                    ? `Rolling d${activeDie}…`
-                    : tier === 'crit-success'
+                {twoDisplay !== null ? (
+                  <div className="flex items-center justify-around w-full px-6 gap-2">
+                    <TwoDie
+                      die={activeDie!}
+                      value={twoDisplay.v1}
+                      rolling={rolling}
+                      shakePhase={shakePhase}
+                      dieState={rolling ? 'idle' : twoFinal ? (twoFinal.winner === 1 ? 'winner' : 'loser') : 'idle'}
+                      dir="left"
+                      resultKey={resultKey}
+                      tier={twoFinal?.winner === 1 ? tier : 'neutral'}
+                    />
+
+                    {/* VS divider */}
+                    <div className="flex flex-col items-center shrink-0">
+                      <span className="text-[10px] font-bold text-slate-600">
+                        {rolling ? '…' : mode === 'advantage' ? 'ADV' : 'DIS'}
+                      </span>
+                    </div>
+
+                    <TwoDie
+                      die={activeDie!}
+                      value={twoDisplay.v2}
+                      rolling={rolling}
+                      shakePhase={shakePhase}
+                      dieState={rolling ? 'idle' : twoFinal ? (twoFinal.winner === 2 ? 'winner' : 'loser') : 'idle'}
+                      dir="right"
+                      resultKey={resultKey}
+                      tier={twoFinal?.winner === 2 ? tier : 'neutral'}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-slate-600 text-sm">Pick a die to roll</p>
+                )}
+
+                {/* Winner result label */}
+                {!rolling && twoFinal && display !== null && (
+                  <p className="text-xs mt-3 relative z-10 font-semibold" style={{ color: t.color }}>
+                    {tier === 'crit-success'
                       ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
-                      : t.label || `d${activeDie}`}
-                </p>
+                      : tier === 'crit-fail'
+                      ? '💀 Critical Fail'
+                      : `${mode === 'advantage' ? '⬆ Adv' : '⬇ Dis'} → ${display} (took ${twoFinal.winner === 1 ? twoFinal.v1 : twoFinal.v2})`}
+                  </p>
+                )}
               </>
             ) : (
-              <p className="text-slate-600 text-sm">Pick a die to roll</p>
+              // ── Single-die layout (unchanged) ───────────────────────────
+              <>
+                {/* Die shape outline */}
+                {activeDie !== null && (
+                  <svg viewBox="0 0 100 100" className="absolute pointer-events-none"
+                    style={{ width: 160, height: 160, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', opacity: rolling ? 0.1 : 0.2 }}>
+                    <g fill="none" stroke={rolling ? '#64748b' : t.color} strokeWidth="2.5">
+                      {DIE_SHAPE[activeDie]}
+                    </g>
+                  </svg>
+                )}
+
+                {/* Celebration sparks */}
+                {isCritSuccess && !rolling && display !== null && (
+                  <div key={`sparks-${resultKey}`} className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    {SPARKS.map((deg, i) => (
+                      <div key={i} className="absolute w-1.5 h-1.5 rounded-full"
+                        style={{ background: ['#fde047','#fb923c','#4ade80','#60a5fa','#c084fc','#f472b6','#fde047','#4ade80'][i],
+                          animation: `spark-out 0.7s ${i * 0.04}s ease-out forwards`, '--deg': `${deg}deg` } as React.CSSProperties} />
+                    ))}
+                  </div>
+                )}
+
+                {display !== null ? (
+                  <>
+                    <div key={resultKey} className="font-black tabular-nums relative z-10 leading-none"
+                      style={rolling
+                        ? { color: '#64748b', filter: ['blur(2px)','blur(1px)','none'][shakePhase], fontSize: '4.5rem', transform: ['scale(0.88)','scale(0.94)','scale(1)'][shakePhase] }
+                        : { fontSize: isCritFail ? '6rem' : isCritSuccess ? '5.5rem' : '4.5rem', color: t.color, textShadow: t.shadow, animation: t.anim, transform: `scale(${t.scale})` }
+                      }>
+                      {display}
+                    </div>
+                    <p className="text-xs mt-3 relative z-10 font-semibold"
+                      style={{ color: rolling ? '#475569' : t.color, opacity: rolling ? 1 : 0.85 }}>
+                      {rolling ? `Rolling d${activeDie}…`
+                        : tier === 'crit-success' ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
+                        : t.label || `d${activeDie}`}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-slate-600 text-sm">Pick a die to roll</p>
+                )}
+              </>
             )}
           </div>
 
@@ -269,11 +437,11 @@ export function DiceRoller() {
               <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">Recent</p>
               <div className="flex flex-wrap gap-1.5">
                 {history.map((h, i) => (
-                  <span
-                    key={i}
-                    className="text-xs bg-slate-800 border rounded px-2 py-0.5 text-slate-300"
-                    style={{ borderColor: TIER_HISTORY_COLOR[h.tier] }}
-                  >
+                  <span key={i} className="text-xs bg-slate-800 border rounded px-2 py-0.5 text-slate-300"
+                    style={{ borderColor: TIER_HISTORY_COLOR[h.tier] }}>
+                    {h.mode === 'advantage' ? <span className="text-green-500 text-[10px]">▲ </span>
+                      : h.mode === 'disadvantage' ? <span className="text-red-500 text-[10px]">▼ </span>
+                      : null}
                     d{h.die} <span className="font-bold" style={{ color: TIER[h.tier].color }}>{h.result}</span>
                   </span>
                 ))}
@@ -355,6 +523,34 @@ export function DiceRoller() {
         @keyframes spark-out {
           0%   { transform: rotate(var(--deg)) translateX(0) scale(1); opacity:1; }
           100% { transform: rotate(var(--deg)) translateX(70px) scale(0); opacity:0; }
+        }
+        /* Two-dice: winner lunges toward the opposite die */
+        @keyframes dice-winner-lunge-right {
+          0%   { transform: translateX(0) scale(1); }
+          22%  { transform: translateX(28px) scale(1.3); }
+          40%  { transform: translateX(4px) scale(1.22); }
+          60%  { transform: translateX(10px) scale(1.25); }
+          78%  { transform: translateX(2px) scale(1.18); }
+          100% { transform: translateX(0) scale(1.2); }
+        }
+        @keyframes dice-winner-lunge-left {
+          0%   { transform: translateX(0) scale(1); }
+          22%  { transform: translateX(-28px) scale(1.3); }
+          40%  { transform: translateX(-4px) scale(1.22); }
+          60%  { transform: translateX(-10px) scale(1.25); }
+          78%  { transform: translateX(-2px) scale(1.18); }
+          100% { transform: translateX(0) scale(1.2); }
+        }
+        /* Two-dice: loser gets smacked out of frame */
+        @keyframes dice-smacked-left {
+          0%   { transform: translateX(0) rotate(0deg) scale(1); opacity: 1; }
+          12%  { transform: translateX(-8px) rotate(-6deg) scale(0.92); opacity: 0.85; }
+          100% { transform: translateX(-200px) rotate(-40deg) scale(0.2); opacity: 0; }
+        }
+        @keyframes dice-smacked-right {
+          0%   { transform: translateX(0) rotate(0deg) scale(1); opacity: 1; }
+          12%  { transform: translateX(8px) rotate(6deg) scale(0.92); opacity: 0.85; }
+          100% { transform: translateX(200px) rotate(40deg) scale(0.2); opacity: 0; }
         }
       `}</style>
     </>

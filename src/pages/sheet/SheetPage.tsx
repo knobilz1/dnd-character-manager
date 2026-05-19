@@ -56,6 +56,7 @@ export function SheetPage() {
     toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, levelUp, useHitDie, restoreHitDie, setPortrait } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
+  const [round, setRound] = React.useState(1);
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
@@ -309,6 +310,8 @@ export function SheetPage() {
             {tab === 'combat' && (
               <CombatTab
                 character={character}
+                round={round}
+                setRound={setRound}
                 hpPercent={hpPercent}
                 hpInput={hpInput}
                 hpMode={hpMode}
@@ -505,7 +508,7 @@ export function SheetPage() {
   );
 }
 
-function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMode, applyHP,
+function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, setHpInput, setHpMode, applyHP,
   setCurrentHP, setTempHP, setMaxHP, addDeathSuccess, addDeathFailure, resetDeathSaves,
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
@@ -515,6 +518,29 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
 
   return (
     <div className="space-y-4">
+      {/* Round counter */}
+      <div className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-400 uppercase tracking-wide font-semibold">Round</span>
+          <span className="text-2xl font-bold text-white tabular-nums">{round}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setRound((r: number) => r + 1)}
+            className="px-3 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 text-white text-sm font-medium transition-colors flex items-center gap-1.5"
+          >
+            Next Round →
+          </button>
+          <button
+            onClick={() => setRound(1)}
+            className="px-2 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
+            title="Reset round counter"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
       {/* Concentration banner */}
       {concentrationSpellId && (
         <div className="bg-amber-900/30 border border-amber-600 rounded-xl px-4 py-3 flex items-center justify-between">
