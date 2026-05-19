@@ -98,8 +98,12 @@ export function useCharacterDerived(character: Character | null) {
     // Initiative
     const initiative = mods.dex;
 
-    // Speed
-    const speed = race?.speed ?? 30;
+    // Speed (adjusted for exhaustion)
+    const exhaustionLevel = character.exhaustionLevel ?? 0;
+    const _baseSpeed = race?.speed ?? 30;
+    const speed = exhaustionLevel >= 5 ? 0
+      : exhaustionLevel >= 2 ? Math.floor(_baseSpeed / 2)
+      : _baseSpeed;
 
     // Spellcasting (incl. third-caster subclasses Eldritch Knight / Arcane Trickster).
     const primaryEff = primaryClassLevel
@@ -152,6 +156,12 @@ export function useCharacterDerived(character: Character | null) {
       maxSpellLevel = character.pactMagic.slotLevel;
     }
 
+    // Exhaustion flags
+    const exhaustionDisadvChecks = exhaustionLevel >= 1; // disadvantage on ability checks / skills
+    const exhaustionDisadvSaves  = exhaustionLevel >= 3; // disadvantage on saving throws
+    const exhaustionHpMaxHalved  = exhaustionLevel >= 4; // HP maximum is halved
+    const baseSpeed = _baseSpeed; // keep reference for tooltip display
+
     return {
       finalScores,
       mods,
@@ -159,6 +169,7 @@ export function useCharacterDerived(character: Character | null) {
       ac,
       initiative,
       speed,
+      baseSpeed,
       savingThrows,
       savingThrowProficiencies,
       skills,
@@ -173,6 +184,10 @@ export function useCharacterDerived(character: Character | null) {
       cantripsKnown,
       totalLevel,
       primaryClassDef,
+      exhaustionLevel,
+      exhaustionDisadvChecks,
+      exhaustionDisadvSaves,
+      exhaustionHpMaxHalved,
     };
   }, [character]);
 }

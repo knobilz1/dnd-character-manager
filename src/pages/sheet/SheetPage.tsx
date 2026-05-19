@@ -100,7 +100,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionHpMaxHalved } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -224,15 +224,15 @@ export function SheetPage() {
             <SectionHeader>Core Stats</SectionHeader>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { label: 'AC', value: ac },
-                { label: 'Init', value: initiative >= 0 ? `+${initiative}` : initiative },
-                { label: 'Speed', value: `${speed}` },
-                { label: 'Prof', value: `+${profBonus}` },
-                { label: 'Pass. Perc', value: passivePerception },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center">
+                { label: 'AC', value: ac, warn: false },
+                { label: 'Init', value: initiative >= 0 ? `+${initiative}` : `${initiative}`, warn: false },
+                { label: 'Speed', value: `${speed} ft`, warn: exhaustionLevel >= 2, warnTitle: exhaustionLevel >= 5 ? 'Speed reduced to 0 (Exhaustion 5)' : `Speed halved from ${baseSpeed} ft (Exhaustion 2)` },
+                { label: 'Prof', value: `+${profBonus}`, warn: false },
+                { label: 'Pass. Perc', value: passivePerception, warn: false },
+              ].map(({ label, value, warn, warnTitle }) => (
+                <div key={label} className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center', warn ? 'border-orange-700/60' : 'border-slate-700')} title={warn ? warnTitle : undefined}>
                   <p className="text-xs text-slate-400">{label}</p>
-                  <p className="font-bold text-white">{value}</p>
+                  <p className={cn('font-bold', warn ? 'text-orange-300' : 'text-white')}>{value}</p>
                 </div>
               ))}
             </div>
@@ -242,6 +242,11 @@ export function SheetPage() {
           <div>
             <SectionHeader>Saving Throws</SectionHeader>
             <div className="space-y-1">
+              {exhaustionDisadvSaves && (
+                <p className="text-[11px] text-orange-400 flex items-center gap-1 px-2 pb-0.5">
+                  <span>⚠</span> Disadvantage on all saves (Exhaustion {exhaustionLevel})
+                </p>
+              )}
               {abilityKeys.map(k => {
                 const val = savingThrows[k];
                 const isProficient = savingThrowProficiencies.has(k);
@@ -249,9 +254,9 @@ export function SheetPage() {
                   <div key={k} className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800">
                     <div className="flex items-center gap-2">
                       <div className={cn('w-2 h-2 rounded-full', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
-                      <span className="text-sm text-slate-300">{abilityLabels[k]}</span>
+                      <span className={cn('text-sm', exhaustionDisadvSaves ? 'text-orange-300' : 'text-slate-300')}>{abilityLabels[k]}</span>
                     </div>
-                    <span className={cn('text-sm font-bold', val >= 0 ? 'text-white' : 'text-red-400')}>
+                    <span className={cn('text-sm font-bold', val >= 0 ? (exhaustionDisadvSaves ? 'text-orange-300' : 'text-white') : 'text-red-400')}>
                       {val >= 0 ? '+' : ''}{val}
                     </span>
                   </div>
@@ -264,15 +269,20 @@ export function SheetPage() {
           <div>
             <SectionHeader>Skills</SectionHeader>
             <div className="space-y-0.5">
+              {exhaustionDisadvChecks && (
+                <p className="text-[11px] text-orange-400 flex items-center gap-1 px-2 pb-0.5">
+                  <span>⚠</span> Disadvantage on all ability checks (Exhaustion {exhaustionLevel})
+                </p>
+              )}
               {Object.entries(skills).map(([skill, bonus]) => {
                 const isProficient = allSkillProficiencies.has(skill);
                 return (
                   <div key={skill} className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800">
                     <div className="flex items-center gap-1.5">
                       <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
-                      <span className="text-xs text-slate-300 truncate">{skill}</span>
+                      <span className={cn('text-xs truncate', exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300')}>{skill}</span>
                     </div>
-                    <span className={cn('text-xs font-bold shrink-0', bonus >= 0 ? 'text-slate-300' : 'text-red-400')}>
+                    <span className={cn('text-xs font-bold shrink-0', bonus >= 0 ? (exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300') : 'text-red-400')}>
                       {bonus >= 0 ? '+' : ''}{bonus}
                     </span>
                   </div>
@@ -649,7 +659,7 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
 
       {/* Conditions */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-3">
           <SectionHeader className="mb-0">Conditions</SectionHeader>
           <button
             onClick={() => setAddConditionOpen(true)}
@@ -658,17 +668,15 @@ function CombatTab({ character, hpPercent, hpInput, hpMode, setHpInput, setHpMod
             <Plus size={12} /> Add
           </button>
         </div>
-        {character.exhaustionLevel > 0 && (
-          <div className="flex items-center gap-2 mb-2">
-            <span className="bg-orange-900/50 text-orange-300 px-2 py-1 rounded-lg text-xs font-medium border border-orange-700">
-              Exhaustion {character.exhaustionLevel}
-            </span>
-            <button onClick={() => setExhaustion(Math.max(0, character.exhaustionLevel - 1) as any)} className="text-xs text-slate-500 hover:text-white">−</button>
-            <button onClick={() => setExhaustion(Math.min(6, character.exhaustionLevel + 1) as any)} className="text-xs text-slate-500 hover:text-white">+</button>
-          </div>
-        )}
+        {/* Exhaustion tracker — always visible */}
+        <ExhaustionTracker
+          level={character.exhaustionLevel}
+          maxHP={character.maxHP}
+          speed={character.classes.length ? (getRace(character.raceId)?.speed ?? 30) : 30}
+          onChange={lvl => setExhaustion(lvl as any)}
+        />
         {character.conditions.length === 0 && character.exhaustionLevel === 0 ? (
-          <p className="text-slate-500 text-sm">No active conditions</p>
+          <p className="text-slate-500 text-sm mt-3">No active conditions</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {character.conditions.map((c: Condition) => (
@@ -949,5 +957,107 @@ function ArcaneRecoveryDialog({ open, onClose, budget, slotTotals, spellSlotsUse
         </Button>
       </div>
     </Dialog>
+  );
+}
+
+// ── Exhaustion Tracker ──────────────────────────────────────────────────────
+
+const EXHAUSTION_EFFECTS: Record<number, string[]> = {
+  1: ['Disadvantage on all ability checks (skills, tools, etc.)'],
+  2: ['Speed halved', 'Disadvantage on ability checks'],
+  3: ['Disadvantage on attack rolls', 'Disadvantage on saving throws', 'Disadvantage on ability checks', 'Speed halved'],
+  4: ['Hit point maximum halved', 'Disadvantage on attack rolls & saving throws', 'Disadvantage on ability checks', 'Speed halved'],
+  5: ['Speed reduced to 0', 'HP maximum halved', 'Disadvantage on attack rolls, saves & checks'],
+  6: ['Death'],
+};
+
+function ExhaustionTracker({ level, maxHP, speed, onChange }: {
+  level: number;
+  maxHP: number;
+  speed: number;
+  onChange: (lvl: number) => void;
+}) {
+  const [tooltipVisible, setTooltipVisible] = React.useState(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleMouseEnter() {
+    timerRef.current = setTimeout(() => setTooltipVisible(true), 1000);
+  }
+  function handleMouseLeave() {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setTooltipVisible(false);
+  }
+
+  const effects = level > 0 ? EXHAUSTION_EFFECTS[level] ?? [] : [];
+  const effectiveSpeed = level >= 5 ? 0 : level >= 2 ? Math.floor(speed / 2) : speed;
+  const effectiveMaxHP = level >= 4 ? Math.floor(maxHP / 2) : maxHP;
+
+  return (
+    <div className="relative mb-2" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-400 shrink-0 w-20">Exhaustion</span>
+        <div className="flex gap-1">
+          {[1,2,3,4,5,6].map(pip => (
+            <button
+              key={pip}
+              onClick={() => onChange(level === pip ? 0 : pip)}
+              title={`Set exhaustion to ${pip}`}
+              className={cn(
+                'w-6 h-6 rounded border text-xs font-bold transition-all',
+                pip <= level
+                  ? pip === 6
+                    ? 'bg-red-700 border-red-500 text-red-100'
+                    : pip >= 5
+                    ? 'bg-red-900/80 border-red-600 text-red-200'
+                    : pip >= 3
+                    ? 'bg-orange-800/70 border-orange-600 text-orange-200'
+                    : 'bg-orange-900/50 border-orange-700 text-orange-300'
+                  : 'bg-slate-800 border-slate-600 text-slate-500 hover:border-slate-400',
+              )}
+            >
+              {pip}
+            </button>
+          ))}
+        </div>
+        {level === 0 && <span className="text-xs text-slate-500">None</span>}
+        {level > 0 && level < 6 && (
+          <span className={cn('text-xs font-medium', level >= 5 ? 'text-red-300' : level >= 3 ? 'text-orange-300' : 'text-orange-400')}>
+            Lvl {level}
+          </span>
+        )}
+        {level === 6 && <span className="text-xs font-bold text-red-400 animate-pulse">☠ Dead</span>}
+      </div>
+
+      {/* Delayed tooltip */}
+      {tooltipVisible && level > 0 && (
+        <div className="absolute left-0 top-8 z-50 bg-slate-900 border border-orange-700/60 rounded-xl p-3 shadow-2xl w-72">
+          <p className="text-xs font-bold text-orange-300 mb-2">Exhaustion Level {level} — Current Effects</p>
+          <ul className="space-y-1">
+            {effects.map((e, i) => (
+              <li key={i} className="text-xs text-slate-300 flex items-start gap-2">
+                <span className="text-orange-500 shrink-0 mt-0.5">•</span>
+                <span>{e}</span>
+              </li>
+            ))}
+          </ul>
+          {level >= 2 && level < 5 && (
+            <p className="text-[11px] text-slate-400 mt-2 border-t border-slate-700 pt-2">
+              Speed: {effectiveSpeed} ft (base {speed} ft, halved)
+            </p>
+          )}
+          {level >= 5 && (
+            <p className="text-[11px] text-slate-400 mt-2 border-t border-slate-700 pt-2">
+              Speed: 0 ft (reduced from {speed} ft)
+            </p>
+          )}
+          {level >= 4 && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              HP maximum: {effectiveMaxHP} (halved from {maxHP})
+            </p>
+          )}
+          <p className="text-[10px] text-slate-500 mt-2">Click a pip to set level · Click active pip to clear</p>
+        </div>
+      )}
+    </div>
   );
 }
