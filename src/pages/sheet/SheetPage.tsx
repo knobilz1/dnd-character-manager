@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -53,7 +53,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, levelUp, useHitDie, restoreHitDie } = useCharacterStore();
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, levelUp, useHitDie, restoreHitDie, setPortrait } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [hpInput, setHpInput] = React.useState('');
@@ -64,8 +64,21 @@ export function SheetPage() {
   const [levelUpOpen, setLevelUpOpen] = React.useState(false);
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const portraitInputRef = React.useRef<HTMLInputElement>(null);
 
   const { saveSnapshot } = useSnapshotStore();
+
+  function handlePortraitUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const result = ev.target?.result;
+      if (typeof result === 'string') setPortrait(result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
 
   // Load character on mount
   React.useEffect(() => {
@@ -121,6 +134,20 @@ export function SheetPage() {
         <div className="flex items-center gap-3">
           <button onClick={() => navigate('/')} className="text-slate-400 hover:text-white transition-colors">
             <ArrowLeft size={20} />
+          </button>
+          {/* Portrait avatar */}
+          <input ref={portraitInputRef} type="file" accept="image/*" className="hidden" onChange={handlePortraitUpload} />
+          <button
+            onClick={() => portraitInputRef.current?.click()}
+            className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-slate-600 hover:border-red-500 transition-colors shrink-0 group"
+            title="Upload portrait"
+          >
+            {character.portrait
+              ? <img src={character.portrait} alt="Portrait" className="w-full h-full object-cover" />
+              : <div className="w-full h-full bg-slate-700 flex items-center justify-center text-slate-500 group-hover:text-red-400 transition-colors">
+                  <Camera size={16} />
+                </div>
+            }
           </button>
           <div>
             <h1 className="font-bold text-white text-lg leading-tight">{character.name}</h1>

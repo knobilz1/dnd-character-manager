@@ -155,15 +155,23 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
                   </div>
 
                   {/* Character info */}
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="text-lg font-bold text-white">{character.name || 'Unnamed'}</h3>
+                  <div className="flex items-start gap-3 mb-3">
+                    {/* Portrait */}
+                    {character.portrait && (
+                      <img
+                        src={character.portrait}
+                        alt="Portrait"
+                        className="w-14 h-14 rounded-lg object-cover border border-slate-600 shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-lg font-bold text-white truncate">{character.name || 'Unnamed'}</h3>
+                        <div className="text-xl font-bold text-white shrink-0">Lv.{level}</div>
+                      </div>
                       <p className="text-sm text-slate-400">
-                        Level {level} {race?.name ?? '?'} {classDef?.name ?? '?'}
+                        {race?.name ?? '?'} {classDef?.name ?? '?'}
                       </p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xl font-bold text-white">Lv.{level}</div>
                     </div>
                   </div>
 

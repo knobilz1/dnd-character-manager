@@ -69,6 +69,7 @@ interface CharacterState {
   setNotes: (notes: string) => void;
   setExperiencePoints: (xp: number) => void;
   updateCurrency: (coin: 'cp' | 'sp' | 'ep' | 'gp' | 'pp', value: number) => void;
+  setPortrait: (dataUrl: string | undefined) => void;
 }
 
 export const useCharacterStore = create<CharacterState>((set, get) => ({
@@ -566,4 +567,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       if (!s.character) return s;
       return { character: { ...s.character, currencies: { ...s.character.currencies, [coin]: Math.max(0, Math.floor(value)) } } };
     }),
+
+  setPortrait: (dataUrl) =>
+    set((s) => s.character ? { character: { ...s.character, portrait: dataUrl } } : s),
 }));
