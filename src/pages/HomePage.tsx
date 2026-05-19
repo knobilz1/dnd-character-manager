@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, SunMoon } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
@@ -12,6 +12,7 @@ import { totalCharacterLevel } from '../data/mechanics';
 import type { Character } from '../types';
 import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 import { useSnapshotStore } from '../store/useSnapshotStore';
+import { useThemeStore } from '../store/useThemeStore';
 
 async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
@@ -27,6 +28,7 @@ async function exportCharacter(character: Character) {
 export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: () => void; checkStatus?: UpdateCheckStatus }) {
   const navigate = useNavigate();
   const { characters, deleteCharacter, createCharacter } = useLibraryStore();
+  const { theme, toggleTheme } = useThemeStore();
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
@@ -97,7 +99,14 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             </h1>
             <p className="text-slate-400 mt-1">Unofficial 5e character manager · fan project</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-lg text-slate-500 hover:text-yellow-400 hover:bg-slate-800 transition-colors"
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              <SunMoon size={20} />
+            </button>
             <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             <Button variant="outline" size="lg" onClick={() => importRef.current?.click()}>
               <Upload size={18} />

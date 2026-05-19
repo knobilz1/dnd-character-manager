@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, SunMoon } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -16,6 +16,7 @@ import { InventoryPanel } from './InventoryPanel';
 import { DiceRoller } from './DiceRoller';
 import { SnapshotPanel } from './SnapshotPanel';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
+import { useThemeStore } from '../../store/useThemeStore';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
@@ -68,6 +69,7 @@ export function SheetPage() {
   const portraitInputRef = React.useRef<HTMLInputElement>(null);
 
   const { saveSnapshot } = useSnapshotStore();
+  const { theme, toggleTheme } = useThemeStore();
 
   function handlePortraitUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -159,6 +161,13 @@ export function SheetPage() {
         </div>
         <div className="flex items-center gap-2">
           {saved && <span className="text-xs text-green-400">Saved ✓</span>}
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 rounded text-slate-500 hover:text-yellow-400 transition-colors"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <SunMoon size={18} />
+          </button>
           <button
             onClick={() => setSnapshotOpen(true)}
             className="p-1.5 rounded text-slate-500 hover:text-violet-400 transition-colors"

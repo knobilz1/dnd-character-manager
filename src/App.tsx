@@ -1,11 +1,19 @@
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
 import { WizardPage } from './pages/wizard/WizardPage';
 import { SheetPage } from './pages/sheet/SheetPage';
 import { useAppUpdater } from './hooks/useAppUpdater';
+import { useThemeStore } from './store/useThemeStore';
 
 export default function App() {
   const updater = useAppUpdater();
+  const { theme } = useThemeStore();
+
+  // Keep the <html> data-theme attribute in sync with the store
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   return (
     <BrowserRouter>

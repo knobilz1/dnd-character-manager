@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Default colour scheme hint for the browser chrome */
+:root { color-scheme: dark; }
+
 @theme {
   --color-parchment: #f5f0e8;
   --color-parchment-dark: #e8e0cc;
@@ -41,4 +44,60 @@
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background-color: #475569;
   border-radius: 3px;
+}
+
+/* ── Light mode ─────────────────────────────────────────────────────────── */
+/* Flip the slate palette so every bg-slate-*, border-slate-*, text-slate-*,
+   and text-white Tailwind utility responds automatically via CSS variables. */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Backgrounds: deep darks → whites/light grays */
+  --color-slate-950: #f8fafc;
+  --color-slate-900: #f1f5f9;   /* page background */
+  --color-slate-800: #ffffff;   /* card / panel background */
+  --color-slate-700: #e2e8f0;   /* button bg, active tab, nested inputs */
+  --color-slate-600: #cbd5e1;   /* input borders, dividers */
+  --color-slate-500: #94a3b8;   /* very muted / placeholder */
+  --color-slate-400: #64748b;   /* muted labels */
+  --color-slate-300: #475569;   /* secondary text */
+  --color-slate-200: #334155;
+  --color-slate-100: #1e293b;
+  --color-slate-50:  #0f172a;
+
+  /* text-white → nearly-black primary text */
+  --color-white: #0f172a;
+}
+
+/* Restore true white text when it sits on a vivid coloured background
+   (red buttons, green buttons, etc.).  CSS custom properties cascade, so
+   setting --color-white here overrides the above for children/self. */
+[data-theme="light"] [class*="bg-red-"],
+[data-theme="light"] [class*="bg-green-"],
+[data-theme="light"] [class*="bg-emerald-"],
+[data-theme="light"] [class*="bg-blue-"],
+[data-theme="light"] [class*="bg-indigo-"],
+[data-theme="light"] [class*="bg-violet-"],
+[data-theme="light"] [class*="bg-purple-"],
+[data-theme="light"] [class*="bg-teal-"],
+[data-theme="light"] [class*="bg-cyan-"],
+[data-theme="light"] [class*="bg-amber-"],
+[data-theme="light"] [class*="bg-yellow-"],
+[data-theme="light"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+[data-theme="light"] body {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+[data-theme="light"] .scrollbar-thin {
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+[data-theme="light"] .scrollbar-thin::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+[data-theme="light"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
 }
