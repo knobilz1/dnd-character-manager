@@ -249,7 +249,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
         setDisplay(result);
         setTier(t);
         setResultKey(k => k + 1);
-        setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' }, ...h].slice(0, 8));
+        setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
         setRolling(false);
       }
     };

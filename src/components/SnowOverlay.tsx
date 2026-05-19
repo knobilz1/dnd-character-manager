@@ -1,5 +1,3 @@
-import React from 'react';
-
 // Four distinct sway paths so flakes don't all drift the same way.
 // Named snow-a … snow-d — keyframes are in index.css.
 const VARIANTS = ['snow-a', 'snow-b', 'snow-c', 'snow-d'] as const;

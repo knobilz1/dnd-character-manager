@@ -1,5 +1,3 @@
-import React from 'react';
-
 type HauntEmoji = '👻' | '🎃' | '💀' | '🧟' | '🦇';
 
 interface Flake {

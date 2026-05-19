@@ -1,5 +1,3 @@
-import React from 'react';
-
 // ── Wave layers at the top of the screen ─────────────────────────────────────
 // Three overlapping arched bands. border-radius is static (no repaint);
 // only transform is animated so these stay on the GPU compositor layer.
