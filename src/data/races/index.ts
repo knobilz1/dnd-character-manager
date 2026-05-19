@@ -517,7 +517,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'VGM',
     size: 'Medium',
     speed: 30,
-    abilityScoreIncreases: { str: 2, con: 1 },
+    abilityScoreIncreases: { str: 2, con: 1, int: -2 },
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
       { name: 'Aggressive', description: 'As a bonus action, you can move up to your speed toward an enemy of your choice that you can see or hear.' },

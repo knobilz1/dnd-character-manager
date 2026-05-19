@@ -6,7 +6,7 @@ import { getSubclass, ALL_SUBCLASSES } from '../../data/subclasses';
 import { getRace } from '../../data/races';
 import {
   abilityMod, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor,
-  FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
+  FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
 } from '../../data/mechanics';
 import { getEligibleFeats } from '../../data/feats';
 import { ALL_SPELLS } from '../../data/spells';
@@ -296,7 +296,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     : (sub?.spellcastingType ?? 'none');
   const slotTable =
     effectiveSpellcastingType === 'full'  ? FULL_CASTER_SLOTS  :
-    effectiveSpellcastingType === 'half'  ? HALF_CASTER_SLOTS  :
+    effectiveSpellcastingType === 'half'  ? (classId === 'artificer' ? ARTIFICER_SLOTS : HALF_CASTER_SLOTS) :
     effectiveSpellcastingType === 'third' ? THIRD_CASTER_SLOTS : null;
   const oldSlots: number[] = slotTable?.[currentLevel] ?? Array(9).fill(0);
   const newSlots: number[] = slotTable?.[newLevel] ?? Array(9).fill(0);

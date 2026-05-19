@@ -25,8 +25,35 @@ export const FULL_CASTER_SLOTS: Record<number, number[]> = {
 };
 
 // Half caster slots (Paladin, Ranger) — index by class level
+// NOTE: Artificer is also a half-caster but gets 2×1st-level slots at level 1.
+// Use ARTIFICER_SLOTS for Artificer characters.
 export const HALF_CASTER_SLOTS: Record<number, number[]> = {
   1:  [0,0,0,0,0,0,0,0,0],
+  2:  [2,0,0,0,0,0,0,0,0],
+  3:  [3,0,0,0,0,0,0,0,0],
+  4:  [3,0,0,0,0,0,0,0,0],
+  5:  [4,2,0,0,0,0,0,0,0],
+  6:  [4,2,0,0,0,0,0,0,0],
+  7:  [4,3,0,0,0,0,0,0,0],
+  8:  [4,3,0,0,0,0,0,0,0],
+  9:  [4,3,2,0,0,0,0,0,0],
+  10: [4,3,2,0,0,0,0,0,0],
+  11: [4,3,3,0,0,0,0,0,0],
+  12: [4,3,3,0,0,0,0,0,0],
+  13: [4,3,3,1,0,0,0,0,0],
+  14: [4,3,3,1,0,0,0,0,0],
+  15: [4,3,3,2,0,0,0,0,0],
+  16: [4,3,3,2,0,0,0,0,0],
+  17: [4,3,3,3,1,0,0,0,0],
+  18: [4,3,3,3,1,0,0,0,0],
+  19: [4,3,3,3,2,0,0,0,0],
+  20: [4,3,3,3,2,0,0,0,0],
+};
+
+// Artificer spell slots (TCE p. 11) — same progression as half-caster but
+// starts at level 1 (2 × 1st-level slots), unlike Paladin/Ranger who get none.
+export const ARTIFICER_SLOTS: Record<number, number[]> = {
+  1:  [2,0,0,0,0,0,0,0,0],
   2:  [2,0,0,0,0,0,0,0,0],
   3:  [3,0,0,0,0,0,0,0,0],
   4:  [3,0,0,0,0,0,0,0,0],
@@ -229,7 +256,7 @@ export function maxPreparedSpellsFor(
       if (level < 2) return 0;
       return Math.max(1, Math.floor(level / 2) + spellMod);
     case 'artificer':
-      if (level < 2) return 0;
+      // Artificer gets spells at level 1 (unlike Paladin/Ranger who start at 2)
       return Math.max(1, Math.ceil(level / 2) + spellMod);
     default:
       return null; // sorcerer, bard, ranger, warlock are known/spontaneous

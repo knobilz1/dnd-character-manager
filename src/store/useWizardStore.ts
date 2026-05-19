@@ -110,10 +110,15 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       const current = { ...(s.draft.baseAbilityScores ?? { str:8,dex:8,con:8,int:8,wis:8,cha:8 }) };
       const oldValue = current[ability];
       current[ability] = value;
-      // Put old value back to unassigned if it was from standard array
       const stdArr = [15, 14, 13, 12, 10, 8];
+      // Remove the newly assigned value from the pool
       let unassigned = s.standardArrayUnassigned.filter(v => v !== value);
-      if (oldValue && stdArr.includes(oldValue)) unassigned.push(oldValue);
+      // Only return the old value to the pool if it was actually taken from the pool.
+      // If it's still present in standardArrayUnassigned it was never taken (it's just
+      // the initial default of 8), so don't push a phantom duplicate back in.
+      if (oldValue && stdArr.includes(oldValue) && !s.standardArrayUnassigned.includes(oldValue)) {
+        unassigned.push(oldValue);
+      }
       unassigned = unassigned.sort((a,b) => b-a);
       return {
         draft: { ...s.draft, baseAbilityScores: current },

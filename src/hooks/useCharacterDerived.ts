@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
-import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
+import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
@@ -67,12 +67,11 @@ export function useCharacterDerived(character: Character | null) {
     if (primaryClassDef?.id === 'barbarian') ac = 10 + mods.dex + mods.con;
     else if (primaryClassDef?.id === 'monk') ac = 10 + mods.dex + mods.wis;
 
-    // Saving throws
+    // Saving throws — per PHB multiclassing rules, you only keep the saving throw
+    // proficiencies of your FIRST class. Adding every class's saves is wrong.
     const savingThrowProficiencies = new Set<AbilityKey>();
-    for (const cl of character.classes) {
-      const def = getClass(cl.classId);
-      if (def) def.savingThrows.forEach(s => savingThrowProficiencies.add(s));
-    }
+    const primarySaveDef = getClass(character.classes[0]?.classId);
+    if (primarySaveDef) primarySaveDef.savingThrows.forEach(s => savingThrowProficiencies.add(s));
     const savingThrows: Record<AbilityKey, number> = {} as Record<AbilityKey, number>;
     for (const k of Object.keys(mods) as AbilityKey[]) {
       savingThrows[k] = mods[k] + (savingThrowProficiencies.has(k) ? profBonus : 0);
@@ -127,7 +126,8 @@ export function useCharacterDerived(character: Character | null) {
     if (spellcasterClasses.length === 1) {
       const { cl, eff } = spellcasterClasses[0];
       const table = eff.type === 'full' ? FULL_CASTER_SLOTS :
-        eff.type === 'half' ? HALF_CASTER_SLOTS : THIRD_CASTER_SLOTS;
+        eff.type === 'half' ? (cl.classId === 'artificer' ? ARTIFICER_SLOTS : HALF_CASTER_SLOTS) :
+        THIRD_CASTER_SLOTS;
       const row = table[Math.min(Math.max(cl.level, 1), 20)] ?? [];
       row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
     } else if (spellcasterClasses.length > 1) {
@@ -145,6 +145,15 @@ export function useCharacterDerived(character: Character | null) {
       const spellMod = mods[spellcastingAbility];
       maxPreparedSpells = maxPreparedSpellsFor(primaryClassDef.id, casterLevel, spellMod);
       cantripsKnown = cantripsKnownFor(primaryClassDef.id, casterLevel);
+      // Eldritch Knight and Arcane Trickster learn cantrips via their subclass
+      // (2 at level 3, 3 at level 10). The base Fighter/Rogue class has 0 cantrips
+      // so cantripsKnownFor returns 0 — override it here.
+      if (cantripsKnown === 0 && primaryClassLevel?.subclassId) {
+        const sub = getSubclass(primaryClassLevel.subclassId);
+        if (sub?.spellcastingType === 'third') {
+          cantripsKnown = casterLevel >= 10 ? 3 : casterLevel >= 3 ? 2 : 0;
+        }
+      }
     }
 
     // Highest leveled slot the character has access to

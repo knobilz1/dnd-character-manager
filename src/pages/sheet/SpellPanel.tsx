@@ -125,8 +125,9 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
         </Button>
       </div>
 
-      {/* Half-caster gating hint (paladin/ranger/artificer at level 1 have no slots yet). */}
-      {classDef && ['paladin', 'ranger', 'artificer'].includes(classDef.id) && maxSpellLevel === 0 && (
+      {/* Half-caster gating hint (paladin/ranger at level 1 have no slots yet). */}
+      {/* Note: Artificer gets slots at level 1, so they are excluded from this hint. */}
+      {classDef && ['paladin', 'ranger'].includes(classDef.id) && maxSpellLevel === 0 && (
         <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/40 rounded-lg px-3 py-2">
           {classDef.name}s gain spellcasting at level 2. You can still add spells you plan to learn later.
         </div>

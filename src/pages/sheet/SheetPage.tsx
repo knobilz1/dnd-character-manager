@@ -108,7 +108,11 @@ export function SheetPage() {
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
-  const hpPercent = Math.min(100, Math.round((character.currentHP / character.maxHP) * 100));
+  // At exhaustion 4 the HP maximum is halved (PHB p. 291)
+  const effectiveMaxHP = (character.exhaustionLevel ?? 0) >= 4
+    ? Math.floor(character.maxHP / 2)
+    : character.maxHP;
+  const hpPercent = Math.min(100, Math.round((character.currentHP / effectiveMaxHP) * 100));
 
   function applyHP() {
     const amount = parseInt(hpInput);
@@ -349,6 +353,7 @@ export function SheetPage() {
                 endConcentration={endConcentration}
                 useHitDie={useHitDie}
                 restoreHitDie={restoreHitDie}
+                effectiveMaxHP={effectiveMaxHP}
               />
             )}
             {tab === 'spells' && (
@@ -517,7 +522,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
-  useHitDie, restoreHitDie }: any) {
+  useHitDie, restoreHitDie, effectiveMaxHP }: any) {
 
   return (
     <div className="space-y-4">
@@ -567,7 +572,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
         <div className="mb-4">
           <div className="flex justify-between text-sm mb-1">
             <span className="text-slate-400">Current HP</span>
-            <span className="font-bold text-white">{character.currentHP} / {character.maxHP}</span>
+            <span className="font-bold text-white">
+              {character.currentHP} / {effectiveMaxHP}
+              {effectiveMaxHP < character.maxHP && (
+                <span className="text-red-400 text-xs ml-1">(halved)</span>
+              )}
+            </span>
           </div>
           <div className="h-4 bg-slate-700 rounded-full overflow-hidden">
             <div
