@@ -268,7 +268,7 @@ function ChargeCounter({ charges, maxCharges, onChange }: { charges: number; max
             <button
               key={i}
               onClick={() => onChange(i < charges ? charges - 1 : charges + 1)}
-              title={i < charges ? 'Click to use a charge' : 'Charge spent'}
+              title={i < charges ? 'Click to use a charge' : 'Click to restore a charge'}
               className={cn(
                 'w-3 h-3 rounded-full border transition-all',
                 i < charges

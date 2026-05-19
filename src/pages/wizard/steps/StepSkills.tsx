@@ -1,5 +1,5 @@
 import { useWizardStore } from '../../../store/useWizardStore';
-import { SKILL_ABILITY, abilityMod } from '../../../data/mechanics';
+import { SKILL_ABILITY, abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
 import { getBackground } from '../../../data/backgrounds';
 import { cn } from '../../../utils/cn';
@@ -33,6 +33,8 @@ export function StepSkills() {
     updateDraft({ selectedSkillProficiencies: Array.from(next) });
   }
 
+  const totalLevel = totalCharacterLevel(draft.classes ?? []);
+  const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;
   const chosenCount = selectedSkills.size;
 
   return (
@@ -53,7 +55,7 @@ export function StepSkills() {
           const chosen = selectedSkills.has(skill);
           const inClassList = allowedSkills.has(skill);
           const proficient = fromBg || chosen;
-          const bonus = proficient ? 2 : 0; // simplified, no actual prof bonus here
+          const bonus = proficient ? profBonus : 0;
           const modStr = (mod + bonus) >= 0 ? `+${mod + bonus}` : `${mod + bonus}`;
 
           return (

@@ -140,6 +140,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           metamagic: [],
           maneuvers: [],
           infusions: [],
+          optionalFeatures: [],
         },
         // Ensure all 9 slot levels are present; {} is truthy so can't use ?? alone.
         spellSlotsUsed: (c.spellSlotsUsed && Object.keys(c.spellSlotsUsed).length === 9)
@@ -541,8 +542,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           tempHP: 0,
           deathSaves: { successes: 0, failures: 0 },
           // Exhaustion is tracked via exhaustionLevel only; conditions list
-          // should never contain 'Exhaustion'. Clear all conditions on long rest.
-          conditions: [],
+          // should never contain 'Exhaustion'. Per 5e RAW, a long rest does NOT
+          // remove conditions — only specific spells/effects do. Preserve them.
+          conditions: s.character.conditions,
           exhaustionLevel: Math.max(0, s.character.exhaustionLevel - 1) as ExhaustionLevel,
           spellSlotsUsed: emptySlotState(),
           concentrationSpellId: undefined,
