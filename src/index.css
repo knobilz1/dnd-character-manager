@@ -280,3 +280,33 @@
   50%  { background-position: 100% 50%; }
   100% { background-position:   0% 50%; }
 }
+
+/* ── Snow keyframes (four sway patterns) ────────────────────────────────── */
+@keyframes snow-a {
+  0%   { transform: translateY(-12px) translateX(0px);   opacity: 0;    }
+  6%   {                                                  opacity: 0.65; }
+  93%  {                                                  opacity: 0.5;  }
+  100% { transform: translateY(105vh)  translateX(22px);  opacity: 0;    }
+}
+@keyframes snow-b {
+  0%   { transform: translateY(-12px) translateX(0px);   opacity: 0;    }
+  6%   {                                                  opacity: 0.55; }
+  93%  {                                                  opacity: 0.4;  }
+  100% { transform: translateY(105vh)  translateX(-20px); opacity: 0;    }
+}
+@keyframes snow-c {
+  0%   { transform: translateY(-12px) translateX(0px);   opacity: 0;    }
+  6%   {                                                  opacity: 0.7;  }
+  32%  { transform: translateY(32vh)   translateX(16px);                 }
+  65%  { transform: translateY(65vh)   translateX(-8px);                 }
+  93%  {                                                  opacity: 0.45; }
+  100% { transform: translateY(105vh)  translateX(10px);  opacity: 0;    }
+}
+@keyframes snow-d {
+  0%   { transform: translateY(-12px) translateX(0px);   opacity: 0;    }
+  6%   {                                                  opacity: 0.6;  }
+  38%  { transform: translateY(38vh)   translateX(-18px);                }
+  72%  { transform: translateY(72vh)   translateX(12px);                 }
+  93%  {                                                  opacity: 0.4;  }
+  100% { transform: translateY(105vh)  translateX(-6px);  opacity: 0;    }
+}
