@@ -34,12 +34,15 @@ const STARS = Array.from({ length: 80 }, (_, i) => ({
 }));
 
 // ── Shooting stars ────────────────────────────────────────────────────────────
+// Start off-screen to the top-right; sweep diagonally down-left, then vanish.
+// Active movement is ~20% of the cycle so it feels like a quick streak with
+// a natural pause before the next one.
 const SHOOTING_STARS = Array.from({ length: 3 }, (_, i) => ({
   id: i,
-  top:   `${6  + i * 9}%`,
-  left:  `${70 + i * 10}%`,
-  duration: `${5 + i * 3}s`,
-  delay:    `${-(i * 2.8).toFixed(1)}s`,
+  top:      `${3  + i * 7}%`,
+  left:     `${72 + i * 9}%`,
+  duration: `${7  + i * 2.5}s`,
+  delay:    `${-(i * 2.4).toFixed(1)}s`,
 }));
 
 // ── Gold dust particles ───────────────────────────────────────────────────────
@@ -115,10 +118,11 @@ export function EidOverlay() {
         <div key={ss.id} style={{
           position: 'absolute',
           top: ss.top, left: ss.left,
-          width: 120, height: 2,
-          borderRadius: 2,
-          background: 'linear-gradient(to left, #fff8e7cc, transparent)',
-          animation: `eid-shoot ${ss.duration} ${ss.delay} ease-in infinite`,
+          width: 220, height: 1.5,
+          borderRadius: 1,
+          // Left = bright head (leading edge), right = transparent tail
+          background: 'linear-gradient(to right, #ffffff, rgba(255,248,231,0.6), transparent)',
+          animation: `eid-shoot ${ss.duration} ${ss.delay} linear infinite`,
           willChange: 'transform, opacity',
         }} />
       ))}
@@ -381,12 +385,15 @@ export function EidOverlay() {
           88%  {                                                   opacity: 0.5;  }
           100% { transform: translateY(-96vh) translateX(4px);    opacity: 0;    }
         }
+        /* Shooting star: diagonal streak, bright head on left.
+           Element is tilted -22°; translate moves it down-left to match that angle.
+           Active sweep is 0–22% of cycle so it feels like a quick flash. */
         @keyframes eid-shoot {
-          0%   { transform: translateX(0)     translateY(0);    opacity: 0;   }
-          5%   {                                                 opacity: 0.9; }
-          70%  { transform: translateX(-55vw) translateY(20vh); opacity: 0.4; }
-          85%  {                                                 opacity: 0;   }
-          100% { opacity: 0; }
+          0%   { transform: translateX(0)      translateY(0)      rotate(-22deg); opacity: 0;   }
+          4%   {                                                                   opacity: 1;   }
+          18%  { transform: translateX(-52vw)  translateY(20vh)   rotate(-22deg); opacity: 0.6; }
+          24%  { transform: translateX(-58vw)  translateY(22vh)   rotate(-22deg); opacity: 0;   }
+          100% { transform: translateX(-58vw)  translateY(22vh)   rotate(-22deg); opacity: 0;   }
         }
       `}</style>
     </div>
