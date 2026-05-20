@@ -360,7 +360,7 @@ const THEME_META: Record<Theme, { color: string; emoji: string | null; title: st
   christmas: { color: 'text-green-400 hover:text-yellow-300',   emoji: '🎄',  title: 'Deep sea mode 🌊'         },
   deepsea:   { color: 'text-cyan-400 hover:text-cyan-200',      emoji: '🌊',  title: 'Eid Mubarak 🌙'           },
   eid:       { color: 'text-yellow-400 hover:text-yellow-200',  emoji: '🌙',  title: 'Switch to light mode ☀️'  },
-  light:     { color: 'text-slate-800 hover:text-slate-600',    emoji: null,  title: 'Switch to dark mode'      },
+  light:     { color: 'text-slate-50 hover:text-slate-100',     emoji: null,  title: 'Switch to dark mode'      },
 };
 
 export function ThemeToggleButton({ theme, onToggle, size = 18 }: {
