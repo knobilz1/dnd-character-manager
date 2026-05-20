@@ -19,29 +19,31 @@ const COLORS = [
   '#fde68a', '#a5b4fc',
 ];
 
-interface Spark { dx: number; dy: number }
+interface Spark { dx: number; dy: number; color: string }
 
-function makeSparks(count: number, radiusPx: number): Spark[] {
+function makeSparks(count: number, radiusPx: number, fwId: number): Spark[] {
   return Array.from({ length: count }, (_, i) => {
     const rad = (2 * Math.PI / count) * i;
     // vary radius slightly so they don't all land on the same circle
     const r = radiusPx + (i % 4) * 18;
-    return { dx: Math.cos(rad) * r, dy: Math.sin(rad) * r };
+    // each spark gets its own color — offset by firework id so adjacent sparks differ
+    const color = COLORS[(fwId * 7 + i * 3) % COLORS.length];
+    return { dx: Math.cos(rad) * r, dy: Math.sin(rad) * r, color };
   });
 }
 
-// 14 deterministic fireworks
+// 14 deterministic fireworks — burst tops kept high (3–28 % from top)
 const FIREWORKS = Array.from({ length: 14 }, (_, i) => {
-  const color = COLORS[i % COLORS.length];
   const sparkCount = i % 2 === 0 ? 16 : 12;
   return {
     id: i,
     left:     `${5  + ((i * 6.1  + (i % 5) * 2.5) % 88).toFixed(1)}%`,
-    burstTop: `${8  + ((i * 3.5  + (i % 4) * 4.8) % 48).toFixed(1)}%`,
+    burstTop: `${3  + ((i * 2.3  + (i % 5) * 3.1) % 25).toFixed(1)}%`,
     duration: `${(3.6 + (i % 6) * 0.55).toFixed(1)}s`,
     delay:    `${-((i * 0.85 + (i % 4) * 1.15) % 7).toFixed(2)}s`,
-    color,
-    sparks: makeSparks(sparkCount, 55),
+    // rocket trail colour — first spark's colour
+    rocketColor: COLORS[(i * 7) % COLORS.length],
+    sparks: makeSparks(sparkCount, 60, i),
   };
 });
 
@@ -61,19 +63,18 @@ export function FireworksOverlay() {
               position: 'fixed',
               left: fw.left,
               top:  fw.burstTop,
-              // centre the 3 px wide trail on the left anchor
               marginLeft: -1.5,
               width:  3,
               height: 16,
               borderRadius: 2,
-              background: `linear-gradient(to top, ${fw.color}dd, transparent)`,
+              background: `linear-gradient(to top, ${fw.rocketColor}dd, transparent)`,
               animation: `fw-rocket ${fw.duration} ${fw.delay} infinite`,
               willChange: 'transform, opacity',
             }}
           />
 
-          {/* ── Burst sparks ── */}
-          {fw.sparks.map((_spark, si) => (
+          {/* ── Burst sparks — each its own colour ── */}
+          {fw.sparks.map((spark, si) => (
             <div
               key={si}
               style={{
@@ -85,15 +86,13 @@ export function FireworksOverlay() {
                 width:  4,
                 height: 4,
                 borderRadius: '50%',
-                background: fw.color,
-                boxShadow:   `0 0 5px 2px ${fw.color}77`,
+                background: spark.color,
+                boxShadow:   `0 0 5px 2px ${spark.color}77`,
                 animation:   `fw-spark ${fw.duration} infinite`,
-                // stagger each spark slightly so the burst "pops"
                 animationDelay: `calc(${fw.delay} + ${(si * 0.008).toFixed(3)}s)`,
                 willChange: 'transform, opacity',
-                // pre-computed screen-space offsets so gravity is always downward
-                ['--dx' as string]: fw.sparks[si].dx,
-                ['--dy' as string]: fw.sparks[si].dy,
+                ['--dx' as string]: spark.dx,
+                ['--dy' as string]: spark.dy,
               } as React.CSSProperties}
             />
           ))}
