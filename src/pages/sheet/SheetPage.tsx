@@ -6,7 +6,7 @@ import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper, ThemeToggleButton } from '../../components/ui';
+import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper, ThemeToggleButton, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
@@ -572,6 +572,269 @@ export function SheetPage() {
   );
 }
 
+// ── Combat Abilities Panel ───────────────────────────────────────────────────
+// Shows prepared/known spells, class features, and magic-item abilities at the
+// bottom of the Combat tab so everything needed in a fight is in one place.
+
+const PREPARED_CASTER_IDS = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
+
+const SPELL_SCHOOL_COLORS: Record<string, string> = {
+  Abjuration: 'text-blue-400',   Conjuration: 'text-purple-400',
+  Divination: 'text-indigo-400', Enchantment: 'text-pink-400',
+  Evocation:  'text-red-400',    Illusion: 'text-violet-400',
+  Necromancy: 'text-slate-300',  Transmutation: 'text-green-400',
+};
+
+function castTimeShort(ct: string): string {
+  const l = ct.toLowerCase();
+  if (l.includes('bonus action')) return 'BA';
+  if (l.includes('reaction'))    return 'RXN';
+  if (l.match(/\d+ (minute|hour)/)) return l.replace(/1 (minute|hour)/, '1min').replace(/(\d+) minutes?/, '$1min').replace(/(\d+) hours?/, '$1hr').split(' ').slice(0,2).join(' ');
+  return 'A';
+}
+
+function spellLevelLabel(lvl: number): string {
+  if (lvl === 0) return 'Cantrip';
+  const ord = ['','1st','2nd','3rd','4th','5th','6th','7th','8th','9th'];
+  return ord[lvl] ?? `${lvl}th`;
+}
+
+function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
+  character: any;
+  spellSaveDC: number;
+  spellAttackBonus: number;
+}) {
+  const [spellsOpen,     setSpellsOpen]     = React.useState(true);
+  const [abilitiesOpen,  setAbilitiesOpen]  = React.useState(true);
+  const [itemsOpen,      setItemsOpen]      = React.useState(true);
+
+  const primaryClassId  = character.classes[0]?.classId ?? '';
+  const isPreparedCaster = PREPARED_CASTER_IDS.includes(primaryClassId);
+
+  // ── Spells ──────────────────────────────────────────────────────────────────
+  // Prepared casters: show cantrips + spells marked isPrepared or isAlwaysPrepared.
+  // Known casters (Bard, Sorcerer, Warlock, Ranger…): all spells in book are always
+  // available — show everything.
+  type SpellEntry = { spell: ReturnType<typeof getSpell>; alwaysPrepared: boolean };
+  const combatSpells: SpellEntry[] = (character.spellbook ?? [])
+    .map((sp: any): SpellEntry | null => {
+      const spell = getSpell(sp.spellId);
+      if (!spell) return null;
+      if (spell.level === 0)                    return { spell, alwaysPrepared: false };
+      if (sp.isPrepared || sp.isAlwaysPrepared) return { spell, alwaysPrepared: sp.isAlwaysPrepared };
+      if (!isPreparedCaster)                    return { spell, alwaysPrepared: false }; // known caster
+      return null;
+    })
+    .filter(Boolean)
+    .sort((a: SpellEntry, b: SpellEntry) =>
+      (a.spell?.level ?? 0) - (b.spell?.level ?? 0) ||
+      (a.spell?.name ?? '').localeCompare(b.spell?.name ?? ''),
+    ) as SpellEntry[];
+
+  // ── Class & subclass features ────────────────────────────────────────────────
+  const classAbilities: { name: string; description: string; source: string; level: number }[] =
+    character.classes.flatMap((cl: any) => {
+      const def = getClass(cl.classId);
+      const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+      return [
+        ...(def?.features.filter((f: any) => f.level <= cl.level && !f.isASI) ?? [])
+          .map((f: any) => ({ name: f.name, description: f.description, source: def!.name, level: f.level })),
+        ...(sub?.features.filter((f: any) => f.level <= cl.level) ?? [])
+          .map((f: any) => ({ name: f.name, description: f.description, source: sub!.name, level: f.level })),
+      ];
+    });
+
+  // ── Magic-item abilities ─────────────────────────────────────────────────────
+  // Show any item categorised as 'magic' that has a description or charge tracking.
+  const magicItems = (character.inventory ?? []).filter(
+    (item: any) => item.category === 'magic' && (item.description || item.maxCharges != null),
+  );
+
+  const hasSpells    = combatSpells.length > 0;
+  const hasAbilities = classAbilities.length > 0;
+  const hasItems     = magicItems.length > 0;
+  if (!hasSpells && !hasAbilities && !hasItems) return null;
+
+  // Shared chevron button helper
+  function SectionToggle({ label, open, onToggle, count }: { label: string; open: boolean; onToggle: () => void; count: number }) {
+    return (
+      <button onClick={onToggle} className="flex items-center justify-between w-full group">
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-400 group-hover:text-slate-300 transition-colors">
+          {label}
+          <span className="ml-2 text-slate-600 font-normal normal-case tracking-normal">({count})</span>
+        </span>
+        <span className="text-slate-500 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+
+      {/* ── Spells ── */}
+      {hasSpells && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionToggle
+            label={isPreparedCaster ? 'Prepared Spells' : 'Known Spells'}
+            open={spellsOpen}
+            onToggle={() => setSpellsOpen(o => !o)}
+            count={combatSpells.length}
+          />
+          {spellsOpen && (
+            <div className="mt-3 space-y-px">
+              {combatSpells.map(({ spell, alwaysPrepared }) => spell && (
+                <HoverCard
+                  key={spell.id}
+                  content={
+                    <div>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <p className="font-bold text-white text-sm">{spell.name}</p>
+                        {spell.concentration && <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1 rounded">Conc.</span>}
+                        {spell.ritual && <span className="text-[10px] bg-teal-900/50 text-teal-300 px-1 rounded">Ritual</span>}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        {spellLevelLabel(spell.level)} {spell.school} · {spell.castingTime} · Range: {spell.range} · {spell.duration}
+                      </p>
+                      {(spell.savingThrow || spell.damageType) && (
+                        <p className="text-[10px] text-slate-300 mb-2">
+                          {spell.savingThrow && `DC ${spellSaveDC} ${spell.savingThrow.toUpperCase()} save`}
+                          {spell.savingThrow && spell.damageType && ' · '}
+                          {spell.damageType && spell.damageType}
+                        </p>
+                      )}
+                      <p className="text-xs text-slate-300 leading-relaxed">{spell.description}</p>
+                      {spell.atHigherLevels && (
+                        <p className="text-[10px] text-slate-400 mt-2 italic border-t border-slate-700 pt-1.5">
+                          At higher levels: {spell.atHigherLevels}
+                        </p>
+                      )}
+                    </div>
+                  }
+                >
+                  <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-700/50 transition-colors cursor-default select-none">
+                    {/* Casting time badge */}
+                    <span className={cn(
+                      'text-[10px] font-bold rounded px-1.5 py-0.5 min-w-[28px] text-center shrink-0',
+                      castTimeShort(spell.castingTime) === 'BA'  ? 'bg-amber-900/60 text-amber-300' :
+                      castTimeShort(spell.castingTime) === 'RXN' ? 'bg-purple-900/60 text-purple-300' :
+                      'bg-slate-700 text-slate-300',
+                    )}>
+                      {castTimeShort(spell.castingTime)}
+                    </span>
+                    {/* Level */}
+                    <span className="text-[10px] text-slate-500 w-[38px] shrink-0">{spellLevelLabel(spell.level)}</span>
+                    {/* Name */}
+                    <span className="text-sm text-white font-medium flex-1 truncate">{spell.name}</span>
+                    {/* School (abbreviated, hidden on small) */}
+                    <span className={cn('text-[10px] hidden sm:inline shrink-0 w-[28px]', SPELL_SCHOOL_COLORS[spell.school] ?? 'text-slate-400')}>
+                      {spell.school.slice(0, 4)}
+                    </span>
+                    {/* Range */}
+                    <span className="text-[10px] text-slate-500 shrink-0 w-[42px] text-right">
+                      {spell.range.replace(' feet', 'ft').replace(' foot', 'ft')}
+                    </span>
+                    {/* Indicators */}
+                    {spell.concentration && <span className="text-yellow-400/80 text-[10px] shrink-0" title="Concentration">⊙</span>}
+                    {alwaysPrepared && spell.level > 0 && <span className="text-teal-400/80 text-[10px] shrink-0" title="Always prepared">✦</span>}
+                  </div>
+                </HoverCard>
+              ))}
+              {/* Spell stats footer */}
+              {(spellAttackBonus !== 0 || spellSaveDC !== 0) && (
+                <div className="flex gap-4 pt-2 mt-1 border-t border-slate-700/50">
+                  {spellAttackBonus !== 0 && (
+                    <p className="text-[10px] text-slate-400">Spell Attack <span className="text-white font-bold">{spellAttackBonus >= 0 ? '+' : ''}{spellAttackBonus}</span></p>
+                  )}
+                  {spellSaveDC !== 0 && (
+                    <p className="text-[10px] text-slate-400">Save DC <span className="text-white font-bold">{spellSaveDC}</span></p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Class Abilities ── */}
+      {hasAbilities && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionToggle
+            label="Class Abilities"
+            open={abilitiesOpen}
+            onToggle={() => setAbilitiesOpen(o => !o)}
+            count={classAbilities.length}
+          />
+          {abilitiesOpen && (
+            <div className="mt-3 space-y-px">
+              {classAbilities.map((ability, idx) => (
+                <HoverCard
+                  key={`${ability.name}-${idx}`}
+                  content={
+                    <div>
+                      <p className="font-bold text-white text-sm mb-0.5">{ability.name}</p>
+                      <p className="text-[10px] text-slate-400 mb-2">{ability.source} · Lv {ability.level}</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{ability.description}</p>
+                    </div>
+                  }
+                >
+                  <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-700/50 transition-colors cursor-default select-none">
+                    <span className="text-sm text-white font-medium flex-1 truncate">{ability.name}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">{ability.source}</span>
+                    <span className="text-[10px] text-slate-600 shrink-0 w-[28px] text-right">Lv{ability.level}</span>
+                  </div>
+                </HoverCard>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Magic Item Abilities ── */}
+      {hasItems && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionToggle
+            label="Magic Item Abilities"
+            open={itemsOpen}
+            onToggle={() => setItemsOpen(o => !o)}
+            count={magicItems.length}
+          />
+          {itemsOpen && (
+            <div className="mt-3 space-y-px">
+              {magicItems.map((item: any) => (
+                <HoverCard
+                  key={item.id}
+                  content={
+                    <div>
+                      <p className="font-bold text-white text-sm mb-1">{item.name}</p>
+                      {item.maxCharges != null && (
+                        <p className="text-[10px] text-amber-400 mb-1.5">Charges: {item.charges ?? 0} / {item.maxCharges}</p>
+                      )}
+                      <p className="text-xs text-slate-300 leading-relaxed">{item.description || '(No description added)'}</p>
+                    </div>
+                  }
+                >
+                  <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-700/50 transition-colors cursor-default select-none">
+                    <span className="text-sm text-white font-medium flex-1 truncate">{item.name}</span>
+                    {item.maxCharges != null && (
+                      <span className="text-[10px] text-amber-300 shrink-0">{item.charges ?? 0}/{item.maxCharges} charges</span>
+                    )}
+                    {item.description && (
+                      <span className="text-[10px] text-slate-500 truncate max-w-[140px] hidden sm:inline shrink-0">
+                        {item.description.slice(0, 55)}{item.description.length > 55 ? '…' : ''}
+                      </span>
+                    )}
+                  </div>
+                </HoverCard>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+    </div>
+  );
+}
+
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
 function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mods: any; profBonus: number }) {
   const { triggerRoll } = useDiceStore();
@@ -1076,6 +1339,14 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
           })}
         </div>
       )}
+
+      {/* ── Combat Spells & Abilities ── */}
+      <CombatAbilitiesPanel
+        character={character}
+        spellSaveDC={spellSaveDC}
+        spellAttackBonus={spellAttackBonus}
+      />
+
     </div>
   );
 }
