@@ -537,25 +537,4 @@
   100% { background-position:   0% 50%; }
 }
 
-/* ── Eid overlay keyframes ───────────────────────────────────────────────── */
-@keyframes eid-star-twinkle {
-  0%, 100% { opacity: 0.9; transform: scale(1);    }
-  50%       { opacity: 0.3; transform: scale(0.75); }
-}
-
-@keyframes eid-lantern-sway {
-  0%   { transform: rotate(-6deg); }
-  50%  { transform: rotate(6deg);  }
-  100% { transform: rotate(-6deg); }
-}
-
-@keyframes eid-lantern-glow {
-  0%, 100% { opacity: 0.55; }
-  50%       { opacity: 0.9;  }
-}
-
-@keyframes eid-crescent-float {
-  0%   { transform: translateY(0px)   rotate(-5deg); }
-  50%  { transform: translateY(-8px)  rotate(-3deg); }
-  100% { transform: translateY(0px)   rotate(-5deg); }
-}
+/* Eid overlay keyframes are inlined in EidOverlay.tsx */
