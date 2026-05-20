@@ -6,7 +6,7 @@ import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper, ThemeToggleButton, HoverCard } from '../../components/ui';
+import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
@@ -77,6 +77,7 @@ export function SheetPage() {
 
   const [tab, setTab] = React.useState('combat');
   const [round, setRound] = React.useState(1);
+  const [activeEffects, setActiveEffects] = React.useState<Record<string, number>>({}); // key → round when activated
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
@@ -410,6 +411,8 @@ export function SheetPage() {
                 mods={mods}
                 profBonus={profBonus}
                 resourceMaxOverrides={resourceMaxOverrides}
+                activeEffects={activeEffects}
+                setActiveEffects={setActiveEffects}
               />
             )}
             {tab === 'spells' && (
@@ -572,6 +575,27 @@ export function SheetPage() {
   );
 }
 
+// ── Sustained Ability Metadata ───────────────────────────────────────────────
+// Resources listed here get an "Activate / End" toggle + round countdown when active.
+// durationRounds: undefined = no automatic expiry countdown (e.g. Wild Shape).
+interface SustainedMeta {
+  durationRounds?: number;
+  bg: string; border: string; text: string;
+  progressBg: string; dotBg: string; label: string;
+}
+const SUSTAINED_ABILITIES: Record<string, SustainedMeta> = {
+  // ── Barbarian ──────────────────────────────────────────────────────────────
+  rage:             { durationRounds: 10, bg: 'bg-red-950/60',    border: 'border-red-600',    text: 'text-red-300',    progressBg: 'bg-red-500',    dotBg: 'bg-red-300',    label: 'Raging'           },
+  // ── Druid ──────────────────────────────────────────────────────────────────
+  wild_shape:       {                     bg: 'bg-green-950/50',  border: 'border-green-600',  text: 'text-green-300',  progressBg: 'bg-green-500',  dotBg: 'bg-green-300',  label: 'Wild Shaped'      },
+  // ── Paladin / Cleric — Channel Divinity (duration-based uses) ──────────────
+  channel_divinity: { durationRounds: 10, bg: 'bg-amber-950/50',  border: 'border-amber-600',  text: 'text-amber-300',  progressBg: 'bg-amber-500',  dotBg: 'bg-amber-300',  label: 'Channel Active'   },
+  // ── Warlock / Hexblade ─────────────────────────────────────────────────────
+  hexblade_curse:   { durationRounds: 10, bg: 'bg-violet-950/60', border: 'border-violet-600', text: 'text-violet-300', progressBg: 'bg-violet-500', dotBg: 'bg-violet-300', label: 'Hexblade Cursed'  },
+  // ── Wizard / Bladesinging ──────────────────────────────────────────────────
+  bladesong:        { durationRounds: 10, bg: 'bg-teal-950/60',   border: 'border-teal-500',   text: 'text-teal-300',   progressBg: 'bg-teal-400',   dotBg: 'bg-teal-300',   label: 'Bladesinging'     },
+};
+
 // ── Combat Abilities Panel ───────────────────────────────────────────────────
 // Shows prepared/known spells, class features, and magic-item abilities at the
 // bottom of the Combat tab so everything needed in a fight is in one place.
@@ -607,6 +631,11 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
   const [spellsOpen,     setSpellsOpen]     = React.useState(true);
   const [abilitiesOpen,  setAbilitiesOpen]  = React.useState(true);
   const [itemsOpen,      setItemsOpen]      = React.useState(true);
+  const [expandedKey,    setExpandedKey]    = React.useState<string | null>(null);
+
+  function toggleExpand(key: string) {
+    setExpandedKey(prev => prev === key ? null : key);
+  }
 
   const primaryClassId  = character.classes[0]?.classId ?? '';
   const isPreparedCaster = PREPARED_CASTER_IDS.includes(primaryClassId);
@@ -683,36 +712,12 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
           {spellsOpen && (
             <div className="mt-3 space-y-px">
               {combatSpells.map(({ spell, alwaysPrepared }) => spell && (
-                <HoverCard
-                  key={spell.id}
-                  content={
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <p className="font-bold text-white text-sm">{spell.name}</p>
-                        {spell.concentration && <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1 rounded">Conc.</span>}
-                        {spell.ritual && <span className="text-[10px] bg-teal-900/50 text-teal-300 px-1 rounded">Ritual</span>}
-                      </div>
-                      <p className="text-[10px] text-slate-400 mb-2">
-                        {spellLevelLabel(spell.level)} {spell.school} · {spell.castingTime} · Range: {spell.range} · {spell.duration}
-                      </p>
-                      {(spell.savingThrow || spell.damageType) && (
-                        <p className="text-[10px] text-slate-300 mb-2">
-                          {spell.savingThrow && `DC ${spellSaveDC} ${spell.savingThrow.toUpperCase()} save`}
-                          {spell.savingThrow && spell.damageType && ' · '}
-                          {spell.damageType && spell.damageType}
-                        </p>
-                      )}
-                      <p className="text-xs text-slate-300 leading-relaxed">{spell.description}</p>
-                      {spell.atHigherLevels && (
-                        <p className="text-[10px] text-slate-400 mt-2 italic border-t border-slate-700 pt-1.5">
-                          At higher levels: {spell.atHigherLevels}
-                        </p>
-                      )}
-                    </div>
-                  }
-                >
-                  <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-700/50 transition-colors cursor-default select-none">
-                    {/* Casting time badge */}
+                <div key={spell.id} className="rounded-lg overflow-hidden">
+                  {/* Summary row */}
+                  <button
+                    onClick={() => toggleExpand(`spell-${spell.id}`)}
+                    className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-slate-700/50 transition-colors text-left"
+                  >
                     <span className={cn(
                       'text-[10px] font-bold rounded px-1.5 py-0.5 min-w-[28px] text-center shrink-0',
                       castTimeShort(spell.castingTime) === 'BA'  ? 'bg-amber-900/60 text-amber-300' :
@@ -721,23 +726,50 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
                     )}>
                       {castTimeShort(spell.castingTime)}
                     </span>
-                    {/* Level */}
                     <span className="text-[10px] text-slate-500 w-[38px] shrink-0">{spellLevelLabel(spell.level)}</span>
-                    {/* Name */}
                     <span className="text-sm text-white font-medium flex-1 truncate">{spell.name}</span>
-                    {/* School (abbreviated, hidden on small) */}
                     <span className={cn('text-[10px] hidden sm:inline shrink-0 w-[28px]', SPELL_SCHOOL_COLORS[spell.school] ?? 'text-slate-400')}>
                       {spell.school.slice(0, 4)}
                     </span>
-                    {/* Range */}
                     <span className="text-[10px] text-slate-500 shrink-0 w-[42px] text-right">
                       {spell.range.replace(' feet', 'ft').replace(' foot', 'ft')}
                     </span>
-                    {/* Indicators */}
                     {spell.concentration && <span className="text-yellow-400/80 text-[10px] shrink-0" title="Concentration">⊙</span>}
                     {alwaysPrepared && spell.level > 0 && <span className="text-teal-400/80 text-[10px] shrink-0" title="Always prepared">✦</span>}
-                  </div>
-                </HoverCard>
+                    <span className="text-slate-500 text-[10px] shrink-0 ml-1">
+                      {expandedKey === `spell-${spell.id}` ? '▲' : '▼'}
+                    </span>
+                  </button>
+                  {/* Expanded detail */}
+                  {expandedKey === `spell-${spell.id}` && (
+                    <div className="px-3 pb-3 pt-1 bg-slate-900/60 border-t border-slate-700/50 text-xs space-y-1.5">
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        <span className="text-slate-400">{spellLevelLabel(spell.level)} {spell.school}</span>
+                        {spell.concentration && <span className="bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">Concentration</span>}
+                        {spell.ritual && <span className="bg-teal-900/50 text-teal-300 px-1.5 py-0.5 rounded text-[10px]">Ritual</span>}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
+                        <span className="text-slate-500">Cast time <span className="text-slate-300">{spell.castingTime}</span></span>
+                        <span className="text-slate-500">Range <span className="text-slate-300">{spell.range}</span></span>
+                        <span className="text-slate-500">Duration <span className="text-slate-300">{spell.duration}</span></span>
+                        {spell.components?.length > 0 && <span className="text-slate-500">Components <span className="text-slate-300">{spell.components.join(', ')}</span></span>}
+                      </div>
+                      {(spell.savingThrow || spell.damageType) && (
+                        <p className="text-[11px] text-slate-300">
+                          {spell.savingThrow && <><span className="text-slate-500">Save </span>DC {spellSaveDC} {spell.savingThrow.toUpperCase()}</>}
+                          {spell.savingThrow && spell.damageType && '  ·  '}
+                          {spell.damageType && <><span className="text-slate-500">Damage </span>{spell.damageType}</>}
+                        </p>
+                      )}
+                      <p className="text-slate-300 leading-relaxed">{spell.description}</p>
+                      {spell.atHigherLevels && (
+                        <p className="text-slate-400 italic border-t border-slate-700/50 pt-1.5">
+                          <span className="not-italic text-slate-500">At higher levels: </span>{spell.atHigherLevels}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               ))}
               {/* Spell stats footer */}
               {(spellAttackBonus !== 0 || spellSaveDC !== 0) && (
@@ -766,24 +798,30 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
           />
           {abilitiesOpen && (
             <div className="mt-3 space-y-px">
-              {classAbilities.map((ability, idx) => (
-                <HoverCard
-                  key={`${ability.name}-${idx}`}
-                  content={
-                    <div>
-                      <p className="font-bold text-white text-sm mb-0.5">{ability.name}</p>
-                      <p className="text-[10px] text-slate-400 mb-2">{ability.source} · Lv {ability.level}</p>
-                      <p className="text-xs text-slate-300 leading-relaxed">{ability.description}</p>
-                    </div>
-                  }
-                >
-                  <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-700/50 transition-colors cursor-default select-none">
-                    <span className="text-sm text-white font-medium flex-1 truncate">{ability.name}</span>
-                    <span className="text-[10px] text-slate-500 shrink-0">{ability.source}</span>
-                    <span className="text-[10px] text-slate-600 shrink-0 w-[28px] text-right">Lv{ability.level}</span>
+              {classAbilities.map((ability, idx) => {
+                const key = `ability-${ability.name}-${idx}`;
+                return (
+                  <div key={key} className="rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => toggleExpand(key)}
+                      className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-slate-700/50 transition-colors text-left"
+                    >
+                      <span className="text-sm text-white font-medium flex-1 truncate">{ability.name}</span>
+                      <span className="text-[10px] text-slate-500 shrink-0">{ability.source}</span>
+                      <span className="text-[10px] text-slate-600 shrink-0 w-[28px] text-right">Lv{ability.level}</span>
+                      <span className="text-slate-500 text-[10px] shrink-0 ml-1">
+                        {expandedKey === key ? '▲' : '▼'}
+                      </span>
+                    </button>
+                    {expandedKey === key && (
+                      <div className="px-3 pb-3 pt-1 bg-slate-900/60 border-t border-slate-700/50">
+                        <p className="text-[11px] text-slate-400 mb-1.5">{ability.source} · Level {ability.level}</p>
+                        <p className="text-xs text-slate-300 leading-relaxed">{ability.description}</p>
+                      </div>
+                    )}
                   </div>
-                </HoverCard>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -800,32 +838,33 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
           />
           {itemsOpen && (
             <div className="mt-3 space-y-px">
-              {magicItems.map((item: any) => (
-                <HoverCard
-                  key={item.id}
-                  content={
-                    <div>
-                      <p className="font-bold text-white text-sm mb-1">{item.name}</p>
+              {magicItems.map((item: any) => {
+                const key = `item-${item.id}`;
+                return (
+                  <div key={item.id} className="rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => toggleExpand(key)}
+                      className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-slate-700/50 transition-colors text-left"
+                    >
+                      <span className="text-sm text-white font-medium flex-1 truncate">{item.name}</span>
                       {item.maxCharges != null && (
-                        <p className="text-[10px] text-amber-400 mb-1.5">Charges: {item.charges ?? 0} / {item.maxCharges}</p>
+                        <span className="text-[10px] text-amber-300 shrink-0">{item.charges ?? 0}/{item.maxCharges} charges</span>
                       )}
-                      <p className="text-xs text-slate-300 leading-relaxed">{item.description || '(No description added)'}</p>
-                    </div>
-                  }
-                >
-                  <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-700/50 transition-colors cursor-default select-none">
-                    <span className="text-sm text-white font-medium flex-1 truncate">{item.name}</span>
-                    {item.maxCharges != null && (
-                      <span className="text-[10px] text-amber-300 shrink-0">{item.charges ?? 0}/{item.maxCharges} charges</span>
-                    )}
-                    {item.description && (
-                      <span className="text-[10px] text-slate-500 truncate max-w-[140px] hidden sm:inline shrink-0">
-                        {item.description.slice(0, 55)}{item.description.length > 55 ? '…' : ''}
+                      <span className="text-slate-500 text-[10px] shrink-0 ml-1">
+                        {expandedKey === key ? '▲' : '▼'}
                       </span>
+                    </button>
+                    {expandedKey === key && (
+                      <div className="px-3 pb-3 pt-1 bg-slate-900/60 border-t border-slate-700/50">
+                        {item.maxCharges != null && (
+                          <p className="text-[11px] text-amber-400 mb-1.5">Charges: {item.charges ?? 0} / {item.maxCharges}</p>
+                        )}
+                        <p className="text-xs text-slate-300 leading-relaxed">{item.description || '(No description added)'}</p>
+                      </div>
                     )}
                   </div>
-                </HoverCard>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -933,7 +972,8 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
-  useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides }: any) {
+  useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
+  activeEffects, setActiveEffects }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   return (
@@ -952,9 +992,9 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
             Next Round →
           </button>
           <button
-            onClick={() => setRound(1)}
+            onClick={() => { setRound(1); setActiveEffects({}); }}
             className="px-2 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
-            title="Reset round counter"
+            title="Reset round counter and end all active effects"
           >
             Reset
           </button>
@@ -1196,13 +1236,87 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
             {resources.filter((r: any) => r.key !== 'arcane_recovery').map((r: any) => {
               const resourceDef = getResourceDef(character, r.key);
               const displayMax = (resourceMaxOverrides?.[r.key] ?? r.max);
+              const sustained = SUSTAINED_ABILITIES[r.key];
+              const activatedRound: number | undefined = activeEffects[r.key];
+              const isActive = activatedRound !== undefined;
+
+              if (sustained && isActive) {
+                // ── Active state ─────────────────────────────────────────
+                const roundsElapsed = round - activatedRound;
+                const expired = sustained.durationRounds !== undefined && roundsElapsed >= sustained.durationRounds;
+                const roundsLeft = sustained.durationRounds !== undefined
+                  ? Math.max(0, sustained.durationRounds - roundsElapsed)
+                  : null;
+                const progressPct = sustained.durationRounds !== undefined
+                  ? Math.max(0, Math.min(100, (roundsLeft! / sustained.durationRounds) * 100))
+                  : null;
+
+                return (
+                  <div key={r.key} className={cn('rounded-xl border p-3 transition-all', expired ? 'border-slate-600 bg-slate-900' : `${sustained.border} ${sustained.bg}`)}>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2">
+                        {!expired && <div className={cn('w-2 h-2 rounded-full animate-pulse', sustained.dotBg)} />}
+                        <p className={cn('text-sm font-bold', expired ? 'text-slate-400' : sustained.text)}>
+                          {expired ? `${resourceDef?.name ?? r.key} — Expired!` : sustained.label}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setActiveEffects((prev: Record<string, number>) => { const n = { ...prev }; delete n[r.key]; return n; })}
+                        className={cn('text-xs px-2 py-1 rounded-lg font-medium transition-colors', expired ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-black/30 hover:bg-black/50 text-white')}
+                      >
+                        End
+                      </button>
+                    </div>
+
+                    {/* Countdown bar */}
+                    {!expired && sustained.durationRounds !== undefined && (
+                      <div className="mb-2">
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className={sustained.text}>{roundsLeft} round{roundsLeft !== 1 ? 's' : ''} left</span>
+                          <span className="text-slate-500">{roundsElapsed} elapsed</span>
+                        </div>
+                        <div className="h-1.5 bg-black/40 rounded-full overflow-hidden">
+                          <div
+                            className={cn('h-full rounded-full transition-all', sustained.progressBg)}
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {!expired && sustained.durationRounds === undefined && (
+                      <p className="text-xs text-slate-400 mb-2">No time limit — end manually.</p>
+                    )}
+
+                    {/* Counter row */}
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-slate-400">{resourceDef?.name ?? r.key} uses remaining</p>
+                      <NumberStepper value={Math.min(r.current, displayMax)} min={0} max={displayMax === 99 ? 999 : displayMax} onChange={v => setResource(r.key, v)} />
+                    </div>
+                  </div>
+                );
+              }
+
+              // ── Inactive state ───────────────────────────────────────
               return (
                 <div key={r.key} className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-white">{resourceDef?.name ?? r.key}</p>
                     {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
                   </div>
-                  <NumberStepper value={Math.min(r.current, displayMax)} min={0} max={displayMax === 99 ? 999 : displayMax} onChange={v => setResource(r.key, v)} />
+                  <div className="flex items-center gap-2">
+                    {sustained && r.current > 0 && (
+                      <button
+                        onClick={() => {
+                          setResource(r.key, r.current - 1);
+                          setActiveEffects((prev: Record<string, number>) => ({ ...prev, [r.key]: round }));
+                        }}
+                        className="text-xs px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white font-medium transition-colors border border-slate-600"
+                      >
+                        Activate
+                      </button>
+                    )}
+                    <NumberStepper value={Math.min(r.current, displayMax)} min={0} max={displayMax === 99 ? 999 : displayMax} onChange={v => setResource(r.key, v)} />
+                  </div>
                 </div>
               );
             })}

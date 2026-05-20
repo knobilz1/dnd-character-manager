@@ -2,9 +2,34 @@ import { create } from 'zustand';
 import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState } from '../types';
 import { getRace } from '../data/races';
 import { useLibraryStore } from './useLibraryStore';
-import { emptySlotState, PACT_MAGIC_TABLE } from '../data/mechanics';
+import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
+
+/** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
+ *  Mirrors the logic in useCharacterDerived.ts so the store can apply correct maxes
+ *  during long rest and level-up without depending on the hook. */
+function computeResourceMaxOverrides(c: Character): Record<string, number> {
+  const totalLvl = totalCharacterLevel(c.classes);
+  const profBonus = PROFICIENCY_BONUS[Math.min(totalLvl, 20)] ?? 2;
+
+  // Final ability scores = base + racial (feats omitted here; edge-case impact is minimal)
+  const race = getRace(c.raceId);
+  const racial = race?.abilityScoreIncreases ?? {};
+  const score = (key: AbilityKey) =>
+    (c.baseAbilityScores[key] ?? 10) + ((racial as Record<string, number>)[key] ?? 0);
+
+  const overrides: Record<string, number> = {};
+  if (c.classes.some(cl => cl.classId === 'bard'))
+    overrides['bardic_inspiration'] = Math.max(1, abilityMod(score('cha')));
+  if (c.classes.some(cl => cl.classId === 'artificer'))
+    overrides['flash_of_genius'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'bladesinging'))
+    overrides['bladesong'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'samurai'))
+    overrides['fighting_spirit'] = 3;
+  return overrides;
+}
 
 interface CharacterState {
   character: Character | null;
@@ -100,11 +125,31 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     // Old schema stored HP as hitPoints.max/current/temp; new schema uses maxHP/currentHP/tempHP.
     const oldHP = (c as any).hitPoints as { max?: number; current?: number; temp?: number } | undefined;
 
+    // Insert any subclass resources that didn't exist when the character was saved.
+    // This handles e.g. a Bladesinging Wizard or Hexblade Warlock created before
+    // those subclass resources were added to the data layer.
+    for (const cl of (c.classes ?? [])) {
+      const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+      for (const rd of (sub?.resources ?? [])) {
+        if (resources.some(r => r.key === rd.key)) continue; // already present
+        const rawMax = rd.maxPerLevel[cl.level] ?? 0;
+        const normMax = rawMax === 'unlimited' ? 99 : rawMax as number;
+        if (normMax > 0) resources.push({ key: rd.key, current: normMax, max: normMax });
+      }
+    }
+
+    // Pre-compute ability-mod / profBonus overrides.
+    // These must be applied AFTER the maxPerLevel re-sync below (otherwise re-sync
+    // overwrites the corrected values back to the table defaults).
+    const loadOverrides = computeResourceMaxOverrides(c);
+
     // Re-sync resource maxes against current class definitions.
     // Needed when class data changes after a character was saved (e.g. arcane_recovery
     // was previously 1 at all levels; now it's ceil(level/2)).
     // Proportionally scales current: full → still full, empty → still empty.
+    // Skip keys managed by loadOverrides — their max is not level-table-based.
     resources = resources.map(r => {
+      if (loadOverrides[r.key] != null) return r; // handled in override pass below
       for (const cl of (c.classes ?? [])) {
         const def = getClass(cl.classId);
         const classDef = def?.resources.find(rd => rd.key === r.key);
@@ -124,6 +169,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
       return r;
     });
+
+    // Apply overrides last so they are never overwritten by the re-sync pass above.
+    resources = resources.map(r =>
+      loadOverrides[r.key] != null
+        ? { ...r, max: loadOverrides[r.key]!, current: Math.min(r.current, loadOverrides[r.key]!) }
+        : r
+    );
 
     set({
       // Defensive defaults for characters created before fields like
@@ -408,6 +460,19 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         }
       }
 
+      // Apply ability-mod / prof-bonus resource overrides after the maxPerLevel pass.
+      // Uses the *new* class array (post level-up) so profBonus is already updated.
+      {
+        const tempChar = { ...s.character, classes };
+        const overrides = computeResourceMaxOverrides(tempChar);
+        for (const [key, correctMax] of Object.entries(overrides)) {
+          const idx = resources.findIndex(r => r.key === key);
+          if (idx >= 0) {
+            resources[idx] = { ...resources[idx]!, max: correctMax, current: Math.min(resources[idx]!.current, correctMax) };
+          }
+        }
+      }
+
       // Refresh pact magic if this is a warlock level up.
       let pactMagic = s.character.pactMagic;
       if (classId === 'warlock') {
@@ -531,9 +596,14 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const bardLevel = s.character.classes.find(c => c.classId === 'bard')?.level ?? 0;
       if (bardLevel >= 5) shortRestKeys.add('bardic_inspiration');
 
-      const resources = s.character.resources.map((r) =>
-        shortRestKeys.has(r.key) ? { ...r, current: r.max } : r
-      );
+      // Apply ability-mod / prof-bonus overrides so restoring to r.max gives the correct value
+      // even if r.max was set from a stale level-table entry (e.g. bardic inspiration with high CHA).
+      const srOverrides = computeResourceMaxOverrides(s.character);
+      const resources = s.character.resources.map((r) => {
+        if (!shortRestKeys.has(r.key)) return r;
+        const correctMax = srOverrides[r.key] ?? r.max;
+        return { ...r, max: correctMax, current: correctMax };
+      });
       // Restore pact magic on short rest
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
       return { character: { ...s.character, resources, pactMagic } };
@@ -543,7 +613,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     set((s) => {
       if (!s.character) return s;
       const maxHP = s.character.maxHP;
-      const resources = s.character.resources.map((r) => ({ ...r, current: r.max }));
+      // Re-apply ability-mod / prof-bonus overrides so the stored max stays accurate
+      // even if the character's stats changed since the last level-up.
+      const overrides = computeResourceMaxOverrides(s.character);
+      const resources = s.character.resources.map((r) => {
+        const correctMax = overrides[r.key] ?? r.max;
+        return { ...r, max: correctMax, current: correctMax };
+      });
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
       // Restore up to half (rounded down, min 1) of each class's used hit dice.
       const hitDiceUsed: Record<string, number> = { ...(s.character.hitDiceUsed ?? {}) };

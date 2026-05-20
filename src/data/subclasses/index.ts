@@ -409,9 +409,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Ferocious Charger', level: 15, description: 'If you move at least 10 feet in a straight line and then hit a creature with an attack, that target must succeed on a Strength save or be knocked prone.' },
     { name: 'Vigilant Defender', level: 18, description: 'You can take a reaction on every turn in combat to make an opportunity attack.' },
   ]},
-  { id: 'samurai', name: 'Samurai', classId: 'fighter', sourceBook: 'XGtE', description: 'The Samurai is a fighter who draws on an implacable fighting spirit to overcome enemies. A Samurai\'s resolve is nearly unbreakable.', features: [
+  { id: 'samurai', name: 'Samurai', classId: 'fighter', sourceBook: 'XGtE', description: 'The Samurai is a fighter who draws on an implacable fighting spirit to overcome enemies. A Samurai\'s resolve is nearly unbreakable.',
+    resources: [
+      { name: 'Fighting Spirit', key: 'fighting_spirit', rechargeOn: 'long' as const,
+        maxPerLevel: {3:3,4:3,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:3,19:3,20:3} },
+    ],
+    features: [
     { name: 'Bonus Proficiency', level: 3, description: 'You gain proficiency in one of: History, Insight, Performance, or Persuasion. Or you learn one language.' },
-    { name: 'Fighting Spirit', level: 3, description: 'As a bonus action on your turn, you can give yourself advantage on weapon attack rolls until the end of the current turn and gain 5 temp HP (10 at 10th, 15 at 15th). Wis-modifier uses per long rest.' },
+    { name: 'Fighting Spirit', level: 3, description: 'As a bonus action, give yourself advantage on weapon attack rolls until the end of your current turn and gain 5 temp HP (10 at 10th level, 15 at 15th level). 3 uses per long rest.' },
     { name: 'Elegant Courtier', level: 7, description: 'You add your Wisdom modifier to Charisma (Persuasion) checks, and you gain proficiency in Wisdom saves.' },
     { name: 'Tireless Spirit', level: 10, description: 'When you roll initiative and have no Fighting Spirit uses remaining, you regain one use.' },
     { name: 'Rapid Strike', level: 15, description: 'If you have advantage on an attack against a creature, you can forgo that advantage to make one additional attack.' },
@@ -537,7 +542,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── XGtE: WARLOCK ────────────────────────────────────────────────────
-  { id: 'hexblade', name: 'The Hexblade', classId: 'warlock', sourceBook: 'XGtE', description: 'You have made your pact with a mysterious entity from the Shadowfell — a force that manifests in sentient magic weapons.', features: [
+  { id: 'hexblade', name: 'The Hexblade', classId: 'warlock', sourceBook: 'XGtE', description: 'You have made your pact with a mysterious entity from the Shadowfell — a force that manifests in sentient magic weapons.',
+    resources: [
+      { name: "Hexblade's Curse", key: 'hexblade_curse', rechargeOn: 'short' as const,
+        maxPerLevel: {1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
+    ],
+    features: [
     { name: 'Hexblade\'s Curse', level: 1, description: 'As a bonus action, curse a creature within 30 feet for 1 minute. You gain a bonus to damage rolls against it equal to your proficiency bonus, your attacks crit on 19-20 against it, and if it dies you regain HP. Use once per short or long rest.' },
     { name: 'Hex Warrior', level: 1, description: 'You gain proficiency with medium armor, shields, and martial weapons. You can use Charisma in place of Strength or Dexterity for the attack and damage rolls of one weapon you touch at the end of a long rest.' },
     { name: 'Accursed Specter', level: 6, description: 'When you slay a humanoid, you can cause its spirit to rise as a specter under your control for 1 hour. Once per long rest.' },
@@ -758,9 +768,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── TCE: WIZARD ──────────────────────────────────────────────────────
-  { id: 'bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'TCE', description: 'Bladesingers are elves who use their wizardly training to perfect a deadly art that combines swordplay with magic.', features: [
+  { id: 'bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'TCE', description: 'Bladesingers are elves who use their wizardly training to perfect a deadly art that combines swordplay with magic.',
+    resources: [
+      // Max = proficiency bonus; overridden dynamically in useCharacterDerived + longRest.
+      // maxPerLevel entries use profBonus at each wizard class level as a safe fallback.
+      { name: 'Bladesong', key: 'bladesong', rechargeOn: 'long' as const,
+        maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+    ],
+    features: [
     { name: 'Training in War and Song', level: 2, description: 'You gain proficiency with light armor, one type of one-handed melee weapon (rapier, longsword, scimitar, sword, etc.), and Performance.' },
-    { name: 'Bladesong', level: 2, description: 'As a bonus action, you can start the Bladesong (lasts 1 minute or until you don armor/shield, use two hands, or are incapacitated). While active: +Int mod to AC, +10 ft speed, advantage on Acrobatics checks, +Int mod to Concentration saves. Prof-bonus uses per short or long rest.' },
+    { name: 'Bladesong', level: 2, description: 'As a bonus action, you can start the Bladesong (lasts 1 minute or until you don armor/shield, use two hands, or are incapacitated). While active: +Int mod to AC, +10 ft speed, advantage on Acrobatics checks, +Int mod to Concentration saves. Proficiency bonus uses per long rest.' },
     { name: 'Extra Attack', level: 6, description: 'You can attack twice when you take the Attack action. You can also replace one of these attacks with a cantrip with a casting time of 1 action.' },
     { name: 'Song of Defense', level: 10, description: 'While Bladesong is active, you can use your reaction when you take damage to expend a spell slot and reduce the damage by five times the slot level.' },
     { name: 'Song of Victory', level: 14, description: 'While Bladesong is active, you add your Intelligence modifier to the damage of your melee weapon attacks.' },

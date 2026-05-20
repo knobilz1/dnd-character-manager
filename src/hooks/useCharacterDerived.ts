@@ -169,13 +169,20 @@ export function useCharacterDerived(character: Character | null) {
       maxSpellLevel = character.pactMagic.slotLevel;
     }
 
-    // Resource max overrides — Bardic Inspiration uses CHA mod (min 1), Flash of Genius uses INT mod (min 1).
+    // Resource max overrides — ability-mod or prof-bonus based resources.
     const resourceMaxOverrides: Record<string, number> = {};
     if (character.classes.some(c => c.classId === 'bard')) {
       resourceMaxOverrides['bardic_inspiration'] = Math.max(1, mods.cha);
     }
     if (character.classes.some(c => c.classId === 'artificer')) {
       resourceMaxOverrides['flash_of_genius'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'bladesinging')) {
+      resourceMaxOverrides['bladesong'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'samurai')) {
+      // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)
+      resourceMaxOverrides['fighting_spirit'] = 3;
     }
 
     // Exhaustion flags
