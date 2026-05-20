@@ -20,6 +20,8 @@ import { useThemeStore } from '../../store/useThemeStore';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
+import { useDiceStore } from '../../store/useDiceStore';
+import { lookupWeapon, rollDamage, damageLine } from '../../data/weapons';
 
 // Find a resource definition by key, checking both class and subclass.
 function getResourceDef(character: any, key: string) {
@@ -43,6 +45,23 @@ const CONDITION_LIST: Condition[] = [
   'Incapacitated','Invisible','Paralyzed','Petrified','Poisoned','Prone',
   'Restrained','Stunned','Unconscious',
 ];
+
+const CONDITION_DESC: Partial<Record<Condition, string>> = {
+  Blinded:        "Can't see. Auto-fail sight-based ability checks. Attack rolls against you have advantage; your attack rolls have disadvantage.",
+  Charmed:        "Can't attack the charmer. The charmer has advantage on Charisma checks against you.",
+  Deafened:       "Can't hear. Auto-fail hearing-based ability checks.",
+  Frightened:     "Disadvantage on ability checks and attack rolls while source of fear is in line of sight. Can't willingly move closer to source.",
+  Grappled:       "Speed becomes 0. Ends if grappler is incapacitated or you are moved out of reach.",
+  Incapacitated:  "Can't take actions or reactions.",
+  Invisible:      "Impossible to see without magic. Considered heavily obscured. Your attacks have advantage; attacks against you have disadvantage.",
+  Paralyzed:      "Incapacitated, can't move or speak. Auto-fail STR & DEX saves. Attacks against you have advantage. Any hit within 5 ft is a critical hit.",
+  Petrified:      "Turned to stone. Incapacitated, can't move. Auto-fail STR & DEX saves. Resistance to all damage; immune to poison and disease.",
+  Poisoned:       "Disadvantage on attack rolls and ability checks.",
+  Prone:          "Disadvantage on attack rolls. Melee attacks against you have advantage; ranged attacks have disadvantage. Must spend half speed to stand up.",
+  Restrained:     "Speed 0. Attack rolls against you have advantage; your attack rolls have disadvantage. Disadvantage on DEX saves.",
+  Stunned:        "Incapacitated, can't move, can only speak falteringly. Auto-fail STR & DEX saves. Attacks against you have advantage.",
+  Unconscious:    "Incapacitated, can't move or speak. Unaware of surroundings. Drop held items, fall prone. Auto-fail STR & DEX saves. Attacks against you have advantage. Hits within 5 ft are critical hits.",
+};
 
 export function SheetPage() {
   const { id } = useParams<{ id: string }>();
@@ -98,12 +117,13 @@ export function SheetPage() {
   }, [character]);
 
   const derived = useCharacterDerived(character);
+  const { triggerRoll } = useDiceStore();
 
   if (!character || !derived) {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, passivePerception, passiveInsight, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -231,18 +251,41 @@ export function SheetPage() {
           <div>
             <SectionHeader>Core Stats</SectionHeader>
             <div className="grid grid-cols-3 gap-2">
-              {[
-                { label: 'AC', value: ac, warn: false },
-                { label: 'Init', value: initiative >= 0 ? `+${initiative}` : `${initiative}`, warn: false },
-                { label: 'Speed', value: `${speed} ft`, warn: exhaustionLevel >= 2, warnTitle: exhaustionLevel >= 5 ? 'Speed reduced to 0 (Exhaustion 5)' : `Speed halved from ${baseSpeed} ft (Exhaustion 2)` },
-                { label: 'Prof', value: `+${profBonus}`, warn: false },
-                { label: 'Pass. Perc', value: passivePerception, warn: false },
-              ].map(({ label, value, warn, warnTitle }) => (
-                <div key={label} className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center', warn ? 'border-orange-700/60' : 'border-slate-700')} title={warn ? warnTitle : undefined}>
-                  <p className="text-xs text-slate-400">{label}</p>
-                  <p className={cn('font-bold', warn ? 'text-orange-300' : 'text-white')}>{value}</p>
-                </div>
-              ))}
+              {/* AC — static */}
+              <div className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center">
+                <p className="text-xs text-slate-400">AC</p>
+                <p className="font-bold text-white">{ac}</p>
+              </div>
+              {/* Initiative — clickable to roll */}
+              <button
+                onClick={() => triggerRoll(20, initiative, 'Initiative')}
+                className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center hover:border-blue-500/60 hover:bg-slate-800 transition-colors cursor-pointer group"
+                title="Click to roll initiative"
+              >
+                <p className="text-xs text-slate-400 group-hover:text-blue-400 transition-colors">Init <span className="text-[10px] opacity-60">🎲</span></p>
+                <p className="font-bold text-white">{initiative >= 0 ? `+${initiative}` : `${initiative}`}</p>
+              </button>
+              {/* Speed */}
+              <div className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center', exhaustionLevel >= 2 ? 'border-orange-700/60' : 'border-slate-700')}
+                title={exhaustionLevel >= 5 ? 'Speed reduced to 0 (Exhaustion 5)' : exhaustionLevel >= 2 ? `Speed halved from ${baseSpeed} ft (Exhaustion 2)` : undefined}>
+                <p className="text-xs text-slate-400">Speed</p>
+                <p className={cn('font-bold', exhaustionLevel >= 2 ? 'text-orange-300' : 'text-white')}>{speed} ft</p>
+              </div>
+              {/* Prof */}
+              <div className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center">
+                <p className="text-xs text-slate-400">Prof</p>
+                <p className="font-bold text-white">+{profBonus}</p>
+              </div>
+              {/* Passive Perception */}
+              <div className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center" title="10 + Perception bonus">
+                <p className="text-xs text-slate-400">Pass. Perc</p>
+                <p className="font-bold text-white">{passivePerception}</p>
+              </div>
+              {/* Passive Insight */}
+              <div className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center" title="10 + Insight bonus">
+                <p className="text-xs text-slate-400">Pass. Ins</p>
+                <p className="font-bold text-white">{passiveInsight}</p>
+              </div>
             </div>
           </div>
 
@@ -259,15 +302,20 @@ export function SheetPage() {
                 const val = savingThrows[k];
                 const isProficient = savingThrowProficiencies.has(k);
                 return (
-                  <div key={k} className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800">
+                  <button
+                    key={k}
+                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`)}
+                    className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
+                    title={`Roll ${abilityLabels[k]} saving throw`}
+                  >
                     <div className="flex items-center gap-2">
                       <div className={cn('w-2 h-2 rounded-full', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
-                      <span className={cn('text-sm', exhaustionDisadvSaves ? 'text-orange-300' : 'text-slate-300')}>{abilityLabels[k]}</span>
+                      <span className={cn('text-sm', exhaustionDisadvSaves ? 'text-orange-300' : 'text-slate-300 group-hover:text-white')}>{abilityLabels[k]}</span>
                     </div>
                     <span className={cn('text-sm font-bold', val >= 0 ? (exhaustionDisadvSaves ? 'text-orange-300' : 'text-white') : 'text-red-400')}>
                       {val >= 0 ? '+' : ''}{val}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -285,15 +333,20 @@ export function SheetPage() {
               {Object.entries(skills).map(([skill, bonus]) => {
                 const isProficient = allSkillProficiencies.has(skill);
                 return (
-                  <div key={skill} className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800">
+                  <button
+                    key={skill}
+                    onClick={() => triggerRoll(20, bonus, `${skill} Check`)}
+                    className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
+                    title={`Roll ${skill} check`}
+                  >
                     <div className="flex items-center gap-1.5">
                       <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
-                      <span className={cn('text-xs truncate', exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300')}>{skill}</span>
+                      <span className={cn('text-xs truncate', exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300 group-hover:text-white')}>{skill}</span>
                     </div>
                     <span className={cn('text-xs font-bold shrink-0', bonus >= 0 ? (exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300') : 'text-red-400')}>
                       {bonus >= 0 ? '+' : ''}{bonus}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -354,6 +407,9 @@ export function SheetPage() {
                 useHitDie={useHitDie}
                 restoreHitDie={restoreHitDie}
                 effectiveMaxHP={effectiveMaxHP}
+                mods={mods}
+                profBonus={profBonus}
+                resourceMaxOverrides={resourceMaxOverrides}
               />
             )}
             {tab === 'spells' && (
@@ -516,13 +572,106 @@ export function SheetPage() {
   );
 }
 
+// ── Weapon Attacks Panel ────────────────────────────────────────────────────
+function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mods: any; profBonus: number }) {
+  const { triggerRoll } = useDiceStore();
+  const [damageResults, setDamageResults] = React.useState<Record<string, { result: number; label: string } | null>>({});
+
+  const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
+  if (equippedWeapons.length === 0) return null;
+
+  function abilityModForWeapon(w: ReturnType<typeof lookupWeapon>) {
+    if (!w) return mods.str;
+    if (w.ability === 'finesse') return Math.max(mods.str, mods.dex);
+    if (w.ability === 'dex' || w.ranged) return mods.dex;
+    return mods.str;
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      <SectionHeader>Weapon Attacks</SectionHeader>
+      <div className="space-y-2">
+        {equippedWeapons.map((item: any) => {
+          const w = lookupWeapon(item.name);
+          const abilityMod = abilityModForWeapon(w);
+          const toHit = abilityMod + profBonus;
+          const dmgDice = w?.damageDice ?? '1d6';
+          const dmgType = w?.damageType ?? '—';
+          const dmgLabel = w ? damageLine(dmgDice, abilityMod) : `?d? + ${abilityMod >= 0 ? '+' : ''}${abilityMod}`;
+          const dmgResult = damageResults[item.id];
+
+          return (
+            <div key={item.id} className="bg-slate-900/60 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-white">{item.name}</p>
+                {w && <span className="text-[10px] text-slate-500 capitalize">{dmgType}</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Attack roll */}
+                <button
+                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`)}
+                  className="flex-1 bg-red-900/40 hover:bg-red-800/50 border border-red-700/60 hover:border-red-500 rounded-lg py-1.5 text-center transition-colors group"
+                  title={`Roll attack: d20 + ${toHit >= 0 ? '+' : ''}${toHit}`}
+                >
+                  <p className="text-[10px] text-slate-400 group-hover:text-red-300 transition-colors">Attack</p>
+                  <p className="text-sm font-bold text-white">{toHit >= 0 ? '+' : ''}{toHit} 🎲</p>
+                </button>
+                {/* Damage roll */}
+                <button
+                  onClick={() => {
+                    if (dmgDice === '—') return;
+                    const raw = rollDamage(dmgDice);
+                    const total = raw + abilityMod;
+                    setDamageResults(prev => ({ ...prev, [item.id]: { result: total, label: dmgLabel } }));
+                  }}
+                  className="flex-1 bg-orange-900/40 hover:bg-orange-800/50 border border-orange-700/60 hover:border-orange-500 rounded-lg py-1.5 text-center transition-colors group"
+                  title={`Roll damage: ${dmgLabel}`}
+                >
+                  <p className="text-[10px] text-slate-400 group-hover:text-orange-300 transition-colors">Damage</p>
+                  <p className="text-sm font-bold text-white">
+                    {dmgResult ? (
+                      <span className="text-orange-300">{dmgResult.result}</span>
+                    ) : (
+                      <span>{dmgLabel} 🎲</span>
+                    )}
+                  </p>
+                </button>
+              </div>
+              {/* Versatile option */}
+              {w?.versatile && (
+                <button
+                  onClick={() => {
+                    const raw = rollDamage(w.versatile!);
+                    const total = raw + abilityMod;
+                    setDamageResults(prev => ({ ...prev, [`${item.id}-v`]: { result: total, label: damageLine(w.versatile!, abilityMod) } }));
+                  }}
+                  className="mt-1.5 w-full text-[10px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded py-1 transition-colors"
+                >
+                  Two-handed: {damageLine(w.versatile, abilityMod)} 🎲
+                  {damageResults[`${item.id}-v`] && (
+                    <span className="ml-1 text-orange-300 font-bold">→ {damageResults[`${item.id}-v`]!.result}</span>
+                  )}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {equippedWeapons.some((item: any) => !lookupWeapon(item.name)) && (
+        <p className="text-[10px] text-slate-600 mt-2">* Unknown weapons use estimated stats. Equip in Inventory tab.</p>
+      )}
+    </div>
+  );
+}
+
 function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, setHpInput, setHpMode, applyHP,
   setCurrentHP, setTempHP, setMaxHP, addDeathSuccess, addDeathFailure, resetDeathSaves,
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
-  useHitDie, restoreHitDie, effectiveMaxHP }: any) {
+  useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides }: any) {
+  const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   return (
     <div className="space-y-4">
@@ -548,6 +697,9 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
           </button>
         </div>
       </div>
+
+      {/* Weapon Attacks */}
+      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} />
 
       {/* Concentration banner */}
       {concentrationSpellId && (
@@ -719,16 +871,28 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
         {character.conditions.length === 0 && character.exhaustionLevel === 0 ? (
           <p className="text-slate-500 text-sm mt-3">No active conditions</p>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div className="space-y-1.5 mt-1">
             {character.conditions.map((c: Condition) => (
-              <span
-                key={c}
-                onClick={() => removeCondition(c)}
-                className="bg-red-900/40 text-red-300 border border-red-700 px-2 py-0.5 rounded-lg text-xs cursor-pointer hover:bg-red-800/50 transition-colors"
-                title="Click to remove"
-              >
-                {c} ×
-              </span>
+              <div key={c} className="bg-red-950/40 border border-red-800/60 rounded-lg overflow-hidden">
+                <div className="flex items-center justify-between px-2.5 py-1.5">
+                  <button
+                    onClick={() => setExpandedCondition(expandedCondition === c ? null : c)}
+                    className="text-xs font-semibold text-red-300 hover:text-red-100 transition-colors flex items-center gap-1"
+                  >
+                    <span>{expandedCondition === c ? '▾' : '▸'}</span> {c}
+                  </button>
+                  <button
+                    onClick={() => { removeCondition(c); if (expandedCondition === c) setExpandedCondition(null); }}
+                    className="text-xs text-slate-500 hover:text-red-300 transition-colors px-1"
+                    title="Remove condition"
+                  >
+                    ×
+                  </button>
+                </div>
+                {expandedCondition === c && CONDITION_DESC[c] && (
+                  <p className="text-[11px] text-slate-300 leading-relaxed px-2.5 pb-2">{CONDITION_DESC[c]}</p>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -768,13 +932,14 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
           <div className="space-y-3">
             {resources.filter((r: any) => r.key !== 'arcane_recovery').map((r: any) => {
               const resourceDef = getResourceDef(character, r.key);
+              const displayMax = (resourceMaxOverrides?.[r.key] ?? r.max);
               return (
                 <div key={r.key} className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-white">{resourceDef?.name ?? r.key}</p>
                     {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
                   </div>
-                  <NumberStepper value={r.current} min={0} max={r.max === 99 ? 999 : r.max} onChange={v => setResource(r.key, v)} />
+                  <NumberStepper value={Math.min(r.current, displayMax)} min={0} max={displayMax === 99 ? 999 : displayMax} onChange={v => setResource(r.key, v)} />
                 </div>
               );
             })}

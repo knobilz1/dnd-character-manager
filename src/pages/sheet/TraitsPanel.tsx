@@ -274,25 +274,50 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
 
       {/* Gold & Currencies */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-        <SectionHeader>Currency</SectionHeader>
-        <div className="grid grid-cols-5 gap-2">
-          {(['cp','sp','ep','gp','pp'] as const).map(coin => (
-            <div key={coin} className="text-center">
-              <label className="text-xs text-slate-400 uppercase block mb-1">{coin}</label>
-              <input
-                type="number"
-                min={0}
-                value={character.currencies[coin]}
-                onChange={e => {
-                  const v = Math.floor(Number(e.target.value));
-                  if (!isNaN(v)) updateCurrency(coin, v);
-                }}
-                className="w-full bg-slate-900 border border-slate-600 rounded px-1 py-1 text-white text-sm text-center focus:outline-none focus:border-yellow-500"
-              />
-            </div>
-          ))}
+        <div className="flex items-center justify-between mb-3">
+          <SectionHeader className="mb-0">Currency</SectionHeader>
+          <button
+            onClick={() => {
+              // Convert up: 100cp→10sp, 10sp→1gp, 10gp→1pp (electrum stays)
+              let { cp, sp, ep, gp, pp } = character.currencies;
+              const cpGain = Math.floor(cp / 100); cp = cp % 100; sp += cpGain * 10;
+              const spGain = Math.floor(sp / 10);  sp = sp % 10;  gp += spGain;
+              const gpGain = Math.floor(gp / 10);  gp = gp % 10;  pp += gpGain;
+              updateCurrency('cp', cp);
+              updateCurrency('sp', sp);
+              updateCurrency('ep', ep);
+              updateCurrency('gp', gp);
+              updateCurrency('pp', pp);
+            }}
+            className="text-xs text-slate-400 hover:text-yellow-300 px-2 py-1 rounded border border-slate-600 hover:border-yellow-600 transition-colors"
+            title="Convert up: 100cp→10sp→1gp→pp"
+          >
+            ⬆ Convert
+          </button>
         </div>
-        <p className="text-xs text-slate-500 mt-2">Click any value to edit. Changes save automatically.</p>
+        <div className="grid grid-cols-5 gap-2">
+          {(['cp','sp','ep','gp','pp'] as const).map(coin => {
+            const COLOR: Record<string, string> = { cp: 'text-orange-400', sp: 'text-slate-300', ep: 'text-blue-400', gp: 'text-yellow-400', pp: 'text-purple-400' };
+            return (
+              <div key={coin} className="text-center">
+                <label className={`text-xs uppercase font-bold block mb-1 ${COLOR[coin]}`}>{coin}</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={character.currencies[coin]}
+                  onChange={e => {
+                    const v = Math.floor(Number(e.target.value));
+                    if (!isNaN(v)) updateCurrency(coin, v);
+                  }}
+                  className="w-full bg-slate-900 border border-slate-600 rounded px-1 py-1 text-white text-sm text-center focus:outline-none focus:border-yellow-500"
+                />
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          100 cp = 10 sp = 1 gp = 0.1 pp · Electrum (ep) stays, convert manually
+        </p>
       </div>
 
       {/* Notes */}

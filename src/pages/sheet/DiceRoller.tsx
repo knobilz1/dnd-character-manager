@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dice5, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
+import { useDiceStore } from '../../store/useDiceStore';
 
 const DICE = [4, 6, 8, 10, 12, 20, 100] as const;
 type Die = typeof DICE[number];
@@ -193,6 +194,24 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // External trigger state (skill/save/initiative rolls)
+  const [rollModifier, setRollModifier] = React.useState<number | null>(null);
+  const [rollLabel, setRollLabel] = React.useState<string | null>(null);
+  const { pending, consume } = useDiceStore();
+
+  // Watch for pending external rolls
+  React.useEffect(() => {
+    if (!pending) return;
+    const req = consume();
+    if (!req) return;
+    setOpen(true);
+    setMode('normal');
+    setRollModifier(req.modifier);
+    setRollLabel(req.label);
+    rollWithSides(req.die as Die);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
+
   // Dragging
   const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
   const dragging = React.useRef(false);
@@ -222,9 +241,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
 
   React.useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  function roll(sides: Die) {
-    if (rolling) return;
-    if (mode !== 'normal') { rollTwo(sides); return; }
+  function rollWithSides(sides: Die) {
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setRolling(true);
@@ -256,6 +273,15 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     timerRef.current = setTimeout(tick, 30);
   }
 
+  function roll(sides: Die) {
+    if (rolling) return;
+    if (mode !== 'normal') { rollTwo(sides); return; }
+    // Manual clicks clear the external label
+    setRollModifier(null);
+    setRollLabel(null);
+    rollWithSides(sides);
+  }
+
   function rollTwo(sides: Die) {
     if (rolling) return;
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -264,6 +290,8 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     setShakePhase(0);
     setTwoFinal(null);
     setDisplay(null);
+    setRollModifier(null);
+    setRollLabel(null);
 
     let frame = 0;
     const frames = 28;
@@ -458,14 +486,30 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
 
                 {display !== null ? (
                   <>
+                    {/* Roll label (skill name, save name, etc.) */}
+                    {rollLabel && !rolling && (
+                      <p className="text-[11px] text-slate-400 uppercase tracking-wide mb-1 relative z-10">{rollLabel}</p>
+                    )}
                     <div key={resultKey} className="font-black tabular-nums relative z-10 leading-none"
                       style={rolling
-                        ? { color: '#64748b', filter: ['blur(2px)','blur(1px)','none'][shakePhase], fontSize: '4.5rem', transform: ['scale(0.88)','scale(0.94)','scale(1)'][shakePhase] }
-                        : { fontSize: isCritFail ? '6rem' : isCritSuccess ? '5.5rem' : '4.5rem', color: t.color, textShadow: t.shadow, animation: t.anim, transform: `scale(${t.scale})` }
+                        ? { color: '#64748b', filter: ['blur(2px)','blur(1px)','none'][shakePhase], fontSize: rollModifier !== null ? '3.5rem' : '4.5rem', transform: ['scale(0.88)','scale(0.94)','scale(1)'][shakePhase] }
+                        : { fontSize: isCritFail ? '6rem' : isCritSuccess ? '5.5rem' : (rollModifier !== null ? '3.5rem' : '4.5rem'), color: t.color, textShadow: t.shadow, animation: t.anim, transform: `scale(${t.scale})` }
                       }>
                       {display}
                     </div>
-                    <p className="text-xs mt-3 relative z-10 font-semibold"
+                    {/* Modifier + total row */}
+                    {rollModifier !== null && !rolling && (
+                      <div className="flex items-center gap-1.5 mt-1 relative z-10">
+                        <span className="text-slate-400 text-base font-bold">
+                          {rollModifier >= 0 ? `+${rollModifier}` : `${rollModifier}`}
+                        </span>
+                        <span className="text-slate-500 text-base">=</span>
+                        <span className="text-2xl font-black" style={{ color: t.color, textShadow: t.shadow }}>
+                          {display + rollModifier}
+                        </span>
+                      </div>
+                    )}
+                    <p className="text-xs mt-2 relative z-10 font-semibold"
                       style={{ color: rolling ? '#475569' : t.color, opacity: rolling ? 1 : 0.85 }}>
                       {rolling ? `Rolling d${activeDie}…`
                         : tier === 'crit-success' ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'

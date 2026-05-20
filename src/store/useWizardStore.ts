@@ -167,6 +167,14 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       if (pm) pactMagic = { slotsTotal: pm.slots, slotsUsed: 0, slotLevel: pm.slotLevel };
     }
 
+    // Compute ability mods needed for resource max overrides (Bardic Inspiration, Flash of Genius).
+    const racialCha = (race?.abilityScoreIncreases as any)?.cha ?? 0;
+    const racialInt = (race?.abilityScoreIncreases as any)?.int ?? 0;
+    const effectiveCha = (draft.baseAbilityScores?.cha ?? 10) + racialCha;
+    const effectiveInt = (draft.baseAbilityScores?.int ?? 10) + racialInt;
+    const chaMod = Math.floor((effectiveCha - 10) / 2);
+    const intMod  = Math.floor((effectiveInt  - 10) / 2);
+
     // Build resources from both class and (if selected) subclass definitions.
     const resources = [];
     for (const cl of draft.classes) {
@@ -180,6 +188,11 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           resources.push({ key: rd.key, current: max === 'unlimited' ? 99 : max, max: max === 'unlimited' ? 99 : max });
         }
       }
+    }
+    // Override Bardic Inspiration (uses CHA mod, not a level table) and Flash of Genius (INT mod).
+    for (const r of resources) {
+      if (r.key === 'bardic_inspiration') { const m = Math.max(1, chaMod); r.max = m; r.current = m; }
+      if (r.key === 'flash_of_genius')    { const m = Math.max(1, intMod);  r.max = m; r.current = m; }
     }
 
     const character: Character = {

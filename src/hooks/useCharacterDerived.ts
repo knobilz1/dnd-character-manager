@@ -48,9 +48,12 @@ export function useCharacterDerived(character: Character | null) {
         }
       }
     }
-    // Cap at 20 (unless a feature raises it); guard against undefined scores
+    // Cap at 20 (unless a feature raises it); guard against undefined scores.
+    // Primal Champion (Barbarian 20) raises STR and CON cap to 24.
+    const barbLevel = character.classes.find(c => c.classId === 'barbarian')?.level ?? 0;
     for (const k of Object.keys(finalScores) as AbilityKey[]) {
-      finalScores[k] = Math.min(finalScores[k] ?? 10, 20);
+      const cap = barbLevel >= 20 && (k === 'str' || k === 'con') ? 24 : 20;
+      finalScores[k] = Math.min(finalScores[k] ?? 10, cap);
     }
 
     const mods: Record<AbilityKey, number> = {
@@ -93,6 +96,7 @@ export function useCharacterDerived(character: Character | null) {
       skills[skill] = base + prof + jackOfAllTrades;
     }
     const passivePerception = 10 + (skills['Perception'] ?? 0);
+    const passiveInsight    = 10 + (skills['Insight']    ?? 0);
 
     // Initiative
     const initiative = mods.dex;
@@ -165,6 +169,15 @@ export function useCharacterDerived(character: Character | null) {
       maxSpellLevel = character.pactMagic.slotLevel;
     }
 
+    // Resource max overrides — Bardic Inspiration uses CHA mod (min 1), Flash of Genius uses INT mod (min 1).
+    const resourceMaxOverrides: Record<string, number> = {};
+    if (character.classes.some(c => c.classId === 'bard')) {
+      resourceMaxOverrides['bardic_inspiration'] = Math.max(1, mods.cha);
+    }
+    if (character.classes.some(c => c.classId === 'artificer')) {
+      resourceMaxOverrides['flash_of_genius'] = Math.max(1, mods.int);
+    }
+
     // Exhaustion flags
     const exhaustionDisadvChecks = exhaustionLevel >= 1; // disadvantage on ability checks / skills
     const exhaustionDisadvSaves  = exhaustionLevel >= 3; // disadvantage on saving throws
@@ -197,6 +210,8 @@ export function useCharacterDerived(character: Character | null) {
       exhaustionDisadvChecks,
       exhaustionDisadvSaves,
       exhaustionHpMaxHalved,
+      passiveInsight,
+      resourceMaxOverrides,
     };
   }, [character]);
 }
