@@ -8,6 +8,7 @@ import { useThemeStore } from './store/useThemeStore';
 import { SnowOverlay } from './components/SnowOverlay';
 import { HauntOverlay } from './components/HauntOverlay';
 import { DeepSeaOverlay } from './components/DeepSeaOverlay';
+import { FireworksOverlay } from './components/FireworksOverlay';
 
 export default function App() {
   const updater = useAppUpdater();
@@ -23,6 +24,7 @@ export default function App() {
       {theme === 'christmas' && <SnowOverlay />}
       {theme === 'halloween' && <HauntOverlay />}
       {theme === 'deepsea' && <DeepSeaOverlay />}
+      {theme === 'party' && <FireworksOverlay />}
       {/* Global update banner */}
       {updater.updateAvailable && (
         <div className="fixed bottom-4 right-4 z-50 bg-slate-800 border border-emerald-600 rounded-xl shadow-2xl px-4 py-3 flex items-center gap-4 max-w-sm">
