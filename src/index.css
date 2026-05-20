@@ -481,3 +481,81 @@
   93%  {                                                  opacity: 0.4;  }
   100% { transform: translateY(105vh)  translateX(-6px);  opacity: 0;    }
 }
+
+/* ── Eid theme ───────────────────────────────────────────────────────────── */
+[data-theme="eid"] {
+  color-scheme: dark;
+
+  --color-slate-950: #050a0f;
+  --color-slate-900: #0a1628;   /* deep midnight blue bg */
+  --color-slate-800: #0f2044;   /* rich navy card bg */
+  --color-slate-700: #1a3366;   /* cobalt button / active */
+  --color-slate-600: #1e4080;   /* border */
+  --color-slate-500: #4a7fcb;   /* muted blue */
+  --color-slate-400: #c9a84c;   /* gold labels */
+  --color-slate-300: #e2c97e;   /* light gold secondary */
+  --color-slate-200: #f0dfa0;
+  --color-slate-100: #f8f0cc;
+  --color-slate-50:  #fdf8e8;
+  --color-white:     #fff8e7;
+}
+
+[data-theme="eid"] [class*="bg-red-"],
+[data-theme="eid"] [class*="bg-green-"],
+[data-theme="eid"] [class*="bg-emerald-"],
+[data-theme="eid"] [class*="bg-blue-"],
+[data-theme="eid"] [class*="bg-indigo-"],
+[data-theme="eid"] [class*="bg-violet-"],
+[data-theme="eid"] [class*="bg-purple-"],
+[data-theme="eid"] [class*="bg-teal-"],
+[data-theme="eid"] [class*="bg-cyan-"],
+[data-theme="eid"] [class*="bg-amber-"],
+[data-theme="eid"] [class*="bg-yellow-"],
+[data-theme="eid"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+[data-theme="eid"] .min-h-screen {
+  background: linear-gradient(160deg, #050a0f, #0a1628, #0c1e3a, #080f20);
+  background-size: 400% 400%;
+  animation: eid-bg 14s ease infinite;
+}
+
+[data-theme="eid"] .bg-slate-800 {
+  box-shadow: 0 0 18px rgba(201,168,76,0.12), 0 0 40px rgba(26,51,102,0.2);
+}
+
+[data-theme="eid"] body { color: #e2c97e; }
+
+[data-theme="eid"] .scrollbar-thin { scrollbar-color: #c9a84c #0a1628; }
+[data-theme="eid"] .scrollbar-thin::-webkit-scrollbar-track { background: #0a1628; }
+[data-theme="eid"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #c9a84c; }
+
+@keyframes eid-bg {
+  0%   { background-position:   0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
+}
+
+/* ── Eid overlay keyframes ───────────────────────────────────────────────── */
+@keyframes eid-star-twinkle {
+  0%, 100% { opacity: 0.9; transform: scale(1);    }
+  50%       { opacity: 0.3; transform: scale(0.75); }
+}
+
+@keyframes eid-lantern-sway {
+  0%   { transform: rotate(-6deg); }
+  50%  { transform: rotate(6deg);  }
+  100% { transform: rotate(-6deg); }
+}
+
+@keyframes eid-lantern-glow {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 0.9;  }
+}
+
+@keyframes eid-crescent-float {
+  0%   { transform: translateY(0px)   rotate(-5deg); }
+  50%  { transform: translateY(-8px)  rotate(-3deg); }
+  100% { transform: translateY(0px)   rotate(-5deg); }
+}
