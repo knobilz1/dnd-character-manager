@@ -378,8 +378,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
       // Apply HP gain. Heal the character by the gained amount so a level-up while
       // damaged increases both max and current HP without overhealing past the new max.
-      const newMaxHP = s.character.maxHP + hpGained;
-      const newCurrentHP = Math.min(newMaxHP, s.character.currentHP + hpGained);
+      // 'let' so we can bump them again below if a CON ASI raises the modifier.
+      let newMaxHP = s.character.maxHP + hpGained;
+      let newCurrentHP = Math.min(newMaxHP, s.character.currentHP + hpGained);
 
       // Rebuild resources from class+subclass definitions at the new level.
       const classDef = getClass(classId);
@@ -421,6 +422,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
 
       // Apply ASI or feat choice
+      // Hoist race/racial lookup so we can use racialCon in the CON-mod delta check below.
+      const race = getRace(s.character.raceId);
+      const racialBonuses = race?.abilityScoreIncreases ?? {};
+      const racialCon = (racialBonuses as Partial<Record<AbilityKey, number>>).con ?? 0;
+      // Old CON modifier (before this ASI) — used to detect a modifier increase.
+      const oldConMod = Math.floor(((s.character.baseAbilityScores.con ?? 10) + racialCon - 10) / 2);
+
       let baseAbilityScores = { ...s.character.baseAbilityScores };
       let selectedFeats = [...(s.character.selectedFeats ?? [])];
       if (asiChoice) {
@@ -429,8 +437,6 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
             selectedFeats = [...selectedFeats, asiChoice.featId];
           }
         } else {
-          const race = getRace(s.character.raceId);
-          const racialBonuses = race?.abilityScoreIncreases ?? {};
           for (const [k, inc] of Object.entries(asiChoice.increases)) {
             const key = k as AbilityKey;
             const racial = (racialBonuses as Partial<Record<AbilityKey, number>>)[key] ?? 0;
@@ -441,6 +447,19 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
             };
           }
         }
+      }
+
+      // Per 5e PHB: "Whenever your Constitution modifier increases by 1, your hit
+      // point maximum increases by 1 for each level you have attained."
+      // hpGained (calculated in LevelUpDialog) used the old CON mod, so we need
+      // to patch both the retroactive levels AND the current level's HP grant.
+      const newConMod = Math.floor(((baseAbilityScores.con ?? 10) + racialCon - 10) / 2);
+      const conModDelta = newConMod - oldConMod;
+      if (conModDelta > 0) {
+        const newTotalLevel = classes.reduce((sum, cl) => sum + cl.level, 0);
+        const retroHP = conModDelta * newTotalLevel;
+        newMaxHP += retroHP;
+        newCurrentHP = Math.min(newMaxHP, newCurrentHP + retroHP);
       }
 
       return {
