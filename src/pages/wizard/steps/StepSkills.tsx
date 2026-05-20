@@ -1,3 +1,4 @@
+import React from 'react';
 import { useWizardStore } from '../../../store/useWizardStore';
 import { SKILL_ABILITY, abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
@@ -22,8 +23,25 @@ export function StepSkills() {
   const allowedSkills = new Set<SkillName>(classDef?.skillChoices.from ?? ALL_SKILLS);
   const maxChoices = classDef?.skillChoices.count ?? 2;
 
+  // Auto-clean stale selections whenever the class or background changes.
+  // A previously chosen skill becomes invalid if:
+  //  • it's no longer in the class's allowed list (class changed), or
+  //  • it's now granted by the background (background changed).
+  const classId = draft.classes?.[0]?.classId;
+  const backgroundId = draft.backgroundId;
+  React.useEffect(() => {
+    const cleaned = (draft.selectedSkillProficiencies ?? []).filter(
+      s => allowedSkills.has(s) && !backgroundSkills.has(s)
+    );
+    if (cleaned.length !== (draft.selectedSkillProficiencies ?? []).length) {
+      updateDraft({ selectedSkillProficiencies: cleaned });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classId, backgroundId]);
+
   function toggle(skill: SkillName) {
-    if (backgroundSkills.has(skill)) return;
+    if (backgroundSkills.has(skill)) return;   // locked in by background
+    if (!allowedSkills.has(skill)) return;      // not in this class's skill list
     const next = new Set(selectedSkills);
     if (next.has(skill)) {
       next.delete(skill);
@@ -64,10 +82,14 @@ export function StepSkills() {
               onClick={() => toggle(skill)}
               className={cn(
                 'p-3 rounded-lg border transition-all flex items-center gap-3',
+                // Background-granted: blue, locked
                 fromBg && 'border-blue-600 bg-blue-950/30 cursor-default',
-                chosen && !fromBg && 'border-red-500 bg-red-950/30 cursor-pointer',
-                !fromBg && !chosen && inClassList && 'border-slate-700 bg-slate-800 cursor-pointer hover:border-slate-500',
-                !fromBg && !chosen && !inClassList && 'border-slate-800 bg-slate-900 cursor-not-allowed opacity-50',
+                // Class skill chosen by player: green (positive confirmation)
+                chosen && !fromBg && 'border-green-500 bg-green-950/30 cursor-pointer',
+                // Class skill available but not yet chosen: visible border, green hover hint
+                !fromBg && !chosen && inClassList && 'border-slate-500 bg-slate-800 cursor-pointer hover:border-green-400/60',
+                // Not in this class's skill list: dimmed / locked
+                !fromBg && !chosen && !inClassList && 'border-slate-800 bg-slate-900 cursor-not-allowed opacity-40',
               )}
             >
               <div className={cn(
