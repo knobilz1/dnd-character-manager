@@ -22,6 +22,7 @@ import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
 import { lookupWeapon, rollDamage, damageLine } from '../../data/weapons';
+import { getRace } from '../../data/races';
 
 // Find a resource definition by key, checking both class and subclass.
 function getResourceDef(character: any, key: string) {
@@ -35,7 +36,6 @@ function getResourceDef(character: any, key: string) {
   }
   return undefined;
 }
-import { getRace } from '../../data/races';
 
 // Exhaustion is tracked separately via exhaustionLevel; it has its own +/- UI
 // and a dedicated button in the Add Condition dialog, so it's omitted here to
@@ -623,6 +623,19 @@ function spellLevelLabel(lvl: number): string {
   return ord[lvl] ?? `${lvl}th`;
 }
 
+// Defined outside CombatAbilitiesPanel so it isn't recreated on every render.
+function SectionToggle({ label, open, onToggle, count }: { label: string; open: boolean; onToggle: () => void; count: number }) {
+  return (
+    <button onClick={onToggle} className="flex items-center justify-between w-full group">
+      <span className="text-xs font-bold uppercase tracking-widest text-slate-400 group-hover:text-slate-300 transition-colors">
+        {label}
+        <span className="ml-2 text-slate-600 font-normal normal-case tracking-normal">({count})</span>
+      </span>
+      <span className="text-slate-500 text-xs">{open ? '▲' : '▼'}</span>
+    </button>
+  );
+}
+
 function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
   character: any;
   spellSaveDC: number;
@@ -683,19 +696,6 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
   const hasAbilities = classAbilities.length > 0;
   const hasItems     = magicItems.length > 0;
   if (!hasSpells && !hasAbilities && !hasItems) return null;
-
-  // Shared chevron button helper
-  function SectionToggle({ label, open, onToggle, count }: { label: string; open: boolean; onToggle: () => void; count: number }) {
-    return (
-      <button onClick={onToggle} className="flex items-center justify-between w-full group">
-        <span className="text-xs font-bold uppercase tracking-widest text-slate-400 group-hover:text-slate-300 transition-colors">
-          {label}
-          <span className="ml-2 text-slate-600 font-normal normal-case tracking-normal">({count})</span>
-        </span>
-        <span className="text-slate-500 text-xs">{open ? '▲' : '▼'}</span>
-      </button>
-    );
-  }
 
   return (
     <div className="space-y-3">

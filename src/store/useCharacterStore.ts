@@ -444,7 +444,15 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const newLevel = classes.find(c => c.classId === classId)!.level;
       const oldResources = new Map(s.character.resources.map(r => [r.key, r] as const));
       const resources = [...s.character.resources];
+
+      // Pre-compute ability-mod / prof-bonus overrides so we can skip those keys
+      // in the maxPerLevel loop — otherwise the loop caps current down to the table
+      // value and the subsequent override correction can't recover it.
+      const tempChar = { ...s.character, classes };
+      const levelUpOverrides = computeResourceMaxOverrides(tempChar);
+
       for (const rd of allRds) {
+        if (levelUpOverrides[rd.key] != null) continue; // handled in override pass below
         const max = rd.maxPerLevel[newLevel] ?? 0;
         const normalisedMax = max === 'unlimited' ? 99 : max;
         const existing = oldResources.get(rd.key);
@@ -460,16 +468,19 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         }
       }
 
-      // Apply ability-mod / prof-bonus resource overrides after the maxPerLevel pass.
-      // Uses the *new* class array (post level-up) so profBonus is already updated.
-      {
-        const tempChar = { ...s.character, classes };
-        const overrides = computeResourceMaxOverrides(tempChar);
-        for (const [key, correctMax] of Object.entries(overrides)) {
-          const idx = resources.findIndex(r => r.key === key);
-          if (idx >= 0) {
-            resources[idx] = { ...resources[idx]!, max: correctMax, current: Math.min(resources[idx]!.current, correctMax) };
-          }
+      // Apply ability-mod / prof-bonus overrides.
+      // Handled separately so they never get capped to a lower maxPerLevel table value.
+      for (const [key, correctMax] of Object.entries(levelUpOverrides)) {
+        const existing = oldResources.get(key);
+        const idx = resources.findIndex(r => r.key === key);
+        const prevMax = existing?.max ?? 0;
+        // Carry over any gains in max (e.g. profBonus tier went up this level-up).
+        const currentGain = Math.max(0, correctMax - prevMax);
+        if (idx >= 0) {
+          resources[idx] = { ...resources[idx]!, max: correctMax, current: Math.min(resources[idx]!.current + currentGain, correctMax) };
+        } else if (correctMax > 0) {
+          // Resource first becomes available at this level (e.g. bladesong unlocks at wizard 2).
+          resources.push({ key, current: correctMax, max: correctMax });
         }
       }
 
