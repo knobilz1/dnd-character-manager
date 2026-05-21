@@ -57,4 +57,12 @@ export const BOOKS: Book[] = [
     year: 2020,
     description: 'Critical Role campaign setting with Dunamancy magic, Echo Knight, and Wildemount races.',
   },
+  {
+    id: 'GGR',
+    name: "Guildmasters' Guide to Ravnica",
+    shortName: 'GGR',
+    color: 'indigo',
+    year: 2018,
+    description: 'Magic: The Gathering crossover. Ravnica guilds, new races, subclasses, spells, and magic items.',
+  },
 ];

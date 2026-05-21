@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -425,6 +425,7 @@ export function SheetPage() {
                 restorePactSlots={restorePactSlots}
                 spellSlotsUsed={character.spellSlotsUsed}
                 concentrationSpellId={character.concentrationSpellId}
+                startConcentration={startConcentration}
                 endConcentration={endConcentration}
                 useHitDie={useHitDie}
                 restoreHitDie={restoreHitDie}
@@ -660,15 +661,25 @@ function SectionToggle({ label, open, onToggle, count }: { label: string; open: 
   );
 }
 
-function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
+function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
+  slotTotals, spellSlotsUsed, pactMagic, useSpellSlot, usePactSlot,
+  startConcentration,
+}: {
   character: any;
   spellSaveDC: number;
   spellAttackBonus: number;
+  slotTotals: Record<number, number>;
+  spellSlotsUsed: Record<number, number>;
+  pactMagic: any;
+  useSpellSlot: (level: SlotLevel) => void;
+  usePactSlot: () => void;
+  startConcentration: (id: string) => void;
 }) {
   const [spellsOpen,     setSpellsOpen]     = React.useState(true);
   const [abilitiesOpen,  setAbilitiesOpen]  = React.useState(true);
   const [itemsOpen,      setItemsOpen]      = React.useState(true);
   const [expandedKey,    setExpandedKey]    = React.useState<string | null>(null);
+  const [castSpell,      setCastSpell]      = React.useState<ReturnType<typeof getSpell> | null>(null);
 
   function toggleExpand(key: string) {
     setExpandedKey(prev => prev === key ? null : key);
@@ -676,6 +687,16 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
 
   const primaryClassId  = character.classes[0]?.classId ?? '';
   const isPreparedCaster = PREPARED_CASTER_IDS.includes(primaryClassId);
+
+  const totalSlots = Object.values(slotTotals ?? {}).reduce((s: number, n) => s + (n as number), 0);
+  const hasAnyCastingResource = totalSlots > 0 || (pactMagic && pactMagic.slotsTotal > 0);
+
+  function canCast(spell: NonNullable<ReturnType<typeof getSpell>>, alwaysPrepared: boolean): boolean {
+    if (spell.level === 0) return true;
+    if (!hasAnyCastingResource) return false;
+    if (!isPreparedCaster) return true;
+    return alwaysPrepared || (character.spellbook ?? []).some((sp: any) => sp.spellId === spell.id && sp.isPrepared);
+  }
 
   // ── Spells ──────────────────────────────────────────────────────────────────
   // Prepared casters: show cantrips + spells marked isPrepared or isAlwaysPrepared.
@@ -771,6 +792,24 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
                         <span className="text-slate-400">{spellLevelLabel(spell.level)} {spell.school}</span>
                         {spell.concentration && <span className="bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">Concentration</span>}
                         {spell.ritual && <span className="bg-teal-900/50 text-teal-300 px-1.5 py-0.5 rounded text-[10px]">Ritual</span>}
+                        {canCast(spell, alwaysPrepared) && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (spell.level === 0) {
+                                if (spell.concentration && character.concentrationSpellId !== spell.id)
+                                  startConcentration(spell.id);
+                                return;
+                              }
+                              setCastSpell(spell);
+                            }}
+                            className="ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-red-700 bg-red-900/30 text-red-300 hover:bg-red-800/50 transition-all"
+                            title="Cast spell"
+                          >
+                            <Zap size={10} />
+                            Cast
+                          </button>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
                         <span className="text-slate-500">Cast time <span className="text-slate-300">{spell.castingTime}</span></span>
@@ -810,6 +849,71 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus }: {
           )}
         </div>
       )}
+
+      {/* ── Cast slot picker ── */}
+      <Dialog open={!!castSpell} onClose={() => setCastSpell(null)} title={castSpell ? `Cast ${castSpell.name}` : ''}>
+        {castSpell && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-400">
+              Choose a spell slot. Base level is {castSpell.level === 0 ? 'cantrip' : `L${castSpell.level}`}.
+              {castSpell.atHigherLevels && <span className="block mt-1 text-xs text-slate-500 italic">Upcasting: {castSpell.atHigherLevels}</span>}
+            </p>
+            {castSpell.concentration && character.concentrationSpellId && character.concentrationSpellId !== castSpell.id && (() => {
+              const current = getSpell(character.concentrationSpellId);
+              return (
+                <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/40 rounded-lg px-3 py-2">
+                  ⚠ You are concentrating on <span className="font-bold">{current?.name ?? 'another spell'}</span>. Casting this will break that concentration.
+                </div>
+              );
+            })()}
+            {pactMagic && pactMagic.slotLevel >= castSpell.level && pactMagic.slotsUsed < pactMagic.slotsTotal && (
+              <button
+                className="w-full text-left p-3 rounded-lg border-2 border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 transition-all"
+                onClick={() => { usePactSlot(); if (castSpell.concentration) startConcentration(castSpell.id); setCastSpell(null); }}
+              >
+                <p className="text-sm font-bold text-purple-300">Pact Magic Slot (L{pactMagic.slotLevel})</p>
+                <p className="text-xs text-slate-400">{pactMagic.slotsTotal - pactMagic.slotsUsed}/{pactMagic.slotsTotal} pact slots remaining</p>
+              </button>
+            )}
+            <div className="grid gap-2">
+              {([1,2,3,4,5,6,7,8,9] as SlotLevel[])
+                .filter(lvl => lvl >= castSpell.level)
+                .map(lvl => {
+                  const total = slotTotals[lvl] ?? 0;
+                  if (total === 0) return null;
+                  const used = spellSlotsUsed[lvl] ?? 0;
+                  const avail = total - used;
+                  const disabled = avail <= 0;
+                  return (
+                    <button
+                      key={lvl}
+                      disabled={disabled}
+                      onClick={() => { useSpellSlot(lvl); if (castSpell.concentration) startConcentration(castSpell.id); setCastSpell(null); }}
+                      className={cn(
+                        'w-full text-left p-3 rounded-lg border-2 transition-all',
+                        disabled ? 'border-slate-700 bg-slate-900 opacity-50 cursor-not-allowed'
+                                 : lvl === castSpell.level
+                                   ? 'border-red-600 bg-red-950/30 hover:bg-red-900/40'
+                                   : 'border-slate-600 bg-slate-800 hover:border-amber-500 hover:bg-amber-950/20',
+                      )}
+                    >
+                      <p className="text-sm font-bold text-white">
+                        Level {lvl} Slot {lvl > castSpell.level && <span className="text-xs text-amber-400 font-normal">(upcast)</span>}
+                      </p>
+                      <p className="text-xs text-slate-400">{avail}/{total} remaining</p>
+                    </button>
+                  );
+                })}
+            </div>
+            {([1,2,3,4,5,6,7,8,9] as SlotLevel[])
+              .filter(lvl => lvl >= castSpell.level)
+              .every(lvl => (slotTotals[lvl] ?? 0) === 0) &&
+              !(pactMagic && pactMagic.slotLevel >= castSpell.level) && (
+                <p className="text-sm text-amber-400 italic">No slots available at this level or higher.</p>
+              )}
+          </div>
+        )}
+      </Dialog>
 
       {/* ── Class Abilities ── */}
       {hasAbilities && (
@@ -995,7 +1099,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
-  restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
+  restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
@@ -1499,6 +1603,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
         character={character}
         spellSaveDC={spellSaveDC}
         spellAttackBonus={spellAttackBonus}
+        slotTotals={slotTotals}
+        spellSlotsUsed={character.spellSlotsUsed}
+        pactMagic={character.pactMagic}
+        useSpellSlot={useSpellSlot}
+        usePactSlot={usePactSlot}
+        startConcentration={startConcentration}
       />
 
     </div>
