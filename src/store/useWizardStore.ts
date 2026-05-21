@@ -5,6 +5,7 @@ import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
+import { ALL_FEATS } from '../data/feats';
 
 type Draft = Partial<Character> & {
   name: string;
@@ -168,10 +169,19 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     }
 
     // Compute ability mods needed for resource max overrides (Bardic Inspiration, Flash of Genius).
+    // Mirrors computeResourceMaxOverrides in useCharacterStore: base + racial + feats.
     const racialCha = (race?.abilityScoreIncreases as any)?.cha ?? 0;
     const racialInt = (race?.abilityScoreIncreases as any)?.int ?? 0;
-    const effectiveCha = (draft.baseAbilityScores?.cha ?? 10) + racialCha;
-    const effectiveInt = (draft.baseAbilityScores?.int ?? 10) + racialInt;
+    let featCha = 0, featInt = 0;
+    for (const featId of (draft.selectedFeats ?? [])) {
+      const feat = ALL_FEATS.find(f => f.id === featId);
+      if (feat?.abilityScoreIncrease) {
+        featCha += feat.abilityScoreIncrease.cha ?? 0;
+        featInt += feat.abilityScoreIncrease.int  ?? 0;
+      }
+    }
+    const effectiveCha = (draft.baseAbilityScores?.cha ?? 10) + racialCha + featCha;
+    const effectiveInt = (draft.baseAbilityScores?.int ?? 10) + racialInt + featInt;
     const chaMod = Math.floor((effectiveCha - 10) / 2);
     const intMod  = Math.floor((effectiveInt  - 10) / 2);
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState } from '../types';
 import { getRace } from '../data/races';
+import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
 import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
 import { getClass } from '../data/classes';
@@ -13,11 +14,22 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   const totalLvl = totalCharacterLevel(c.classes);
   const profBonus = PROFICIENCY_BONUS[Math.min(totalLvl, 20)] ?? 2;
 
-  // Final ability scores = base + racial (feats omitted here; edge-case impact is minimal)
+  // Final ability scores = base + racial + feat bonuses (mirrors useCharacterDerived.ts)
   const race = getRace(c.raceId);
   const racial = race?.abilityScoreIncreases ?? {};
-  const score = (key: AbilityKey) =>
-    (c.baseAbilityScores[key] ?? 10) + ((racial as Record<string, number>)[key] ?? 0);
+  const baseScores: Record<string, number> = {};
+  for (const k of Object.keys(c.baseAbilityScores)) {
+    baseScores[k] = (c.baseAbilityScores[k as AbilityKey] ?? 10) + ((racial as Record<string, number>)[k] ?? 0);
+  }
+  for (const featId of (c.selectedFeats ?? [])) {
+    const feat = ALL_FEATS.find(f => f.id === featId);
+    if (feat?.abilityScoreIncrease) {
+      for (const [k, v] of Object.entries(feat.abilityScoreIncrease)) {
+        baseScores[k] = (baseScores[k] ?? 10) + (v ?? 0);
+      }
+    }
+  }
+  const score = (key: AbilityKey) => baseScores[key] ?? 10;
 
   const overrides: Record<string, number> = {};
   if (c.classes.some(cl => cl.classId === 'bard'))

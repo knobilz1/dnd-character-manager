@@ -40,7 +40,6 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
   const { maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel } = derived;
   const slotsUsed = character.spellSlotsUsed;
   const pactMagic = character.pactMagic;
-  const isWarlock = classDef?.id === 'warlock';
 
   // Group spellbook by level
   const spellbookMap = new Map(character.spellbook.map(sp => [sp.spellId, sp]));
@@ -271,8 +270,8 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
               );
             })()}
 
-            {/* Pact slot option (warlock) */}
-            {isWarlock && pactMagic && pactMagic.slotLevel >= castSpell.level && pactMagic.slotsUsed < pactMagic.slotsTotal && (
+            {/* Pact slot option */}
+            {pactMagic && pactMagic.slotLevel >= castSpell.level && pactMagic.slotsUsed < pactMagic.slotsTotal && (
               <button
                 className="w-full text-left p-3 rounded-lg border-2 border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 transition-all"
                 onClick={() => {
@@ -326,7 +325,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
             {([1,2,3,4,5,6,7,8,9] as SlotLevel[])
               .filter(lvl => lvl >= castSpell.level)
               .every(lvl => (slotTotals[lvl] ?? 0) === 0) &&
-              !(isWarlock && pactMagic && pactMagic.slotLevel >= castSpell.level) && (
+              !(pactMagic && pactMagic.slotLevel >= castSpell.level) && (
                 <p className="text-sm text-amber-400 italic">You don&apos;t have any slots at this level or higher.</p>
               )}
           </div>

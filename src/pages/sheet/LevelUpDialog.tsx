@@ -18,7 +18,7 @@ import { ALL_INFUSIONS } from '../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../data/optionalClassFeatures';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import type { Character, AbilityKey, ASIChoice, Feat } from '../../types';
+import type { Character, AbilityKey, ASIChoice } from '../../types';
 
 interface LevelUpDialogProps {
   open: boolean;
@@ -130,7 +130,9 @@ function CompactOptionPicker({ items, selected, max, onToggle }: OptionPickerPro
 export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDialogProps) {
   const { addSpellToBook, updateClassOptions } = useCharacterStore();
   const derived = useCharacterDerived(character);
-  const primary = character.classes[0];
+  const [selectedClassIdx, setSelectedClassIdx] = React.useState(0);
+
+  const primary = character.classes[selectedClassIdx] ?? character.classes[0];
   const classDef = primary ? getClass(primary.classId) : null;
   const currentLevel = primary?.level ?? 1;
   const newLevel = currentLevel + 1;
@@ -146,7 +148,6 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const [asiIncreases, setASIIncreases] = React.useState<Partial<Record<AbilityKey, number>>>({});
   const [selectedFeat, setSelectedFeat] = React.useState<string | undefined>(undefined);
   const [featSearch, setFeatSearch] = React.useState('');
-  const [detailFeat, setDetailFeat] = React.useState<Feat | null>(null);
 
   // Spell / option selection state
   const [pendingCantrips, setPendingCantrips] = React.useState<string[]>([]);
@@ -160,8 +161,30 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const [pendingInfusions, setPendingInfusions] = React.useState<string[]>([]);
   const [pendingOptionalFeatures, setPendingOptionalFeatures] = React.useState<string[]>([]);
 
+  // Reset all per-class choices when the selected class changes mid-dialog.
+  React.useEffect(() => {
+    setMethod('average');
+    setRollResult(null);
+    setPendingSubclass(undefined);
+    setASIMode('asi');
+    setASIIncreases({});
+    setSelectedFeat(undefined);
+    setFeatSearch('');
+    setPendingCantrips([]);
+    setPendingSpells([]);
+    setSpellSearch('');
+    setSpellLevelFilter('all');
+    setPendingPactBoon(undefined);
+    setPendingInvocations([]);
+    setPendingMetamagic([]);
+    setPendingManeuvers([]);
+    setPendingInfusions([]);
+    setPendingOptionalFeatures([]);
+  }, [selectedClassIdx]);
+
   React.useEffect(() => {
     if (open) {
+      setSelectedClassIdx(0);
       setMethod('average');
       setRollResult(null);
       setPendingSubclass(undefined);
@@ -169,7 +192,6 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
       setASIIncreases({});
       setSelectedFeat(undefined);
       setFeatSearch('');
-      setDetailFeat(null);
       setPendingCantrips([]);
       setPendingSpells([]);
       setSpellSearch('');
@@ -426,6 +448,32 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   return (
     <Dialog open={open} onClose={onClose} title={`Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
       <div className="space-y-5">
+        {/* Class selector — only shown for multiclass characters */}
+        {character.classes.length > 1 && (
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Level Up Which Class?</h3>
+            <div className="flex flex-wrap gap-2">
+              {character.classes.map((cl, idx) => {
+                const def = getClass(cl.classId);
+                return (
+                  <button
+                    key={cl.classId}
+                    onClick={() => setSelectedClassIdx(idx)}
+                    className={cn(
+                      'px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all',
+                      selectedClassIdx === idx
+                        ? 'border-red-500 bg-red-950/30 text-white'
+                        : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-500 hover:text-white',
+                    )}
+                  >
+                    {def?.name ?? cl.classId} <span className="text-slate-500 font-normal">Lv{cl.level}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* HP gain */}
         <section>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
@@ -1168,29 +1216,6 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
         </div>
       </div>
 
-      {/* Feat detail dialog */}
-      <Dialog open={!!detailFeat} onClose={() => setDetailFeat(null)} title={detailFeat?.name}>
-        {detailFeat && (
-          <div>
-            <div className="flex gap-2 mb-3">
-              <Badge>{detailFeat.sourceBook}</Badge>
-              {detailFeat.abilityScoreIncrease && <Badge color="green">+1 to ability</Badge>}
-            </div>
-            {detailFeat.prerequisite && (
-              <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3 mb-4">
-                <p className="text-xs font-bold text-yellow-300 mb-1">Prerequisite</p>
-                <p className="text-xs text-yellow-200">
-                  {detailFeat.prerequisite.other ??
-                   (detailFeat.prerequisite.spellcasting ? 'Spellcasting ability' :
-                    detailFeat.prerequisite.ability ? Object.entries(detailFeat.prerequisite.ability).map(([k, v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
-                    detailFeat.prerequisite.proficiency ?? '')}
-                </p>
-              </div>
-            )}
-            <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">{detailFeat.description}</p>
-          </div>
-        )}
-      </Dialog>
     </Dialog>
   );
 }

@@ -105,6 +105,7 @@
 /* ── Party mode 🎉 ───────────────────────────────────────────────────────── */
 [data-theme="party"] {
   color-scheme: dark;
+  background-color: #100030;   /* canvas fallback while body::before is transparent */
 
   /* Replace the neutral slate scale with vivid purple/violet */
   --color-slate-950: #08001a;
@@ -137,12 +138,24 @@
   --color-white: #ffffff;
 }
 
-/* Animated rainbow gradient on the main page wrappers — more specific than
-   .bg-slate-900 so it wins without !important */
+/* GPU-composited background: oversized ::before animated with transform instead
+   of background-position, so no paint is triggered on the compositor thread. */
 [data-theme="party"] .min-h-screen {
+  background: transparent;
+}
+
+[data-theme="party"] body::before {
+  content: '';
+  position: fixed;
+  top: -150vh;   /* centers the 400vh element vertically in viewport */
+  left: 0;
+  width: 400vw;  /* 4× viewport — matches original background-size: 400% 400% */
+  height: 400vh;
   background: linear-gradient(-45deg, #200050, #4d0028, #001450, #003040);
-  background-size: 400% 400%;
   animation: party-bg 5s ease infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: -1;
 }
 
 /* Soft neon glow around every card */
@@ -162,18 +175,21 @@
 }
 
 [data-theme="party"] body {
+  background-color: transparent;
   color: #ede9fe;
 }
 
+/* translateX(-75%) = -75% of 400vw = -300vw, matching original 100% position shift */
 @keyframes party-bg {
-  0%   { background-position:   0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position:   0% 50%; }
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-75%); }
+  100% { transform: translateX(0); }
 }
 
 /* ── Halloween mode 🎃 ───────────────────────────────────────────────────── */
 [data-theme="halloween"] {
   color-scheme: dark;
+  background-color: #0b0015;
 
   --color-slate-950: #06000e;
   --color-slate-900: #0b0015;   /* near-black purple page bg */
@@ -205,30 +221,43 @@
 }
 
 [data-theme="halloween"] .min-h-screen {
+  background: transparent;
+}
+
+[data-theme="halloween"] body::before {
+  content: '';
+  position: fixed;
+  top: -150vh;
+  left: 0;
+  width: 400vw;
+  height: 400vh;
   background: linear-gradient(-45deg, #0b0015, #1c0500, #0b000e, #0e0400);
-  background-size: 400% 400%;
   animation: halloween-bg 8s ease infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: -1;
 }
 
 [data-theme="halloween"] .bg-slate-800 {
   box-shadow: 0 0 20px rgba(234, 88, 12, 0.25), 0 0 50px rgba(234, 88, 12, 0.08);
 }
 
-[data-theme="halloween"] body { color: #fed7aa; }
+[data-theme="halloween"] body { background-color: transparent; color: #fed7aa; }
 
 [data-theme="halloween"] .scrollbar-thin { scrollbar-color: #ea580c #160025; }
 [data-theme="halloween"] .scrollbar-thin::-webkit-scrollbar-track { background: #160025; }
 [data-theme="halloween"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #ea580c; }
 
 @keyframes halloween-bg {
-  0%   { background-position:   0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position:   0% 50%; }
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-75%); }
+  100% { transform: translateX(0); }
 }
 
 /* ── Christmas mode 🎄 ───────────────────────────────────────────────────── */
 [data-theme="christmas"] {
   color-scheme: dark;
+  background-color: #050f08;
 
   --color-slate-950: #030a06;
   --color-slate-900: #050f08;   /* near-black forest green page bg */
@@ -260,30 +289,43 @@
 }
 
 [data-theme="christmas"] .min-h-screen {
+  background: transparent;
+}
+
+[data-theme="christmas"] body::before {
+  content: '';
+  position: fixed;
+  top: -150vh;
+  left: 0;
+  width: 400vw;
+  height: 400vh;
   background: linear-gradient(-45deg, #071a0d, #1a0808, #051407, #120505);
-  background-size: 400% 400%;
   animation: christmas-bg 8s ease infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: -1;
 }
 
 [data-theme="christmas"] .bg-slate-800 {
   box-shadow: 0 0 20px rgba(251, 191, 36, 0.2), 0 0 50px rgba(22, 101, 52, 0.15);
 }
 
-[data-theme="christmas"] body { color: #fde68a; }
+[data-theme="christmas"] body { background-color: transparent; color: #fde68a; }
 
 [data-theme="christmas"] .scrollbar-thin { scrollbar-color: #16a34a #0c1e10; }
 [data-theme="christmas"] .scrollbar-thin::-webkit-scrollbar-track { background: #0c1e10; }
 [data-theme="christmas"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #16a34a; }
 
 @keyframes christmas-bg {
-  0%   { background-position:   0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position:   0% 50%; }
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-75%); }
+  100% { transform: translateX(0); }
 }
 
 /* ── Deep Sea mode 🌊 ───────────────────────────────────────────────────── */
 [data-theme="deepsea"] {
   color-scheme: dark;
+  background-color: #010d1a;
 
   --color-slate-950: #000810;
   --color-slate-900: #010d1a;   /* near-black ocean page bg */
@@ -315,25 +357,37 @@
 }
 
 [data-theme="deepsea"] .min-h-screen {
+  background: transparent;
+}
+
+[data-theme="deepsea"] body::before {
+  content: '';
+  position: fixed;
+  top: -150vh;
+  left: 0;
+  width: 400vw;
+  height: 400vh;
   background: linear-gradient(-45deg, #010d1a, #041e38, #011820, #05253a);
-  background-size: 400% 400%;
   animation: deepsea-bg 12s ease infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: -1;
 }
 
 [data-theme="deepsea"] .bg-slate-800 {
   box-shadow: 0 0 20px rgba(34, 211, 238, 0.15), 0 0 50px rgba(14, 116, 144, 0.1);
 }
 
-[data-theme="deepsea"] body { color: #67e8f9; }
+[data-theme="deepsea"] body { background-color: transparent; color: #67e8f9; }
 
 [data-theme="deepsea"] .scrollbar-thin { scrollbar-color: #0e7490 #051525; }
 [data-theme="deepsea"] .scrollbar-thin::-webkit-scrollbar-track { background: #051525; }
 [data-theme="deepsea"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #0e7490; }
 
 @keyframes deepsea-bg {
-  0%   { background-position:   0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position:   0% 50%; }
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-75%); }
+  100% { transform: translateX(0); }
 }
 
 /* ── Deep Sea overlay keyframes ─────────────────────────────────────────── */
@@ -485,6 +539,7 @@
 /* ── Eid theme ───────────────────────────────────────────────────────────── */
 [data-theme="eid"] {
   color-scheme: dark;
+  background-color: #0a1628;
 
   --color-slate-950: #050a0f;
   --color-slate-900: #0a1628;   /* deep midnight blue bg */
@@ -516,25 +571,51 @@
 }
 
 [data-theme="eid"] .min-h-screen {
+  background: transparent;
+}
+
+[data-theme="eid"] body::before {
+  content: '';
+  position: fixed;
+  top: -150vh;
+  left: 0;
+  width: 400vw;
+  height: 400vh;
   background: linear-gradient(160deg, #050a0f, #0a1628, #0c1e3a, #080f20);
-  background-size: 400% 400%;
   animation: eid-bg 14s ease infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: -1;
 }
 
 [data-theme="eid"] .bg-slate-800 {
   box-shadow: 0 0 18px rgba(201,168,76,0.12), 0 0 40px rgba(26,51,102,0.2);
 }
 
-[data-theme="eid"] body { color: #e2c97e; }
+[data-theme="eid"] body { background-color: transparent; color: #e2c97e; }
 
 [data-theme="eid"] .scrollbar-thin { scrollbar-color: #c9a84c #0a1628; }
 [data-theme="eid"] .scrollbar-thin::-webkit-scrollbar-track { background: #0a1628; }
 [data-theme="eid"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #c9a84c; }
 
 @keyframes eid-bg {
-  0%   { background-position:   0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position:   0% 50%; }
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(-75%); }
+  100% { transform: translateX(0); }
 }
 
 /* Eid overlay keyframes are inlined in EidOverlay.tsx */
+
+/* ── Barbarian Rage mode ─────────────────────────────────────────────────── */
+/* Applied when data-raging is set on <html>. Turns the entire background
+   blood-red and gives every card an intense crimson glow. */
+[data-raging] .min-h-screen {
+  background: #1a0000 !important;  /* deep blood red page bg */
+}
+
+/* Tint cards with a fierce red glow — overrides any theme shadow */
+[data-raging] .bg-slate-800 {
+  box-shadow:
+    0 0 24px rgba(220, 0, 0, 0.55),
+    0 0 60px rgba(160, 0, 0, 0.25) !important;
+}

@@ -15,6 +15,7 @@ import { TraitsPanel } from './TraitsPanel';
 import { InventoryPanel } from './InventoryPanel';
 import { DiceRoller } from './DiceRoller';
 import { SnapshotPanel } from './SnapshotPanel';
+import { RageOverlay } from '../../components/RageOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { getClass } from '../../data/classes';
@@ -78,6 +79,7 @@ export function SheetPage() {
   const [tab, setTab] = React.useState('combat');
   const [round, setRound] = React.useState(1);
   const [activeEffects, setActiveEffects] = React.useState<Record<string, number>>({}); // key → round when activated
+  const [showRageOverlay, setShowRageOverlay] = React.useState(false);
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
@@ -116,6 +118,20 @@ export function SheetPage() {
     const t = setTimeout(() => { save(); setSaved(true); setTimeout(() => setSaved(false), 1500); }, 1000);
     return () => clearTimeout(t);
   }, [character]);
+
+  const isRaging = 'rage' in activeEffects;
+
+  // data-raging drives the full-screen page tint + global card glows — only
+  // active while the overlay is showing. After "End Effect" the overlay is gone
+  // so the page returns to normal; only the class resources card stays red (via isRaging).
+  React.useEffect(() => {
+    if (showRageOverlay) {
+      document.documentElement.setAttribute('data-raging', '');
+    } else {
+      document.documentElement.removeAttribute('data-raging');
+    }
+    return () => document.documentElement.removeAttribute('data-raging');
+  }, [showRageOverlay]);
 
   const derived = useCharacterDerived(character);
   const { triggerRoll } = useDiceStore();
@@ -157,6 +173,11 @@ export function SheetPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col">
+      {/* Full-screen rage overlay — shows while overlay is active; "End Effect" only
+          dismisses the visual. Rage itself ends via "End Rage" in Class Resources. */}
+      {showRageOverlay && (
+        <RageOverlay onEnd={() => setShowRageOverlay(false)} />
+      )}
       {/* Top bar */}
       <div className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -305,7 +326,7 @@ export function SheetPage() {
                 return (
                   <button
                     key={k}
-                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`)}
+                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`, exhaustionDisadvSaves ? 'disadvantage' : undefined)}
                     className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
                     title={`Roll ${abilityLabels[k]} saving throw`}
                   >
@@ -336,7 +357,7 @@ export function SheetPage() {
                 return (
                   <button
                     key={skill}
-                    onClick={() => triggerRoll(20, bonus, `${skill} Check`)}
+                    onClick={() => triggerRoll(20, bonus, `${skill} Check`, exhaustionDisadvChecks ? 'disadvantage' : undefined)}
                     className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
                     title={`Roll ${skill} check`}
                   >
@@ -413,6 +434,9 @@ export function SheetPage() {
                 resourceMaxOverrides={resourceMaxOverrides}
                 activeEffects={activeEffects}
                 setActiveEffects={setActiveEffects}
+                isRaging={isRaging}
+                showRageOverlay={showRageOverlay}
+                setShowRageOverlay={setShowRageOverlay}
               />
             )}
             {tab === 'spells' && (
@@ -973,7 +997,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
-  activeEffects, setActiveEffects }: any) {
+  activeEffects, setActiveEffects, isRaging, setShowRageOverlay }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   return (
@@ -1230,7 +1254,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
 
       {/* Class Resources */}
       {resources.filter((r: any) => r.key !== 'arcane_recovery').length > 0 && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+        <div className={cn(
+          'border rounded-xl p-4 transition-all duration-500',
+          isRaging
+            ? 'bg-red-950/50 border-red-700/70 shadow-[0_0_22px_rgba(200,0,0,0.45),0_0_55px_rgba(140,0,0,0.2)]'
+            : 'bg-slate-800 border-slate-700',
+        )}>
           <SectionHeader>Class Resources</SectionHeader>
           <div className="space-y-3">
             {resources.filter((r: any) => r.key !== 'arcane_recovery').map((r: any) => {
@@ -1261,10 +1290,20 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
                         </p>
                       </div>
                       <button
-                        onClick={() => setActiveEffects((prev: Record<string, number>) => { const n = { ...prev }; delete n[r.key]; return n; })}
-                        className={cn('text-xs px-2 py-1 rounded-lg font-medium transition-colors', expired ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-black/30 hover:bg-black/50 text-white')}
+                        onClick={() => {
+                          setActiveEffects((prev: Record<string, number>) => { const n = { ...prev }; delete n[r.key]; return n; });
+                          if (r.key === 'rage') setShowRageOverlay(false);
+                        }}
+                        className={cn(
+                          'text-xs px-2 py-1 rounded-lg font-medium transition-colors',
+                          expired
+                            ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                            : r.key === 'rage'
+                              ? 'bg-red-900/60 hover:bg-red-800/80 text-red-200 border border-red-700/50'
+                              : 'bg-black/30 hover:bg-black/50 text-white',
+                        )}
                       >
-                        End
+                        {r.key === 'rage' ? 'End Rage' : 'End'}
                       </button>
                     </div>
 
@@ -1309,6 +1348,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
                         onClick={() => {
                           setResource(r.key, r.current - 1);
                           setActiveEffects((prev: Record<string, number>) => ({ ...prev, [r.key]: round }));
+                          if (r.key === 'rage') setShowRageOverlay(true);
                         }}
                         className="text-xs px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white font-medium transition-colors border border-slate-600"
                       >

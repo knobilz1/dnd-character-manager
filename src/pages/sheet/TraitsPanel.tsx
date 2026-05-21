@@ -280,7 +280,7 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
             onClick={() => {
               // Convert up: 100cp→10sp, 10sp→1gp, 10gp→1pp (electrum stays)
               let { cp, sp, ep, gp, pp } = character.currencies;
-              const cpGain = Math.floor(cp / 100); cp = cp % 100; sp += cpGain * 10;
+              const cpGain = Math.floor(cp / 10); cp = cp % 10; sp += cpGain;
               const spGain = Math.floor(sp / 10);  sp = sp % 10;  gp += spGain;
               const gpGain = Math.floor(gp / 10);  gp = gp % 10;  pp += gpGain;
               updateCurrency('cp', cp);
@@ -290,7 +290,7 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
               updateCurrency('pp', pp);
             }}
             className="text-xs text-slate-400 hover:text-yellow-300 px-2 py-1 rounded border border-slate-600 hover:border-yellow-600 transition-colors"
-            title="Convert up: 100cp→10sp→1gp→pp"
+            title="Convert up: 10cp→1sp, 10sp→1gp, 10gp→1pp"
           >
             ⬆ Convert
           </button>

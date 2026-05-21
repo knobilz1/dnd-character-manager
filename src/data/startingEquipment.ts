@@ -5,14 +5,16 @@ export const CLASS_STARTING_EQUIPMENT: ClassStartingEquipment[] = [
     classId: 'barbarian',
     choices: [
       {
-        label: 'Primary weapon',
+        label: 'Weapon',
         options: [
           { label: 'A greataxe', items: [{ name: 'Greataxe', category: 'weapon', weight: 7 }] },
           { label: 'Any martial melee weapon', items: [{ name: 'Martial melee weapon (your choice)', category: 'weapon' }] },
         ],
       },
       {
-        label: 'Secondary weapon',
+        // Independent of the first choice — these are backup / thrown weapons,
+        // not an offhand weapon. A greataxe + two handaxes is a valid combo (PHB).
+        label: 'Backup weapons',
         options: [
           { label: 'Two handaxes', items: [{ name: 'Handaxe', quantity: 2, category: 'weapon', weight: 2 }] },
           { label: 'Any simple weapon', items: [{ name: 'Simple weapon (your choice)', category: 'weapon' }] },

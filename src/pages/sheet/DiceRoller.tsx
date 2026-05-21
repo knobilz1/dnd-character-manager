@@ -204,11 +204,16 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     if (!pending) return;
     const req = consume();
     if (!req) return;
+    const reqMode = req.mode ?? 'normal';
     setOpen(true);
-    setMode('normal');
+    setMode(reqMode);
     setRollModifier(req.modifier);
     setRollLabel(req.label);
-    rollWithSides(req.die as Die);
+    if (reqMode !== 'normal') {
+      rollTwo(req.die as Die, reqMode);
+    } else {
+      rollWithSides(req.die as Die);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending]);
 
@@ -275,14 +280,14 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
 
   function roll(sides: Die) {
     if (rolling) return;
-    if (mode !== 'normal') { rollTwo(sides); return; }
-    // Manual clicks clear the external label
+    // Manual clicks always clear the external label
     setRollModifier(null);
     setRollLabel(null);
+    if (mode !== 'normal') { rollTwo(sides); return; }
     rollWithSides(sides);
   }
 
-  function rollTwo(sides: Die) {
+  function rollTwo(sides: Die, modeOverride?: Mode) {
     if (rolling) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
@@ -290,8 +295,6 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     setShakePhase(0);
     setTwoFinal(null);
     setDisplay(null);
-    setRollModifier(null);
-    setRollLabel(null);
 
     let frame = 0;
     const frames = 28;
@@ -307,8 +310,9 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
       } else {
         const v1 = Math.ceil(Math.random() * sides);
         const v2 = Math.ceil(Math.random() * sides);
+        const effectiveMode = modeOverride ?? mode;
         // Advantage: take higher; disadvantage: take lower. Tie → die 1 wins.
-        const winner: 1 | 2 = mode === 'advantage'
+        const winner: 1 | 2 = effectiveMode === 'advantage'
           ? (v1 >= v2 ? 1 : 2)
           : (v1 <= v2 ? 1 : 2);
         const finalVal = winner === 1 ? v1 : v2;
@@ -318,7 +322,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
         setDisplay(finalVal);
         setTier(t);
         setResultKey(k => k + 1);
-        setHistory(h => [{ die: sides, result: finalVal, tier: t, mode }, ...h].slice(0, 8));
+        setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
         setRolling(false);
       }
     };
@@ -348,7 +352,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
       {open && (
         <div
           ref={panelRef}
-          className="fixed z-40 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+          className="fixed z-50 w-72 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
           style={pos ? { left: pos.x, top: pos.y } : { bottom: 24, right: 24 }}
         >
           {/* Header */}
