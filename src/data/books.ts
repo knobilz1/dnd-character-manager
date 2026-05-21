@@ -10,6 +10,14 @@ export const BOOKS: Book[] = [
     description: 'The core rulebook. Contains all 12 base classes, races, spells, and rules.',
   },
   {
+    id: 'DMG',
+    name: "Dungeon Master's Guide",
+    shortName: 'DMG',
+    color: 'gray',
+    year: 2014,
+    description: 'Core magic items: weapons, armor, wondrous items, artifacts, and treasure tables.',
+  },
+  {
     id: 'XGtE',
     name: "Xanathar's Guide to Everything",
     shortName: 'XGtE',

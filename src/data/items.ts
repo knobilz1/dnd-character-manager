@@ -1,10 +1,11 @@
-import type { ItemCategory } from '../types';
+import type { BookId, ItemCategory } from '../types';
 
 export interface ItemTemplate {
   name: string;
   category: ItemCategory;
   weight?: number;
   description?: string;
+  sourceBook?: BookId;
 }
 
 const WEAPONS: ItemTemplate[] = [
@@ -778,30 +779,35 @@ const SJA_ITEMS: ItemTemplate[] = [
   { name: 'Wildspace Orrery', category: 'magic', weight: 5, description: "Wondrous item, uncommon. Inside a Wildspace system, this portable arcane device automatically tracks the positions and movements of all suns, planets, moons, and comets within that system, projecting a display of all these bodies in the space above its current location. In that display, a white, pulsating pinprick of light marks the orrery's location." },
 ];
 
+const tag = <B extends BookId>(arr: ItemTemplate[], book: B): ItemTemplate[] =>
+  arr.map(i => ({ ...i, sourceBook: book }));
+
 export const ALL_ITEMS: ItemTemplate[] = [
-  ...WEAPONS,
-  ...ARMOR,
-  ...PACKS,
-  ...GEAR,
-  ...TOOLS,
-  ...CONSUMABLES,
-  ...MAGIC_ITEMS,
-  ...DMG_EXTRA,
-  ...XGTE_ITEMS,
-  ...TCE_ITEMS,
-  ...EGTW_ITEMS,
-  ...FTOD_ITEMS,
-  ...GGR_ITEMS,
-  ...SJA_ITEMS,
-  ...TREASURE,
+  ...tag(WEAPONS,     'PHB'),
+  ...tag(ARMOR,       'PHB'),
+  ...tag(PACKS,       'PHB'),
+  ...tag(GEAR,        'PHB'),
+  ...tag(TOOLS,       'PHB'),
+  ...tag(CONSUMABLES, 'PHB'),
+  ...tag(MAGIC_ITEMS, 'DMG'),
+  ...tag(DMG_EXTRA,   'DMG'),
+  ...tag(XGTE_ITEMS,  'XGtE'),
+  ...tag(TCE_ITEMS,   'TCE'),
+  ...tag(EGTW_ITEMS,  'EGtW'),
+  ...tag(FTOD_ITEMS,  'FToD'),
+  ...tag(GGR_ITEMS,   'GGR'),
+  ...tag(SJA_ITEMS,   'SJA'),
+  ...tag(TREASURE,    'PHB'),
 ];
 
-export function searchItems(query: string, limit = 8): ItemTemplate[] {
+export function searchItems(query: string, enabledBooks: BookId[], limit = 8): ItemTemplate[] {
   if (!query.trim()) return [];
   const q = query.toLowerCase();
+  const bookSet = new Set<BookId>(enabledBooks);
   const results: Array<{ item: ItemTemplate; score: number }> = [];
 
   for (const item of ALL_ITEMS) {
+    if (item.sourceBook && !bookSet.has(item.sourceBook)) continue;
     const name = item.name.toLowerCase();
     if (name.startsWith(q)) {
       results.push({ item, score: 2 });

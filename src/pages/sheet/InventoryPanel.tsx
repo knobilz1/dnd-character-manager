@@ -83,7 +83,7 @@ export function InventoryPanel({
 
   function handleNameChange(value: string) {
     setDraftItem(d => ({ ...d, name: value }));
-    const hits = searchItems(value, 8);
+    const hits = searchItems(value, character.enabledBooks, 8);
     setSuggestions(hits);
     setShowSuggestions(hits.length > 0);
   }

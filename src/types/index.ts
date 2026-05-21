@@ -1,5 +1,6 @@
 export type BookId =
   | 'PHB'
+  | 'DMG'
   | 'XGtE'
   | 'TCE'
   | 'MMoM'
