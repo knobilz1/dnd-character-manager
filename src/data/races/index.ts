@@ -1393,6 +1393,26 @@ export const ALL_RACES: Race[] = [
     isSubrace: false,
   },
 
+  // ── SCoC: OWLIN ───────────────────────────────────────────────────────
+  {
+    id: 'owlin',
+    name: 'Owlin',
+    sourceBook: 'SCoC',
+    size: 'Medium',
+    speed: 30,
+    abilityScoreIncreases: {},
+    traits: [
+      { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
+      { name: 'Flight', description: 'Thanks to your wings, you have a flying speed equal to your walking speed. You can\'t use this flying speed if you\'re wearing medium or heavy armor.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 120 feet of you as if it were bright light, and in darkness as if it were dim light. You can\'t discern color in darkness, only shades of gray.' },
+      { name: 'Silent Feathers', description: 'You have proficiency in the Stealth skill.' },
+    ],
+    darkvision: 120,
+    proficiencies: ['Stealth'],
+    languages: ['Common', 'one other language of your choice'],
+    isSubrace: false,
+  },
+
   // ── AcqInc: VERDAN ────────────────────────────────────────────────────
   {
     id: 'verdan',

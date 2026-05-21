@@ -81,4 +81,12 @@ export const BOOKS: Book[] = [
     year: 2022,
     description: 'Space-based adventure setting with six new races, spelljamming rules, ships, and Wildspace magic.',
   },
+  {
+    id: 'SCoC',
+    name: 'Strixhaven: A Curriculum of Chaos',
+    shortName: 'SCoC',
+    color: 'rose',
+    year: 2021,
+    description: 'Magic school setting. Owlin race, five college backgrounds, Strixhaven feats, new spells, and campus magic items.',
+  },
 ];

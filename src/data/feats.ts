@@ -515,6 +515,21 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'FToD',
     description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. Prof-bonus uses per long rest.',
   },
+
+  // ── SCoC FEATS ─────────────────────────────────────────────────────────
+  {
+    id: 'scoc-strixhaven-initiate',
+    name: 'Strixhaven Initiate',
+    sourceBook: 'SCoC',
+    description: 'You have studied some magical theory and have learned a few spells associated with Strixhaven University.\n\nChoose one of Strixhaven\'s colleges: Lorehold, Prismari, Quandrix, Silverquill, or Witherbloom. You learn two cantrips and one 1st-level spell based on the college you choose, as specified in the Strixhaven Spells table:\n• Lorehold: cantrips from light, sacred flame, and thaumaturgy; 1st-level cleric or wizard spell.\n• Prismari: cantrips from fire bolt, prestidigitation, and ray of frost; 1st-level bard or sorcerer spell.\n• Quandrix: cantrips from druidcraft, guidance, and mage hand; 1st-level druid or wizard spell.\n• Silverquill: cantrips from sacred flame, thaumaturgy, and vicious mockery; 1st-level bard or cleric spell.\n• Witherbloom: cantrips from chill touch, druidcraft, and spare the dying; 1st-level druid or wizard spell.\n\nYou can cast the chosen 1st-level spell without a spell slot, and you must finish a long rest before you can cast it in this way again. You can also cast the spell using any spell slots you have. Your spellcasting ability for this feat\'s spells is Intelligence, Wisdom, or Charisma (choose when you select this feat).',
+  },
+  {
+    id: 'scoc-strixhaven-mascot',
+    name: 'Strixhaven Mascot',
+    sourceBook: 'SCoC',
+    prerequisite: { minLevel: 4, other: 'Strixhaven Initiate feat' },
+    description: 'You have learned how to summon a Strixhaven mascot to assist you, granting you these benefits:\n• You can cast the find familiar spell as a ritual. Your familiar can take the form of the mascot associated with the college you chose for the Strixhaven Initiate feat: a spirit statue mascot (Lorehold), an art elemental mascot (Prismari), a fractal mascot (Quandrix), an inkling mascot (Silverquill), or a pest mascot (Witherbloom).\n• When you take the Attack action on your turn, you can forgo one attack to allow your mascot familiar to make one attack of its own with its reaction.\n• If your mascot familiar is within 60 feet of you, you can teleport as an action, swapping places with the familiar. If your destination space is too small for you to occupy, the teleportation fails and is wasted. Once you teleport in this way, you can\'t do so again until you finish a long rest, unless you expend a spell slot of 2nd level or higher to do it again.',
+  },
 ];
 
 export function getFeat(id: string): Feat | undefined {
