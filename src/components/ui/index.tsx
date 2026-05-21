@@ -58,11 +58,17 @@ export function Badge({ color = 'slate', className, children, ...props }: BadgeP
   const colors: Record<string, string> = {
     red: 'bg-red-900/50 text-red-300 border-red-700',
     amber: 'bg-amber-900/50 text-amber-300 border-amber-700',
+    yellow: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
     purple: 'bg-purple-900/50 text-purple-300 border-purple-700',
     blue: 'bg-blue-900/50 text-blue-300 border-blue-700',
     green: 'bg-green-900/50 text-green-300 border-green-700',
     orange: 'bg-orange-900/50 text-orange-300 border-orange-700',
     teal: 'bg-teal-900/50 text-teal-300 border-teal-700',
+    indigo: 'bg-indigo-900/50 text-indigo-300 border-indigo-700',
+    violet: 'bg-violet-900/50 text-violet-300 border-violet-700',
+    rose: 'bg-rose-900/50 text-rose-300 border-rose-700',
+    cyan: 'bg-cyan-900/50 text-cyan-300 border-cyan-700',
+    gray: 'bg-gray-700/50 text-gray-300 border-gray-600',
     slate: 'bg-slate-700 text-slate-300 border-slate-600',
   };
   return (

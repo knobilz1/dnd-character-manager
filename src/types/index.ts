@@ -11,7 +11,9 @@ export type BookId =
   | 'ToB'
   | 'AcqInc'
   | 'GGR'
-  | 'SJA';
+  | 'SJA'
+  | 'ERLW'
+  | 'SCAG';
 
 export interface Book {
   id: BookId;

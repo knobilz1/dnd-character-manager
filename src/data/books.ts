@@ -89,4 +89,20 @@ export const BOOKS: Book[] = [
     year: 2021,
     description: 'Magic school setting. Owlin race, five college backgrounds, Strixhaven feats, new spells, and campus magic items.',
   },
+  {
+    id: 'ERLW',
+    name: 'Eberron: Rising from the Last War',
+    shortName: 'ERLW',
+    color: 'yellow',
+    year: 2019,
+    description: 'Eberron campaign setting. Changeling, Kalashtar, Shifter, and Warforged races; 13 Dragonmark variants; House Agent background; and Eberron magic items.',
+  },
+  {
+    id: 'SCAG',
+    name: "Sword Coast Adventurer's Guide",
+    shortName: 'SCAG',
+    color: 'cyan',
+    year: 2015,
+    description: "Forgotten Realms sourcebook. New subraces (Duergar, Ghostwise Halfling, Svirfneblin), tiefling/half-elf variants, 12 subclasses, 4 cantrips, and 12 backgrounds.",
+  },
 ];

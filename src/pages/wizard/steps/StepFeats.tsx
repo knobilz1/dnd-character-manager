@@ -92,6 +92,8 @@ export function StepFeats() {
               {feat.prerequisite && (
                 <p className="text-xs text-yellow-400 mb-1">
                   Requires: {
+                    feat.prerequisite.other ? `${feat.prerequisite.other}${feat.prerequisite.minLevel ? `, level ${feat.prerequisite.minLevel}` : ''}` :
+                    feat.prerequisite.minLevel ? `Level ${feat.prerequisite.minLevel}` :
                     feat.prerequisite.spellcasting ? 'Spellcasting' :
                     feat.prerequisite.ability ? Object.entries(feat.prerequisite.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
                     feat.prerequisite.proficiency ?? ''
@@ -135,7 +137,9 @@ export function StepFeats() {
               <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3 mb-4">
                 <p className="text-xs font-bold text-yellow-300 mb-1">Prerequisite</p>
                 <p className="text-xs text-yellow-200">
-                  {detailFeat.prerequisite.spellcasting ? 'Spellcasting ability' :
+                  {detailFeat.prerequisite.other ? `${detailFeat.prerequisite.other}${detailFeat.prerequisite.minLevel ? `, level ${detailFeat.prerequisite.minLevel}` : ''}` :
+                   detailFeat.prerequisite.minLevel ? `Level ${detailFeat.prerequisite.minLevel}` :
+                   detailFeat.prerequisite.spellcasting ? 'Spellcasting ability' :
                    detailFeat.prerequisite.ability ? Object.entries(detailFeat.prerequisite.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
                    detailFeat.prerequisite.proficiency ?? ''}
                 </p>
