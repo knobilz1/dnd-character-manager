@@ -65,4 +65,12 @@ export const BOOKS: Book[] = [
     year: 2018,
     description: 'Magic: The Gathering crossover. Ravnica guilds, new races, subclasses, spells, and magic items.',
   },
+  {
+    id: 'SJA',
+    name: 'Spelljammer: Adventures in Space',
+    shortName: 'SJA',
+    color: 'violet',
+    year: 2022,
+    description: 'Space-based adventure setting with six new races, spelljamming rules, ships, and Wildspace magic.',
+  },
 ];

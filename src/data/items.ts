@@ -771,6 +771,13 @@ const GGR_ITEMS: ItemTemplate[] = [
   { name: 'Voyager Staff', category: 'magic', weight: 4, description: 'Staff, very rare (requires attunement by a spellcaster). You gain a +1 bonus to attack and damage rolls made with this magic quarterstaff. While you hold it, you also gain a +1 bonus to spell attack rolls. The staff has 10 charges. While holding it, you can use an action to expend 1 or more of its charges to cast one of the following spells (save DC your spell save DC): banishment (4 charges), blink (3 charges), misty step (2 charges), passwall (5 charges), or teleport (7 charges). The staff regains 1d6 + 4 expended charges daily at dawn. If you expend the last charge, roll a d20. On a 1, the staff vanishes forever.' },
 ];
 
+// ── SJA magic items ──────────────────────────────────────────────────────────
+const SJA_ITEMS: ItemTemplate[] = [
+  { name: 'Fish Suit', category: 'magic', weight: 20, description: "Wondrous item, very rare. This bulky suit, which fully encases your head and body, takes 1 minute to don or doff. While worn, it enables you to breathe in an airless environment and renders you immune to the harmful effects of any gas that surrounds you. The suit also grants you a swimming speed equal to your walking speed while underwater, or a flying speed equal to your walking speed in an environment with no gravity." },
+  { name: 'Spelljamming Helm', category: 'magic', weight: 75, description: "Wondrous item, rare (requires attunement by a spellcaster). This ornate chair propels and maneuvers a ship on which it has been installed through space, air, and water. The ship must weigh 1 ton or more. While attuned to the helm and sitting in it, you gain the following abilities (as if concentrating on a spell): you can move the ship up to its speed and steer it; if in space with no objects 1 ton or larger within 1 mile, you can move the ship to travel 100 million miles in 24 hours; you can see and hear anywhere on and around the vessel. Transfer Attunement: as an action, touch a willing spellcaster — that creature immediately attunes to the helm and your attunement ends." },
+  { name: 'Wildspace Orrery', category: 'magic', weight: 5, description: "Wondrous item, uncommon. Inside a Wildspace system, this portable arcane device automatically tracks the positions and movements of all suns, planets, moons, and comets within that system, projecting a display of all these bodies in the space above its current location. In that display, a white, pulsating pinprick of light marks the orrery's location." },
+];
+
 export const ALL_ITEMS: ItemTemplate[] = [
   ...WEAPONS,
   ...ARMOR,
@@ -785,6 +792,7 @@ export const ALL_ITEMS: ItemTemplate[] = [
   ...EGTW_ITEMS,
   ...FTOD_ITEMS,
   ...GGR_ITEMS,
+  ...SJA_ITEMS,
   ...TREASURE,
 ];
 
