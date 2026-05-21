@@ -57,10 +57,13 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
     byLevel[spell.level].push({ spell, prepared: sp.isPrepared, alwaysPrepared: sp.isAlwaysPrepared });
   }
 
-  // Spells for add browser
+  // Spells for add browser — include spells for ALL character classes so
+  // multiclass casters (e.g. Fighter/Wizard, Paladin/Sorcerer) can add
+  // spells from their secondary casting class.
+  const allClassIds = character.classes.map((cl: any) => cl.classId);
   const availableToAdd = ALL_SPELLS.filter(s =>
     character.enabledBooks.includes(s.sourceBook) &&
-    (classDef ? s.classes.includes(primaryClass.classId) : true) &&
+    (classDef ? allClassIds.some(id => s.classes.includes(id)) : true) &&
     !spellbookMap.has(s.id) &&
     (filterLevel === 'all' || s.level === filterLevel) &&
     (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))

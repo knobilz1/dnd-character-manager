@@ -40,7 +40,10 @@ export function StepReview() {
   const conMod = abilityMod(finalScores.con);
   const hitDie = classDef?.hitDie ?? 8;
   const level = primaryClass?.level ?? 1;
-  const maxHP = hitDie + conMod + (level - 1) * (Math.floor(hitDie / 2) + 1 + conMod);
+  // Per RAW, each level grants at least 1 HP even with very negative CON — match finalize().
+  const lvl1HP = Math.max(1, hitDie + conMod);
+  const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
+  const maxHP = lvl1HP + (level - 1) * perLevelHP;
 
   const selectedFeats = ALL_FEATS.filter(f => draft.selectedFeats?.includes(f.id));
   const selectedSpells = ALL_SPELLS.filter(s => draft.spellbook?.some(sp => sp.spellId === s.id));

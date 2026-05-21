@@ -238,14 +238,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   setCurrentHP: (hp) =>
     set((s) => {
       if (!s.character) return s;
-      const maxHP = s.character.maxHP;
-      return { character: { ...s.character, currentHP: Math.min(Math.max(hp, 0), maxHP) } };
+      // Exhaustion 4 halves the HP maximum (PHB p. 291); cap to that, not the raw max.
+      const effMax = (s.character.exhaustionLevel ?? 0) >= 4
+        ? Math.floor(s.character.maxHP / 2)
+        : s.character.maxHP;
+      return { character: { ...s.character, currentHP: Math.min(Math.max(hp, 0), effMax) } };
     }),
 
   healHP: (amount) =>
     set((s) => {
       if (!s.character) return s;
-      const next = Math.min(s.character.currentHP + amount, s.character.maxHP);
+      const effMax = (s.character.exhaustionLevel ?? 0) >= 4
+        ? Math.floor(s.character.maxHP / 2)
+        : s.character.maxHP;
+      const next = Math.min(s.character.currentHP + amount, effMax);
       return { character: { ...s.character, currentHP: next } };
     }),
 
@@ -635,7 +641,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   longRest: () =>
     set((s) => {
       if (!s.character) return s;
-      const maxHP = s.character.maxHP;
+      // Long rest reduces exhaustion by 1 first. The restored HP is capped at the
+      // NEW (post-rest) effective max — so exhaustion 5→4 still halves it, but
+      // exhaustion 4→3 lets you heal to full (PHB p. 186 + exhaustion table).
+      const newExhaustionLevel = Math.max(0, s.character.exhaustionLevel - 1) as ExhaustionLevel;
+      const effMax = newExhaustionLevel >= 4
+        ? Math.floor(s.character.maxHP / 2)
+        : s.character.maxHP;
       // Re-apply ability-mod / prof-bonus overrides so the stored max stays accurate
       // even if the character's stats changed since the last level-up.
       const overrides = computeResourceMaxOverrides(s.character);
@@ -656,14 +668,14 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return {
         character: {
           ...s.character,
-          currentHP: maxHP,
+          currentHP: effMax,
           tempHP: 0,
           deathSaves: { successes: 0, failures: 0 },
           // Exhaustion is tracked via exhaustionLevel only; conditions list
           // should never contain 'Exhaustion'. Per 5e RAW, a long rest does NOT
           // remove conditions — only specific spells/effects do. Preserve them.
           conditions: s.character.conditions,
-          exhaustionLevel: Math.max(0, s.character.exhaustionLevel - 1) as ExhaustionLevel,
+          exhaustionLevel: newExhaustionLevel,
           spellSlotsUsed: emptySlotState(),
           concentrationSpellId: undefined,
           resources,

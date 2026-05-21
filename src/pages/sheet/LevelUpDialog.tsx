@@ -214,7 +214,10 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     setRollResult(roll);
   }
 
-  const sub = primary?.subclassId ? getSubclass(primary.subclassId) : null;
+  // Use the already-assigned subclass, or the pending pick if this is the first subclass selection.
+  // This ensures the subclass's entry-level features appear in "Features Gained" as soon as
+  // the player selects a subclass in this level-up dialog.
+  const sub = getSubclass(primary?.subclassId ?? pendingSubclass ?? '');
   const newFeatures = [
     ...classDef.features.filter(f => f.level === newLevel).map(f => ({ source: 'Class', ...f })),
     ...(sub?.features ?? []).filter(f => f.level === newLevel).map(f => ({ source: sub!.name, ...f })),

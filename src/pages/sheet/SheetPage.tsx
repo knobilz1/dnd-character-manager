@@ -201,7 +201,14 @@ export function SheetPage() {
           <div>
             <h1 className="font-bold text-white text-lg leading-tight">{character.name}</h1>
             <p className="text-xs text-slate-400">
-              Level {totalLevel} {race?.name ?? ''} {classDef?.name ?? ''} · {character.alignment}
+              Level {totalLevel} {race?.name ?? ''}{' '}
+              {character.classes.length > 1
+                ? character.classes.map(cl => {
+                    const d = getClass(cl.classId);
+                    return `${d?.name ?? cl.classId} ${cl.level}`;
+                  }).join(' / ')
+                : classDef?.name ?? ''}{' '}
+              · {character.alignment}
             </p>
           </div>
         </div>
@@ -494,7 +501,7 @@ export function SheetPage() {
       <Dialog open={!!restConfirm} onClose={() => setRestConfirm(null)} title={restConfirm === 'long' ? 'Long Rest' : 'Short Rest'}>
         <p className="text-slate-300 mb-4">
           {restConfirm === 'long'
-            ? 'Taking a long rest will restore all HP, spell slots, and class resources. Conditions (except Exhaustion) are cleared.'
+            ? 'Taking a long rest will restore HP, spell slots, and class resources. Exhaustion is reduced by 1. Conditions are not cleared by rest.'
             : 'Taking a short rest will restore short-rest resources (Ki, Channel Divinity, Action Surge, Warlock pact slots). Spend hit dice below to recover HP.'}
         </p>
 
