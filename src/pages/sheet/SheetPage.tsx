@@ -1402,8 +1402,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
                       </div>
                       <button
                         onClick={() => {
-                          setActiveEffects((prev: Record<string, number>) => { const n = { ...prev }; delete n[r.key]; return n; });
-                          if (r.key === 'rage') setShowRageOverlay(false);
+                          const wasFrenzying = r.key === 'rage' && 'frenzy' in activeEffects;
+                          setActiveEffects((prev: Record<string, number>) => { const n = { ...prev }; delete n[r.key]; if (r.key === 'rage') delete n['frenzy']; return n; });
+                          if (r.key === 'rage') {
+                            setShowRageOverlay(false);
+                            if (wasFrenzying) setExhaustion(Math.min(6, (character.exhaustionLevel ?? 0) + 1) as any);
+                          }
                         }}
                         className={cn(
                           'text-xs px-2 py-1 rounded-lg font-medium transition-colors',
@@ -1436,6 +1440,62 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
                     {!expired && sustained.durationRounds === undefined && (
                       <p className="text-xs text-slate-400 mb-2">No time limit — end manually.</p>
                     )}
+
+                    {/* Berserker subclass features during rage */}
+                    {r.key === 'rage' && !expired && (() => {
+                      const barEntry = character.classes.find((cl: any) => cl.classId === 'barbarian' && cl.subclassId === 'berserker');
+                      if (!barEntry) return null;
+                      const barLevel: number = barEntry.level;
+                      const isFrenzying: boolean = 'frenzy' in activeEffects;
+                      return (
+                        <div className="space-y-2 mb-3">
+                          <div className="h-px bg-red-700/30" />
+                          {/* Frenzy toggle (level 3+) */}
+                          {barLevel >= 3 && (
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="relative group min-w-0">
+                                <p className="text-xs font-semibold text-red-300 cursor-default select-none">⚔️ Frenzy</p>
+                                {/* Hover tooltip — appears above to avoid bottom-of-viewport clipping */}
+                                <div className="absolute left-0 bottom-full mb-1.5 w-64 bg-slate-950 border border-red-900/70 rounded-xl p-3 text-xs text-slate-300 leading-relaxed z-50 shadow-2xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150">
+                                  <p className="font-bold text-red-300 mb-1">Frenzy — Berserker lv.3</p>
+                                  <p>When you rage, you can choose to go into a frenzy. For the duration, you can make one melee weapon attack as a <span className="text-white font-medium">bonus action</span> on each of your turns after this one.</p>
+                                  <p className="mt-1.5 text-amber-300">⚠ Costs +1 Exhaustion when this rage ends.</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (isFrenzying) {
+                                    setActiveEffects((prev: Record<string, number>) => { const n = { ...prev }; delete n['frenzy']; return n; });
+                                  } else {
+                                    setActiveEffects((prev: Record<string, number>) => ({ ...prev, frenzy: round }));
+                                  }
+                                }}
+                                className={cn(
+                                  'shrink-0 text-xs px-2 py-1 rounded-lg font-medium border transition-all',
+                                  isFrenzying
+                                    ? 'bg-red-900/70 border-red-500 text-red-200'
+                                    : 'bg-black/20 hover:bg-red-950/40 border-slate-600 hover:border-red-700/60 text-slate-400 hover:text-red-300',
+                                )}
+                              >
+                                {isFrenzying ? '🔥 Frenzying' : 'Enter Frenzy'}
+                              </button>
+                            </div>
+                          )}
+                          {/* Frenzy active reminder */}
+                          {barLevel >= 3 && isFrenzying && (
+                            <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2 py-1.5 leading-relaxed">
+                              Bonus action: one melee weapon attack per turn · +1 Exhaustion on rage end
+                            </p>
+                          )}
+                          {/* Mindless Rage passive (level 6+) */}
+                          {barLevel >= 6 && (
+                            <p className="text-[11px] text-slate-400">
+                              🛡 <span className="text-slate-300 font-medium">Mindless Rage</span> — immune to charmed &amp; frightened
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Counter row */}
                     <div className="flex items-center justify-between">

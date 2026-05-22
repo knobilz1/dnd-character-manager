@@ -389,7 +389,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const spellLevelOptions = Array.from({ length: effectiveMaxSpellLevel }, (_, i) => i + 1);
 
   // ── Class options ────────────────────────────────────────────────────────
-  const classOpts = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] };
+  // Spread over defaults so partial classOptions objects (e.g. imported chars) don't crash array spreads.
+  const classOpts = { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [], ...character.classOptions };
 
   const needsPactBoon = isWarlock && newLevel >= 3 && !classOpts.pactBoon;
 
