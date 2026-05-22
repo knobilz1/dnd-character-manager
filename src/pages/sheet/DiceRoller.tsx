@@ -454,13 +454,27 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
                 {/* Winner result label */}
                 {!rolling && twoFinal && display !== null && (
                   <>
-                    <p className="text-xs mt-3 relative z-10 font-semibold" style={{ color: t.color }}>
+                    {rollLabel && (
+                      <p className="text-[11px] text-slate-400 uppercase tracking-wide mt-3 relative z-10">{rollLabel}</p>
+                    )}
+                    <p className={cn('text-xs relative z-10 font-semibold', rollLabel ? 'mt-1' : 'mt-3')} style={{ color: t.color }}>
                       {tier === 'crit-success'
                         ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
                         : tier === 'crit-fail'
                         ? '💀 Critical Fail'
                         : `${mode === 'advantage' ? '⬆ Adv' : '⬇ Dis'} → ${display} (took ${twoFinal.winner === 1 ? twoFinal.v1 : twoFinal.v2})`}
                     </p>
+                    {rollModifier !== null && (
+                      <div className="flex items-center gap-1.5 mt-1 relative z-10">
+                        <span className="text-slate-400 text-sm font-bold">
+                          {rollModifier >= 0 ? `+${rollModifier}` : `${rollModifier}`}
+                        </span>
+                        <span className="text-slate-500 text-sm">=</span>
+                        <span className="text-xl font-black" style={{ color: t.color, textShadow: t.shadow }}>
+                          {display + rollModifier}
+                        </span>
+                      </div>
+                    )}
                   </>
                 )}
               </>
