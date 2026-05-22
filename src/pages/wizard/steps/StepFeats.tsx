@@ -5,7 +5,10 @@ import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { ASI_LEVELS } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
-import type { Feat } from '../../../types';
+import { BOOKS } from '../../../data/books';
+import type { Feat, BookId } from '../../../types';
+
+const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
 
 export function StepFeats() {
   const { draft, updateDraft } = useWizardStore();
@@ -85,7 +88,7 @@ export function StepFeats() {
                 >
                   {feat.name}
                 </h4>
-                <Badge color={feat.sourceBook === 'PHB' ? 'red' : feat.sourceBook === 'XGtE' ? 'amber' : 'purple'}>
+                <Badge color={(BOOK_COLOR[feat.sourceBook] ?? 'slate') as any}>
                   {feat.sourceBook}
                 </Badge>
               </div>
@@ -130,7 +133,7 @@ export function StepFeats() {
         {detailFeat && (
           <div>
             <div className="flex gap-2 mb-3">
-              <Badge>{detailFeat.sourceBook}</Badge>
+              <Badge color={(BOOK_COLOR[detailFeat.sourceBook] ?? 'slate') as any}>{detailFeat.sourceBook}</Badge>
               {detailFeat.abilityScoreIncrease && <Badge color="green">+1 to ability</Badge>}
             </div>
             {detailFeat.prerequisite && (

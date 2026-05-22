@@ -11,16 +11,22 @@ import { ALL_INFUSIONS } from '../../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../../data/optionalClassFeatures';
 import type { BookId, ClassOptionsState } from '../../../types';
 
-function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' {
+function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' | 'indigo' | 'violet' | 'rose' | 'yellow' | 'cyan' | 'gray' {
   switch (b) {
-    case 'PHB': return 'red';
+    case 'PHB':  return 'red';
     case 'XGtE': return 'amber';
-    case 'TCE': return 'purple';
+    case 'TCE':  return 'purple';
     case 'MMoM': return 'blue';
-    case 'VGM': return 'green';
+    case 'VGM':  return 'green';
     case 'FToD': return 'orange';
     case 'EGtW': return 'teal';
-    default: return 'slate' as any;
+    case 'GGR':  return 'indigo';
+    case 'SJA':  return 'violet';
+    case 'SCoC': return 'rose';
+    case 'ERLW': return 'yellow';
+    case 'SCAG': return 'cyan';
+    case 'DMG':  return 'gray';
+    default: return 'gray' as any;
   }
 }
 

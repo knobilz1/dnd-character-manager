@@ -16,9 +16,12 @@ import { ALL_METAMAGIC } from '../../data/metamagic';
 import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../data/optionalClassFeatures';
+import { BOOKS } from '../../data/books';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import type { Character, AbilityKey, ASIChoice } from '../../types';
+import type { Character, AbilityKey, ASIChoice, BookId } from '../../types';
+
+const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
 
 interface LevelUpDialogProps {
   open: boolean;
@@ -728,7 +731,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                               <span className="text-sm font-bold text-white leading-tight">{feat.name}</span>
                               <div className="flex items-center gap-1 shrink-0">
                                 {isSelected && <span className="text-amber-400 text-xs">✓</span>}
-                                <Badge color={feat.sourceBook === 'PHB' ? 'red' : feat.sourceBook === 'XGtE' ? 'amber' : 'purple'}>
+                                <Badge color={BOOK_COLOR[feat.sourceBook as BookId] ?? 'slate'}>
                                   {feat.sourceBook}
                                 </Badge>
                               </div>

@@ -589,8 +589,8 @@ export const ALL_SUBCLASSES: Subclass[] = [
   // ── TCE: BARD ────────────────────────────────────────────────────────
   { id: 'college-of-creation', name: 'College of Creation', classId: 'bard', sourceBook: 'TCE', description: 'A bard who walks the College of Creation\'s path views themselves as an extension of the Song of Creation, the great musical effort that gave birth to all that exists.', features: [
     { name: 'Mote of Potential', level: 3, description: 'When a creature uses a Bardic Inspiration die you gave them, they roll an additional effect (extra inspiration die, AC bonus, or temp HP).' },
-    { name: 'Performance of Creation', level: 6, description: 'As an action, expend a 2nd-level (or higher) spell slot to create a nonmagical item of your choice in an unoccupied space, worth up to 20 gp times the slot level.' },
-    { name: 'Animating Performance', level: 14, description: 'As an action, animate a Large or smaller nonmagical item that you can see within 30 feet (Dancing Item). Uses prof-bonus times per long rest.' },
+    { name: 'Performance of Creation', level: 3, description: 'As an action, expend a 2nd-level (or higher) spell slot to create a nonmagical item of your choice in an unoccupied space, worth up to 20 gp times the slot level.' },
+    { name: 'Animating Performance', level: 6, description: 'As an action, animate a Large or smaller nonmagical item that you can see within 30 feet (Dancing Item). Uses prof-bonus times per long rest.' },
     { name: 'Creative Crescendo', level: 14, description: 'When you cast Performance of Creation, you can create three items at once.' },
   ]},
   { id: 'college-of-eloquence', name: 'College of Eloquence', classId: 'bard', sourceBook: 'TCE', description: 'Adherents of the College of Eloquence master the art of oratory. They sway hearts and minds with practiced charm and an unassailable logic.', features: [
@@ -1162,7 +1162,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // Wizard: Bladesinging
-  { id: 'scag-bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'SCAG', description: 'Bladesingers are elves who bravely defend their people and lands. They are elf wizards who master a school of sword fighting grounded in a tradition of arcane magic. Note: Only elves and half-elves can choose this tradition in the Forgotten Realms.', features: [
+  { id: 'scag-bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'SCAG', description: 'Bladesingers are elves who bravely defend their people and lands. They are elf wizards who master a school of sword fighting grounded in a tradition of arcane magic. Note: Only elves and half-elves can choose this tradition in the Forgotten Realms.',
+    resources: [
+      // SCAG version: fixed 2 uses, recharges on short or long rest (unlike TCE which scales with proficiency bonus).
+      { name: 'Bladesong', key: 'bladesong', rechargeOn: 'short' as const,
+        maxPerLevel: {1:2,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2} },
+    ],
+    features: [
     { name: 'Training in War and Song', level: 2, description: 'When you adopt this tradition at 2nd level, you gain proficiency with light armor, and you gain proficiency with one type of one-handed melee weapon of your choice. You also gain proficiency in the Performance skill if you don\'t already have it.' },
     { name: 'Bladesong', level: 2, description: 'Starting at 2nd level, you can invoke a secret elven magic called the Bladesong, provided you aren\'t wearing medium or heavy armor or using a shield. It graces you with supernatural speed, agility, and focus. You can use a bonus action to start the Bladesong, which lasts for 1 minute. It ends early if you are incapacitated, don medium or heavy armor or a shield, or use two hands to make an attack with a weapon. While the Bladesong is active: you add your Intelligence modifier (minimum +1) to your AC; your walking speed increases by 10 feet; you have advantage on Dexterity (Acrobatics) checks; you add your Intelligence modifier (minimum +1) to any Constitution saving throw you make to maintain concentration on a spell. You can use this feature twice, and regain all expended uses when you finish a short or long rest.' },
     { name: 'Extra Attack', level: 6, description: 'Starting at 6th level, you can attack twice, instead of once, whenever you take the Attack action on your turn.' },

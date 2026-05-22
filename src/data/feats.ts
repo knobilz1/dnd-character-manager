@@ -188,7 +188,7 @@ export const ALL_FEATS: Feat[] = [
     id: 'ritual-caster',
     name: 'Ritual Caster',
     sourceBook: 'PHB',
-    prerequisite: { ability: { int: 13, wis: 13 } },
+    prerequisite: { other: 'Intelligence or Wisdom 13 or higher' },
     description: 'You have learned a number of spells that you can cast as rituals. These spells are written in a ritual book, which you must have in hand while casting one of them. When you choose this feat, you acquire a ritual book holding two 1st-level spells of your choice. Choose one of the following classes: bard, cleric, druid, sorcerer, warlock, or wizard. You must choose your spells from that class\'s spell list, and the spells you choose must have the ritual tag.',
   },
   {
@@ -267,7 +267,7 @@ export const ALL_FEATS: Feat[] = [
     id: 'bountiful-luck',
     name: 'Bountiful Luck',
     sourceBook: 'XGtE',
-    prerequisite: { race: 'halfling-lightfoot' },
+    prerequisite: { race: 'halfling' },
     description: 'Your people have extraordinary luck, which you have learned to mystically lend to your companions when you see them falter. You\'re not sure how you do it; you just wish it, and it happens. Surely a sign of fortune\'s favor! When an ally you can see within 30 feet of you rolls a 1 on the d20 for an attack roll, an ability check, or a saving throw, you can use your reaction to let the ally reroll the die. The ally must use the new roll.',
   },
   {
@@ -281,7 +281,7 @@ export const ALL_FEATS: Feat[] = [
     id: 'elven-accuracy',
     name: 'Elven Accuracy',
     sourceBook: 'XGtE',
-    prerequisite: { race: 'elf-high' },
+    prerequisite: { other: 'Elf or half-elf' },
     description: 'The accuracy of elves is legendary, especially that of elf archers and spellcasters. You have uncanny aim with attacks that rely on precision rather than brute force. You gain the following benefits:\n• Increase your Dexterity, Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Whenever you have advantage on an attack roll using Dexterity, Intelligence, Wisdom, or Charisma, you can reroll one of the dice once.',
   },
   {
@@ -584,8 +584,9 @@ export function getEligibleFeats(character: Character, enabledBooks: BookId[]): 
 
     if (prereq.race) {
       const raceId = character.raceId;
-      // 'halfling' matches 'halfling-lightfoot'; 'halfling-lightfoot' only matches exactly
-      if (raceId !== prereq.race && !raceId.startsWith(prereq.race)) return false;
+      // 'tiefling' matches 'tiefling', 'tiefling-asmodeus', AND 'scag-tiefling-feral'.
+      // Substring matching handles both the common tiefling-* prefix and SCAG's scag-tiefling-* prefix.
+      if (!raceId.includes(prereq.race)) return false;
     }
     if (prereq.minLevel !== undefined && totalLevel < prereq.minLevel) return false;
     if (prereq.ability) {
