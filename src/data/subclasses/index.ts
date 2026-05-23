@@ -438,7 +438,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Unerring Accuracy', level: 17, description: 'If you miss with a monk weapon attack on your turn, you can reroll it once.' },
   ]},
   { id: 'way-of-the-sun-soul', name: 'Way of the Sun Soul', classId: 'monk', sourceBook: 'XGtE', description: 'Monks of the Way of the Sun Soul learn to channel their own life energy into searing bolts of light.', features: [
-    { name: 'Radiant Sun Bolt', level: 3, description: 'You can hurl a bolt of radiance: ranged spell attack, 30 feet, deals 1d4 + Dex mod radiant damage. Counts as monk weapon. You can spend ki for Flurry of Blows-style attacks with bolts.' },
+    { name: 'Radiant Sun Bolt', level: 3, description: 'You can hurl a bolt of radiance: ranged spell attack, 30 feet, deals 1d6 + Dex mod radiant damage. Counts as monk weapon. You can spend ki for Flurry of Blows-style attacks with bolts.' },
     { name: 'Searing Arc Strike', level: 6, description: 'Immediately after using Attack action, spend 2 ki points to cast Burning Hands as a bonus action (scales by spending more ki).' },
     { name: 'Searing Sunburst', level: 11, description: 'Create a 20-foot sphere of light at a point within 150 feet. Each creature in it must make a Con save, taking 2d6 radiant damage on a fail. Spend ki to increase damage.' },
     { name: 'Sun Shield', level: 17, description: 'You emit bright light in 30 feet, and when a creature hits you with a melee attack, it takes radiant damage equal to 5 + your Wis modifier.' },
