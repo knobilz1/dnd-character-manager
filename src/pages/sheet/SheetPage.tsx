@@ -6,7 +6,7 @@ import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import { Button, Tabs, Dialog, StatBox, SectionHeader, NumberStepper, ThemeToggleButton } from '../../components/ui';
+import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
@@ -1102,7 +1102,7 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
   );
 }
 
-function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, setHpInput, setHpMode, applyHP,
+function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput, applyHP,
   setCurrentHP, setTempHP, setMaxHP, addDeathSuccess, addDeathFailure, resetDeathSaves,
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
