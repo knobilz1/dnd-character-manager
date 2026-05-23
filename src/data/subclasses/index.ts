@@ -580,7 +580,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'path-of-wild-magic', name: 'Path of Wild Magic', classId: 'barbarian', sourceBook: 'TCE', description: 'Barbarians who tread the Path of Wild Magic perceive the magical energies that suffuse the multiverse and learn to channel them in battle.', features: [
     { name: 'Magic Awareness', level: 3, description: 'As an action, sense the presence of magic within 60 feet. Prof-bonus uses per long rest.' },
-    { name: 'Wild Surge', level: 3, description: 'When you enter your rage, roll on the Wild Magic table to manifest a random magical effect (e.g., shadowy tendrils, teleport ally, summon a creature, etc.).' },
+    { name: 'Wild Surge', level: 3, description: 'When you enter your rage, roll a d8: 1 — Shadowy tendrils extend from you for 1 min; creatures within 10 ft take necrotic damage equal to your proficiency bonus each round. 2 — Teleport up to 30 ft to an unoccupied space you can see. 3 — A creature within 30 ft makes a Str save or takes 1d6 lightning and is knocked prone. 4 — One held weapon deals force damage and gains the thrown property (range 20/60 ft) until rage ends. 5 — Creatures that hit you take psychic damage equal to your proficiency bonus until rage ends. 6 — You and allies within 10 ft gain +1 AC until rage ends. 7 — Ground within 15 ft becomes difficult terrain for your enemies until rage ends. 8 — A creature within 30 ft makes a Con save or takes 1d6 radiant and is blinded until the start of your next turn.' },
     { name: 'Bolstering Magic', level: 6, description: 'As an action, touch a creature: 1d3 bonus on attacks/checks for 10 minutes, or roll 1d3 to regain a spell slot of that level. Prof-bonus uses per long rest.' },
     { name: 'Unstable Backlash', level: 10, description: 'When you take damage or fail a save during rage, use your reaction to roll a new effect on the Wild Magic table.' },
     { name: 'Controlled Surge', level: 14, description: 'When you roll on the Wild Magic table, you can roll twice and use either result.' },
@@ -644,7 +644,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Full of Stars', level: 14, description: 'While in Starry Form, you become partially incorporeal: resistance to bludgeoning, piercing, and slashing.' },
   ]},
   { id: 'circle-of-wildfire', name: 'Circle of Wildfire', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Wildfire understand that destruction sometimes paves the way for greater growth.', features: [
-    { name: 'Circle Spells', level: 2, description: 'You learn additional spells: Burning Hands, Cure Wounds, etc.' },
+    { name: 'Circle Spells', level: 2, description: 'You always have these spells prepared: 1st — Burning Hands, Cure Wounds; 3rd — Flaming Sphere, Scorching Ray; 5th — Plant Growth, Revivify; 7th — Aura of Life, Fire Shield; 9th — Flame Strike, Mass Cure Wounds.' },
     { name: 'Summon Wildfire Spirit', level: 2, description: 'As an action, expend a Wild Shape use to summon a wildfire spirit (Small elemental) in an unoccupied space within 30 feet. It can use Fiery Teleportation to teleport and deal fire damage.' },
     { name: 'Enhanced Bond', level: 6, description: 'When you cast a fire or healing spell, you can have it originate from your wildfire spirit. Damage spells deal +1d8 fire; healing spells heal +1d8.' },
     { name: 'Cauterizing Flames', level: 10, description: 'When a Small or larger creature dies within 30 feet of your wildfire spirit, a harmless spectral flame springs forth. As an action, a creature within 5 feet can heal another creature or deal fire damage to an enemy. Prof-bonus uses.' },
@@ -736,7 +736,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
 
   // ── TCE: SORCERER ────────────────────────────────────────────────────
   { id: 'aberrant-mind', name: 'Aberrant Mind', classId: 'sorcerer', sourceBook: 'TCE', description: 'An alien influence has wrapped its tendrils around your mind, giving you psionic power.', features: [
-    { name: 'Psionic Spells', level: 1, description: 'You learn additional spells (Mind Sliver, Dissonant Whispers, etc.) and can swap your sorcerer spells for divination or enchantment spells.' },
+    { name: 'Psionic Spells', level: 1, description: 'You learn Mind Sliver (cantrip) and always have these spells prepared: 1st — Arms of Hadar, Dissonant Whispers; 3rd — Calm Emotions, Detect Thoughts; 5th — Hunger of Hadar, Sending; 7th — Evard\'s Black Tentacles, Summon Aberration; 9th — Modify Memory, Rary\'s Telepathic Bond. You can also swap sorcerer spells known for divination or enchantment spells.' },
     { name: 'Telepathic Speech', level: 1, description: 'As a bonus action, form a telepathic link with a creature you can see within 30 feet for sorcerer-level minutes.' },
     { name: 'Psionic Sorcery', level: 6, description: 'When you cast a Psionic Spell, you can spend sorcery points equal to the spell\'s level instead of a spell slot. The spell requires no V or S components.' },
     { name: 'Psychic Defenses', level: 6, description: 'You gain resistance to psychic damage and advantage on saves to avoid being charmed or frightened.' },
@@ -744,7 +744,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Warping Implosion', level: 18, description: 'As an action, teleport up to 120 feet. Creatures within 30 feet of your starting space must make a Str save or take 5d10 force damage and be pulled to your new space. Once per long rest.' },
   ]},
   { id: 'clockwork-soul', name: 'Clockwork Soul', classId: 'sorcerer', sourceBook: 'TCE', description: 'The cosmic forces of order and chaos perpetually struggle. Some sorcerers draw their power from this struggle, embodying the perfection of order.', features: [
-    { name: 'Clockwork Magic', level: 1, description: 'You learn additional spells (Alarm, Protection from Evil and Good, etc.) and can swap your sorcerer spells for abjuration or transmutation spells.' },
+    { name: 'Clockwork Magic', level: 1, description: 'You learn Mending (cantrip) and always have these spells prepared: 1st — Alarm, Protection from Evil and Good; 3rd — Aid, Lesser Restoration; 5th — Dispel Magic, Protection from Energy; 7th — Freedom of Movement, Summon Construct; 9th — Dispel Evil and Good, Wall of Force. You can also swap sorcerer spells known for abjuration or transmutation spells.' },
     { name: 'Restore Balance', level: 1, description: 'When a creature within 60 feet rolls with advantage or disadvantage, you can use your reaction to cancel it. Prof-bonus uses per long rest.' },
     { name: 'Bastion of Law', level: 6, description: 'Spend 1-5 sorcery points to grant a creature within 30 feet that many d8s, used to cancel damage taken.' },
     { name: 'Trance of Order', level: 14, description: 'As a bonus action, you become unflappable for 1 minute: attack rolls vs you don\'t have advantage, and your d20 rolls for attacks, ability checks, and saves treat 9 or lower as 10.' },
@@ -761,7 +761,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Fathomless Plunge', level: 14, description: 'As an action, teleport yourself and up to 5 willing creatures within 30 feet through a portal to a body of water you have seen, up to 1 mile away. Once per short or long rest.' },
   ]},
   { id: 'the-genie', name: 'The Genie', classId: 'warlock', sourceBook: 'TCE', description: 'You have made a pact with one of the rarest kinds of genie, a noble genie of an exotic court.', features: [
-    { name: 'Genie\'s Vessel', level: 1, description: 'Your patron gifts you a vessel (lamp, ring, etc.). As a bonus action, you can vanish into the vessel for up to twice your prof-bonus hours. You can also use it to deal extra damage based on your genie\'s kind (Dao: bludgeoning, Djinni: thunder, Efreeti: fire, Marid: cold).' },
+    { name: 'Genie\'s Vessel', level: 1, description: 'Your patron gifts you a vessel — a lamp, urn, ring, or bottle. As a bonus action, you can vanish into the vessel for up to twice your prof-bonus hours. You can also use it to deal extra damage based on your genie\'s kind (Dao: bludgeoning, Djinni: thunder, Efreeti: fire, Marid: cold).' },
     { name: 'Elemental Gift', level: 6, description: 'You gain resistance to a damage type based on your genie kind, and as a bonus action a flying speed of 30 feet for 10 minutes. Prof-bonus uses per long rest.' },
     { name: 'Sanctuary Vessel', level: 10, description: 'When you hide in your Genie\'s Vessel, you can bring along willing creatures within 30 feet (up to 5). Creatures inside regain HP at the start of each hour as if they\'d spent Hit Dice.' },
     { name: 'Limited Wish', level: 14, description: 'You can entreat your genie patron to cast any spell of 6th level or lower as a free action. Once per long rest, but you must wait 1d4 long rests before using it again.' },
@@ -776,7 +776,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
         maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
     ],
     features: [
-    { name: 'Training in War and Song', level: 2, description: 'You gain proficiency with light armor, one type of one-handed melee weapon (rapier, longsword, scimitar, sword, etc.), and Performance.' },
+    { name: 'Training in War and Song', level: 2, description: 'You gain proficiency with light armor, one type of one-handed melee weapon of your choice, and the Performance skill (if you don\'t already have it).' },
     { name: 'Bladesong', level: 2, description: 'As a bonus action, you can start the Bladesong (lasts 1 minute or until you don armor/shield, use two hands, or are incapacitated). While active: +Int mod to AC, +10 ft speed, advantage on Acrobatics checks, +Int mod to Concentration saves. Proficiency bonus uses per long rest.' },
     { name: 'Extra Attack', level: 6, description: 'You can attack twice when you take the Attack action. You can also replace one of these attacks with a cantrip with a casting time of 1 action.' },
     { name: 'Song of Defense', level: 10, description: 'While Bladesong is active, you can use your reaction when you take damage to expend a spell slot and reduce the damage by five times the slot level.' },

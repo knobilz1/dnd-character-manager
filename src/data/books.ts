@@ -7,7 +7,7 @@ export const BOOKS: Book[] = [
     shortName: 'PHB',
     color: 'red',
     year: 2014,
-    description: 'The core rulebook. Contains all 12 base classes, races, spells, and rules.',
+    description: 'The core rulebook. 12 base classes, 15 races (including subraces), spells, and rules.',
   },
   {
     id: 'DMG',
