@@ -95,6 +95,12 @@ export function useCharacterDerived(character: Character | null) {
     // Shield: +2 AC bonus regardless of armor (Monk loses Unarmored Defense above if shield equipped)
     if (equippedShield) ac += 2;
 
+    // Fighting style AC bonuses
+    const fightingStyles: string[] = character.classOptions?.fightingStyles ?? [];
+    const armorStats = equippedArmor ? ARMOR_STATS[equippedArmor.name] : null;
+    if (fightingStyles.includes('defense') && equippedArmor) ac += 1;
+    if (fightingStyles.includes('mariner') && armorStats?.armorType !== 'heavy' && !equippedShield) ac += 1;
+
     // Saving throws — per PHB multiclassing rules, you only keep the saving throw
     // proficiencies of your FIRST class. Adding every class's saves is wrong.
     const savingThrowProficiencies = new Set<AbilityKey>();
