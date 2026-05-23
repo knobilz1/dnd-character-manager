@@ -6,6 +6,7 @@ import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS } from '../data/feats';
+import { ARMOR_STATS } from '../data/items';
 
 // Eldritch Knight and Arcane Trickster get spellcasting via subclass.
 // Look up the effective spellcasting type for a class+subclass combo.
@@ -65,10 +66,34 @@ export function useCharacterDerived(character: Character | null) {
       cha: abilityMod(finalScores.cha ?? 10),
     };
 
-    // AC (unarmored default; classes with Unarmored Defense use different formulas)
-    let ac = 10 + mods.dex;
-    if (primaryClassDef?.id === 'barbarian') ac = 10 + mods.dex + mods.con;
-    else if (primaryClassDef?.id === 'monk') ac = 10 + mods.dex + mods.wis;
+    // AC — check for equipped armor/shield from inventory first
+    const equippedArmor = character.inventory.find(item => item.category === 'armor' && item.equipped);
+    const equippedShield = character.inventory.find(item => item.category === 'shield' && item.equipped);
+
+    let ac: number;
+    if (equippedArmor) {
+      // Wearing armor: use its base AC + DEX (capped per armor type)
+      const stats = ARMOR_STATS[equippedArmor.name];
+      if (stats) {
+        const dexBonus = stats.dexCap === 0 ? 0
+          : stats.dexCap !== undefined ? Math.min(mods.dex, stats.dexCap)
+          : mods.dex;
+        ac = stats.baseAC + dexBonus;
+      } else {
+        // Custom / magic armor not in table — fall back to 10 + DEX
+        ac = 10 + mods.dex;
+      }
+    } else if (primaryClassDef?.id === 'barbarian') {
+      // Barbarian Unarmored Defense: 10 + DEX + CON (only when not wearing armor)
+      ac = 10 + mods.dex + mods.con;
+    } else if (primaryClassDef?.id === 'monk' && !equippedShield) {
+      // Monk Unarmored Defense: 10 + DEX + WIS (only when not wearing armor OR shield)
+      ac = 10 + mods.dex + mods.wis;
+    } else {
+      ac = 10 + mods.dex;
+    }
+    // Shield: +2 AC bonus regardless of armor (Monk loses Unarmored Defense above if shield equipped)
+    if (equippedShield) ac += 2;
 
     // Saving throws — per PHB multiclassing rules, you only keep the saving throw
     // proficiencies of your FIRST class. Adding every class's saves is wrong.

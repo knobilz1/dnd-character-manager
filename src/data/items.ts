@@ -72,6 +72,29 @@ const ARMOR: ItemTemplate[] = [
   { name: 'Shield', category: 'shield', weight: 6, description: '+2 AC. Must be proficient.' },
 ];
 
+// Structured AC stats for each armor piece.
+// dexCap: undefined = full DEX bonus, number = capped DEX bonus (0 = no DEX for heavy)
+export interface ArmorStats {
+  baseAC: number;
+  armorType: 'light' | 'medium' | 'heavy';
+  dexCap?: number;
+}
+
+export const ARMOR_STATS: Record<string, ArmorStats> = {
+  'Padded armor':          { baseAC: 11, armorType: 'light' },
+  'Leather armor':         { baseAC: 11, armorType: 'light' },
+  'Studded leather armor': { baseAC: 12, armorType: 'light' },
+  'Hide armor':            { baseAC: 12, armorType: 'medium', dexCap: 2 },
+  'Chain shirt':           { baseAC: 13, armorType: 'medium', dexCap: 2 },
+  'Scale mail':            { baseAC: 14, armorType: 'medium', dexCap: 2 },
+  'Breastplate':           { baseAC: 14, armorType: 'medium', dexCap: 2 },
+  'Half plate armor':      { baseAC: 15, armorType: 'medium', dexCap: 2 },
+  'Ring mail':             { baseAC: 14, armorType: 'heavy', dexCap: 0 },
+  'Chain mail':            { baseAC: 16, armorType: 'heavy', dexCap: 0 },
+  'Splint armor':          { baseAC: 17, armorType: 'heavy', dexCap: 0 },
+  'Plate armor':           { baseAC: 18, armorType: 'heavy', dexCap: 0 },
+};
+
 const PACKS: ItemTemplate[] = [
   {
     name: "Burglar's pack", category: 'pack', weight: 44.5,
