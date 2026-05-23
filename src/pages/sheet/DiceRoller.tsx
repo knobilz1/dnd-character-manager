@@ -194,6 +194,15 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Hurry up: skip roll animations and show results instantly
+  const [hurryUp, setHurryUpState] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('dnd_hurryup') === '1'; } catch { return false; }
+  });
+  function setHurryUp(val: boolean) {
+    setHurryUpState(val);
+    try { localStorage.setItem('dnd_hurryup', val ? '1' : '0'); } catch { /* ignore */ }
+  }
+
   // External trigger state (skill/save/initiative rolls)
   const [rollModifier, setRollModifier] = React.useState<number | null>(null);
   const [rollLabel, setRollLabel] = React.useState<string | null>(null);
@@ -249,10 +258,22 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   function rollWithSides(sides: Die) {
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
-    setRolling(true);
-    setShakePhase(0);
     setTwoDisplay(null);
     setTwoFinal(null);
+
+    if (hurryUp) {
+      const result = Math.ceil(Math.random() * sides);
+      const t = getTier(result, sides);
+      setDisplay(result);
+      setTier(t);
+      setResultKey(k => k + 1);
+      setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
+      setRolling(false);
+      return;
+    }
+
+    setRolling(true);
+    setShakePhase(0);
 
     let frame = 0;
     const frames = 28;
@@ -291,10 +312,30 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     if (rolling) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
+    setDisplay(null);
+
+    if (hurryUp) {
+      const v1 = Math.ceil(Math.random() * sides);
+      const v2 = Math.ceil(Math.random() * sides);
+      const effectiveMode = modeOverride ?? mode;
+      const winner: 1 | 2 = effectiveMode === 'advantage'
+        ? (v1 >= v2 ? 1 : 2)
+        : (v1 <= v2 ? 1 : 2);
+      const finalVal = winner === 1 ? v1 : v2;
+      const t = getTier(finalVal, sides);
+      setTwoDisplay({ v1, v2 });
+      setTwoFinal({ v1, v2, winner });
+      setDisplay(finalVal);
+      setTier(t);
+      setResultKey(k => k + 1);
+      setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
+      setRolling(false);
+      return;
+    }
+
     setRolling(true);
     setShakePhase(0);
     setTwoFinal(null);
-    setDisplay(null);
 
     let frame = 0;
     const frames = 28;
@@ -386,6 +427,24 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
                 {m === 'normal' ? 'Normal' : m === 'advantage' ? '⬆ ADV' : '⬇ DIS'}
               </button>
             ))}
+          </div>
+
+          {/* Hurry up toggle */}
+          <div className="flex items-center justify-end px-4 pb-1 -mt-0.5">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none group">
+              <input
+                type="checkbox"
+                checked={hurryUp}
+                onChange={e => setHurryUp(e.target.checked)}
+                className="w-3.5 h-3.5 accent-amber-500 cursor-pointer"
+              />
+              <span className={cn(
+                'text-[11px] font-medium transition-colors',
+                hurryUp ? 'text-amber-400' : 'text-slate-500 group-hover:text-slate-400',
+              )}>
+                ⚡ Hurry up!
+              </span>
+            </label>
           </div>
 
           {/* Exhaustion reminder — always visible when panel is open */}

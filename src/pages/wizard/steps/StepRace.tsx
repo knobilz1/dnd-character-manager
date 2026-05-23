@@ -18,13 +18,16 @@ export function StepRace() {
     draft.enabledBooks.includes(r.sourceBook) && r.isSubrace
   );
 
-  // Group: top-level races that have subraces
-  const racesWithSubs = availableRaces.filter(r =>
-    subraceRaces.some(s => s.parentRaceId === r.id)
-  );
-  const racesWithoutSubs = availableRaces.filter(r =>
-    !subraceRaces.some(s => s.parentRaceId === r.id)
-  );
+  // Group subraces by parentRaceId — no parent entry required in ALL_RACES
+  const subGroupIds = [...new Set(
+    subraceRaces.map(r => r.parentRaceId).filter((id): id is string => !!id)
+  )];
+  function groupLabel(parentId: string): string {
+    const parent = ALL_RACES.find(r => r.id === parentId);
+    return parent ? parent.name : parentId.charAt(0).toUpperCase() + parentId.slice(1);
+  }
+  // Non-subrace races that aren't acting as a subrace group header
+  const racesWithoutSubs = availableRaces.filter(r => !subGroupIds.includes(r.id));
 
   function selectRace(race: Race) {
     setSelected(race);
@@ -63,14 +66,14 @@ export function StepRace() {
         <p className="text-slate-400 mb-4">Your race determines your ability score bonuses, speed, size, languages, and racial traits.</p>
 
         {/* Subraces */}
-        {racesWithSubs.length > 0 && (
+        {subGroupIds.length > 0 && (
           <div className="mb-4">
             <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Subraces</h3>
-            {racesWithSubs.map(parent => (
-              <div key={parent.id} className="mb-3">
-                <p className="text-xs text-slate-500 mb-1.5 pl-1">{parent.name}</p>
+            {subGroupIds.map(parentId => (
+              <div key={parentId} className="mb-3">
+                <p className="text-xs text-slate-500 mb-1.5 pl-1">{groupLabel(parentId)}</p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {subraceRaces.filter(s => s.parentRaceId === parent.id).map(race => (
+                  {subraceRaces.filter(s => s.parentRaceId === parentId).map(race => (
                     <RaceCard key={race.id} race={race} />
                   ))}
                 </div>
