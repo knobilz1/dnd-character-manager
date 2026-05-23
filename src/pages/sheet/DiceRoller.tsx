@@ -2,6 +2,7 @@ import React from 'react';
 import { Dice5, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useDiceStore } from '../../store/useDiceStore';
+import { useCharacterStore } from '../../store/useCharacterStore';
 
 const DICE = [4, 6, 8, 10, 12, 20, 100] as const;
 type Die = typeof DICE[number];
@@ -207,6 +208,10 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   const [rollModifier, setRollModifier] = React.useState<number | null>(null);
   const [rollLabel, setRollLabel] = React.useState<string | null>(null);
   const { pending, consume } = useDiceStore();
+
+  // Inspiration — pulled directly so we don't need an extra prop
+  const inspiration     = useCharacterStore(s => s.character?.inspiration ?? false);
+  const toggleInspiration = useCharacterStore(s => s.toggleInspiration);
 
   // Watch for pending external rolls
   React.useEffect(() => {
@@ -446,6 +451,30 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
               </span>
             </label>
           </div>
+
+          {/* Inspiration banner — only visible when character has inspiration */}
+          {inspiration && (
+            <div className="mx-4 mb-1 px-2.5 py-1.5 rounded-lg bg-yellow-950/60 border border-yellow-600/50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-yellow-300 text-[13px] shrink-0">✨</span>
+                <p className="text-[11px] text-yellow-200 leading-tight font-semibold truncate">
+                  You have Inspiration!
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setMode('advantage');
+                  setTwoDisplay(null);
+                  setTwoFinal(null);
+                  setDisplay(null);
+                  toggleInspiration();
+                }}
+                className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded border border-yellow-500/60 bg-yellow-600/25 text-yellow-200 hover:bg-yellow-600/50 hover:border-yellow-400 transition-colors"
+              >
+                Use →
+              </button>
+            </div>
+          )}
 
           {/* Exhaustion reminder — always visible when panel is open */}
           {exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (

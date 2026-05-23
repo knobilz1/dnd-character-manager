@@ -16,6 +16,7 @@ import { InventoryPanel } from './InventoryPanel';
 import { DiceRoller } from './DiceRoller';
 import { SnapshotPanel } from './SnapshotPanel';
 import { RageOverlay } from '../../components/RageOverlay';
+import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { getClass } from '../../data/classes';
@@ -179,6 +180,8 @@ export function SheetPage() {
       {showRageOverlay && (
         <RageOverlay onEnd={() => setShowRageOverlay(false)} />
       )}
+      {/* Inspiration overlay — subtle golden sparkle every ~20s while inspired */}
+      {character.inspiration && <InspirationOverlay />}
       {/* Top bar */}
       <div className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
