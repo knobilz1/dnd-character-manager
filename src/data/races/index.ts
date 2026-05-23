@@ -93,6 +93,7 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 120,
     languages: ['Common', 'Elvish'],
+    proficiencies: ['Rapier', 'Shortsword', 'Hand crossbow'],
     isSubrace: true,
     parentRaceId: 'elf',
   },
@@ -917,8 +918,9 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'FToD',
     size: 'Medium',
     speed: 30,
-    abilityScoreIncreases: { str: 2, cha: 1 },
+    abilityScoreIncreases: {},
     traits: [
+      { name: 'Ability Score Increase', description: 'Increase one ability score by 2 and a different one by 1, or increase three different ability scores by 1.' },
       { name: 'Chromatic Ancestry', description: 'Choose one chromatic dragon ancestor: Black (acid), Blue (lightning), Green (poison), Red (fire), or White (cold). This determines the damage type for your other traits.' },
       { name: 'Breath Weapon', description: 'When you take the Attack action, replace one attack with an exhalation in a 30-foot line, 5 feet wide (Dex save, DC = 8 + Con mod + prof bonus). Fail: 1d10 damage of your ancestry type; success: half. Scales to 2d10 at 5th, 3d10 at 11th, 4d10 at 17th. Proficiency bonus uses per long rest.' },
       { name: 'Draconic Resistance', description: 'You have resistance to the damage type associated with your Chromatic Ancestry.' },
@@ -933,8 +935,9 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'FToD',
     size: 'Medium',
     speed: 30,
-    abilityScoreIncreases: { str: 2, cha: 1 },
+    abilityScoreIncreases: {},
     traits: [
+      { name: 'Ability Score Increase', description: 'Increase one ability score by 2 and a different one by 1, or increase three different ability scores by 1.' },
       { name: 'Metallic Ancestry', description: 'Choose one metallic dragon ancestor: Brass (fire), Bronze (lightning), Copper (acid), Gold (fire), or Silver (cold). This determines the damage type for your other traits.' },
       { name: 'Breath Weapon', description: 'When you take the Attack action, replace one attack with an exhalation in a 15-foot cone (Dex save, DC = 8 + Con mod + prof bonus). Fail: 1d10 damage of your ancestry type; success: half. Scales to 2d10 at 5th, 3d10 at 11th, 4d10 at 17th. Proficiency bonus uses per long rest.' },
       { name: 'Draconic Resistance', description: 'You have resistance to the damage type associated with your Metallic Ancestry.' },
@@ -949,8 +952,9 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'FToD',
     size: 'Medium',
     speed: 30,
-    abilityScoreIncreases: { str: 2, cha: 1 },
+    abilityScoreIncreases: {},
     traits: [
+      { name: 'Ability Score Increase', description: 'Increase one ability score by 2 and a different one by 1, or increase three different ability scores by 1.' },
       { name: 'Gem Ancestry', description: 'Choose one gem dragon ancestor: Amethyst (force), Crystal (radiant), Emerald (psychic), Sapphire (thunder), or Topaz (necrotic). This determines the damage type for your other traits.' },
       { name: 'Breath Weapon', description: 'When you take the Attack action, replace one attack with an exhalation in a 15-foot cone (Dex save, DC = 8 + Con mod + prof bonus). Fail: 1d10 damage of your ancestry type; success: half. Scales to 2d10 at 5th, 3d10 at 11th, 4d10 at 17th. Proficiency bonus uses per long rest.' },
       { name: 'Draconic Resistance', description: 'You have resistance to the damage type associated with your Gem Ancestry.' },
@@ -1123,7 +1127,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'EGtW',
     size: 'Medium',
     speed: 30,
-    abilityScoreIncreases: { dex: 2, int: 1 },
+    abilityScoreIncreases: { dex: 2, wis: 1 },
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
       { name: 'Keen Senses', description: 'You have proficiency in the Perception skill.' },
@@ -1328,7 +1332,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: {},
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
-      { name: 'Astral Spark', description: 'When you make an Intelligence, Wisdom, or Charisma check or saving throw and the roll fails, you can cause the roll to succeed instead. Once you use this trait, you can\'t use it again until you finish a long rest. If the triggering roll was for a spell attack, saving throw DC, or concentration, you can add 1d6 to the roll.' },
+      { name: 'Damage Dealer', description: 'Once per turn when you score a hit with an attack roll using a weapon, you can roll the weapon\'s damage die one additional time and add it to the damage roll.' },
       { name: 'Firearms Expert', description: 'You have proficiency with firearms (see the Dungeon Master\'s Guide). Whenever you make a ranged attack with a firearm and miss, you can reroll the attack roll against the same target. You can\'t use this trait again until you reload the firearm.' },
       { name: 'Hippogriff Build', description: 'You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.' },
       { name: 'Percussive Repair', description: 'Once per day as a bonus action, you can strike a Construct or vehicle within 5 feet of you and restore 1d6 hit points to it.' },
