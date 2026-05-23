@@ -151,10 +151,11 @@ export function SheetPage() {
     : character.maxHP;
   const hpPercent = Math.min(100, Math.round((character.currentHP / effectiveMaxHP) * 100));
 
-  function applyHP() {
+  function applyHP(mode?: 'heal' | 'damage') {
     const amount = parseInt(hpInput);
     if (isNaN(amount) || amount <= 0) return;
-    if (hpMode === 'heal') healHP(amount); else damageHP(amount);
+    const m = mode ?? hpMode;
+    if (m === 'heal') healHP(amount); else damageHP(amount);
     setHpInput('');
   }
 
@@ -1118,6 +1119,9 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-400 uppercase tracking-wide font-semibold">Round</span>
           <span className="text-2xl font-bold text-white tabular-nums">{round}</span>
+          <span className="text-sm text-slate-400 tabular-nums">
+            {(() => { const s = round * 6; return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; })()}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1183,39 +1187,30 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
           )}
         </div>
 
-        {/* HP controls */}
-        <div className="flex gap-2 mb-3">
-          <button
-            onClick={() => setHpMode('damage')}
-            className={cn('flex-1 py-1.5 rounded-lg text-sm font-medium transition-all', hpMode === 'damage' ? 'bg-red-700 text-white' : 'bg-slate-700 text-slate-400 hover:text-white')}
-          >
-            Damage
-          </button>
-          <button
-            onClick={() => setHpMode('heal')}
-            className={cn('flex-1 py-1.5 rounded-lg text-sm font-medium transition-all', hpMode === 'heal' ? 'bg-green-700 text-white' : 'bg-slate-700 text-slate-400 hover:text-white')}
-          >
-            Heal
-          </button>
-        </div>
-        <div className="flex gap-2">
+        {/* HP controls — type amount, then click Damage or Heal */}
+        <div className="mb-2">
           <input
             type="number"
             min={1}
             value={hpInput}
             onChange={e => setHpInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && applyHP()}
+            onKeyDown={e => e.key === 'Enter' && applyHP('damage')}
             placeholder="Amount..."
-            className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
+            className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-slate-400"
           />
+        </div>
+        <div className="flex gap-2">
           <button
-            onClick={applyHP}
-            className={cn(
-              'px-4 py-2 rounded-lg font-medium text-sm transition-all',
-              hpMode === 'damage' ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-green-700 hover:bg-green-600 text-white',
-            )}
+            onClick={() => applyHP('damage')}
+            className="flex-1 py-2 rounded-lg text-sm font-medium bg-red-700 hover:bg-red-600 text-white transition-all"
           >
-            Apply
+            Damage
+          </button>
+          <button
+            onClick={() => applyHP('heal')}
+            className="flex-1 py-2 rounded-lg text-sm font-medium bg-green-700 hover:bg-green-600 text-white transition-all"
+          >
+            Heal
           </button>
         </div>
 
@@ -1543,39 +1538,99 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
                     })()}
 
                     {/* Counter row */}
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-slate-400">{resourceDef?.name ?? r.key} uses remaining</p>
-                      <NumberStepper value={Math.min(r.current, displayMax)} min={0} max={displayMax === 99 ? 999 : displayMax} onChange={v => setResource(r.key, v)} />
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs text-slate-400 shrink-0">{resourceDef?.name ?? r.key} uses remaining</p>
+                      <div className="flex gap-1.5 flex-wrap justify-end">
+                        {Array.from({ length: Math.min(displayMax === 99 ? 20 : displayMax, 20) }).map((_, i) => {
+                          const available = i < Math.min(r.current, displayMax === 99 ? 20 : displayMax);
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => setResource(r.key, available ? Math.min(r.current, displayMax) - 1 : Math.min(r.current, displayMax) + 1)}
+                              className={cn(
+                                'w-4 h-4 rounded-full border-2 transition-all',
+                                available
+                                  ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
+                                  : 'border-slate-600 bg-transparent hover:border-slate-400',
+                              )}
+                            />
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );
               }
 
               // ── Inactive state ───────────────────────────────────────
+              const cappedMax = Math.min(displayMax === 99 ? 20 : displayMax, 20);
+              const cappedCurrent = Math.min(r.current, cappedMax);
               return (
-                <div key={r.key} className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-white">{resourceDef?.name ?? r.key}</p>
-                    {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {sustained && r.current > 0 && (
+                <div key={r.key} className="bg-slate-900/40 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-white">{resourceDef?.name ?? r.key}</p>
+                      {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {sustained && r.current > 0 && (
+                        <button
+                          onClick={() => {
+                            setResource(r.key, r.current - 1);
+                            setActiveEffects((prev: Record<string, number>) => ({ ...prev, [r.key]: round }));
+                            if (r.key === 'rage') setShowRageOverlay(true);
+                          }}
+                          className="text-xs px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white font-medium transition-colors border border-slate-600"
+                        >
+                          Activate
+                        </button>
+                      )}
                       <button
-                        onClick={() => {
-                          setResource(r.key, r.current - 1);
-                          setActiveEffects((prev: Record<string, number>) => ({ ...prev, [r.key]: round }));
-                          if (r.key === 'rage') setShowRageOverlay(true);
-                        }}
-                        className="text-xs px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white font-medium transition-colors border border-slate-600"
+                        onClick={() => setResource(r.key, displayMax === 99 ? r.max : displayMax)}
+                        className="text-xs px-2 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                        title="Reset uses"
                       >
-                        Activate
+                        Reset
                       </button>
+                    </div>
+                  </div>
+                  {/* Radio bubbles — filled = available, empty = used */}
+                  <div className="flex gap-1.5 flex-wrap">
+                    {Array.from({ length: cappedMax }).map((_, i) => {
+                      const available = i < cappedCurrent;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setResource(r.key, available ? cappedCurrent - 1 : cappedCurrent + 1)}
+                          className={cn(
+                            'w-5 h-5 rounded-full border-2 transition-all',
+                            available
+                              ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
+                              : 'border-slate-600 bg-transparent hover:border-slate-400',
+                          )}
+                          title={available ? 'Use one' : 'Restore one'}
+                        />
+                      );
+                    })}
+                    {displayMax === 99 && (
+                      <span className="text-xs text-slate-400 self-center ml-1">{r.current} / ∞</span>
                     )}
-                    <NumberStepper value={Math.min(r.current, displayMax)} min={0} max={displayMax === 99 ? 999 : displayMax} onChange={v => setResource(r.key, v)} />
                   </div>
                 </div>
               );
             })}
+            {/* Reset All */}
+            {resources.filter((r: any) => r.key !== 'arcane_recovery').length > 1 && (
+              <button
+                onClick={() => resources.filter((r: any) => r.key !== 'arcane_recovery').forEach((r: any) => {
+                  const displayMax = resourceMaxOverrides?.[r.key] ?? r.max;
+                  setResource(r.key, displayMax === 99 ? r.max : displayMax);
+                })}
+                className="w-full text-xs py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors border border-slate-700"
+              >
+                Reset All Resources
+              </button>
+            )}
           </div>
         </div>
       )}
