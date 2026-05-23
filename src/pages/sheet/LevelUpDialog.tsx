@@ -158,6 +158,9 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const [spellSearch, setSpellSearch] = React.useState('');
   const [spellLevelFilter, setSpellLevelFilter] = React.useState<number | 'all'>('all');
   const [pendingPactBoon, setPendingPactBoon] = React.useState<string | undefined>(undefined);
+  const [pendingTotemSpirit, setPendingTotemSpirit] = React.useState<string | undefined>(undefined);
+  const [pendingAspectTotem, setPendingAspectTotem] = React.useState<string | undefined>(undefined);
+  const [pendingTotemicAttunement, setPendingTotemicAttunement] = React.useState<string | undefined>(undefined);
   const [pendingInvocations, setPendingInvocations] = React.useState<string[]>([]);
   const [pendingMetamagic, setPendingMetamagic] = React.useState<string[]>([]);
   const [pendingManeuvers, setPendingManeuvers] = React.useState<string[]>([]);
@@ -178,6 +181,9 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     setSpellSearch('');
     setSpellLevelFilter('all');
     setPendingPactBoon(undefined);
+    setPendingTotemSpirit(undefined);
+    setPendingAspectTotem(undefined);
+    setPendingTotemicAttunement(undefined);
     setPendingInvocations([]);
     setPendingMetamagic([]);
     setPendingManeuvers([]);
@@ -200,6 +206,9 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
       setSpellSearch('');
       setSpellLevelFilter('all');
       setPendingPactBoon(undefined);
+      setPendingTotemSpirit(undefined);
+      setPendingAspectTotem(undefined);
+      setPendingTotemicAttunement(undefined);
       setPendingInvocations([]);
       setPendingMetamagic([]);
       setPendingManeuvers([]);
@@ -298,9 +307,14 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
     // Merge pending class options with existing
     const existing = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] };
-    if (pendingPactBoon || pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length || pendingInfusions.length || pendingOptionalFeatures.length) {
+    if (pendingPactBoon || pendingTotemSpirit || pendingAspectTotem || pendingTotemicAttunement ||
+        pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length ||
+        pendingInfusions.length || pendingOptionalFeatures.length) {
       updateClassOptions({
         ...(pendingPactBoon ? { pactBoon: pendingPactBoon } : {}),
+        ...(pendingTotemSpirit ? { totemSpirit: pendingTotemSpirit } : {}),
+        ...(pendingAspectTotem ? { aspectTotem: pendingAspectTotem } : {}),
+        ...(pendingTotemicAttunement ? { totemicAttunement: pendingTotemicAttunement } : {}),
         invocations: [...new Set([...existing.invocations, ...pendingInvocations])],
         metamagic: [...new Set([...existing.metamagic, ...pendingMetamagic])],
         maneuvers: [...new Set([...existing.maneuvers, ...pendingManeuvers])],
@@ -394,10 +408,52 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const needsPactBoon = isWarlock && newLevel >= 3 && !classOpts.pactBoon;
 
+  // ── Totem Warrior checks ──────────────────────────────────────────────────
+  const isTotemWarrior = classId === 'barbarian' && (
+    (primary?.subclassId === 'totem-warrior' || primary?.subclassId === 'scag-totem-warrior-elk-tiger') ||
+    (pendingSubclass === 'totem-warrior' || pendingSubclass === 'scag-totem-warrior-elk-tiger')
+  );
+  const hasScagTotems = isTotemWarrior && enabledBooks.includes('SCAG');
+  const needsTotemSpirit = isTotemWarrior && newLevel >= 3 && !classOpts.totemSpirit;
+  const needsAspectTotem = isTotemWarrior && newLevel >= 6 && !classOpts.aspectTotem;
+  const needsTotemicAttunement = isTotemWarrior && newLevel >= 14 && !classOpts.totemicAttunement;
+
+  type TotemAnimal = { id: string; emoji: string; name: string; description: string };
+  const TOTEM_SPIRIT_OPTIONS: TotemAnimal[] = [
+    { id: 'bear',  emoji: '🐻', name: 'Bear',  description: 'While raging, resistance to all damage except psychic.' },
+    { id: 'eagle', emoji: '🦅', name: 'Eagle', description: 'While raging, enemies have disadvantage on opportunity attacks against you; Dash as bonus action.' },
+    { id: 'wolf',  emoji: '🐺', name: 'Wolf',  description: 'While raging, allies have advantage on melee attacks vs. creatures within 5 ft. of you.' },
+    ...(hasScagTotems ? [
+      { id: 'elk',   emoji: '🦌', name: 'Elk',   description: 'While raging (no heavy armor), +15 ft. walking speed.' },
+      { id: 'tiger', emoji: '🐯', name: 'Tiger', description: 'While raging, +10 ft. long jump and +3 ft. high jump.' },
+    ] : []),
+  ];
+  const ASPECT_TOTEM_OPTIONS: TotemAnimal[] = [
+    { id: 'bear',  emoji: '🐻', name: 'Bear',  description: 'Carrying capacity doubles; advantage on Str checks to push, pull, lift, or break.' },
+    { id: 'eagle', emoji: '🦅', name: 'Eagle', description: 'See 1 mile clearly; dim light doesn\'t impose disadvantage on Perception.' },
+    { id: 'wolf',  emoji: '🐺', name: 'Wolf',  description: 'Track at fast pace; move stealthily at normal pace.' },
+    ...(hasScagTotems ? [
+      { id: 'elk',   emoji: '🦌', name: 'Elk',   description: 'Travel pace doubles for you and up to 10 companions within 60 ft.' },
+      { id: 'tiger', emoji: '🐯', name: 'Tiger', description: 'Gain proficiency in 2 skills: Athletics, Acrobatics, Stealth, or Survival.' },
+    ] : []),
+  ];
+  const TOTEMIC_ATTUNEMENT_OPTIONS: TotemAnimal[] = [
+    { id: 'bear',  emoji: '🐻', name: 'Bear',  description: 'While raging, hostile creatures within 5 ft. have disadvantage on attacks against targets other than you.' },
+    { id: 'eagle', emoji: '🦅', name: 'Eagle', description: 'While raging, flying speed equals your walking speed (short bursts; fall if you end turn in the air).' },
+    { id: 'wolf',  emoji: '🐺', name: 'Wolf',  description: 'While raging, bonus action to knock Large or smaller creature prone when you hit it with a melee attack.' },
+    ...(hasScagTotems ? [
+      { id: 'elk',   emoji: '🦌', name: 'Elk',   description: 'While raging, bonus action to charge through a creature\'s space (Str save or prone + 1d12+Str damage).' },
+      { id: 'tiger', emoji: '🐯', name: 'Tiger', description: 'While raging, move 20+ ft. toward target before attacking for bonus additional melee attack.' },
+    ] : []),
+  ];
+
   const canConfirm =
     (method === 'average' || rollResult != null) &&
     (!needsSubclass || pendingSubclass != null) &&
     (!needsPactBoon || pendingPactBoon != null) &&
+    (!needsTotemSpirit || pendingTotemSpirit != null) &&
+    (!needsAspectTotem || pendingAspectTotem != null) &&
+    (!needsTotemicAttunement || pendingTotemicAttunement != null) &&
     asiChoiceValid;
 
   const pactBoonsAvail = needsPactBoon
@@ -1003,6 +1059,99 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                     <p className="text-xs text-slate-400 line-clamp-2">{boon.description}</p>
                   </button>
                 </HoverCard>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Totem Spirit (Totem Warrior lv.3+) ──────────────────────────── */}
+        {needsTotemSpirit && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Totem Spirit</h3>
+              {pendingTotemSpirit
+                ? <span className="text-xs font-bold text-green-400">1/1 chosen</span>
+                : <span className="text-xs font-bold text-amber-300">0/1 chosen — required</span>}
+            </div>
+            <p className="text-xs text-slate-500 mb-2">Choose a totem animal whose spirit guides your rage.</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {TOTEM_SPIRIT_OPTIONS.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setPendingTotemSpirit(pendingTotemSpirit === t.id ? undefined : t.id)}
+                  className={cn(
+                    'p-3 rounded-lg border-2 text-left transition-all',
+                    pendingTotemSpirit === t.id ? 'border-amber-500 bg-amber-950/20' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-bold text-white">{t.emoji} {t.name}</p>
+                    {pendingTotemSpirit === t.id && <span className="text-amber-400 text-xs">✓</span>}
+                  </div>
+                  <p className="text-xs text-slate-400 line-clamp-3">{t.description}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Aspect of the Beast (Totem Warrior lv.6+) ───────────────────── */}
+        {needsAspectTotem && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Aspect of the Beast</h3>
+              {pendingAspectTotem
+                ? <span className="text-xs font-bold text-green-400">1/1 chosen</span>
+                : <span className="text-xs font-bold text-amber-300">0/1 chosen — required</span>}
+            </div>
+            <p className="text-xs text-slate-500 mb-2">Choose a totem animal for your beast aspect. Can differ from your Totem Spirit.</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {ASPECT_TOTEM_OPTIONS.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setPendingAspectTotem(pendingAspectTotem === t.id ? undefined : t.id)}
+                  className={cn(
+                    'p-3 rounded-lg border-2 text-left transition-all',
+                    pendingAspectTotem === t.id ? 'border-amber-500 bg-amber-950/20' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-bold text-white">{t.emoji} {t.name}</p>
+                    {pendingAspectTotem === t.id && <span className="text-amber-400 text-xs">✓</span>}
+                  </div>
+                  <p className="text-xs text-slate-400 line-clamp-3">{t.description}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Totemic Attunement (Totem Warrior lv.14+) ───────────────────── */}
+        {needsTotemicAttunement && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Totemic Attunement</h3>
+              {pendingTotemicAttunement
+                ? <span className="text-xs font-bold text-green-400">1/1 chosen</span>
+                : <span className="text-xs font-bold text-amber-300">0/1 chosen — required</span>}
+            </div>
+            <p className="text-xs text-slate-500 mb-2">Choose a totem animal for your ultimate attunement. Can differ from your earlier choices.</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {TOTEMIC_ATTUNEMENT_OPTIONS.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setPendingTotemicAttunement(pendingTotemicAttunement === t.id ? undefined : t.id)}
+                  className={cn(
+                    'p-3 rounded-lg border-2 text-left transition-all',
+                    pendingTotemicAttunement === t.id ? 'border-amber-500 bg-amber-950/20' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-bold text-white">{t.emoji} {t.name}</p>
+                    {pendingTotemicAttunement === t.id && <span className="text-amber-400 text-xs">✓</span>}
+                  </div>
+                  <p className="text-xs text-slate-400 line-clamp-3">{t.description}</p>
+                </button>
               ))}
             </div>
           </section>

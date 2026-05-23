@@ -1,4 +1,6 @@
+import React from 'react';
 import { Textarea, SectionHeader, HoverCard } from '../../components/ui';
+import { cn } from '../../utils/cn';
 import { getBackground } from '../../data/backgrounds';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
@@ -273,52 +275,7 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
       )}
 
       {/* Gold & Currencies */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <SectionHeader className="mb-0">Currency</SectionHeader>
-          <button
-            onClick={() => {
-              // Convert up: 100cp→10sp, 10sp→1gp, 10gp→1pp (electrum stays)
-              let { cp, sp, ep, gp, pp } = character.currencies;
-              const cpGain = Math.floor(cp / 10); cp = cp % 10; sp += cpGain;
-              const spGain = Math.floor(sp / 10);  sp = sp % 10;  gp += spGain;
-              const gpGain = Math.floor(gp / 10);  gp = gp % 10;  pp += gpGain;
-              updateCurrency('cp', cp);
-              updateCurrency('sp', sp);
-              updateCurrency('ep', ep);
-              updateCurrency('gp', gp);
-              updateCurrency('pp', pp);
-            }}
-            className="text-xs text-slate-400 hover:text-yellow-300 px-2 py-1 rounded border border-slate-600 hover:border-yellow-600 transition-colors"
-            title="Convert up: 10cp→1sp, 10sp→1gp, 10gp→1pp"
-          >
-            ⬆ Convert
-          </button>
-        </div>
-        <div className="grid grid-cols-5 gap-2">
-          {(['cp','sp','ep','gp','pp'] as const).map(coin => {
-            const COLOR: Record<string, string> = { cp: 'text-orange-400', sp: 'text-slate-300', ep: 'text-blue-400', gp: 'text-yellow-400', pp: 'text-purple-400' };
-            return (
-              <div key={coin} className="text-center">
-                <label className={`text-xs uppercase font-bold block mb-1 ${COLOR[coin]}`}>{coin}</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={character.currencies[coin]}
-                  onChange={e => {
-                    const v = Math.floor(Number(e.target.value));
-                    if (!isNaN(v)) updateCurrency(coin, v);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-600 rounded px-1 py-1 text-white text-sm text-center focus:outline-none focus:border-yellow-500"
-                />
-              </div>
-            );
-          })}
-        </div>
-        <p className="text-xs text-slate-500 mt-2">
-          100 cp = 10 sp = 1 gp = 0.1 pp · Electrum (ep) stays, convert manually
-        </p>
-      </div>
+      <CurrencyPanel character={character} updateCurrency={updateCurrency} />
 
       {/* Notes */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
@@ -329,6 +286,208 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
           placeholder="Adventure notes, reminders, contacts, lore..."
           className="min-h-32"
         />
+      </div>
+    </div>
+  );
+}
+
+// ── D&D 5e currency conversion rates (in CP) ────────────────────────────────
+const CP_VALUE: Record<'cp' | 'sp' | 'ep' | 'gp' | 'pp', number> = {
+  cp: 1, sp: 10, ep: 50, gp: 100, pp: 1000,
+};
+const COIN_COLORS: Record<'cp' | 'sp' | 'ep' | 'gp' | 'pp', string> = {
+  cp: 'text-orange-400', sp: 'text-slate-300', ep: 'text-blue-400', gp: 'text-yellow-400', pp: 'text-purple-400',
+};
+const COIN_BORDER_FOCUS: Record<'cp' | 'sp' | 'ep' | 'gp' | 'pp', string> = {
+  cp: 'focus:border-orange-500', sp: 'focus:border-slate-400', ep: 'focus:border-blue-500',
+  gp: 'focus:border-yellow-500', pp: 'focus:border-purple-500',
+};
+type CoinKey = 'cp' | 'sp' | 'ep' | 'gp' | 'pp';
+const COINS: CoinKey[] = ['cp', 'sp', 'ep', 'gp', 'pp'];
+
+function CurrencyPanel({
+  character,
+  updateCurrency,
+}: {
+  character: import('../../types').Character;
+  updateCurrency: (coin: CoinKey, v: number) => void;
+}) {
+  type SpendFields = Record<CoinKey, string>;
+  const [spend, setSpend] = React.useState<SpendFields>({ cp: '', sp: '', ep: '', gp: '', pp: '' });
+  const [spendError, setSpendError] = React.useState<string | null>(null);
+  const [spendFlash, setSpendFlash] = React.useState(false);
+
+  const cur = character.currencies;
+
+  // Total held in CP (including EP at 50 CP each)
+  function totalHeldCP() {
+    return COINS.reduce((sum, c) => sum + cur[c] * CP_VALUE[c], 0);
+  }
+
+  // Total spend in CP
+  function spendTotalCP() {
+    return COINS.reduce((sum, c) => {
+      const v = parseInt(spend[c]) || 0;
+      return sum + v * CP_VALUE[c];
+    }, 0);
+  }
+
+  function handleSpend() {
+    const cost = spendTotalCP();
+    if (cost === 0) return;
+
+    // Separate EP from the rest so we only touch it if needed
+    const withoutEP = cur.cp * 1 + cur.sp * 10 + cur.gp * 100 + cur.pp * 1000;
+    const withEP    = withoutEP + cur.ep * 50;
+
+    if (cost > withEP) {
+      // Format a friendly total for the error message
+      const gpEq = (withEP / 100).toFixed(2).replace(/\.?0+$/, '');
+      setSpendError(`Not enough funds (you have ~${gpEq} gp total)`);
+      return;
+    }
+    setSpendError(null);
+
+    // Decide whether EP is needed
+    const useEP = cost > withoutEP;
+    const totalCP = useEP ? withEP : withoutEP;
+    let remaining = totalCP - cost;
+
+    // Re-denominate — only go up to PP if the character currently holds PP
+    const hasPP = cur.pp > 0;
+    const newPP  = hasPP ? Math.floor(remaining / 1000) : 0;
+    remaining   -= newPP * 1000;
+    const newGP  = Math.floor(remaining / 100);
+    remaining   -= newGP * 100;
+    const newSP  = Math.floor(remaining / 10);
+    const newCP  = remaining % 10;
+    const newEP  = useEP ? 0 : cur.ep; // keep EP untouched unless we needed it
+
+    updateCurrency('pp', newPP);
+    updateCurrency('gp', newGP);
+    updateCurrency('ep', newEP);
+    updateCurrency('sp', newSP);
+    updateCurrency('cp', newCP);
+
+    setSpend({ cp: '', sp: '', ep: '', gp: '', pp: '' });
+    setSpendFlash(true);
+    setTimeout(() => setSpendFlash(false), 900);
+  }
+
+  // Live GP-equivalent of what's being entered in the spend fields
+  const spendCP = spendTotalCP();
+  const spendGPDisplay = spendCP > 0
+    ? `= ${(spendCP / 100).toFixed(2).replace(/\.?0+$/, '')} gp`
+    : null;
+
+  const canAfford = spendCP > 0 && spendCP <= totalHeldCP();
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <SectionHeader className="mb-0">Currency</SectionHeader>
+        <button
+          onClick={() => {
+            // Convert up: 10cp→1sp, 10sp→1gp, 10gp→1pp (ep stays)
+            let { cp, sp, ep, gp, pp } = cur;
+            const cpGain = Math.floor(cp / 10); cp = cp % 10; sp += cpGain;
+            const spGain = Math.floor(sp / 10);  sp = sp % 10;  gp += spGain;
+            const gpGain = Math.floor(gp / 10);  gp = gp % 10;  pp += gpGain;
+            updateCurrency('cp', cp);
+            updateCurrency('sp', sp);
+            updateCurrency('ep', ep);
+            updateCurrency('gp', gp);
+            updateCurrency('pp', pp);
+          }}
+          className="text-xs text-slate-400 hover:text-yellow-300 px-2 py-1 rounded border border-slate-600 hover:border-yellow-600 transition-colors"
+          title="Convert up: 10cp→1sp, 10sp→1gp, 10gp→1pp"
+        >
+          ⬆ Convert
+        </button>
+      </div>
+
+      {/* Current wallet */}
+      <div className={cn('grid grid-cols-5 gap-2 transition-all duration-300', spendFlash && 'opacity-60 scale-[0.99]')}>
+        {COINS.map(coin => (
+          <div key={coin} className="text-center">
+            <label className={cn('text-xs uppercase font-bold block mb-1', COIN_COLORS[coin])}>{coin}</label>
+            <input
+              type="number"
+              min={0}
+              value={cur[coin]}
+              onChange={e => {
+                const v = Math.floor(Number(e.target.value));
+                if (!isNaN(v)) updateCurrency(coin, v);
+              }}
+              className={cn(
+                'w-full bg-slate-900 border border-slate-600 rounded px-1 py-1 text-white text-sm text-center focus:outline-none',
+                COIN_BORDER_FOCUS[coin],
+                spendFlash && 'border-green-500',
+              )}
+            />
+          </div>
+        ))}
+      </div>
+
+      <p className="text-xs text-slate-500 mt-2 mb-4">
+        10 cp = 1 sp · 10 sp = 1 gp · 10 gp = 1 pp · 1 ep = 5 sp
+      </p>
+
+      {/* ── Spend section ── */}
+      <div className="border-t border-slate-700 pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Spend</p>
+          {spendGPDisplay && (
+            <span className={cn('text-xs font-medium', canAfford ? 'text-slate-400' : 'text-red-400')}>
+              {spendGPDisplay}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-5 gap-2 mb-2">
+          {COINS.map(coin => (
+            <div key={coin} className="text-center">
+              <label className={cn('text-xs uppercase font-bold block mb-1', COIN_COLORS[coin])}>{coin}</label>
+              <input
+                type="number"
+                min={0}
+                value={spend[coin]}
+                placeholder="0"
+                onChange={e => {
+                  const raw = e.target.value;
+                  setSpend(prev => ({ ...prev, [coin]: raw }));
+                  setSpendError(null);
+                }}
+                onKeyDown={e => e.key === 'Enter' && handleSpend()}
+                className={cn(
+                  'w-full bg-slate-900 border rounded px-1 py-1 text-white text-sm text-center focus:outline-none placeholder-slate-600',
+                  spendError ? 'border-red-700 focus:border-red-500' : 'border-slate-600',
+                  COIN_BORDER_FOCUS[coin],
+                )}
+              />
+            </div>
+          ))}
+        </div>
+
+        {spendError && (
+          <p className="text-xs text-red-400 mb-2">⚠ {spendError}</p>
+        )}
+
+        <button
+          onClick={handleSpend}
+          disabled={spendCP === 0}
+          className={cn(
+            'w-full py-1.5 rounded-lg text-sm font-semibold border transition-all',
+            spendCP === 0
+              ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+              : canAfford
+                ? 'bg-red-950/40 border-red-700/60 text-red-300 hover:bg-red-900/50 hover:border-red-500 hover:text-red-200'
+                : 'bg-red-950/20 border-red-900/50 text-red-500 cursor-not-allowed',
+          )}
+        >
+          {spendCP === 0 ? 'Enter an amount to spend' : canAfford ? '💸 Spend & Make Change' : '⚠ Not enough funds'}
+        </button>
       </div>
     </div>
   );

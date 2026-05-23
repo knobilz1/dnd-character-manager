@@ -1497,6 +1497,51 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, hpMode, set
                       );
                     })()}
 
+                    {/* Totem Warrior subclass features during rage */}
+                    {r.key === 'rage' && !expired && (() => {
+                      const totemEntry = character.classes.find((cl: any) => cl.classId === 'barbarian' && (cl.subclassId === 'totem-warrior' || cl.subclassId === 'scag-totem-warrior-elk-tiger'));
+                      if (!totemEntry) return null;
+                      const totemLevel: number = totemEntry.level;
+                      const spirit = character.classOptions?.totemSpirit;
+                      const attunement = character.classOptions?.totemicAttunement;
+
+                      const spiritBenefits: Record<string, { emoji: string; title: string; text: string }> = {
+                        bear:  { emoji: '🐻', title: 'Bear Spirit', text: 'Resistance to all damage types except psychic.' },
+                        eagle: { emoji: '🦅', title: 'Eagle Spirit', text: 'Enemies have disadvantage on opportunity attacks against you. Dash as a bonus action.' },
+                        wolf:  { emoji: '🐺', title: 'Wolf Spirit', text: 'Allies have advantage on melee attacks vs. creatures within 5 ft. of you.' },
+                        elk:   { emoji: '🦌', title: 'Elk Spirit', text: '+15 ft. walking speed (no heavy armor).' },
+                        tiger: { emoji: '🐯', title: 'Tiger Spirit', text: '+10 ft. long jump · +3 ft. high jump.' },
+                      };
+                      const attuneBenefits: Record<string, { emoji: string; title: string; text: string }> = {
+                        bear:  { emoji: '🐻', title: 'Bear Attunement', text: 'Hostile creatures within 5 ft. have disadvantage on attacks against others.' },
+                        eagle: { emoji: '🦅', title: 'Eagle Attunement', text: 'Flying speed equals walking speed (short bursts; fall if you end turn in air).' },
+                        wolf:  { emoji: '🐺', title: 'Wolf Attunement', text: 'Bonus action: knock Large-or-smaller creature prone on a hit.' },
+                        elk:   { emoji: '🦌', title: 'Elk Attunement', text: 'Bonus action: charge through creature\'s space (Str save or prone + 1d12+Str).' },
+                        tiger: { emoji: '🐯', title: 'Tiger Attunement', text: 'Move 20 ft. toward target before attacking → bonus melee attack.' },
+                      };
+
+                      const spiritInfo = spirit ? spiritBenefits[spirit] : null;
+                      const attuneInfo = attunement && totemLevel >= 14 ? attuneBenefits[attunement] : null;
+
+                      return (
+                        <div className="space-y-2 mb-3">
+                          <div className="h-px bg-red-700/30" />
+                          {spiritInfo ? (
+                            <p className="text-[11px] text-green-300 bg-green-950/30 border border-green-700/40 rounded-lg px-2 py-1.5 leading-relaxed">
+                              {spiritInfo.emoji} <span className="font-semibold">{spiritInfo.title}</span> — {spiritInfo.text}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-slate-500 italic px-1">⚠ No totem spirit chosen — go to Character → Class Options to pick one.</p>
+                          )}
+                          {attuneInfo && (
+                            <p className="text-[11px] text-teal-300 bg-teal-950/30 border border-teal-700/40 rounded-lg px-2 py-1.5 leading-relaxed">
+                              {attuneInfo.emoji} <span className="font-semibold">{attuneInfo.title}</span> — {attuneInfo.text}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Counter row */}
                     <div className="flex items-center justify-between">
                       <p className="text-xs text-slate-400">{resourceDef?.name ?? r.key} uses remaining</p>

@@ -257,6 +257,12 @@ export interface ClassOptionsState {
   maneuvers: string[];
   infusions: string[];
   optionalFeatures: string[];
+  /** Barbarian Totem Warrior — chosen at lv.3 (bear/eagle/wolf/elk/tiger) */
+  totemSpirit?: string;
+  /** Barbarian Totem Warrior — chosen at lv.6 (Aspect of the Beast) */
+  aspectTotem?: string;
+  /** Barbarian Totem Warrior — chosen at lv.14 (Totemic Attunement) */
+  totemicAttunement?: string;
 }
 
 export type ItemCategory =

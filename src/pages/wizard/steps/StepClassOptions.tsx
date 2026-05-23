@@ -139,7 +139,7 @@ export function StepClassOptions() {
     updateDraft({ classOptions: { ...opts, ...partial } });
   }
 
-  function toggleList(key: keyof Omit<ClassOptionsState, 'pactBoon'>, id: string, max: number) {
+  function toggleList(key: keyof Omit<ClassOptionsState, 'pactBoon' | 'totemSpirit' | 'aspectTotem' | 'totemicAttunement'>, id: string, max: number) {
     const current = opts[key] as string[];
     const next = current.includes(id)
       ? current.filter(x => x !== id)
@@ -218,9 +218,46 @@ export function StepClassOptions() {
     .filter(f => f.classId === classId)
     .filter(f => f.minLevel <= level);
 
+  // ── Totem Warrior ─────────────────────────────────────────────────────
+  const isTotemWarrior = classId === 'barbarian' && (
+    subclassId === 'totem-warrior' || subclassId === 'scag-totem-warrior-elk-tiger'
+  );
+  const hasScagTotems = isTotemWarrior && enabledBooks.has('SCAG');
+
+  type TotemAnimal = { id: string; emoji: string; name: string; sourceBook: BookId; description: string };
+  const TOTEM_SPIRIT_OPTIONS: TotemAnimal[] = [
+    { id: 'bear',  emoji: '🐻', name: 'Bear',  sourceBook: 'PHB',  description: "While raging, you have resistance to all damage except psychic damage. This makes you exceptionally hard to kill in battle." },
+    { id: 'eagle', emoji: '🦅', name: 'Eagle', sourceBook: 'PHB',  description: "While raging, other creatures have disadvantage on opportunity attack rolls against you, and you can use the Dash action as a bonus action on your turn. The spirit of the eagle makes you into a predator who can weave through the fray with ease." },
+    { id: 'wolf',  emoji: '🐺', name: 'Wolf',  sourceBook: 'PHB',  description: "While raging, your friends have advantage on melee attack rolls against any creature within 5 feet of you that is hostile to you. The spirit of the wolf makes you a leader of hunters." },
+    ...(hasScagTotems ? [
+      { id: 'elk',   emoji: '🦌', name: 'Elk',   sourceBook: 'SCAG' as BookId, description: "While raging and not wearing heavy armor, your walking speed increases by 15 feet. The spirit of the elk makes you extraordinarily swift." },
+      { id: 'tiger', emoji: '🐯', name: 'Tiger', sourceBook: 'SCAG' as BookId, description: "While raging, you can add 10 feet to your long jump distance and 3 feet to your high jump distance. The spirit of the tiger empowers your leaps." },
+    ] : []),
+  ];
+
+  const ASPECT_TOTEM_OPTIONS: TotemAnimal[] = [
+    { id: 'bear',  emoji: '🐻', name: 'Bear',  sourceBook: 'PHB',  description: "Your carrying capacity (including maximum load and maximum lift) is doubled, and you have advantage on Strength checks made to push, pull, lift, or break objects." },
+    { id: 'eagle', emoji: '🦅', name: 'Eagle', sourceBook: 'PHB',  description: "You can see up to 1 mile away with no difficulty, able to discern even fine details as though looking at something no more than 100 feet away from you. Additionally, dim light doesn't impose disadvantage on your Wisdom (Perception) checks." },
+    { id: 'wolf',  emoji: '🐺', name: 'Wolf',  sourceBook: 'PHB',  description: "You can track other creatures while traveling at a fast pace, and you can move stealthily while traveling at a normal pace." },
+    ...(hasScagTotems ? [
+      { id: 'elk',   emoji: '🦌', name: 'Elk',   sourceBook: 'SCAG' as BookId, description: "Whether mounted or on foot, your travel pace is doubled, as is the travel pace of up to ten companions while they're within 60 feet of you and you're not incapacitated." },
+      { id: 'tiger', emoji: '🐯', name: 'Tiger', sourceBook: 'SCAG' as BookId, description: "You gain proficiency in two skills from the following list: Athletics, Acrobatics, Stealth, and Survival." },
+    ] : []),
+  ];
+
+  const TOTEMIC_ATTUNEMENT_OPTIONS: TotemAnimal[] = [
+    { id: 'bear',  emoji: '🐻', name: 'Bear',  sourceBook: 'PHB',  description: "While you're raging, any creature within 5 feet of you that's hostile to you has disadvantage on attack rolls against targets other than you or another character with this feature. An enemy is immune to this effect if it can't see or hear you or if it can't be frightened." },
+    { id: 'eagle', emoji: '🦅', name: 'Eagle', sourceBook: 'PHB',  description: "While raging, you have a flying speed equal to your current walking speed. This benefit works only in short bursts; you fall if you end your turn in the air and nothing else is holding you aloft." },
+    { id: 'wolf',  emoji: '🐺', name: 'Wolf',  sourceBook: 'PHB',  description: "While you're raging, you can use a bonus action on your turn to knock a Large or smaller creature prone when you hit it with a melee weapon attack." },
+    ...(hasScagTotems ? [
+      { id: 'elk',   emoji: '🦌', name: 'Elk',   sourceBook: 'SCAG' as BookId, description: "While raging, you can use a bonus action during your move to pass through the space of a Large or smaller creature. That creature must succeed on a Strength saving throw (DC 8 + your Str bonus + prof bonus) or be knocked prone and take 1d12 + Str modifier bludgeoning damage." },
+      { id: 'tiger', emoji: '🐯', name: 'Tiger', sourceBook: 'SCAG' as BookId, description: "While raging, if you move at least 20 feet in a straight line toward a Large or smaller target right before a melee weapon attack against it, you can use a bonus action to make an additional melee weapon attack against it." },
+    ] : []),
+  ];
+
   const nothingToChoose =
     !hasFightingStyle && !isWarlock && !isSorcerer && !isBattleMaster && !isArtificer &&
-    optionalFeaturesAvail.length === 0;
+    !isTotemWarrior && optionalFeaturesAvail.length === 0;
 
   return (
     <div>
@@ -332,6 +369,51 @@ export function StepClassOptions() {
           selectedIds={opts.optionalFeatures}
           max={Infinity}
           onToggle={(id) => toggleList('optionalFeatures', id, Infinity)}
+        />
+      )}
+
+      {/* ── Totem Warrior: Totem Spirit (lv.3+) ── */}
+      {isTotemWarrior && level >= 3 && (
+        <OptionSection
+          title="Totem Spirit"
+          helpText="Choose a totem animal whose spirit guides your rage. You must craft or acquire a totem object incorporating the animal's physical elements."
+          items={TOTEM_SPIRIT_OPTIONS.map(t => ({
+            id: t.id, name: `${t.emoji} ${t.name}`, sourceBook: t.sourceBook, description: t.description,
+          }))}
+          selectedIds={opts.totemSpirit ? [opts.totemSpirit] : []}
+          max={1}
+          radio
+          onToggle={(id) => patch({ totemSpirit: opts.totemSpirit === id ? undefined : id })}
+        />
+      )}
+
+      {/* ── Totem Warrior: Aspect of the Beast (lv.6+) ── */}
+      {isTotemWarrior && level >= 6 && (
+        <OptionSection
+          title="Aspect of the Beast"
+          helpText="At 6th level, you gain a magical benefit based on a totem animal of your choice (can differ from your Totem Spirit)."
+          items={ASPECT_TOTEM_OPTIONS.map(t => ({
+            id: t.id, name: `${t.emoji} ${t.name}`, sourceBook: t.sourceBook, description: t.description,
+          }))}
+          selectedIds={opts.aspectTotem ? [opts.aspectTotem] : []}
+          max={1}
+          radio
+          onToggle={(id) => patch({ aspectTotem: opts.aspectTotem === id ? undefined : id })}
+        />
+      )}
+
+      {/* ── Totem Warrior: Totemic Attunement (lv.14+) ── */}
+      {isTotemWarrior && level >= 14 && (
+        <OptionSection
+          title="Totemic Attunement"
+          helpText="At 14th level, you gain a magical benefit based on a totem animal of your choice (can differ from your earlier choices)."
+          items={TOTEMIC_ATTUNEMENT_OPTIONS.map(t => ({
+            id: t.id, name: `${t.emoji} ${t.name}`, sourceBook: t.sourceBook, description: t.description,
+          }))}
+          selectedIds={opts.totemicAttunement ? [opts.totemicAttunement] : []}
+          max={1}
+          radio
+          onToggle={(id) => patch({ totemicAttunement: opts.totemicAttunement === id ? undefined : id })}
         />
       )}
     </div>
