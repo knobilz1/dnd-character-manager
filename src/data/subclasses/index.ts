@@ -280,6 +280,9 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'way-of-the-four-elements', name: 'Way of the Four Elements', classId: 'monk', sourceBook: 'PHB', description: 'You follow a monastic tradition that teaches you to harness the elements. When you focus your ki, you can align yourself with the forces of creation.', features: [
     { name: 'Disciple of the Elements', level: 3, description: 'You learn magical disciplines that harness the power of the four elements. You know the Elemental Attunement discipline plus one of your choice. You learn additional disciplines at 6th, 11th, and 17th level.' },
     { name: 'Elemental Disciplines', level: 3, description: 'Disciplines include effects like Fist of Unbroken Air, Water Whip, Fist of Four Thunders, Rush of the Gale Spirits, and Shape the Flowing River.' },
+    { name: 'Additional Elemental Discipline', level: 6, description: 'At 6th level, you learn one additional Elemental Discipline of your choice. Some disciplines require you to be a certain level in this class to learn them.' },
+    { name: 'Additional Elemental Discipline', level: 11, description: 'At 11th level, you learn one additional Elemental Discipline of your choice.' },
+    { name: 'Additional Elemental Discipline', level: 17, description: 'At 17th level, you learn one additional Elemental Discipline of your choice. Some disciplines are available only to monks of sufficient level.' },
   ]},
 
   // ── PHB: PALADIN ──────────────────────────────────────────────────────
