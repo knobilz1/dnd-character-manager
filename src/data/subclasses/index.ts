@@ -5,7 +5,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'berserker', name: 'Path of the Berserker', classId: 'barbarian', sourceBook: 'PHB', description: 'For some barbarians, rage is a means to an end—that end being violence. The Path of the Berserker is a path of untrammeled fury, slick with blood.', features: [
     { name: 'Frenzy', level: 3, description: 'Starting when you choose this path at 3rd level, you can go into a frenzy when you rage. If you do so, for the duration of your rage you can make a single melee weapon attack as a bonus action on each of your turns after this one.' },
     { name: 'Mindless Rage', level: 6, description: 'Beginning at 6th level, you can\'t be charmed or frightened while raging. If you are charmed or frightened when you enter your rage, the effect is suspended for the duration of the rage.' },
-    { name: 'Intimidating Presence', level: 10, description: 'Beginning at 10th level, you can use your action to frighten someone with your menacing presence. When you do so, choose one creature that you can see within 30 feet of you.' },
+    { name: 'Intimidating Presence', level: 10, description: 'Beginning at 10th level, you can use your action to frighten someone with your menacing presence. When you do so, choose one creature that you can see within 30 feet of you. If the creature can see or hear you, it must succeed on a Wisdom saving throw (DC equal to 8 + your proficiency bonus + your Charisma modifier) or be frightened of you until the end of your next turn. On subsequent turns, you can use your action to extend the duration of this effect on the frightened creature until the end of your next turn. This effect ends if the creature ends its turn out of line of sight or more than 60 feet away from you.' },
     { name: 'Retaliation', level: 14, description: 'Starting at 14th level, when you take damage from a creature that is within 5 feet of you, you can use your reaction to make a melee weapon attack against that creature.' },
   ]},
   { id: 'totem-warrior', name: 'Path of the Totem Warrior', classId: 'barbarian', sourceBook: 'PHB', description: 'The Path of the Totem Warrior is a spiritual journey, as the barbarian accepts a spirit animal as guide, protector, and inspiration.', features: [
@@ -107,7 +107,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Shadow Arts', level: 3, description: 'Starting when you choose this tradition at 3rd level, you can use your ki to duplicate the effects of certain spells. As an action, you can spend 2 ki points to cast darkness, darkvision, pass without trace, or silence, without providing material components.' },
     { name: 'Shadow Step', level: 6, description: 'At 6th level, you gain the ability to step from one shadow into another. When you are in dim light or darkness, as a bonus action you can teleport up to 60 feet to an unoccupied space you can see that is also in dim light or darkness.' },
     { name: 'Cloak of Shadows', level: 11, description: 'By 11th level, you have learned to become one with the shadows. When you are in an area of dim light or darkness, you can use your action to become invisible. You remain invisible until you make an attack, cast a spell, or are in an area of bright light.' },
-    { name: 'Opportunist', level: 17, description: 'At 17th level, you can exploit a creature\'s momentary distraction when it is hit by an attack.' },
+    { name: 'Opportunist', level: 17, description: 'At 17th level, you can exploit a creature\'s momentary distraction when it is hit by an attack. Whenever a creature within 5 feet of you is hit by an attack made by a creature other than you, you can use your reaction to make a melee attack against that creature.' },
   ]},
   // Paladin
   { id: 'oath-of-devotion', name: 'Oath of Devotion', classId: 'paladin', sourceBook: 'PHB', description: 'The Oath of Devotion binds a paladin to the loftiest ideals of justice, virtue, and order. Sometimes called cavaliers, white knights, or holy warriors.', features: [
@@ -398,9 +398,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'arcane-archer', name: 'Arcane Archer', classId: 'fighter', sourceBook: 'XGtE', description: 'An Arcane Archer studies a unique elven method of archery that weaves magic into attacks to produce supernatural effects.', features: [
     { name: 'Arcane Archer Lore', level: 3, description: 'You gain proficiency in Arcana or Nature, and you learn the Prestidigitation or Druidcraft cantrip.' },
     { name: 'Arcane Shot', level: 3, description: 'You learn two Arcane Shot options of your choice (Banishing, Beguiling, Bursting, Enfeebling, Grasping, Piercing, Seeking, or Shadow Arrow). You have two uses, regaining all on a short or long rest.' },
+    { name: 'Additional Arcane Shot', level: 7, description: 'You learn one additional Arcane Shot option of your choice.' },
     { name: 'Magic Arrow', level: 7, description: 'Whenever you fire a nonmagical arrow from a shortbow or longbow, you can make it magical for the purpose of overcoming resistance and immunity.' },
     { name: 'Curving Shot', level: 7, description: 'When you miss with a magic arrow, you can use a bonus action to reroll the attack roll against a different target within 60 feet.' },
+    { name: 'Additional Arcane Shot', level: 10, description: 'You learn one additional Arcane Shot option of your choice.' },
     { name: 'Ever-Ready Shot', level: 15, description: 'If you have no Arcane Shot uses remaining at initiative, you regain one use.' },
+    { name: 'Additional Arcane Shot', level: 15, description: 'You learn one additional Arcane Shot option of your choice.' },
+    { name: 'Additional Arcane Shot', level: 18, description: 'You learn one additional Arcane Shot option of your choice.' },
     { name: 'Improved Shots', level: 18, description: 'Arcane Shot damage dice increase from d6 to d8.' },
   ]},
   { id: 'cavalier', name: 'Cavalier', classId: 'fighter', sourceBook: 'XGtE', description: 'The archetypal Cavalier excels at mounted combat. Usually born of noble birth, the cavalier embodies the ideals of chivalry.', features: [
@@ -667,7 +671,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Rune Carver', level: 3, description: 'You learn two runes of your choice (Cloud, Fire, Frost, Stone, Hill, Storm). Inscribed on gear, each rune grants a passive benefit and a usable property.' },
     { name: 'Giant\'s Might', level: 3, description: 'As a bonus action, become Large for 1 minute, gaining advantage on Strength checks/saves and extra 1d6 damage on weapon attacks once per turn. Prof-bonus uses per long rest.' },
     { name: 'Runic Shield', level: 7, description: 'When an ally within 60 feet is hit by an attack, use your reaction to force the attacker to reroll. Prof-bonus uses per long rest.' },
-    { name: 'Great Stature', level: 10, description: 'Your size becomes permanently Large, and Giant\'s Might damage increases to 1d8.' },
+    { name: 'Great Stature', level: 10, description: 'Your height increases by 3d4 inches. The extra damage you deal with Giant\'s Might increases to 1d8.' },
     { name: 'Master of Runes', level: 15, description: 'You can use each rune twice per short or long rest.' },
     { name: 'Runic Juggernaut', level: 18, description: 'Giant\'s Might damage increases to 1d10, lasts 10 minutes, and you can become Huge.' },
   ]},
