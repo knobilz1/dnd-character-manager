@@ -17,6 +17,7 @@ import { DiceRoller } from './DiceRoller';
 import { SnapshotPanel } from './SnapshotPanel';
 import { RageOverlay } from '../../components/RageOverlay';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
+import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { getClass } from '../../data/classes';
@@ -81,6 +82,8 @@ export function SheetPage() {
   const [round, setRound] = React.useState(1);
   const [activeEffects, setActiveEffects] = React.useState<Record<string, number>>({}); // key → round when activated
   const [showRageOverlay, setShowRageOverlay] = React.useState(false);
+  const [showDeadOverlay, setShowDeadOverlay] = React.useState(false);
+  const prevDeathFailures = React.useRef<number | null>(null);
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
@@ -134,6 +137,17 @@ export function SheetPage() {
     return () => document.documentElement.removeAttribute('data-raging');
   }, [showRageOverlay]);
 
+  // Trigger "YOU ARE DEAD" overlay only when the 3rd failure is actually clicked
+  // (not on initial load when failures may already be 3).
+  React.useEffect(() => {
+    if (!character) return;
+    const curr = character.deathSaves.failures;
+    if (prevDeathFailures.current !== null && prevDeathFailures.current < 3 && curr === 3) {
+      setShowDeadOverlay(true);
+    }
+    prevDeathFailures.current = curr;
+  }, [character?.deathSaves?.failures]);
+
   const derived = useCharacterDerived(character);
   const { triggerRoll } = useDiceStore();
 
@@ -182,6 +196,10 @@ export function SheetPage() {
       )}
       {/* Inspiration overlay — subtle golden sparkle every ~20s while inspired */}
       {character.inspiration && <InspirationOverlay />}
+      {/* Death overlay — Dark Souls style when 3 death save failures are reached */}
+      {showDeadOverlay && (
+        <YouAreDeadOverlay onDismiss={() => setShowDeadOverlay(false)} />
+      )}
       {/* Top bar */}
       <div className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
