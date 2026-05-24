@@ -207,11 +207,16 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   // External trigger state (skill/save/initiative rolls)
   const [rollModifier, setRollModifier] = React.useState<number | null>(null);
   const [rollLabel, setRollLabel] = React.useState<string | null>(null);
-  const { pending, consume } = useDiceStore();
+  const { pending, consume, openNonce } = useDiceStore();
 
   // Inspiration — pulled directly so we don't need an extra prop
   const inspiration     = useCharacterStore(s => s.character?.inspiration ?? false);
   const toggleInspiration = useCharacterStore(s => s.toggleInspiration);
+
+  // Open panel when the FAB or any external caller fires openPanel()
+  React.useEffect(() => {
+    if (openNonce > 0) setOpen(true);
+  }, [openNonce]);
 
   // Watch for pending external rolls
   React.useEffect(() => {

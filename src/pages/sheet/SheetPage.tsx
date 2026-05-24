@@ -24,7 +24,8 @@ import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
-import { lookupWeapon, rollDamage, damageLine } from '../../data/weapons';
+import type { RollDie } from '../../store/useDiceStore';
+import { lookupWeapon, damageLine } from '../../data/weapons';
 import { getRace } from '../../data/races';
 
 // Find a resource definition by key, checking both class and subclass.
@@ -200,6 +201,8 @@ export function SheetPage() {
       {showDeadOverlay && (
         <YouAreDeadOverlay onDismiss={() => setShowDeadOverlay(false)} />
       )}
+      {/* Floating d20 quick-launch button */}
+      <DiceFAB />
       {/* Top bar */}
       <div className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -1032,9 +1035,16 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
+const VALID_DAMAGE_DICE: RollDie[] = [4, 6, 8, 10, 12, 20, 100];
+/** Extract the die type from a weapon damage string, e.g. "1d8" → 8, "2d6" → 6. */
+function parseDamageDie(dice: string): RollDie | null {
+  if (!dice || dice === '—' || !dice.includes('d')) return null;
+  const sides = parseInt(dice.split('d')[1], 10);
+  return VALID_DAMAGE_DICE.includes(sides as RollDie) ? (sides as RollDie) : null;
+}
+
 function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mods: any; profBonus: number }) {
   const { triggerRoll } = useDiceStore();
-  const [damageResults, setDamageResults] = React.useState<Record<string, { result: number; label: string } | null>>({});
 
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
   if (equippedWeapons.length === 0) return null;
@@ -1057,7 +1067,7 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
           const dmgDice = w?.damageDice ?? '1d6';
           const dmgType = w?.damageType ?? '—';
           const dmgLabel = w ? damageLine(dmgDice, abilityMod) : `?d? + ${abilityMod >= 0 ? '+' : ''}${abilityMod}`;
-          const dmgResult = damageResults[item.id];
+          const dmgDie = parseDamageDie(dmgDice);
 
           return (
             <div key={item.id} className="bg-slate-900/60 rounded-lg p-3">
@@ -1075,41 +1085,30 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
                   <p className="text-[10px] text-slate-400 group-hover:text-red-300 transition-colors">Attack</p>
                   <p className="text-sm font-bold text-white">{toHit >= 0 ? '+' : ''}{toHit} 🎲</p>
                 </button>
-                {/* Damage roll */}
+                {/* Damage roll — opens the dice window */}
                 <button
                   onClick={() => {
-                    if (dmgDice === '—') return;
-                    const raw = rollDamage(dmgDice);
-                    const total = raw + abilityMod;
-                    setDamageResults(prev => ({ ...prev, [item.id]: { result: total, label: dmgLabel } }));
+                    if (!dmgDie || dmgDice === '—') return;
+                    triggerRoll(dmgDie, abilityMod, `${item.name} Damage`);
                   }}
-                  className="flex-1 bg-orange-900/40 hover:bg-orange-800/50 border border-orange-700/60 hover:border-orange-500 rounded-lg py-1.5 text-center transition-colors group"
+                  disabled={!dmgDie || dmgDice === '—'}
+                  className="flex-1 bg-orange-900/40 hover:bg-orange-800/50 border border-orange-700/60 hover:border-orange-500 rounded-lg py-1.5 text-center transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
                   title={`Roll damage: ${dmgLabel}`}
                 >
                   <p className="text-[10px] text-slate-400 group-hover:text-orange-300 transition-colors">Damage</p>
-                  <p className="text-sm font-bold text-white">
-                    {dmgResult ? (
-                      <span className="text-orange-300">{dmgResult.result}</span>
-                    ) : (
-                      <span>{dmgLabel} 🎲</span>
-                    )}
-                  </p>
+                  <p className="text-sm font-bold text-white">{dmgLabel} 🎲</p>
                 </button>
               </div>
               {/* Versatile option */}
               {w?.versatile && (
                 <button
                   onClick={() => {
-                    const raw = rollDamage(w.versatile!);
-                    const total = raw + abilityMod;
-                    setDamageResults(prev => ({ ...prev, [`${item.id}-v`]: { result: total, label: damageLine(w.versatile!, abilityMod) } }));
+                    const vDie = parseDamageDie(w.versatile!);
+                    if (vDie) triggerRoll(vDie, abilityMod, `${item.name} (Two-Handed) Damage`);
                   }}
                   className="mt-1.5 w-full text-[10px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded py-1 transition-colors"
                 >
                   Two-handed: {damageLine(w.versatile, abilityMod)} 🎲
-                  {damageResults[`${item.id}-v`] && (
-                    <span className="ml-1 text-orange-300 font-bold">→ {damageResults[`${item.id}-v`]!.result}</span>
-                  )}
                 </button>
               )}
             </div>
@@ -1800,6 +1799,40 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       />
 
     </div>
+  );
+}
+
+// ── Floating d20 quick-launch button ────────────────────────────────────────
+function DiceFAB() {
+  const { openPanel } = useDiceStore();
+  return (
+    <button
+      onClick={openPanel}
+      title="Open dice roller"
+      className="fixed bottom-6 right-6 z-[40] w-14 h-14 rounded-full bg-slate-800 border-2 border-slate-600 hover:border-blue-400 shadow-xl hover:shadow-blue-500/30 transition-all duration-200 flex items-center justify-center group active:scale-95"
+    >
+      <svg
+        viewBox="0 0 100 100"
+        className="w-8 h-8 text-slate-400 group-hover:text-blue-300 transition-colors"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinejoin="round"
+      >
+        {/* d20 shape — same octagon used in DiceRoller */}
+        <polygon points="50,7 80,20 93,50 80,80 50,93 20,80 7,50 20,20" />
+        {/* centre "20" text */}
+        <text
+          x="50" y="56"
+          textAnchor="middle"
+          fontSize="26"
+          fontWeight="bold"
+          fontFamily="sans-serif"
+          stroke="none"
+          fill="currentColor"
+        >20</text>
+      </svg>
+    </button>
   );
 }
 
