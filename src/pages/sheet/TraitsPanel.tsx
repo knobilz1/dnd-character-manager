@@ -1,6 +1,4 @@
-import React from 'react';
 import { Textarea, SectionHeader, HoverCard } from '../../components/ui';
-import { cn } from '../../utils/cn';
 import { getBackground } from '../../data/backgrounds';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
