@@ -606,6 +606,105 @@
 
 /* Eid overlay keyframes are inlined in EidOverlay.tsx */
 
+/* ── Parchment / Classic DnD Paper mode 📜 ──────────────────────────────── */
+/*
+   Evokes a college-ruled notebook or vintage campaign journal.
+   Light base so the whole UI feels like cream-coloured aged paper.
+   College-ruled lines (27px pitch) are fixed behind all content via
+   body::before; panels are slightly translucent so the lines show through.
+   A faint red margin line runs down the left, just like a real ruled page.
+*/
+[data-theme="parchment"] {
+  color-scheme: light;
+  background-color: #ede5c4;
+
+  /* Invert the slate scale: 950 = lightest, 50 = darkest — same trick as light mode */
+  --color-slate-950: #fdf9f0;
+  --color-slate-900: #f5edd5;   /* page background (light cream) */
+  --color-slate-800: #f8f2e0;   /* card / panel background (slightly lighter) */
+  --color-slate-700: #e0cfa0;   /* button bg, active tab */
+  --color-slate-600: #c4a86a;   /* input borders, dividers */
+  --color-slate-500: #997540;   /* very muted / placeholder */
+  --color-slate-400: #6b4e28;   /* muted labels */
+  --color-slate-300: #4a3318;   /* secondary text */
+  --color-slate-200: #321f0a;
+  --color-slate-100: #1e1104;
+  --color-slate-50:  #0a0500;
+  --color-white: #2c1a08;       /* main text — dark sepia ink */
+}
+
+/* Keep text white on coloured action buttons (spells, abilities, etc.) */
+[data-theme="parchment"] [class*="bg-red-"],
+[data-theme="parchment"] [class*="bg-green-"],
+[data-theme="parchment"] [class*="bg-emerald-"],
+[data-theme="parchment"] [class*="bg-blue-"],
+[data-theme="parchment"] [class*="bg-indigo-"],
+[data-theme="parchment"] [class*="bg-violet-"],
+[data-theme="parchment"] [class*="bg-purple-"],
+[data-theme="parchment"] [class*="bg-teal-"],
+[data-theme="parchment"] [class*="bg-cyan-"],
+[data-theme="parchment"] [class*="bg-amber-"],
+[data-theme="parchment"] [class*="bg-yellow-"],
+[data-theme="parchment"] [class*="bg-orange-"] {
+  --color-white: #ffffff;
+}
+
+/* Let the body::before lined background show through */
+[data-theme="parchment"] .min-h-screen {
+  background: transparent;
+}
+
+/*
+  Fixed parchment background with college-ruled lines:
+    • Base colour: #f0e8cc — warm cream, lighter than the reference image
+    • Red margin line at 64px from left — 1px wide
+    • Horizontal ruled lines every 27px (college-ruled spacing) — 1px, warm brown
+*/
+[data-theme="parchment"] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-color: #f0e8cc;
+  background-image:
+    /* Red margin line */
+    linear-gradient(
+      to right,
+      transparent 63px,
+      rgba(190, 80, 65, 0.22) 63px,
+      rgba(190, 80, 65, 0.22) 64px,
+      transparent 64px
+    ),
+    /* College-ruled horizontal lines — 1px every 27px */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 26px,
+      rgba(90, 68, 28, 0.17) 26px,
+      rgba(90, 68, 28, 0.17) 27px
+    );
+  pointer-events: none;
+  z-index: -1;
+}
+
+[data-theme="parchment"] body {
+  background-color: transparent;
+  color: #2c1a08;
+}
+
+/*
+  Panels are slightly translucent so the college-ruled lines bleed
+  through at low opacity — the whole UI feels like it sits ON the paper.
+  A very faint warm box-shadow gives each card a slight paper-lift.
+*/
+[data-theme="parchment"] .bg-slate-800 {
+  background-color: rgba(248, 242, 224, 0.90) !important;
+  box-shadow: 0 1px 4px rgba(80, 50, 10, 0.12), 0 4px 16px rgba(80, 50, 10, 0.07);
+}
+
+[data-theme="parchment"] .scrollbar-thin { scrollbar-color: #c4a86a #f0e8cc; }
+[data-theme="parchment"] .scrollbar-thin::-webkit-scrollbar-track { background: #f0e8cc; }
+[data-theme="parchment"] .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #c4a86a; }
+
 /* ── Barbarian Rage mode ─────────────────────────────────────────────────── */
 /* Applied when data-raging is set on <html>. Turns the entire background
    blood-red and gives every card an intense crimson glow. */

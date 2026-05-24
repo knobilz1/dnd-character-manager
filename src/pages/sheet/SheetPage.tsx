@@ -1832,84 +1832,157 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 //
 function DiceFAB() {
   const { openPanel } = useDiceStore();
+  const { theme }     = useThemeStore();
+
+  // Per-theme colour palette matching the template image style:
+  //   face = die body fill  |  line = outline + facet lines  |  num = number fill  |  glow = drop-shadow
+  // Dark themes: dark body + bright accent lines (inverted parchment look)
+  // Light theme: light body + dark lines (matches the cream+teal template exactly)
+  const PALETTE: Record<string, { face:string; line:string; num:string; glow:string }> = {
+    dark:      { face:'#0d1f3c', line:'#60a5fa', num:'#bfdbfe', glow:'#3b82f6' },
+    light:     { face:'#f0ece0', line:'#2a7a8a', num:'#1a4a55', glow:'#2a7a8a' },
+    party:     { face:'#2d0018', line:'#f472b6', num:'#fce7f3', glow:'#db2777' },
+    halloween: { face:'#1c0700', line:'#fb923c', num:'#fed7aa', glow:'#ea580c' },
+    christmas: { face:'#052e16', line:'#4ade80', num:'#bbf7d0', glow:'#16a34a' },
+    deepsea:   { face:'#031828', line:'#38bdf8', num:'#bae6fd', glow:'#0284c7' },
+    eid:       { face:'#100c00', line:'#fcd34d', num:'#fef3c7', glow:'#d97706' },
+    // Parchment: warm cream body, dark sepia ink lines — matches the paper aesthetic
+    parchment: { face:'#f0e8cc', line:'#7a5020', num:'#2c1a08', glow:'#b87a30' },
+  };
+  const c  = PALETTE[theme] ?? PALETTE['dark'];
+  const ns = `d20fab-${theme}`;   // unique SVG id namespace per theme
+
+  // ── Geometry ────────────────────────────────────────────────────────────────
+  // Outer octagonal boundary (100×100 viewBox) — gives a rounded-polygon d20 silhouette
+  const outer = '50,4 83,18 96,50 83,82 50,96 17,82 4,50 17,18';
+
+  // The 8 outer vertices as [x,y] pairs (clockwise from top)
+  const O = [[50,4],[83,18],[96,50],[83,82],[50,96],[17,82],[4,50],[17,18]] as const;
+  //          O0      O1      O2      O3      O4      O5     O6     O7
+
+  // Inner triangle = the prominently visible "20" face
+  // Apex near top, base at y=60 — matches template proportions
+  const T1 = [50, 15] as const;   // apex
+  const T2 = [22, 60] as const;   // bottom-left vertex
+  const T3 = [78, 60] as const;   // bottom-right vertex
+
+  // Centroid of "20" face for text placement
+  const cx20 = (T1[0]+T2[0]+T3[0])/3;  // 50
+  const cy20 = (T1[1]+T2[1]+T3[1])/3;  // 45
+
+  // ── Spoke connections (inner vertex → outer vertices) ────────────────────
+  // Each outer vertex is connected to exactly one inner vertex, producing clean
+  // triangular faces across the whole surface — 12 faces total, matching the
+  // visible-hemisphere topology of the reference illustration.
+  //
+  //  T1 → O7, O0, O1   (top-left tiny, top-right tiny; plus shared T1-T2 / T1-T3 edges)
+  //  T2 → O7, O6, O5, O4  (left, lower-left, bottom-left; T2-T3 is inner base)
+  //  T3 → O1, O2, O3, O4  (right-upper, right, lower-right)
+  //
+  // O4 is shared between T2 and T3 — they both converge at the bottom vertex,
+  // creating the bottom-center "8" face (T2-T3-O4).
+
+  const spokes: [number,number,number,number][] = [
+    // T1 spokes
+    [T1[0],T1[1], O[7][0],O[7][1]],
+    [T1[0],T1[1], O[0][0],O[0][1]],
+    [T1[0],T1[1], O[1][0],O[1][1]],
+    // T2 spokes
+    [T2[0],T2[1], O[7][0],O[7][1]],
+    [T2[0],T2[1], O[6][0],O[6][1]],
+    [T2[0],T2[1], O[5][0],O[5][1]],
+    [T2[0],T2[1], O[4][0],O[4][1]],
+    // T3 spokes
+    [T3[0],T3[1], O[1][0],O[1][1]],
+    [T3[0],T3[1], O[2][0],O[2][1]],
+    [T3[0],T3[1], O[3][0],O[3][1]],
+    [T3[0],T3[1], O[4][0],O[4][1]],
+  ];
+
+  // ── Small face numbers ───────────────────────────────────────────────────
+  // Centroid of each labelled face + rotation to match face orientation
+  // "2"  — upper-left face  (T1-T2-O7): centroid ≈ (30,31), rotated −38°
+  // "14" — upper-right face (T1-T3-O1): centroid ≈ (70,31), rotated +38°
+  // "8"  — bottom-center    (T2-T3-O4): centroid ≈ (50,72), no rotation
+  const sideNums = [
+    { label:'2',  x:29, y:34, rot:-38 },
+    { label:'14', x:71, y:34, rot: 38 },
+    { label:'8',  x:50, y:75, rot:  0 },
+  ] as const;
+
   return (
     <button
       onClick={openPanel}
       title="Open dice roller"
-      className="fixed bottom-6 right-6 z-[40] transition-all duration-150 active:scale-95 hover:scale-110 hover:-translate-y-1 hover:brightness-105"
-      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', width: 62, height: 62 }}
+      className="fixed bottom-6 right-6 z-[40] transition-all duration-200 active:scale-95 hover:scale-110 hover:-translate-y-1"
+      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', width: 60, height: 60 }}
     >
-      <svg
-        viewBox="0 0 60 58"
-        width="62"
-        height="62"
-        style={{ overflow: 'visible' }}
-        xmlns="http://www.w3.org/2000/svg"
-      >
+      <svg viewBox="0 0 100 100" width="60" height="60" style={{ overflow: 'visible' }} xmlns="http://www.w3.org/2000/svg">
         <defs>
-          {/* Subtle gradient on top face to suggest gloss */}
-          <linearGradient id="fab3d-top-grad" x1="20%" y1="5%" x2="80%" y2="95%">
-            <stop offset="0%"   stopColor="#ffffff" />
-            <stop offset="100%" stopColor="#e2e2e2" />
-          </linearGradient>
-          {/* Drop shadow beneath whole die */}
-          <filter id="fab3d-shadow" x="-30%" y="-20%" width="160%" height="160%">
-            <feDropShadow dx="1" dy="4" stdDeviation="3" floodColor="#000000" floodOpacity="0.42" />
+          {/* Drop shadow under entire die */}
+          <filter id={`${ns}-drop`} x="-35%" y="-30%" width="170%" height="175%">
+            <feDropShadow dx="0" dy="5" stdDeviation="5" floodColor={c.glow} floodOpacity="0.8" />
+          </filter>
+          {/* Bloom glow for "20" text */}
+          <filter id={`${ns}-bloom`} x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
           </filter>
         </defs>
 
-        {/* ── Die faces (rendered under the shadow filter as one group) ── */}
-        <g filter="url(#fab3d-shadow)">
-          {/* Top face — brightest, catches direct light */}
-          <polygon points="8,20 30,8 52,20 30,32" fill="url(#fab3d-top-grad)" />
-          {/* Left face — deepest shadow (away from viewer) */}
-          <polygon points="8,20 30,32 30,54 8,42"  fill="#B8B8B8" />
-          {/* Right face — mid-tone (faces partly toward viewer) */}
-          <polygon points="30,32 52,20 52,42 30,54" fill="#D6D6D6" />
-        </g>
+        {/* ── Die body fill ── */}
+        <polygon points={outer} fill={c.face} />
 
-        {/* ── Edge lines ── */}
-        {/* Outer silhouette — darkest */}
+        {/* ── Outer rim — drawn last on top with glow ── */}
+        {/* (drawn twice: once for glow filter, once crisp on top) */}
+        <polygon points={outer} fill="none" stroke={c.line} strokeWidth="2.8"
+          strokeLinejoin="round" filter={`url(#${ns}-drop)`} />
+
+        {/* ── Main "20" face triangle ── */}
         <polygon
-          points="8,20 30,8 52,20 52,42 30,54 8,42"
-          fill="none" stroke="#4a4a4a" strokeWidth="0.9" strokeLinejoin="round"
+          points={`${T1[0]},${T1[1]} ${T2[0]},${T2[1]} ${T3[0]},${T3[1]}`}
+          fill="none" stroke={c.line} strokeWidth="1.6" strokeLinejoin="round"
         />
-        {/* Gloss streak on top-left edge */}
-        <line x1="8" y1="20" x2="30" y2="8"
-          stroke="rgba(255,255,255,0.65)" strokeWidth="1.3" />
-        {/* Internal face dividers */}
-        <line x1="8"  y1="20" x2="30" y2="32" stroke="#606060" strokeWidth="0.7" />
-        <line x1="52" y1="20" x2="30" y2="32" stroke="#707070" strokeWidth="0.7" />
-        <line x1="30" y1="32" x2="30" y2="54" stroke="#606060" strokeWidth="0.7" />
 
-        {/* ── TOP face: 5 pips ──────────────────────────────────────────
-            matrix(22,-12, 22,12, 8,20)
-            x = 22u+22v+8   y = -12u+12v+20
-            u,v positions: (0.25,0.25),(0.75,0.25),(0.5,0.5),(0.25,0.75),(0.75,0.75) */}
-        <circle cx="19"   cy="20"   r="2.35" fill="#111" />  {/* upper-left  */}
-        <circle cx="30"   cy="14"   r="2.35" fill="#111" />  {/* upper-right */}
-        <circle cx="30"   cy="20"   r="2.35" fill="#111" />  {/* center      */}
-        <circle cx="30"   cy="26"   r="2.35" fill="#111" />  {/* lower-left  */}
-        <circle cx="41"   cy="20"   r="2.35" fill="#111" />  {/* lower-right */}
+        {/* ── Facet spoke lines from inner vertices to outer boundary ── */}
+        {spokes.map(([x1,y1,x2,y2], i) => (
+          <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+            stroke={c.line} strokeWidth="1.1" opacity="0.6" />
+        ))}
 
-        {/* ── LEFT face: 3 pips (diagonal stripe top-right → bottom-left)
-            matrix(22,12, 0,22, 8,20)
-            x = 22u+8   y = 12u+22v+20
-            u,v positions: (0.72,0.20),(0.50,0.50),(0.28,0.80) */}
-        <circle cx="23.8" cy="33"   r="2.1" fill="#111" />
-        <circle cx="19"   cy="37"   r="2.1" fill="#111" />
-        <circle cx="14.2" cy="41"   r="2.1" fill="#111" />
+        {/* ── Small face numbers (decorative, matches template illustration) ── */}
+        {sideNums.map(({ label, x, y, rot }) => (
+          <text
+            key={label}
+            x={x} y={y}
+            textAnchor="middle"
+            fontSize={label === '14' ? 7 : 8}
+            fontWeight="700"
+            fontFamily="Georgia, 'Palatino Linotype', serif"
+            fill={c.num}
+            opacity="0.65"
+            transform={rot !== 0 ? `rotate(${rot},${x},${y})` : undefined}
+          >{label}</text>
+        ))}
 
-        {/* ── RIGHT face: 6 pips (two columns × three rows)
-            matrix(22,-12, 0,22, 30,32)
-            x = 22u+30   y = -12u+22v+32
-            u,v cols: 0.28, 0.72  |  v rows: 0.18, 0.50, 0.82 */}
-        <circle cx="36.2" cy="32.6" r="2.1" fill="#111" />  {/* left-top    */}
-        <circle cx="45.8" cy="27.3" r="2.1" fill="#111" />  {/* right-top   */}
-        <circle cx="36.2" cy="39.6" r="2.1" fill="#111" />  {/* left-mid    */}
-        <circle cx="45.8" cy="34.4" r="2.1" fill="#111" />  {/* right-mid   */}
-        <circle cx="36.2" cy="46.7" r="2.1" fill="#111" />  {/* left-bot    */}
-        <circle cx="45.8" cy="41.4" r="2.1" fill="#111" />  {/* right-bot   */}
+        {/* ── "20" — large, prominent, with bloom glow ── */}
+        <text
+          x={cx20} y={cy20 + 7}
+          textAnchor="middle"
+          fontSize="20"
+          fontWeight="900"
+          fontFamily="Georgia, 'Palatino Linotype', serif"
+          fill={c.num}
+          letterSpacing="1"
+          filter={`url(#${ns}-bloom)`}
+        >20</text>
+
+        {/* ── Crisp outer rim on top (no filter, no blur) ── */}
+        <polygon points={outer} fill="none" stroke={c.line} strokeWidth="2.5"
+          strokeLinejoin="round" opacity="0.9" />
       </svg>
     </button>
   );

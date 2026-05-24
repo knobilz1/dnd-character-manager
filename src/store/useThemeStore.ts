@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type Theme = 'dark' | 'light' | 'party' | 'halloween' | 'christmas' | 'deepsea' | 'eid';
+export type Theme = 'dark' | 'light' | 'party' | 'halloween' | 'christmas' | 'deepsea' | 'eid' | 'parchment';
 
-// Click cycle: dark → party → halloween → christmas → deepsea → eid → light → dark → …
+// Click cycle: dark → party → halloween → christmas → deepsea → eid → parchment → light → dark → …
 const NEXT: Record<Theme, Theme> = {
   light:     'dark',
   dark:      'party',
@@ -11,7 +11,8 @@ const NEXT: Record<Theme, Theme> = {
   halloween: 'christmas',
   christmas: 'deepsea',
   deepsea:   'eid',
-  eid:       'light',
+  eid:       'parchment',
+  parchment: 'light',
 };
 
 interface ThemeState {
