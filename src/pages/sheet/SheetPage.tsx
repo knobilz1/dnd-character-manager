@@ -1803,55 +1803,113 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 }
 
 // ── Floating d20 quick-launch button ────────────────────────────────────────
+// ── 3-D isometric casino D6 ─────────────────────────────────────────────────
+//
+// Three visible faces of a cube, tilted ~30°:
+//
+//          (30,8)
+//         / TOP \
+//   (8,20)──────(52,20)
+//   | LEFT \  / RIGHT |
+//   (8,42)  \/ (52,42)
+//          (30,54)
+//
+// Pip positions are derived from the parallelogram matrix for each face so
+// they lie correctly on the angled surface rather than being placed in screen
+// space independently.
+//
+// Face assignment (classic Western dice, 1+6=7, 2+5=7, 3+4=7):
+//   Top   → 5   Left  → 3   Right → 6
+//
+// Matrix derivation for each face (maps [0,1]² → parallelogram):
+//   Top   : origin=(8,20), X-basis=(22,-12), Y-basis=(22,12)
+//   Left  : origin=(8,20), X-basis=(22,12),  Y-basis=(0,22)
+//   Right : origin=(30,32), X-basis=(22,-12), Y-basis=(0,22)
+//
+// x(u,v) = a·u + c·v + e      y(u,v) = b·u + d·v + f
+//
+// All pip screen positions are pre-computed below from those formulas.
+//
 function DiceFAB() {
   const { openPanel } = useDiceStore();
   return (
     <button
       onClick={openPanel}
       title="Open dice roller"
-      className="fixed bottom-6 right-6 z-[40] w-14 h-14 transition-all duration-150 active:scale-95 hover:scale-110 hover:-translate-y-0.5"
-      style={{ background: 'none', border: 'none', padding: 0 }}
+      className="fixed bottom-6 right-6 z-[40] transition-all duration-150 active:scale-95 hover:scale-110 hover:-translate-y-1 hover:brightness-105"
+      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', width: 62, height: 62 }}
     >
-      <svg viewBox="0 0 56 56" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
+      <svg
+        viewBox="0 0 60 58"
+        width="62"
+        height="62"
+        style={{ overflow: 'visible' }}
+        xmlns="http://www.w3.org/2000/svg"
+      >
         <defs>
-          <linearGradient id="fab-die-face" x1="0%" y1="0%" x2="100%" y2="100%">
+          {/* Subtle gradient on top face to suggest gloss */}
+          <linearGradient id="fab3d-top-grad" x1="20%" y1="5%" x2="80%" y2="95%">
             <stop offset="0%"   stopColor="#ffffff" />
-            <stop offset="100%" stopColor="#dde0e6" />
+            <stop offset="100%" stopColor="#e2e2e2" />
           </linearGradient>
-          {/* Drop shadow filter */}
-          <filter id="fab-die-shadow" x="-15%" y="-15%" width="130%" height="130%">
-            <feDropShadow dx="2" dy="3" stdDeviation="2.5" floodColor="#00000055" />
+          {/* Drop shadow beneath whole die */}
+          <filter id="fab3d-shadow" x="-30%" y="-20%" width="160%" height="160%">
+            <feDropShadow dx="1" dy="4" stdDeviation="3" floodColor="#000000" floodOpacity="0.42" />
           </filter>
         </defs>
 
-        {/* ── Die body ───────────────────────────────────── */}
-        {/* Dark edge layer — gives the right/bottom "thickness" of a real die */}
-        <rect x="5" y="7" width="46" height="46" rx="9" fill="#888" />
-        {/* Main face */}
-        <rect
-          x="3" y="3" width="46" height="46" rx="9"
-          fill="url(#fab-die-face)"
-          filter="url(#fab-die-shadow)"
-          stroke="#bbb"
-          strokeWidth="0.6"
-        />
-        {/* Top-left highlight streak */}
-        <rect x="3" y="3" width="46" height="46" rx="9"
-          fill="none" stroke="white" strokeWidth="1.5" opacity="0.6"
-          strokeDasharray="18 999"
-          strokeDashoffset="-2"
-        />
+        {/* ── Die faces (rendered under the shadow filter as one group) ── */}
+        <g filter="url(#fab3d-shadow)">
+          {/* Top face — brightest, catches direct light */}
+          <polygon points="8,20 30,8 52,20 30,32" fill="url(#fab3d-top-grad)" />
+          {/* Left face — deepest shadow (away from viewer) */}
+          <polygon points="8,20 30,32 30,54 8,42"  fill="#B8B8B8" />
+          {/* Right face — mid-tone (faces partly toward viewer) */}
+          <polygon points="30,32 52,20 52,42 30,54" fill="#D6D6D6" />
+        </g>
 
-        {/* ── Six pips (face showing 6) ──────────────────── */}
-        {/* pip radius = 3.4 */}
-        {/* left column  x=14  |  right column x=38 */}
-        {/* rows: y=13, y=26, y=39 */}
-        <circle cx="14" cy="13" r="3.4" fill="#111" />
-        <circle cx="38" cy="13" r="3.4" fill="#111" />
-        <circle cx="14" cy="26" r="3.4" fill="#111" />
-        <circle cx="38" cy="26" r="3.4" fill="#111" />
-        <circle cx="14" cy="39" r="3.4" fill="#111" />
-        <circle cx="38" cy="39" r="3.4" fill="#111" />
+        {/* ── Edge lines ── */}
+        {/* Outer silhouette — darkest */}
+        <polygon
+          points="8,20 30,8 52,20 52,42 30,54 8,42"
+          fill="none" stroke="#4a4a4a" strokeWidth="0.9" strokeLinejoin="round"
+        />
+        {/* Gloss streak on top-left edge */}
+        <line x1="8" y1="20" x2="30" y2="8"
+          stroke="rgba(255,255,255,0.65)" strokeWidth="1.3" />
+        {/* Internal face dividers */}
+        <line x1="8"  y1="20" x2="30" y2="32" stroke="#606060" strokeWidth="0.7" />
+        <line x1="52" y1="20" x2="30" y2="32" stroke="#707070" strokeWidth="0.7" />
+        <line x1="30" y1="32" x2="30" y2="54" stroke="#606060" strokeWidth="0.7" />
+
+        {/* ── TOP face: 5 pips ──────────────────────────────────────────
+            matrix(22,-12, 22,12, 8,20)
+            x = 22u+22v+8   y = -12u+12v+20
+            u,v positions: (0.25,0.25),(0.75,0.25),(0.5,0.5),(0.25,0.75),(0.75,0.75) */}
+        <circle cx="19"   cy="20"   r="2.35" fill="#111" />  {/* upper-left  */}
+        <circle cx="30"   cy="14"   r="2.35" fill="#111" />  {/* upper-right */}
+        <circle cx="30"   cy="20"   r="2.35" fill="#111" />  {/* center      */}
+        <circle cx="30"   cy="26"   r="2.35" fill="#111" />  {/* lower-left  */}
+        <circle cx="41"   cy="20"   r="2.35" fill="#111" />  {/* lower-right */}
+
+        {/* ── LEFT face: 3 pips (diagonal stripe top-right → bottom-left)
+            matrix(22,12, 0,22, 8,20)
+            x = 22u+8   y = 12u+22v+20
+            u,v positions: (0.72,0.20),(0.50,0.50),(0.28,0.80) */}
+        <circle cx="23.8" cy="33"   r="2.1" fill="#111" />
+        <circle cx="19"   cy="37"   r="2.1" fill="#111" />
+        <circle cx="14.2" cy="41"   r="2.1" fill="#111" />
+
+        {/* ── RIGHT face: 6 pips (two columns × three rows)
+            matrix(22,-12, 0,22, 30,32)
+            x = 22u+30   y = -12u+22v+32
+            u,v cols: 0.28, 0.72  |  v rows: 0.18, 0.50, 0.82 */}
+        <circle cx="36.2" cy="32.6" r="2.1" fill="#111" />  {/* left-top    */}
+        <circle cx="45.8" cy="27.3" r="2.1" fill="#111" />  {/* right-top   */}
+        <circle cx="36.2" cy="39.6" r="2.1" fill="#111" />  {/* left-mid    */}
+        <circle cx="45.8" cy="34.4" r="2.1" fill="#111" />  {/* right-mid   */}
+        <circle cx="36.2" cy="46.7" r="2.1" fill="#111" />  {/* left-bot    */}
+        <circle cx="45.8" cy="41.4" r="2.1" fill="#111" />  {/* right-bot   */}
       </svg>
     </button>
   );
