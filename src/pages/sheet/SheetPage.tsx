@@ -77,7 +77,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, levelUp, useHitDie, restoreHitDie, setPortrait } = useCharacterStore();
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [round, setRound] = React.useState(1);
@@ -503,6 +503,7 @@ export function SheetPage() {
                 renameInventoryItem={renameInventoryItem}
                 setInventoryDescription={setInventoryDescription}
                 setItemCharges={setItemCharges}
+                updateCurrency={updateCurrency}
               />
             )}
             {tab === 'character' && (

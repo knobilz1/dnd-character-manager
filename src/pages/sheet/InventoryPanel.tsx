@@ -1,9 +1,10 @@
 import React from 'react';
 import { Plus, X, Shield, Sword, Pencil, RotateCcw } from 'lucide-react';
-import { Button, Dialog, HoverCard } from '../../components/ui';
+import { Button, Dialog, HoverCard, SectionHeader } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Character, InventoryItem, ItemCategory } from '../../types';
 import { searchItems, type ItemTemplate } from '../../data/items';
+import { TOWN_STORE } from '../../data/townStore';
 
 const CATEGORY_BADGE: Record<ItemCategory, string> = {
   weapon: 'bg-red-900/30 text-red-300 border-red-700/40',
@@ -31,6 +32,7 @@ interface InventoryPanelProps {
   renameInventoryItem: (id: string, name: string) => void;
   setInventoryDescription: (id: string, description: string | undefined) => void;
   setItemCharges: (id: string, charges: number) => void;
+  updateCurrency: (coin: 'cp' | 'sp' | 'ep' | 'gp' | 'pp', value: number) => void;
 }
 
 export function InventoryPanel({
@@ -42,6 +44,7 @@ export function InventoryPanel({
   renameInventoryItem,
   setInventoryDescription,
   setItemCharges,
+  updateCurrency,
 }: InventoryPanelProps) {
   const [addOpen, setAddOpen] = React.useState(false);
   const [draftItem, setDraftItem] = React.useState<{
@@ -150,6 +153,8 @@ export function InventoryPanel({
           );
         })
       )}
+
+      <CurrencyPanel character={character} updateCurrency={updateCurrency} addInventoryItem={addInventoryItem} />
 
       <Dialog open={addOpen} onClose={() => { setAddOpen(false); setShowSuggestions(false); }} title="Add Item">
         <div className="space-y-3">
@@ -473,5 +478,339 @@ function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename,
         </div>
       )}
     </div>
+  );
+}
+
+// ── D&D 5e currency conversion rates (in CP) ────────────────────────────────
+const CP_VALUE: Record<'cp' | 'sp' | 'ep' | 'gp' | 'pp', number> = {
+  cp: 1, sp: 10, ep: 50, gp: 100, pp: 1000,
+};
+const COIN_COLORS: Record<'cp' | 'sp' | 'ep' | 'gp' | 'pp', string> = {
+  cp: 'text-orange-400', sp: 'text-slate-300', ep: 'text-blue-400', gp: 'text-yellow-400', pp: 'text-purple-400',
+};
+const COIN_BORDER_FOCUS: Record<'cp' | 'sp' | 'ep' | 'gp' | 'pp', string> = {
+  cp: 'focus:border-orange-500', sp: 'focus:border-slate-400', ep: 'focus:border-blue-500',
+  gp: 'focus:border-yellow-500', pp: 'focus:border-purple-500',
+};
+type CoinKey = 'cp' | 'sp' | 'ep' | 'gp' | 'pp';
+const COINS: CoinKey[] = ['cp', 'sp', 'ep', 'gp', 'pp'];
+
+function CurrencyPanel({
+  character,
+  updateCurrency,
+  addInventoryItem,
+}: {
+  character: Character;
+  updateCurrency: (coin: CoinKey, v: number) => void;
+  addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
+}) {
+  type SpendFields = Record<CoinKey, string>;
+  const [spend, setSpend] = React.useState<SpendFields>({ cp: '', sp: '', ep: '', gp: '', pp: '' });
+  const [spendError, setSpendError] = React.useState<string | null>(null);
+  const [spendFlash, setSpendFlash] = React.useState(false);
+  const [storeOpen, setStoreOpen] = React.useState(false);
+
+  const cur = character.currencies;
+
+  function totalHeldCP() {
+    return COINS.reduce((sum, c) => sum + cur[c] * CP_VALUE[c], 0);
+  }
+
+  function spendTotalCP() {
+    return COINS.reduce((sum, c) => {
+      const v = parseInt(spend[c]) || 0;
+      return sum + v * CP_VALUE[c];
+    }, 0);
+  }
+
+  function deductCP(costCp: number): boolean {
+    const withoutEP = cur.cp + cur.sp * 10 + cur.gp * 100 + cur.pp * 1000;
+    const withEP    = withoutEP + cur.ep * 50;
+    if (costCp > withEP) return false;
+
+    const useEP = costCp > withoutEP;
+    let remaining = (useEP ? withEP : withoutEP) - costCp;
+
+    const hasPP = cur.pp > 0;
+    const newPP = hasPP ? Math.floor(remaining / 1000) : 0;
+    remaining  -= newPP * 1000;
+    const newGP = Math.floor(remaining / 100);
+    remaining  -= newGP * 100;
+    const newSP = Math.floor(remaining / 10);
+    const newCP = remaining % 10;
+    const newEP = useEP ? 0 : cur.ep;
+
+    updateCurrency('pp', newPP);
+    updateCurrency('gp', newGP);
+    updateCurrency('ep', newEP);
+    updateCurrency('sp', newSP);
+    updateCurrency('cp', newCP);
+    return true;
+  }
+
+  function handleSpend() {
+    const cost = spendTotalCP();
+    if (cost === 0) return;
+    if (!deductCP(cost)) {
+      const gpEq = (totalHeldCP() / 100).toFixed(2).replace(/\.?0+$/, '');
+      setSpendError(`Not enough funds (you have ~${gpEq} gp total)`);
+      return;
+    }
+    setSpendError(null);
+    setSpend({ cp: '', sp: '', ep: '', gp: '', pp: '' });
+    setSpendFlash(true);
+    setTimeout(() => setSpendFlash(false), 900);
+  }
+
+  const spendCP = spendTotalCP();
+  const spendGPDisplay = spendCP > 0
+    ? `= ${(spendCP / 100).toFixed(2).replace(/\.?0+$/, '')} gp`
+    : null;
+
+  const canAfford = spendCP > 0 && spendCP <= totalHeldCP();
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <SectionHeader className="mb-0">Currency</SectionHeader>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setStoreOpen(true)}
+            className="text-xs text-slate-400 hover:text-emerald-300 px-2 py-1 rounded border border-slate-600 hover:border-emerald-600 transition-colors"
+            title="Buy items from the town store"
+          >
+            🛒 Shop
+          </button>
+          <button
+            onClick={() => {
+              let { cp, sp, ep, gp, pp } = cur;
+              const cpGain = Math.floor(cp / 10); cp = cp % 10; sp += cpGain;
+              const spGain = Math.floor(sp / 10);  sp = sp % 10;  gp += spGain;
+              const gpGain = Math.floor(gp / 10);  gp = gp % 10;  pp += gpGain;
+              updateCurrency('cp', cp);
+              updateCurrency('sp', sp);
+              updateCurrency('ep', ep);
+              updateCurrency('gp', gp);
+              updateCurrency('pp', pp);
+            }}
+            className="text-xs text-slate-400 hover:text-yellow-300 px-2 py-1 rounded border border-slate-600 hover:border-yellow-600 transition-colors"
+            title="Convert up: 10cp→1sp, 10sp→1gp, 10gp→1pp"
+          >
+            ⬆ Convert
+          </button>
+        </div>
+      </div>
+
+      <TownStoreDialog
+        open={storeOpen}
+        onClose={() => setStoreOpen(false)}
+        totalHeldCP={totalHeldCP()}
+        deductCP={deductCP}
+        addInventoryItem={addInventoryItem}
+      />
+
+      <div className={cn('grid grid-cols-5 gap-2 transition-all duration-300', spendFlash && 'opacity-60 scale-[0.99]')}>
+        {COINS.map(coin => (
+          <div key={coin} className="text-center">
+            <label className={cn('text-xs uppercase font-bold block mb-1', COIN_COLORS[coin])}>{coin}</label>
+            <input
+              type="number"
+              min={0}
+              value={cur[coin]}
+              onChange={e => {
+                const v = Math.floor(Number(e.target.value));
+                if (!isNaN(v)) updateCurrency(coin, v);
+              }}
+              className={cn(
+                'w-full bg-slate-900 border border-slate-600 rounded px-1 py-1 text-white text-sm text-center focus:outline-none',
+                COIN_BORDER_FOCUS[coin],
+                spendFlash && 'border-green-500',
+              )}
+            />
+          </div>
+        ))}
+      </div>
+
+      <p className="text-xs text-slate-500 mt-2 mb-4">
+        10 cp = 1 sp · 10 sp = 1 gp · 10 gp = 1 pp · 1 ep = 5 sp
+      </p>
+
+      <div className="border-t border-slate-700 pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Spend</p>
+          {spendGPDisplay && (
+            <span className={cn('text-xs font-medium', canAfford ? 'text-slate-400' : 'text-red-400')}>
+              {spendGPDisplay}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-5 gap-2 mb-2">
+          {COINS.map(coin => (
+            <div key={coin} className="text-center">
+              <label className={cn('text-xs uppercase font-bold block mb-1', COIN_COLORS[coin])}>{coin}</label>
+              <input
+                type="number"
+                min={0}
+                value={spend[coin]}
+                placeholder="0"
+                onChange={e => {
+                  const raw = e.target.value;
+                  setSpend(prev => ({ ...prev, [coin]: raw }));
+                  setSpendError(null);
+                }}
+                onKeyDown={e => e.key === 'Enter' && handleSpend()}
+                className={cn(
+                  'w-full bg-slate-900 border rounded px-1 py-1 text-white text-sm text-center focus:outline-none placeholder-slate-600',
+                  spendError ? 'border-red-700 focus:border-red-500' : 'border-slate-600',
+                  COIN_BORDER_FOCUS[coin],
+                )}
+              />
+            </div>
+          ))}
+        </div>
+
+        {spendError && (
+          <p className="text-xs text-red-400 mb-2">⚠ {spendError}</p>
+        )}
+
+        <button
+          onClick={handleSpend}
+          disabled={spendCP === 0}
+          className={cn(
+            'w-full py-1.5 rounded-lg text-sm font-semibold border transition-all',
+            spendCP === 0
+              ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+              : canAfford
+                ? 'bg-red-950/40 border-red-700/60 text-red-300 hover:bg-red-900/50 hover:border-red-500 hover:text-red-200'
+                : 'bg-red-950/20 border-red-900/50 text-red-500 cursor-not-allowed',
+          )}
+        >
+          {spendCP === 0 ? 'Enter an amount to spend' : canAfford ? '💸 Spend & Make Change' : '⚠ Not enough funds'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TownStoreDialog({
+  open,
+  onClose,
+  totalHeldCP,
+  deductCP,
+  addInventoryItem,
+}: {
+  open: boolean;
+  onClose: () => void;
+  totalHeldCP: number;
+  deductCP: (costCp: number) => boolean;
+  addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
+}) {
+  const [quantities, setQuantities] = React.useState<Record<string, number>>({});
+  const [flashKey, setFlashKey] = React.useState<string | null>(null);
+  const [errorKey, setErrorKey] = React.useState<string | null>(null);
+
+  function getQty(key: string) { return quantities[key] ?? 1; }
+  function setQty(key: string, v: number) {
+    setQuantities(prev => ({ ...prev, [key]: Math.max(1, v) }));
+  }
+
+  function handleBuy(sectionIdx: number, itemIdx: number) {
+    const key = `${sectionIdx}-${itemIdx}`;
+    const item = TOWN_STORE[sectionIdx].items[itemIdx];
+    const qty = getQty(key);
+    const totalCost = item.priceCp * qty;
+
+    if (!deductCP(totalCost)) {
+      setErrorKey(key);
+      setTimeout(() => setErrorKey(null), 1200);
+      return;
+    }
+
+    const stackQty = (item.qty ?? 1) * qty;
+    addInventoryItem({
+      name: item.name,
+      quantity: stackQty,
+      category: item.category,
+      weight: item.weight,
+      description: item.description,
+      source: 'manual',
+    });
+
+    setFlashKey(key);
+    setTimeout(() => setFlashKey(null), 800);
+  }
+
+  const walletGP = (totalHeldCP / 100).toFixed(2).replace(/\.?0+$/, '');
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Town Store" wide>
+      <p className="text-xs text-slate-400 mb-4">
+        Wallet: <span className="text-yellow-300 font-bold">{walletGP} gp</span> equivalent
+      </p>
+      <div className="space-y-6">
+        {TOWN_STORE.map((section, sIdx) => (
+          <div key={section.label}>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 border-b border-slate-700 pb-1">
+              {section.label}
+            </h3>
+            <div className="space-y-1.5">
+              {section.items.map((item, iIdx) => {
+                const key = `${sIdx}-${iIdx}`;
+                const qty = getQty(key);
+                const totalCost = item.priceCp * qty;
+                const canAfford = totalCost <= totalHeldCP;
+                const isFlash = flashKey === key;
+                const isError = errorKey === key;
+                return (
+                  <div
+                    key={item.name}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg px-3 py-2 transition-all duration-300',
+                      isFlash ? 'bg-emerald-900/30 border border-emerald-700/40' :
+                      isError ? 'bg-red-950/40 border border-red-800/40' :
+                      'bg-slate-900 border border-transparent'
+                    )}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white font-medium truncate">{item.name}</p>
+                      {item.description && (
+                        <p className="text-[10px] text-slate-500 leading-tight line-clamp-1">{item.description}</p>
+                      )}
+                    </div>
+                    <span className="text-xs text-yellow-400 font-bold shrink-0 w-16 text-right">
+                      {qty > 1 ? `${(totalCost / 100).toFixed(2).replace(/\.?0+$/, '')} gp` : item.priceLabel}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => setQty(key, qty - 1)}
+                        className="w-5 h-5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 text-xs leading-none flex items-center justify-center"
+                      >−</button>
+                      <span className="w-5 text-center text-xs text-white">{qty}</span>
+                      <button
+                        onClick={() => setQty(key, qty + 1)}
+                        className="w-5 h-5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 text-xs leading-none flex items-center justify-center"
+                      >+</button>
+                    </div>
+                    <button
+                      onClick={() => handleBuy(sIdx, iIdx)}
+                      disabled={!canAfford}
+                      className={cn(
+                        'text-xs px-2.5 py-1 rounded border font-semibold transition-all shrink-0',
+                        canAfford
+                          ? 'bg-emerald-900/30 border-emerald-700/50 text-emerald-300 hover:bg-emerald-800/40 hover:border-emerald-500'
+                          : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                      )}
+                    >
+                      Buy
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Dialog>
   );
 }
