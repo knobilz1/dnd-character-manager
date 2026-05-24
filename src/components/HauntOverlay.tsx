@@ -1,3 +1,5 @@
+import React from 'react';
+
 type HauntEmoji = '👻' | '🎃' | '💀' | '🧟' | '🦇';
 
 interface Flake {
@@ -8,6 +10,7 @@ interface Flake {
   duration: string;
   delay: string;
   variant: string;
+  sway: number;   // px — constant horizontal bias applied via --sway in the keyframes
 }
 
 // Each creature type gets its own fall variant + size/speed range
@@ -26,24 +29,38 @@ const SPECS: {
   { emoji: '🦇', variant: 'haunt-bat',     count: 6, sizes: [12,14,16],    durMin:  5, durSpan: 5  },
 ];
 
-// Deterministic config — no Math.random so it's stable across re-renders
+// Minimal seeded LCG — deterministic so positions are stable across re-renders,
+// but the sequence looks random (no visible columns or arithmetic regularity).
+function makeLCG(seed: number) {
+  let s = seed >>> 0;
+  return (): number => {
+    s = Math.imul(s, 1664525) + 1013904223 >>> 0;
+    return s / 0x100000000;   // [0, 1)
+  };
+}
+
+// Build all flakes once at module load. seed=13 chosen to give good visual spread.
 const FLAKES: Flake[] = (() => {
+  const rng = makeLCG(13);
   const out: Flake[] = [];
-  let g = 0; // global index for left-position spread
+  let id = 0;
   for (const s of SPECS) {
     for (let i = 0; i < s.count; i++) {
-      const dur = s.durMin + (g % (s.durSpan + 1));
+      const dur = s.durMin + Math.round(rng() * s.durSpan);
       out.push({
-        id: g,
-        emoji: s.emoji,
-        left: `${((g * 3.33 + i * 7.1) % 100).toFixed(1)}%`,
-        size: s.sizes[i % s.sizes.length],
+        id,
+        emoji:    s.emoji,
+        // 3%–95% keeps creatures off the very edges so they don't clip
+        left:     `${(rng() * 92 + 3).toFixed(1)}%`,
+        size:     s.sizes[Math.floor(rng() * s.sizes.length)],
         duration: `${dur}s`,
-        // Negative delay → already mid-animation the moment Halloween mode switches on
-        delay: `-${((g * 0.55) % dur).toFixed(1)}s`,
-        variant: s.variant,
+        // Negative delay → already mid-fall when Halloween mode switches on
+        delay:    `-${(rng() * dur).toFixed(2)}s`,
+        variant:  s.variant,
+        // ±60 px bias — each creature traces a completely different horizontal path
+        sway:     Math.round(rng() * 120 - 60),
       });
-      g++;
+      id++;
     }
   }
   return out;
@@ -65,8 +82,9 @@ export function HauntOverlay() {
             left: f.left,
             fontSize: f.size,
             lineHeight: 1,
+            '--sway': `${f.sway}px`,
             animation: `${f.variant} ${f.duration} ${f.delay} linear infinite`,
-          }}
+          } as React.CSSProperties}
         >
           {f.emoji}
         </span>
