@@ -1,8 +1,8 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { getClassStartingEquipment } from '../../../data/startingEquipment';
 import { getBackground } from '../../../data/backgrounds';
-import { getItemByName } from '../../../data/items';
+import { getItemByName, getPackContents } from '../../../data/items';
 import { cn } from '../../../utils/cn';
 import type { InventoryItem, ItemCategory } from '../../../types';
 
@@ -26,7 +26,7 @@ const CATEGORY_BADGE: Record<ItemCategory, string> = {
 };
 
 export function StepEquipment() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
 
   const primaryClass = draft.classes?.[0];
   const classEq = primaryClass ? getClassStartingEquipment(primaryClass.classId) : undefined;
@@ -39,37 +39,46 @@ export function StepEquipment() {
   React.useEffect(() => {
     const items: InventoryItem[] = [];
 
-    if (classEq && !takeGold) {
-      // Class fixed items
-      for (const f of classEq.fixed) {
-        const template = getItemByName(f.name);
+    function pushItem(name: string, quantity: number, category: string | undefined, weight: number | undefined, source: 'class' | 'background') {
+      const contents = getPackContents(name);
+      if (contents) {
+        for (const entry of contents) {
+          const tpl = getItemByName(entry.name);
+          items.push({
+            id: newId(),
+            name: entry.name,
+            quantity: entry.quantity,
+            category: tpl?.category ?? 'gear',
+            weight: tpl?.weight,
+            description: tpl?.description,
+            source,
+          });
+        }
+      } else {
+        const template = getItemByName(name);
         items.push({
           id: newId(),
-          name: f.name,
-          quantity: f.quantity ?? 1,
-          category: f.category ?? template?.category ?? 'other',
-          weight: f.weight ?? template?.weight,
+          name,
+          quantity,
+          category: (category ?? template?.category ?? 'other') as ItemCategory,
+          weight: weight ?? template?.weight,
           description: template?.description,
-          source: 'class',
+          source,
         });
       }
-      // Class choices
+    }
+
+    if (classEq && !takeGold) {
+      for (const f of classEq.fixed) {
+        pushItem(f.name, f.quantity ?? 1, f.category, f.weight, 'class');
+      }
       classEq.choices.forEach((choice, idx) => {
         const optIdx = choices[idx];
         if (optIdx == null) return;
         const opt = choice.options[optIdx];
         if (!opt) return;
         for (const it of opt.items) {
-          const template = getItemByName(it.name);
-          items.push({
-            id: newId(),
-            name: it.name,
-            quantity: it.quantity ?? 1,
-            category: it.category ?? template?.category ?? 'other',
-            weight: it.weight ?? template?.weight,
-            description: template?.description,
-            source: 'class',
-          });
+          pushItem(it.name, it.quantity ?? 1, it.category, it.weight, 'class');
         }
       });
     }
@@ -82,16 +91,7 @@ export function StepEquipment() {
         if (goldMatch) {
           bgGP += parseInt(goldMatch[1], 10);
         } else {
-          const template = getItemByName(eqStr.trim());
-          items.push({
-            id: newId(),
-            name: eqStr.trim(),
-            quantity: 1,
-            category: template?.category ?? 'gear',
-            weight: template?.weight,
-            description: template?.description,
-            source: 'background',
-          });
+          pushItem(eqStr.trim(), 1, undefined, undefined, 'background');
         }
       }
     }

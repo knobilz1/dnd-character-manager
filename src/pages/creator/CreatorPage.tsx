@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Check, X } from 'lucide-react';
-import { useWizardStore } from '../../store/useWizardStore';
+import { useCreatorStore } from '../../store/useCreatorStore';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { WIZARD_STEPS, STEP_LABELS, type WizardStep } from '../../types';
 import { Button } from '../../components/ui';
@@ -53,9 +53,9 @@ function canAdvance(step: WizardStep, draft: any): boolean {
   }
 }
 
-export function WizardPage() {
+export function CreatorPage() {
   const navigate = useNavigate();
-  const { step, draft, goNext, goPrev, finalize, reset } = useWizardStore();
+  const { step, draft, goNext, goPrev, finalize, reset } = useCreatorStore();
   const { createCharacter } = useLibraryStore();
 
   const currentIdx = WIZARD_STEPS.indexOf(step);

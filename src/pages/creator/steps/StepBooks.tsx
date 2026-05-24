@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { BOOKS } from '../../../data/books';
 import { MODULES } from '../../../data/modules';
 import { Badge } from '../../../components/ui';
@@ -7,7 +7,7 @@ import { cn } from '../../../utils/cn';
 import type { BookId } from '../../../types';
 
 export function StepBooks() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const enabled = new Set(draft.enabledBooks);
   const [showModules, setShowModules] = React.useState(false);
 

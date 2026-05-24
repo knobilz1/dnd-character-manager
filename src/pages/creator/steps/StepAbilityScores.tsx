@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { Tabs } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { abilityMod } from '../../../data/mechanics';
@@ -21,7 +21,7 @@ const POINT_BUY_COSTS: Record<number, number> = { 8:0, 9:1, 10:2, 11:3, 12:4, 13
 const DEFAULT_SCORES: Record<AbilityKey, number> = { str:8,dex:8,con:8,int:8,wis:8,cha:8 };
 
 export function StepAbilityScores() {
-  const { draft, updateDraft, pointBuyRemaining, setPointBuyScore, assignStandardArray, standardArrayUnassigned, rolledValues, rolledDice, rollAllDice } = useWizardStore();
+  const { draft, updateDraft, pointBuyRemaining, setPointBuyScore, assignStandardArray, standardArrayUnassigned, rolledValues, rolledDice, rollAllDice } = useCreatorStore();
   const method: AbilityScoreMethod = draft.abilityScoreMethod ?? 'pointbuy';
   const scores = draft.baseAbilityScores ?? { ...DEFAULT_SCORES };
   const race = getRace(draft.raceId ?? '');

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { SKILL_ABILITY, abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
 import { getBackground } from '../../../data/backgrounds';
@@ -13,7 +13,7 @@ const ALL_SKILLS: SkillName[] = [
 ];
 
 export function StepSkills() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const classDef = draft.classes?.[0] ? getClass(draft.classes[0].classId) : null;
   const bg = draft.backgroundId ? getBackground(draft.backgroundId) : null;
   const scores = draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 };

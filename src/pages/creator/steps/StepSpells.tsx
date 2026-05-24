@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_SPELLS } from '../../../data/spells';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
@@ -13,7 +13,7 @@ const SCHOOL_COLORS: Record<string, string> = {
 };
 
 export function StepSpells() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const [search, setSearch] = React.useState('');
   const [filterLevel, setFilterLevel] = React.useState<number | 'all'>('all');
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);

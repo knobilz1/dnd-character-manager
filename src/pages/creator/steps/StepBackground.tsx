@@ -1,9 +1,9 @@
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_BACKGROUNDS } from '../../../data/backgrounds';
 import { cn } from '../../../utils/cn';
 
 export function StepBackground() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const available = ALL_BACKGROUNDS.filter(b => draft.enabledBooks.includes(b.sourceBook));
 
   function select(id: string) {

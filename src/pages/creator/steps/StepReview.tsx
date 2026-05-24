@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { Input, Select, Badge } from '../../../components/ui';
 import { getRace } from '../../../data/races';
 import { getClass } from '../../../data/classes';
@@ -18,7 +18,7 @@ const ALIGNMENTS = [
 const ABILITY_LABELS: Record<string, string> = { str:'STR',dex:'DEX',con:'CON',int:'INT',wis:'WIS',cha:'CHA' };
 
 export function StepReview() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
 
   const race = getRace(draft.raceId ?? '');
   const primaryClass = draft.classes?.[0];

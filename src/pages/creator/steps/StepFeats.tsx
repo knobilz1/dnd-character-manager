@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_FEATS } from '../../../data/feats';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
@@ -11,7 +11,7 @@ import type { Feat, BookId } from '../../../types';
 const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
 
 export function StepFeats() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const [detailFeat, setDetailFeat] = React.useState<Feat | null>(null);
 
   const primaryClass = draft.classes?.[0];

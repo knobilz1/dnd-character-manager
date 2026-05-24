@@ -130,6 +130,107 @@ const PACKS: ItemTemplate[] = [
   },
 ];
 
+type PackEntry = { name: string; quantity: number };
+
+const PACK_CONTENTS: Record<string, PackEntry[]> = {
+  "burglar's pack": [
+    { name: 'Backpack',                    quantity: 1  },
+    { name: 'Ball bearings (bag of 1,000)', quantity: 1  },
+    { name: 'String (10 feet)',             quantity: 1  },
+    { name: 'Bell',                         quantity: 1  },
+    { name: 'Candle',                       quantity: 5  },
+    { name: 'Crowbar',                      quantity: 1  },
+    { name: 'Hammer',                       quantity: 1  },
+    { name: 'Piton',                        quantity: 10 },
+    { name: 'Lantern, hooded',              quantity: 1  },
+    { name: 'Oil (flask)',                  quantity: 2  },
+    { name: 'Rations (1 day)',              quantity: 5  },
+    { name: 'Tinderbox',                    quantity: 1  },
+    { name: 'Waterskin',                    quantity: 1  },
+    { name: 'Rope, hempen (50 feet)',        quantity: 1  },
+  ],
+  "diplomat's pack": [
+    { name: 'Chest',                quantity: 1 },
+    { name: 'Case, map or scroll',  quantity: 2 },
+    { name: 'Clothes, fine',        quantity: 1 },
+    { name: 'Ink (1-ounce bottle)', quantity: 1 },
+    { name: 'Ink pen',              quantity: 1 },
+    { name: 'Lamp',                 quantity: 1 },
+    { name: 'Oil (flask)',          quantity: 2 },
+    { name: 'Paper (one sheet)',    quantity: 5 },
+    { name: 'Perfume (vial)',       quantity: 1 },
+    { name: 'Sealing wax',         quantity: 1 },
+    { name: 'Soap',                quantity: 1 },
+  ],
+  "dungeoneer's pack": [
+    { name: 'Backpack',              quantity: 1  },
+    { name: 'Crowbar',               quantity: 1  },
+    { name: 'Hammer',                quantity: 1  },
+    { name: 'Piton',                 quantity: 10 },
+    { name: 'Torch',                 quantity: 10 },
+    { name: 'Tinderbox',             quantity: 1  },
+    { name: 'Rations (1 day)',       quantity: 10 },
+    { name: 'Waterskin',             quantity: 1  },
+    { name: 'Rope, hempen (50 feet)', quantity: 1  },
+  ],
+  "entertainer's pack": [
+    { name: 'Backpack',        quantity: 1 },
+    { name: 'Bedroll',         quantity: 1 },
+    { name: 'Clothes, costume', quantity: 2 },
+    { name: 'Candle',          quantity: 5 },
+    { name: 'Rations (1 day)', quantity: 5 },
+    { name: 'Waterskin',       quantity: 1 },
+    { name: 'Disguise kit',    quantity: 1 },
+  ],
+  "explorer's pack": [
+    { name: 'Backpack',              quantity: 1  },
+    { name: 'Bedroll',               quantity: 1  },
+    { name: 'Mess kit',              quantity: 1  },
+    { name: 'Tinderbox',             quantity: 1  },
+    { name: 'Torch',                 quantity: 10 },
+    { name: 'Rations (1 day)',       quantity: 10 },
+    { name: 'Waterskin',             quantity: 1  },
+    { name: 'Rope, hempen (50 feet)', quantity: 1  },
+  ],
+  "monster hunter's pack": [
+    { name: 'Chest',               quantity: 1 },
+    { name: 'Crowbar',             quantity: 1 },
+    { name: 'Hammer',              quantity: 1 },
+    { name: 'Wooden stake',        quantity: 3 },
+    { name: 'Holy symbol (amulet)', quantity: 1 },
+    { name: 'Torch',               quantity: 3 },
+    { name: 'Tinderbox',           quantity: 1 },
+    { name: 'Rations (1 day)',     quantity: 3 },
+    { name: 'Waterskin',           quantity: 1 },
+    { name: 'Holy water (flask)',   quantity: 1 },
+  ],
+  "priest's pack": [
+    { name: 'Backpack',        quantity: 1  },
+    { name: 'Blanket',         quantity: 1  },
+    { name: 'Candle',          quantity: 10 },
+    { name: 'Tinderbox',       quantity: 1  },
+    { name: 'Alms box',        quantity: 1  },
+    { name: 'Incense (block)', quantity: 2  },
+    { name: 'Censer',          quantity: 1  },
+    { name: 'Vestments',       quantity: 1  },
+    { name: 'Rations (1 day)', quantity: 2  },
+    { name: 'Waterskin',       quantity: 1  },
+  ],
+  "scholar's pack": [
+    { name: 'Backpack',              quantity: 1  },
+    { name: 'Book',                  quantity: 1  },
+    { name: 'Ink (1-ounce bottle)',  quantity: 1  },
+    { name: 'Ink pen',               quantity: 1  },
+    { name: 'Parchment (one sheet)', quantity: 10 },
+    { name: 'Bag of sand',           quantity: 1  },
+    { name: 'Small knife',           quantity: 1  },
+  ],
+};
+
+export function getPackContents(packName: string): PackEntry[] | undefined {
+  return PACK_CONTENTS[packName.toLowerCase()];
+}
+
 const GEAR: ItemTemplate[] = [
   { name: 'Abacus', category: 'gear', weight: 2, description: 'A counting frame used for arithmetic calculations.' },
   { name: 'Acid (vial)', category: 'consumable', weight: 1, description: 'As an action, splash on a creature within 5 ft. or throw up to 20 ft. (ranged attack). Hit: 2d6 acid damage.' },
@@ -234,6 +335,7 @@ const GEAR: ItemTemplate[] = [
   { name: 'String (10 feet)', category: 'gear', weight: 0, description: 'Ten feet of sturdy string.' },
   { name: 'Small knife', category: 'gear', weight: 0, description: 'A small utility knife.' },
   { name: 'Bag of sand', category: 'gear', weight: 1, description: 'A small bag of fine sand, used to dry ink.' },
+  { name: 'Wooden stake', category: 'gear', weight: 0.5, description: 'A sharpened wooden stake. Useful against certain undead.' },
 ];
 
 const TOOLS: ItemTemplate[] = [

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { ALL_FIGHTING_STYLES } from '../../../data/fightingStyles';
@@ -124,7 +124,7 @@ function OptionSection({ title, helpText, items, selectedIds, max, onToggle, rad
 }
 
 export function StepClassOptions() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const enabledBooks = new Set(draft.enabledBooks ?? []);
   const primaryClass = draft.classes?.[0];
   const classId = primaryClass?.classId ?? '';

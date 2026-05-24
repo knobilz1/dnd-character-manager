@@ -3,7 +3,7 @@ import { Plus, Sparkles, X, Zap } from 'lucide-react';
 import { ALL_SPELLS, getSpell } from '../../data/spells';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
-import { SpellDetail } from '../wizard/steps/StepSpells';
+import { SpellDetail } from '../creator/steps/StepSpells';
 import type { Character, Spell, SpellLevel, SlotLevel } from '../../types';
 import { getClass } from '../../data/classes';
 

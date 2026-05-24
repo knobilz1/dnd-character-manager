@@ -1,11 +1,11 @@
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_SUBCLASSES } from '../../../data/subclasses';
 import { Badge, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
 
 export function StepSubclass() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const primaryClass = draft.classes?.[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
 

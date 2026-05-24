@@ -1,5 +1,5 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_CLASSES } from '../../../data/classes';
 import { Badge, NumberStepper, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
@@ -10,7 +10,7 @@ const SCHOOL_COLORS: Record<string, string> = {
 };
 
 export function StepClass() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const [selected, setSelected] = React.useState<DClass | null>(
     draft.classes?.[0] ? ALL_CLASSES.find(c => c.id === draft.classes![0].classId) ?? null : null
   );

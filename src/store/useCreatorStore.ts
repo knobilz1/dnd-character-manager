@@ -72,7 +72,7 @@ function budgetForScores(scores: Partial<Record<AbilityKey, number>>): number {
   return 27 - spent;
 }
 
-export const useWizardStore = create<WizardState>((set, get) => ({
+export const useCreatorStore = create<WizardState>((set, get) => ({
   step: 'books',
   draft: structuredClone(INITIAL_DRAFT),
   pointBuyRemaining: 27,

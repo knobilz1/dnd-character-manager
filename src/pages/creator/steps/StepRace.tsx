@@ -1,12 +1,12 @@
 import React from 'react';
-import { useWizardStore } from '../../../store/useWizardStore';
+import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_RACES } from '../../../data/races';
 import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import type { Race } from '../../../types';
 
 export function StepRace() {
-  const { draft, updateDraft } = useWizardStore();
+  const { draft, updateDraft } = useCreatorStore();
   const [selected, setSelected] = React.useState<Race | null>(
     draft.raceId ? ALL_RACES.find(r => r.id === draft.raceId) ?? null : null
   );

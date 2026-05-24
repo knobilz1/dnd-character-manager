@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
-import { WizardPage } from './pages/wizard/WizardPage';
+import { CreatorPage } from './pages/creator/CreatorPage';
 import { SheetPage } from './pages/sheet/SheetPage';
 import { GraveyardPage } from './pages/GraveyardPage';
 import { useAppUpdater } from './hooks/useAppUpdater';
@@ -46,7 +46,7 @@ export default function App() {
       )}
       <Routes>
         <Route index element={<HomePage checkForUpdates={updater.checkForUpdates} checkStatus={updater.checkStatus} />} />
-        <Route path="create" element={<WizardPage />} />
+        <Route path="create" element={<CreatorPage />} />
         <Route path="character/:id" element={<SheetPage />} />
         <Route path="graveyard" element={<GraveyardPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
