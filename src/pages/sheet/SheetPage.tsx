@@ -1132,6 +1132,32 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
+  // ── Death-save die ──────────────────────────────────────────────────────
+  const { triggerRoll: dsTrigger, lastResult } = useDiceStore();
+  const seenDeathNonce = React.useRef<number>(-1);
+
+  React.useEffect(() => {
+    if (!lastResult) return;
+    if (lastResult.label !== 'Death Save') return;
+    if (lastResult.nonce === seenDeathNonce.current) return;
+    seenDeathNonce.current = lastResult.nonce;
+
+    const v = lastResult.value;
+    if (v === 20) {
+      // Natural 20: immediately stabilise — regain 1 HP and clear saves
+      setCurrentHP(1);
+      resetDeathSaves();
+    } else if (v >= 10) {
+      addDeathSuccess();
+    } else if (v === 1) {
+      // Natural 1: two failures
+      addDeathFailure();
+      addDeathFailure();
+    } else {
+      addDeathFailure();
+    }
+  }, [lastResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-4">
       {/* Round counter */}
@@ -1269,10 +1295,81 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
         {/* Death saves — only shown at 0 HP */}
         {character.currentHP === 0 && (
           <div className="mt-4 border-t border-red-700 pt-3">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-3">
               <SectionHeader className="mb-0">Death Saving Throws</SectionHeader>
               <button onClick={resetDeathSaves} className="text-xs text-slate-400 hover:text-white transition-colors">Reset</button>
             </div>
+
+            {/* Skull die — click to roll death save d20 */}
+            <div className="flex flex-col items-center mb-3">
+              <button
+                onClick={() => dsTrigger(20, 0, 'Death Save')}
+                title="Roll Death Save (d20)"
+                className="group transition-all duration-150 active:scale-90 hover:scale-110 hover:-translate-y-0.5"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+              >
+                <svg viewBox="0 0 100 100" width="54" height="54" style={{ overflow: 'visible' }} xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <filter id="ds-drop" x="-35%" y="-30%" width="170%" height="175%">
+                      <feDropShadow dx="0" dy="4" stdDeviation="5" floodColor="#dc2626" floodOpacity="0.7" />
+                    </filter>
+                    <filter id="ds-bloom" x="-60%" y="-60%" width="220%" height="220%">
+                      <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="blur" />
+                      <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                    </filter>
+                    {/* Hover glow — stronger red */}
+                    <filter id="ds-hover" x="-40%" y="-35%" width="180%" height="180%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="7" floodColor="#ef4444" floodOpacity="0.9" />
+                    </filter>
+                  </defs>
+
+                  {/* Die body */}
+                  <polygon points="50,4 83,18 96,50 83,82 50,96 17,82 4,50 17,18"
+                    fill="#1a0505" className="group-hover:fill-[#2d0808] transition-all" />
+
+                  {/* Outer rim with red glow */}
+                  <polygon points="50,4 83,18 96,50 83,82 50,96 17,82 4,50 17,18"
+                    fill="none" stroke="#991b1b" strokeWidth="2.8" strokeLinejoin="round"
+                    filter="url(#ds-drop)"
+                    className="group-hover:stroke-[#dc2626] transition-all" />
+
+                  {/* Inner "20" face triangle */}
+                  <polygon points="50,15 22,60 78,60"
+                    fill="none" stroke="#7f1d1d" strokeWidth="1.5" strokeLinejoin="round"
+                    className="group-hover:stroke-[#b91c1c] transition-all" />
+
+                  {/* Facet spokes */}
+                  {([
+                    [50,15,50,4],[50,15,17,18],[50,15,83,18],
+                    [22,60,17,18],[22,60,4,50],[22,60,17,82],[22,60,50,96],
+                    [78,60,83,18],[78,60,96,50],[78,60,83,82],[78,60,50,96],
+                  ] as [number,number,number,number][]).map(([x1,y1,x2,y2],i) => (
+                    <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+                      stroke="#7f1d1d" strokeWidth="1" opacity="0.55"
+                      className="group-hover:stroke-[#b91c1c] transition-all" />
+                  ))}
+
+                  {/* ☠ skull — centred in the "20" face, with bloom */}
+                  <text
+                    x="50" y="52"
+                    textAnchor="middle"
+                    fontSize="26"
+                    fill="#e8d5b5"
+                    filter="url(#ds-bloom)"
+                    className="group-hover:fill-white transition-all select-none"
+                    style={{ userSelect: 'none' }}
+                  >☠</text>
+
+                  {/* Crisp rim on top */}
+                  <polygon points="50,4 83,18 96,50 83,82 50,96 17,82 4,50 17,18"
+                    fill="none" stroke="#991b1b" strokeWidth="2.2" strokeLinejoin="round" opacity="0.85"
+                    className="group-hover:stroke-[#dc2626] transition-all" />
+                </svg>
+              </button>
+              <p className="text-[10px] text-red-400/70 mt-1 tracking-wide uppercase select-none">Roll Death Save</p>
+            </div>
+
+            {/* Success / failure checkboxes */}
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-xs text-green-400 mb-1">Successes</p>

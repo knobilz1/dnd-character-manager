@@ -194,6 +194,9 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   const [shakePhase, setShakePhase] = React.useState<0 | 1 | 2>(0);
   const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the label of the currently-running roll so we can broadcast it
+  // to subscribers (e.g. death save auto-apply) once the animation settles.
+  const rollLabelRef = React.useRef<string>('');
 
   // Hurry up: skip roll animations and show results instantly
   const [hurryUp, setHurryUpState] = React.useState<boolean>(() => {
@@ -207,7 +210,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   // External trigger state (skill/save/initiative rolls)
   const [rollModifier, setRollModifier] = React.useState<number | null>(null);
   const [rollLabel, setRollLabel] = React.useState<string | null>(null);
-  const { pending, consume, openNonce } = useDiceStore();
+  const { pending, consume, openNonce, publishResult } = useDiceStore();
 
   // Inspiration — pulled directly so we don't need an extra prop
   const inspiration     = useCharacterStore(s => s.character?.inspiration ?? false);
@@ -224,6 +227,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     const req = consume();
     if (!req) return;
     const reqMode = req.mode ?? 'normal';
+    rollLabelRef.current = req.label;
     setOpen(true);
     setMode(reqMode);
     setRollModifier(req.modifier);
@@ -279,6 +283,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
       setResultKey(k => k + 1);
       setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
       setRolling(false);
+      publishResult(result, sides, rollLabelRef.current);
       return;
     }
 
@@ -304,6 +309,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
         setResultKey(k => k + 1);
         setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
         setRolling(false);
+        publishResult(result, sides, rollLabelRef.current);
       }
     };
     timerRef.current = setTimeout(tick, 30);
@@ -311,9 +317,10 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
 
   function roll(sides: Die) {
     if (rolling) return;
-    // Manual clicks always clear the external label
+    // Manual clicks clear the external label and nonce tracking
     setRollModifier(null);
     setRollLabel(null);
+    rollLabelRef.current = '';
     if (mode !== 'normal') { rollTwo(sides); return; }
     rollWithSides(sides);
   }
@@ -340,6 +347,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
       setResultKey(k => k + 1);
       setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
       setRolling(false);
+      publishResult(finalVal, sides, rollLabelRef.current);
       return;
     }
 
@@ -375,6 +383,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
         setResultKey(k => k + 1);
         setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
         setRolling(false);
+        publishResult(finalVal, sides, rollLabelRef.current);
       }
     };
     timerRef.current = setTimeout(tick, 30);
