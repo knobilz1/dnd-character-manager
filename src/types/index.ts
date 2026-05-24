@@ -377,6 +377,7 @@ export interface Character {
   experiencePoints: number;
   notes: string;
   currencies: { cp: number; sp: number; ep: number; gp: number; pp: number };
+  inGraveyard?: boolean;
 }
 
 export type WizardStep =

@@ -15,9 +15,10 @@ import React from 'react';
 
 interface Props {
   onDismiss: () => void;
+  onSendToGraveyard?: () => void;
 }
 
-export function YouAreDeadOverlay({ onDismiss }: Props) {
+export function YouAreDeadOverlay({ onDismiss, onSendToGraveyard }: Props) {
   const [showText,    setShowText]    = React.useState(false);
   const [showHint,    setShowHint]    = React.useState(false);
   const [dismissing,  setDismissing]  = React.useState(false);
@@ -148,23 +149,50 @@ export function YouAreDeadOverlay({ onDismiss }: Props) {
         </div>
       )}
 
-      {/* ── dismiss hint ──────────────────────────────────────── */}
+      {/* ── dismiss hint + graveyard button ──────────────────── */}
       {showHint && !dismissing && (
         <div style={{
-          position:      'absolute',
-          bottom:        '12%',
-          left:          '50%',
-          transform:     'translateX(-50%)',
-          color:         'rgba(255,255,255,0.38)',
-          fontSize:      '0.68rem',
-          letterSpacing: '0.28em',
-          textTransform: 'uppercase',
-          fontFamily:    'sans-serif',
-          whiteSpace:    'nowrap',
-          userSelect:    'none',
-          animation:     'yad-hint-in 1.2s ease-out forwards',
+          position:       'absolute',
+          bottom:         '10%',
+          left:           '50%',
+          transform:      'translateX(-50%)',
+          display:        'flex',
+          flexDirection:  'column',
+          alignItems:     'center',
+          gap:            '16px',
+          animation:      'yad-hint-in 1.2s ease-out forwards',
         }}>
-          Click anywhere to dismiss
+          <div style={{
+            color:         'rgba(255,255,255,0.38)',
+            fontSize:      '0.68rem',
+            letterSpacing: '0.28em',
+            textTransform: 'uppercase',
+            fontFamily:    'sans-serif',
+            whiteSpace:    'nowrap',
+            userSelect:    'none',
+          }}>
+            Click anywhere to dismiss
+          </div>
+          {onSendToGraveyard && (
+            <button
+              onClick={e => { e.stopPropagation(); onSendToGraveyard(); }}
+              style={{
+                background:    'rgba(60,0,0,0.7)',
+                border:        '1px solid rgba(160,18,18,0.6)',
+                borderRadius:  '8px',
+                color:         'rgba(220,180,180,0.85)',
+                fontSize:      '0.72rem',
+                letterSpacing: '0.18em',
+                textTransform: 'uppercase',
+                fontFamily:    'sans-serif',
+                padding:       '8px 20px',
+                cursor:        'pointer',
+                userSelect:    'none',
+              }}
+            >
+              ⚰ Send to Graveyard
+            </button>
+          )}
         </div>
       )}
     </div>

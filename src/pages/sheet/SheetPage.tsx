@@ -70,7 +70,7 @@ const CONDITION_DESC: Partial<Record<Condition, string>> = {
 export function SheetPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { characters } = useLibraryStore();
+  const { characters, sendToGraveyard } = useLibraryStore();
   const { character, load, save, setCurrentHP, healHP, damageHP, setTempHP, setMaxHP,
     addDeathSuccess, addDeathFailure, resetDeathSaves, addCondition, removeCondition,
     setExhaustion, useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, usePactSlot,
@@ -199,7 +199,13 @@ export function SheetPage() {
       {character.inspiration && <InspirationOverlay />}
       {/* Death overlay — Dark Souls style when 3 death save failures are reached */}
       {showDeadOverlay && (
-        <YouAreDeadOverlay onDismiss={() => setShowDeadOverlay(false)} />
+        <YouAreDeadOverlay
+          onDismiss={() => setShowDeadOverlay(false)}
+          onSendToGraveyard={character.inGraveyard ? undefined : () => {
+            sendToGraveyard(character.id);
+            navigate('/');
+          }}
+        />
       )}
       {/* Floating d20 quick-launch button */}
       <DiceFAB />
@@ -1396,6 +1402,16 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                 </div>
               </div>
             </div>
+
+            {/* Send to graveyard — only when all 3 failures are set and not already buried */}
+            {character.deathSaves.failures === 3 && !character.inGraveyard && (
+              <button
+                onClick={() => { sendToGraveyard(character.id); navigate('/'); }}
+                className="mt-4 w-full text-xs text-red-300/70 hover:text-red-200 border border-red-900/50 hover:border-red-700 rounded-lg py-2 transition-colors tracking-widest uppercase"
+              >
+                ⚰ Send to Graveyard
+              </button>
+            )}
           </div>
         )}
       </div>

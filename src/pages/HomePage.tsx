@@ -27,7 +27,9 @@ async function exportCharacter(character: Character) {
 
 export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: () => void; checkStatus?: UpdateCheckStatus }) {
   const navigate = useNavigate();
-  const { characters, deleteCharacter, createCharacter } = useLibraryStore();
+  const { characters: allCharacters, deleteCharacter, createCharacter } = useLibraryStore();
+  const characters = allCharacters.filter(c => !c.inGraveyard);
+  const graveyardCount = allCharacters.filter(c => c.inGraveyard).length;
   const { theme, toggleTheme } = useThemeStore();
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
@@ -101,6 +103,15 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
+            {graveyardCount > 0 && (
+              <button
+                onClick={() => navigate('/graveyard')}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 transition-colors"
+                title="Graveyard"
+              >
+                ⚰ <span className="text-xs text-slate-500">{graveyardCount}</span>
+              </button>
+            )}
             <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             <Button variant="outline" size="lg" onClick={() => importRef.current?.click()}>
               <Upload size={18} />
