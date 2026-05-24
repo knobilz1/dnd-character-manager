@@ -1809,28 +1809,49 @@ function DiceFAB() {
     <button
       onClick={openPanel}
       title="Open dice roller"
-      className="fixed bottom-6 right-6 z-[40] w-14 h-14 rounded-full bg-slate-800 border-2 border-slate-600 hover:border-blue-400 shadow-xl hover:shadow-blue-500/30 transition-all duration-200 flex items-center justify-center group active:scale-95"
+      className="fixed bottom-6 right-6 z-[40] w-14 h-14 transition-all duration-150 active:scale-95 hover:scale-110 hover:-translate-y-0.5"
+      style={{ background: 'none', border: 'none', padding: 0 }}
     >
-      <svg
-        viewBox="0 0 100 100"
-        className="w-8 h-8 text-slate-400 group-hover:text-blue-300 transition-colors"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinejoin="round"
-      >
-        {/* d20 shape — same octagon used in DiceRoller */}
-        <polygon points="50,7 80,20 93,50 80,80 50,93 20,80 7,50 20,20" />
-        {/* centre "20" text */}
-        <text
-          x="50" y="56"
-          textAnchor="middle"
-          fontSize="26"
-          fontWeight="bold"
-          fontFamily="sans-serif"
-          stroke="none"
-          fill="currentColor"
-        >20</text>
+      <svg viewBox="0 0 56 56" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="fab-die-face" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"   stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#dde0e6" />
+          </linearGradient>
+          {/* Drop shadow filter */}
+          <filter id="fab-die-shadow" x="-15%" y="-15%" width="130%" height="130%">
+            <feDropShadow dx="2" dy="3" stdDeviation="2.5" floodColor="#00000055" />
+          </filter>
+        </defs>
+
+        {/* ── Die body ───────────────────────────────────── */}
+        {/* Dark edge layer — gives the right/bottom "thickness" of a real die */}
+        <rect x="5" y="7" width="46" height="46" rx="9" fill="#888" />
+        {/* Main face */}
+        <rect
+          x="3" y="3" width="46" height="46" rx="9"
+          fill="url(#fab-die-face)"
+          filter="url(#fab-die-shadow)"
+          stroke="#bbb"
+          strokeWidth="0.6"
+        />
+        {/* Top-left highlight streak */}
+        <rect x="3" y="3" width="46" height="46" rx="9"
+          fill="none" stroke="white" strokeWidth="1.5" opacity="0.6"
+          strokeDasharray="18 999"
+          strokeDashoffset="-2"
+        />
+
+        {/* ── Six pips (face showing 6) ──────────────────── */}
+        {/* pip radius = 3.4 */}
+        {/* left column  x=14  |  right column x=38 */}
+        {/* rows: y=13, y=26, y=39 */}
+        <circle cx="14" cy="13" r="3.4" fill="#111" />
+        <circle cx="38" cy="13" r="3.4" fill="#111" />
+        <circle cx="14" cy="26" r="3.4" fill="#111" />
+        <circle cx="38" cy="26" r="3.4" fill="#111" />
+        <circle cx="14" cy="39" r="3.4" fill="#111" />
+        <circle cx="38" cy="39" r="3.4" fill="#111" />
       </svg>
     </button>
   );
