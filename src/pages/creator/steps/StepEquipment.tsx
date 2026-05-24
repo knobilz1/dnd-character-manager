@@ -34,6 +34,7 @@ export function StepEquipment() {
 
   const choices = draft.equipmentChoices ?? {};
   const takeGold = !!draft.equipmentTakeGold;
+  const [expandedPack, setExpandedPack] = React.useState<string | null>(null);
 
   // Rebuild inventory whenever choices, takeGold, class, or background change.
   React.useEffect(() => {
@@ -194,6 +195,10 @@ export function StepEquipment() {
                 <div className="space-y-2">
                   {choice.options.map((opt, oIdx) => {
                     const selected = selectedIdx === oIdx;
+                    const packItem = opt.items.find(it => it.category === 'pack');
+                    const packKey = packItem ? `${idx}-${oIdx}` : null;
+                    const packContents = packItem ? getPackContents(packItem.name) : null;
+                    const isExpanded = expandedPack === packKey;
                     return (
                       <div
                         key={oIdx}
@@ -203,7 +208,17 @@ export function StepEquipment() {
                           selected ? 'border-red-500 bg-red-950/30' : 'border-slate-700 hover:border-slate-500 bg-slate-800'
                         )}
                       >
-                        <p className="text-sm font-medium text-white mb-1">{opt.label}</p>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <p className="text-sm font-medium text-white">{opt.label}</p>
+                          {packContents && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setExpandedPack(isExpanded ? null : packKey); }}
+                              className="text-[10px] text-slate-400 hover:text-emerald-300 border border-slate-600 hover:border-emerald-700 rounded px-1.5 py-0.5 shrink-0 transition-colors"
+                            >
+                              {isExpanded ? 'Hide' : 'Contents'}
+                            </button>
+                          )}
+                        </div>
                         <div className="flex flex-wrap gap-1">
                           {opt.items.map((it, i) => (
                             <span key={i} className={cn(
@@ -214,6 +229,19 @@ export function StepEquipment() {
                             </span>
                           ))}
                         </div>
+                        {isExpanded && packContents && (
+                          <div className="mt-2 pt-2 border-t border-slate-600">
+                            <p className="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5">Includes</p>
+                            <ul className="space-y-0.5">
+                              {packContents.map((entry, i) => (
+                                <li key={i} className="flex items-center justify-between text-xs text-slate-300">
+                                  <span>{entry.name}</span>
+                                  {entry.quantity > 1 && <span className="text-slate-500">×{entry.quantity}</span>}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

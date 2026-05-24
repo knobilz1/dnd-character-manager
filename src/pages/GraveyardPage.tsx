@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useLibraryStore } from '../store/useLibraryStore';
@@ -21,7 +20,6 @@ function Tombstone({ name }: { name: string }) {
       {/* Character name — wrap at ~10 chars per line */}
       <foreignObject x="24" y="68" width="72" height="62">
         <div
-          xmlns="http://www.w3.org/1999/xhtml"
           style={{
             width: '72px',
             height: '62px',

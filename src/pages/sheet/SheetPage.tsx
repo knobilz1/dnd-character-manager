@@ -476,6 +476,8 @@ export function SheetPage() {
                 isRaging={isRaging}
                 showRageOverlay={showRageOverlay}
                 setShowRageOverlay={setShowRageOverlay}
+                sendToGraveyard={sendToGraveyard}
+                navigate={navigate}
               />
             )}
             {tab === 'spells' && (
@@ -1135,7 +1137,8 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
-  activeEffects, setActiveEffects, isRaging, setShowRageOverlay }: any) {
+  activeEffects, setActiveEffects, isRaging, setShowRageOverlay,
+  sendToGraveyard, navigate }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   // ── Death-save die ──────────────────────────────────────────────────────
