@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap } from 'lucide-react';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap, Eye } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -27,6 +27,8 @@ import { useDiceStore } from '../../store/useDiceStore';
 import type { RollDie } from '../../store/useDiceStore';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 import { getRace } from '../../data/races';
+import { useSidebarStore, type SidebarModuleId } from '../../store/useSidebarStore';
+import { SidebarPanel } from './SidebarPanel';
 
 // Find a resource definition by key, checking both class and subclass.
 function getResourceDef(character: any, key: string) {
@@ -97,6 +99,7 @@ export function SheetPage() {
 
   const { saveSnapshot } = useSnapshotStore();
   const { theme, toggleTheme } = useThemeStore();
+  const { sidebarOpen, setSidebarOpen } = useSidebarStore();
 
   function handlePortraitUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -270,6 +273,16 @@ export function SheetPage() {
           >
             <Download size={18} />
           </button>
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              sidebarOpen ? 'text-sky-400 hover:text-sky-300' : 'text-slate-500 hover:text-sky-400',
+            )}
+            title={sidebarOpen ? 'Close sidebar' : 'Open customizable sidebar'}
+          >
+            <Eye size={18} />
+          </button>
           {character.inspiration && (
             <span className="text-xs bg-yellow-700/50 text-yellow-300 px-2 py-0.5 rounded border border-yellow-600">✦ Inspired</span>
           )}
@@ -413,8 +426,8 @@ export function SheetPage() {
           </div>
         </div>
 
-        {/* Main content */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin p-4">
+        {/* Main content — shrinks when sidebar is open */}
+        <div className="flex-1 overflow-y-auto scrollbar-thin p-4 min-w-0">
           <Tabs
             tabs={[
               { id: 'combat', label: 'Combat' },
@@ -511,6 +524,9 @@ export function SheetPage() {
             )}
           </div>
         </div>
+
+        {/* Right customizable sidebar */}
+        {sidebarOpen && <SidebarPanel />}
       </div>
 
       {/* Snapshot history */}
@@ -638,6 +654,27 @@ export function SheetPage() {
         );
       })()}
     </div>
+  );
+}
+
+// ── Sidebar pin button ───────────────────────────────────────────────────────
+// Eyeball icon that toggles whether a module is pinned to the right sidebar.
+// Rendered sky-blue when pinned, slate-grey when not. Lives in module headers.
+
+function PinButton({ moduleId }: { moduleId: SidebarModuleId }) {
+  const { isPinned, togglePin } = useSidebarStore();
+  const pinned = isPinned(moduleId);
+  return (
+    <button
+      onClick={() => togglePin(moduleId)}
+      title={pinned ? 'Unpin from sidebar' : 'Pin to sidebar'}
+      className={cn(
+        'p-1 rounded transition-colors shrink-0',
+        pinned ? 'text-sky-400 hover:text-sky-300' : 'text-slate-600 hover:text-slate-400',
+      )}
+    >
+      <Eye size={13} />
+    </button>
   );
 }
 
@@ -785,6 +822,12 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 
   return (
     <div className="space-y-3">
+
+      {/* Panel-level pin button */}
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[10px] text-slate-600 uppercase tracking-wide">Combat Abilities</span>
+        <PinButton moduleId="combat-abilities" />
+      </div>
 
       {/* ── Spells ── */}
       {hasSpells && (
@@ -1067,7 +1110,10 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-      <SectionHeader>Weapon Attacks</SectionHeader>
+      <div className="flex items-center justify-between mb-2">
+        <SectionHeader className="mb-0">Weapon Attacks</SectionHeader>
+        <PinButton moduleId="weapon-attacks" />
+      </div>
       <div className="space-y-2">
         {equippedWeapons.map((item: any) => {
           const w = lookupWeapon(item.name);
@@ -1216,7 +1262,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
       {/* HP Section */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-        <SectionHeader>Hit Points</SectionHeader>
+        <div className="flex items-center justify-between mb-2">
+          <SectionHeader className="mb-0">Hit Points</SectionHeader>
+          <PinButton moduleId="hp" />
+        </div>
 
         {/* HP bar */}
         <div className="mb-4">
@@ -1424,12 +1473,15 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <SectionHeader className="mb-0">Conditions</SectionHeader>
-          <button
-            onClick={() => setAddConditionOpen(true)}
-            className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded border border-slate-600 hover:border-slate-400 transition-colors"
-          >
-            <Plus size={12} /> Add
-          </button>
+          <div className="flex items-center gap-1">
+            <PinButton moduleId="conditions" />
+            <button
+              onClick={() => setAddConditionOpen(true)}
+              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded border border-slate-600 hover:border-slate-400 transition-colors"
+            >
+              <Plus size={12} /> Add
+            </button>
+          </div>
         </div>
         {/* Exhaustion tracker — always visible */}
         <ExhaustionTracker
@@ -1503,7 +1555,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
             ? 'bg-red-950/50 border-red-700/70 shadow-[0_0_22px_rgba(200,0,0,0.45),0_0_55px_rgba(140,0,0,0.2)]'
             : 'bg-slate-800 border-slate-700',
         )}>
-          <SectionHeader>Class Resources</SectionHeader>
+          <div className="flex items-center justify-between mb-2">
+            <SectionHeader className="mb-0">Class Resources</SectionHeader>
+            <PinButton moduleId="class-resources" />
+          </div>
           <div className="space-y-3">
             {resources.filter((r: any) => r.key !== 'arcane_recovery').map((r: any) => {
               const resourceDef = getResourceDef(character, r.key);
@@ -1774,7 +1829,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
       {/* Hit Dice */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-        <SectionHeader>Hit Dice</SectionHeader>
+        <div className="flex items-center justify-between mb-2">
+          <SectionHeader className="mb-0">Hit Dice</SectionHeader>
+          <PinButton moduleId="hit-dice" />
+        </div>
         <div className="space-y-3">
           {character.classes.map((cl: any) => {
             const def = getClass(cl.classId);
@@ -1822,12 +1880,15 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
             <SectionHeader className="mb-0">Spell Slots</SectionHeader>
-            <button
-              onClick={restoreAllSpellSlots}
-              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded border border-slate-600 hover:border-slate-400 transition-colors"
-            >
-              <RefreshCw size={10} /> Restore All
-            </button>
+            <div className="flex items-center gap-1">
+              <PinButton moduleId="spell-slots" />
+              <button
+                onClick={restoreAllSpellSlots}
+                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2 py-1 rounded border border-slate-600 hover:border-slate-400 transition-colors"
+              >
+                <RefreshCw size={10} /> Restore All
+              </button>
+            </div>
           </div>
 
           {/* Spellcasting stats */}

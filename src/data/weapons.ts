@@ -30,8 +30,9 @@ export const WEAPON_TABLE: WeaponData[] = [
   { name: 'spear',         damageDice: '1d6',  damageType: 'piercing',    ability: 'str', versatile: '1d8' },
   { name: 'unarmed',       damageDice: '1',    damageType: 'bludgeoning', ability: 'str', aliases: ['unarmed strike'] },
   // Simple Ranged
-  { name: 'light crossbow',damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true },
-  { name: 'hand crossbow', damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true },
+  { name: 'light crossbow',damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, light'] },
+  { name: 'hand crossbow', damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, hand'] },
+  { name: 'dart',          damageDice: '1d4',  damageType: 'piercing',    ability: 'finesse', ranged: true },
   { name: 'shortbow',      damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true },
   { name: 'sling',         damageDice: '1d4',  damageType: 'bludgeoning', ability: 'dex', ranged: true },
   // Martial Melee
@@ -55,7 +56,7 @@ export const WEAPON_TABLE: WeaponData[] = [
   { name: 'whip',          damageDice: '1d4',  damageType: 'slashing',    ability: 'finesse' },
   // Martial Ranged
   { name: 'blowgun',       damageDice: '1',    damageType: 'piercing',    ability: 'dex', ranged: true },
-  { name: 'heavy crossbow',damageDice: '1d10', damageType: 'piercing',    ability: 'dex', ranged: true },
+  { name: 'heavy crossbow',damageDice: '1d10', damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, heavy'] },
   { name: 'longbow',       damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true },
   { name: 'net',           damageDice: '—',    damageType: '—',           ability: 'dex', ranged: true },
 ];
