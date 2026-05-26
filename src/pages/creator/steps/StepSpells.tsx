@@ -4,6 +4,7 @@ import { ALL_SPELLS } from '../../../data/spells';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
+import { getSubclass } from '../../../data/subclasses';
 import type { Spell, SpellLevel } from '../../../types';
 
 const SCHOOL_COLORS: Record<string, string> = {
@@ -21,7 +22,17 @@ export function StepSpells() {
   const primaryClass = draft.classes?.[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
 
-  if (!classDef || classDef.spellcastingType === 'none') {
+  // Eldritch Knight (Fighter) and Arcane Trickster (Rogue) gain spellcasting
+  // via their subclass, not the base class. Check the subclass if the class itself
+  // has no spellcasting.
+  const subclassDef = primaryClass?.subclassId ? getSubclass(primaryClass.subclassId) : null;
+  const isSubclassSpellcaster =
+    !!subclassDef?.spellcastingType && subclassDef.spellcastingType !== 'none';
+
+  const isSpellcaster =
+    (classDef && classDef.spellcastingType !== 'none') || isSubclassSpellcaster;
+
+  if (!classDef || !isSpellcaster) {
     return (
       <div>
         <h2 className="text-2xl font-bold text-white mb-2">Spells</h2>
@@ -33,8 +44,14 @@ export function StepSpells() {
     );
   }
 
+  // Subclass-based casters (EK, AT) use a different class's spell list.
+  // Fall back to the primary class id for normal spellcasters.
+  const spellListClassId = isSubclassSpellcaster
+    ? (subclassDef!.spellListClassId ?? primaryClass!.classId)
+    : primaryClass!.classId;
+
   const classSpells = ALL_SPELLS.filter(s =>
-    s.classes.includes(primaryClass!.classId) &&
+    s.classes.includes(spellListClassId) &&
     draft.enabledBooks.includes(s.sourceBook) &&
     (filterLevel === 'all' || s.level === filterLevel) &&
     (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))

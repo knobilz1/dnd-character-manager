@@ -88,7 +88,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Improved Combat Superiority', level: 10, description: 'At 10th level, your superiority dice turn into d10s. At 18th level, they turn into d12s.' },
     { name: 'Relentless', level: 15, description: 'Starting at 15th level, when you roll initiative and have no superiority dice remaining, you regain 1 superiority die.' },
   ]},
-  { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', spellcastingType: 'third', features: [
+  { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', spellcastingType: 'third', spellListClassId: 'wizard', features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.', },
     { name: 'Weapon Bond', level: 3, description: 'At 3rd level, you learn a ritual that creates a magical bond between yourself and one weapon.' },
     { name: 'War Magic', level: 7, description: 'Beginning at 7th level, when you use your action to cast a cantrip, you can make one weapon attack as a bonus action.' },
@@ -152,7 +152,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Impostor', level: 13, description: 'At 13th level, you gain the ability to unerringly mimic another person\'s speech, writing, and behavior.' },
     { name: 'Death Strike', level: 17, description: 'Starting at 17th level, you become a master of instant death. When you attack and hit a creature that is surprised, it must make a Constitution saving throw (DC 8 + your Dexterity modifier + your proficiency bonus). On a failed save, double the damage of your attack against the creature.' },
   ]},
-  { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', features: [
+  { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', spellListClassId: 'wizard', features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.' },
     { name: 'Mage Hand Legerdemain', level: 3, description: 'Starting at 3rd level, when you cast mage hand, you can make the spectral hand invisible, and you can perform the following additional tasks with it.' },
     { name: 'Magical Ambush', level: 9, description: 'Starting at 9th level, if you are hidden from a creature when you cast a spell on it, the creature has disadvantage on any saving throw it makes against the spell this turn.' },

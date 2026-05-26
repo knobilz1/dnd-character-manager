@@ -126,6 +126,8 @@ export interface Subclass {
   alwaysPreparedSpells?: Record<number, string[]>;
   expandedSpells?: Record<number, string[]>;
   spellcastingType?: SpellcastingType;
+  /** For subclass-granted spellcasting, the class whose spell list to use (e.g. 'wizard' for EK/AT). */
+  spellListClassId?: string;
   resources?: ClassResourceDefinition[];
 }
 
