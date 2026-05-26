@@ -633,6 +633,28 @@
   --color-slate-100: #1e1104;
   --color-slate-50:  #0a0500;
   --color-white: #2c1a08;       /* main text — dark sepia ink */
+
+  /*
+    Remap the red scale for parchment (cream) backgrounds.
+    Default Tailwind reds are tuned for dark UIs:
+      - text-red-300/200 = light pink → near-invisible on cream
+      - bg-red-900/30    = dark-near-black at 30% → muddy wash on cream
+
+    Fix strategy:
+      - Low reds  (100–500, used as text)   → dark ink-crimsons, high contrast on cream
+      - High reds (600–950, used as bg)     → saturated mid-reds, so opacity variants
+                                              render as a clear crimson chip on cream
+  */
+  --color-red-100: #3d0a0a;
+  --color-red-200: #5c1212;
+  --color-red-300: #881818;   /* "light danger text" on dark → dark ink-crimson on parchment */
+  --color-red-400: #9e2222;
+  --color-red-500: #b43030;
+  --color-red-600: #9a2424;
+  --color-red-700: #822020;   /* borders */
+  --color-red-800: #bf3030;
+  --color-red-900: #bf3030;   /* bg-red-900/30 → vivid crimson chip on cream */
+  --color-red-950: #a82828;   /* bg-red-950/40 → clear crimson chip on cream */
 }
 
 /* Keep text white on coloured action buttons (spells, abilities, etc.) */
