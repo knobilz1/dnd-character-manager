@@ -96,6 +96,11 @@ export const ALL_RACES: Race[] = [
     proficiencies: ['Rapier', 'Shortsword', 'Hand crossbow'],
     isSubrace: true,
     parentRaceId: 'elf',
+    innateSpells: [
+      { spellId: 'dancing-lights', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'faerie-fire', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
   },
   // Dwarf
   {
@@ -208,6 +213,9 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'Gnomish'],
+    innateSpells: [
+      { spellId: 'minor-illusion', recharge: 'cantrip', ability: 'int' },
+    ],
     isSubrace: true,
     parentRaceId: 'gnome',
   },
@@ -281,6 +289,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'hellish-rebuke', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
 
@@ -297,11 +310,14 @@ export const ALL_RACES: Race[] = [
       { name: 'Celestial Resistance', description: 'You have resistance to necrotic damage and radiant damage.' },
       { name: 'Healing Hands', description: 'As an action, you can touch a creature and cause it to regain a number of hit points equal to your level. Once per long rest.' },
       { name: 'Light Bearer', description: 'You know the Light cantrip. Charisma is your spellcasting ability for it.' },
-      { name: 'Radiant Soul', description: 'Starting at 3rd level, as an action you can sprout spectral wings for 1 minute, gaining a flying speed of 30 feet and adding radiant damage to one attack per turn. Once per long rest.' },
+      { name: 'Radiant Soul', description: 'Starting at 3rd level, as an action you can sprout spectral wings for 1 minute, gaining a flying speed of 30 feet. For the duration, once on each of your turns, you can deal extra radiant damage equal to your level to one target when you deal damage to it with an attack or spell. Once per long rest.' },
     ],
     darkvision: 60,
     resistances: ['necrotic', 'radiant'],
     languages: ['Common', 'Celestial'],
+    innateSpells: [
+      { spellId: 'light', recharge: 'cantrip', ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -316,11 +332,14 @@ export const ALL_RACES: Race[] = [
       { name: 'Celestial Resistance', description: 'You have resistance to necrotic damage and radiant damage.' },
       { name: 'Healing Hands', description: 'As an action, restore hit points equal to your level. Once per long rest.' },
       { name: 'Light Bearer', description: 'You know the Light cantrip.' },
-      { name: 'Radiant Consumption', description: 'Starting at 3rd level, as an action you unleash divine energy that lasts 1 minute. You shed bright light, deal radiant damage to nearby creatures, and add radiant damage to one attack per turn. Once per long rest.' },
+      { name: 'Radiant Consumption', description: 'Starting at 3rd level, as an action you unleash divine energy for 1 minute. You shed bright light in a 10-foot radius and dim light for an additional 10 feet. At the start of each of your turns, you and each creature within 10 feet of you take radiant damage equal to half your level (rounded up). Additionally, once on each of your turns, you can deal extra radiant damage equal to your level to one target when you deal damage to it with an attack or spell. Once per long rest.' },
     ],
     darkvision: 60,
     resistances: ['necrotic', 'radiant'],
     languages: ['Common', 'Celestial'],
+    innateSpells: [
+      { spellId: 'light', recharge: 'cantrip', ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -335,11 +354,14 @@ export const ALL_RACES: Race[] = [
       { name: 'Celestial Resistance', description: 'You have resistance to necrotic damage and radiant damage.' },
       { name: 'Healing Hands', description: 'As an action, restore hit points equal to your level. Once per long rest.' },
       { name: 'Light Bearer', description: 'You know the Light cantrip.' },
-      { name: 'Necrotic Shroud', description: 'Starting at 3rd level, as an action you transform: creatures within 10 feet that can see you must succeed on a Cha save or be frightened of you for 1 minute. You add necrotic damage to one attack per turn. Once per long rest.' },
+      { name: 'Necrotic Shroud', description: 'Starting at 3rd level, as an action you transform: your eyes turn black and two skeletal, ghostly wings sprout from your back for 1 minute. Each creature within 10 feet of you that can see you must succeed on a Charisma saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or become frightened of you until the end of your next turn. Additionally, once on each of your turns, you can deal extra necrotic damage equal to your level to one target when you deal damage to it with an attack or spell. Once per long rest.' },
     ],
     darkvision: 60,
     resistances: ['necrotic', 'radiant'],
     languages: ['Common', 'Celestial'],
+    innateSpells: [
+      { spellId: 'light', recharge: 'cantrip', ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -356,6 +378,10 @@ export const ALL_RACES: Race[] = [
       { name: 'Speech of Beast and Leaf', description: 'You have the ability to communicate in a limited manner with beasts and plants.' },
     ],
     languages: ['Common', 'Elvish', 'Giant'],
+    innateSpells: [
+      { spellId: 'detect-magic', recharge: 'short', ability: 'wis' },
+      { spellId: 'disguise-self', recharge: 'short', ability: 'wis' },
+    ],
     isSubrace: false,
   },
   {
@@ -403,7 +429,7 @@ export const ALL_RACES: Race[] = [
       { name: 'Hold Breath', description: 'You can hold your breath for up to 15 minutes.' },
       { name: 'Hunter\'s Lore', description: 'You gain proficiency in two of: Animal Handling, Nature, Perception, Stealth, Survival.' },
       { name: 'Natural Armor', description: 'Your AC equals 13 + your Dexterity modifier when you aren\'t wearing armor.' },
-      { name: 'Hungry Jaws', description: 'As a bonus action, make a special bite attack: on hit, deal extra damage and gain temp HP equal to your prof bonus. Once per short or long rest.' },
+      { name: 'Hungry Jaws', description: 'As a bonus action, make a special bite attack. If it hits, it deals its normal damage and you gain temporary hit points equal to your Constitution modifier (minimum 1). Once per short or long rest.' },
     ],
     languages: ['Common', 'Draconic'],
     isSubrace: false,
@@ -443,6 +469,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['cold'],
     languages: ['Common', 'Primordial'],
+    innateSpells: [
+      { spellId: 'fog-cloud', recharge: 'long', ability: 'cha' },
+      { spellId: 'gust-of-wind', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'wall-of-water', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -501,7 +532,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'VGM',
     size: 'Small',
     speed: 30,
-    abilityScoreIncreases: { dex: 2 },
+    abilityScoreIncreases: { dex: 2, str: -2 },
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
       { name: 'Grovel, Cower, and Beg', description: 'As an action, you can cower pathetically to distract nearby foes. Until the end of your next turn, your allies have advantage on attack rolls against enemies within 10 feet that can see you. Once per short or long rest.' },
@@ -544,6 +575,11 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'Abyssal', 'Draconic'],
+    innateSpells: [
+      { spellId: 'poison-spray', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'animal-friendship', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'suggestion', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+    ],
     isSubrace: false,
   },
 
@@ -562,6 +598,9 @@ export const ALL_RACES: Race[] = [
       { name: 'Wind Caller', description: 'Starting at 3rd level, you can cast the Gust of Wind spell with this trait, without requiring a material component. Once per long rest.' },
     ],
     languages: ['Common', 'Aarakocra', 'Auran'],
+    innateSpells: [
+      { spellId: 'gust-of-wind', recharge: 'long', minCharLevel: 3, ability: 'con' },
+    ],
     isSubrace: false,
   },
   {
@@ -573,7 +612,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: {},
     traits: [
       { name: 'Creature Type', description: 'You are a Fey.' },
-      { name: 'Charge', description: 'If you move at least 30 feet straight toward a target and then hit it with a melee weapon attack on the same turn, you can immediately follow with a bonus-action Hooves attack.' },
+      { name: 'Charge', description: 'If you move at least 30 feet straight toward a target and then hit it with a melee weapon attack on the same turn, you can immediately follow that attack with a bonus action to make one attack with your Hooves. If the Hooves attack hits, the target must succeed on a Strength saving throw (DC 8 + your proficiency bonus + your Strength modifier) or be knocked prone.' },
       { name: 'Equine Build', description: 'You count as one size larger when determining your carrying capacity. Climbing that requires hands and feet is especially difficult (4 ft per ft).' },
       { name: 'Hooves', description: 'Natural weapon dealing 1d6 + Str bludgeoning damage.' },
       { name: 'Natural Affinity', description: 'You gain proficiency in one of: Animal Handling, Medicine, Nature, or Survival.' },
@@ -665,6 +704,11 @@ export const ALL_RACES: Race[] = [
       { name: 'Flight', description: 'You have a flying speed equal to your walking speed. You can\'t use this speed in medium or heavy armor.' },
     ],
     languages: ['Common', 'one of your choice'],
+    innateSpells: [
+      { spellId: 'druidcraft', recharge: 'cantrip', ability: 'wis' },
+      { spellId: 'faerie-fire', recharge: 'long', minCharLevel: 3, ability: 'wis' },
+      { spellId: 'enlarge-reduce', recharge: 'long', minCharLevel: 5, ability: 'wis' },
+    ],
     isSubrace: false,
   },
   {
@@ -682,6 +726,9 @@ export const ALL_RACES: Race[] = [
     ],
     resistances: ['lightning'],
     languages: ['Common', 'Primordial'],
+    innateSpells: [
+      { spellId: 'levitate', recharge: 'long', ability: 'con' },
+    ],
     isSubrace: false,
   },
   {
@@ -697,6 +744,9 @@ export const ALL_RACES: Race[] = [
       { name: 'Merge with Stone', description: 'You can cast Pass without Trace once per long rest.' },
     ],
     languages: ['Common', 'Primordial'],
+    innateSpells: [
+      { spellId: 'pass-without-trace', recharge: 'long', ability: 'con' },
+    ],
     isSubrace: false,
   },
   {
@@ -715,6 +765,10 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Primordial'],
+    innateSpells: [
+      { spellId: 'produce-flame', recharge: 'cantrip', ability: 'con' },
+      { spellId: 'burning-hands', recharge: 'long', minCharLevel: 3, ability: 'con' },
+    ],
     isSubrace: false,
   },
   {
@@ -733,6 +787,10 @@ export const ALL_RACES: Race[] = [
     ],
     resistances: ['acid'],
     languages: ['Common', 'Primordial'],
+    innateSpells: [
+      { spellId: 'shape-water', recharge: 'cantrip', ability: 'con' },
+      { spellId: 'create-or-destroy-water', recharge: 'long', minCharLevel: 3, ability: 'con' },
+    ],
     isSubrace: false,
   },
   {
@@ -750,6 +808,11 @@ export const ALL_RACES: Race[] = [
     ],
     resistances: ['psychic'],
     languages: ['Common', 'Gith'],
+    innateSpells: [
+      { spellId: 'mage-hand', recharge: 'cantrip', ability: 'int' },
+      { spellId: 'jump', recharge: 'long', minCharLevel: 3, ability: 'int' },
+      { spellId: 'misty-step', recharge: 'long', minCharLevel: 5, ability: 'int' },
+    ],
     isSubrace: false,
   },
   {
@@ -767,6 +830,11 @@ export const ALL_RACES: Race[] = [
     ],
     resistances: ['psychic'],
     languages: ['Common', 'Gith'],
+    innateSpells: [
+      { spellId: 'mage-hand', recharge: 'cantrip', ability: 'int' },
+      { spellId: 'shield', recharge: 'long', minCharLevel: 3, ability: 'int' },
+      { spellId: 'detect-thoughts', recharge: 'long', minCharLevel: 5, ability: 'int' },
+    ],
     isSubrace: false,
   },
   {
@@ -795,7 +863,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: {},
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
-      { name: 'Daunting Roar', description: 'As a bonus action, creatures of your choice within 10 feet must succeed on a Wis save or be frightened until end of your next turn. Prof-bonus uses per long rest.' },
+      { name: 'Daunting Roar', description: 'As a bonus action, you let out an intimidating roar. Each creature of your choice within 10 feet of you must succeed on a Wisdom saving throw (DC 8 + your proficiency bonus + your Constitution modifier) or become frightened of you until the end of your next turn. You can use this trait a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
       { name: 'Hunter\'s Instincts', description: 'Proficiency in one of: Athletics, Intimidation, Perception, or Survival.' },
       { name: 'Natural Weapons (Claws)', description: 'Claws deal 1d4 + Str slashing damage.' },
     ],
@@ -981,6 +1049,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'hellish-rebuke', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -998,6 +1071,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'ray-of-sickness', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'crown-of-madness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1015,6 +1093,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'disguise-self', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'detect-thoughts', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1032,6 +1115,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'friends', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'charm-person', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'suggestion', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1049,6 +1137,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'minor-illusion', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'disguise-self', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'invisibility', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1066,6 +1159,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'ray-of-frost', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'armor-of-agathys', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1083,6 +1181,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'mage-hand', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'tensers-floating-disk', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'arcane-lock', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1100,6 +1203,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'mage-hand', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'burning-hands', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'flame-blade', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1117,6 +1225,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'searing-smite', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'branding-smite', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
 
@@ -1138,6 +1251,11 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'Elvish'],
+    innateSpells: [
+      { spellId: 'light', recharge: 'cantrip', ability: 'wis' },
+      { spellId: 'sleep', recharge: 'long', minCharLevel: 3, ability: 'wis' },
+      { spellId: 'invisibility', recharge: 'long', minCharLevel: 5, ability: 'wis' },
+    ],
     isSubrace: true,
     parentRaceId: 'elf',
   },
@@ -1156,6 +1274,11 @@ export const ALL_RACES: Race[] = [
       { name: 'Timberwalk', description: 'Ability checks made to track you are at disadvantage, and you can move through difficult terrain made of nonmagical plants and undergrowth without expending extra movement.' },
     ],
     languages: ['Common', 'Halfling'],
+    innateSpells: [
+      { spellId: 'druidcraft', recharge: 'cantrip', ability: 'wis' },
+      { spellId: 'entangle', recharge: 'long', minCharLevel: 3, ability: 'wis' },
+      { spellId: 'spike-growth', recharge: 'long', minCharLevel: 5, ability: 'wis' },
+    ],
     isSubrace: true,
     parentRaceId: 'halfling',
   },
@@ -1231,6 +1354,11 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'one of your choice'],
+    innateSpells: [
+      { spellId: 'poison-spray', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'animal-friendship', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'suggestion', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+    ],
     isSubrace: false,
   },
 
@@ -1374,6 +1502,7 @@ export const ALL_RACES: Race[] = [
       { name: 'Shape Self', description: 'If you are not incapacitated, you can reshape your body to give yourself a head, one or two arms, one or two legs, and makeshift hands and feet, or revert to a limbless blob. As a bonus action, you can extrude a pseudopod up to 6 inches wide and 10 feet long, or reabsorb it. You can use the pseudopod to manipulate an object, open or close a door or container, or pick up or set down a Tiny object. The pseudopod contains no sensory organs and can\'t make attacks.' },
     ],
     darkvision: 60,
+    resistances: ['acid', 'poison'],
     languages: ['Common', 'one other language of your choice'],
     isSubrace: false,
   },
@@ -1451,6 +1580,7 @@ export const ALL_RACES: Race[] = [
       { name: 'Mind Link', description: 'You can speak telepathically to any creature you can see, provided the creature is within 60 feet of you. The communication is one-way — the creature can\'t reply unless it also has this trait. You don\'t need to share a language with the creature for it to understand your messages. You can use this trait to initiate communication only once per turn.' },
       { name: 'Severed from Dreams', description: 'Kalashtar sleep, but they don\'t connect to the plane of dreams as other creatures do. Instead, their minds draw from the memories of their otherworldly spirit while at rest. This means you are immune to spells and other magical effects that require you to dream, like the dream spell, though the dream spell can still target you. Whenever a magical effect puts you to sleep, you can choose to be unaffected.' },
     ],
+    resistances: ['psychic'],
     languages: ['Common', 'Quori', 'one other language of your choice'],
     isSubrace: false,
   },
@@ -1470,6 +1600,7 @@ export const ALL_RACES: Race[] = [
       { name: 'Integrated Protection', description: "Your body has built-in defensive layers, which determine your armor class. You gain no benefit from wearing armor, but if you are using a shield, you apply its bonus as normal. You can alter your body to enter different defensive modes; each time you finish a long rest, choose one mode: Darkwood Core (AC = 11 + Dex modifier), Composite Plating (AC = 13 + Dex modifier, max 2), or Heavy Plating (AC = 16, disadvantage on Stealth)." },
       { name: 'Specialized Design', description: 'You gain one skill proficiency and one tool proficiency of your choice.' },
     ],
+    resistances: ['poison'],
     languages: ['Common', 'one other language of your choice'],
     isSubrace: false,
   },
@@ -1585,6 +1716,11 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Detection Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'Elvish', 'one other language of your choice'],
+    innateSpells: [
+      { spellId: 'detect-magic', recharge: 'long', ability: 'int' },
+      { spellId: 'detect-poison-and-disease', recharge: 'long', ability: 'int' },
+      { spellId: 'see-invisibility', recharge: 'long', minCharLevel: 3, ability: 'int' },
+    ],
     isSubrace: false,
   },
   {
@@ -1603,6 +1739,10 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'Goblin'],
+    innateSpells: [
+      { spellId: 'hunters-mark', recharge: 'long', ability: 'wis' },
+      { spellId: 'locate-object', recharge: 'long', minCharLevel: 3, ability: 'wis' },
+    ],
     isSubrace: false,
   },
   {
@@ -1620,6 +1760,10 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Handling Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'one other language of your choice'],
+    innateSpells: [
+      { spellId: 'animal-friendship', recharge: 'short', ability: 'wis' },
+      { spellId: 'speak-with-animals', recharge: 'short', ability: 'wis' },
+    ],
     isSubrace: false,
   },
   {
@@ -1636,6 +1780,10 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Healing Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'Halfling'],
+    innateSpells: [
+      { spellId: 'cure-wounds', recharge: 'long', ability: 'wis' },
+      { spellId: 'lesser-restoration', recharge: 'long', minCharLevel: 3, ability: 'wis' },
+    ],
     isSubrace: false,
   },
   {
@@ -1652,6 +1800,11 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Hospitality Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'Halfling'],
+    innateSpells: [
+      { spellId: 'prestidigitation', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'purify-food-and-drink', recharge: 'long', ability: 'cha' },
+      { spellId: 'unseen-servant', recharge: 'long', ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1669,6 +1822,10 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Making Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'one other language of your choice'],
+    innateSpells: [
+      { spellId: 'mending', recharge: 'cantrip', ability: 'int' },
+      { spellId: 'magic-weapon', recharge: 'long', ability: 'int' },
+    ],
     isSubrace: false,
   },
   {
@@ -1686,6 +1843,9 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Passage Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'one other language of your choice'],
+    innateSpells: [
+      { spellId: 'misty-step', recharge: 'long', ability: 'dex' },
+    ],
     isSubrace: false,
   },
   {
@@ -1702,6 +1862,11 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Scribing Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'Gnomish', 'one other language of your choice'],
+    innateSpells: [
+      { spellId: 'message', recharge: 'cantrip', ability: 'int' },
+      { spellId: 'comprehend-languages', recharge: 'long', ability: 'int' },
+      { spellId: 'magic-mouth', recharge: 'long', minCharLevel: 3, ability: 'int' },
+    ],
     isSubrace: false,
   },
   {
@@ -1719,6 +1884,10 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Sentinel Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'one other language of your choice'],
+    innateSpells: [
+      { spellId: 'blade-ward', recharge: 'cantrip', ability: 'wis' },
+      { spellId: 'compelled-duel', recharge: 'long', ability: 'wis' },
+    ],
     isSubrace: false,
   },
   {
@@ -1730,7 +1899,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: { dex: 2, cha: 1 },
     traits: [
       { name: 'Ability Score Increase', description: '+1 Charisma (in addition to standard Elf +2 Dexterity).' },
-      { name: 'Gift of the Shadows', description: 'When you make a Dexterity (Performance) or Charisma (Performance) check, you can roll a d4 and add the number rolled to the ability check.' },
+      { name: 'Gift of the Shadows', description: 'When you make a Dexterity (Stealth) or Charisma (Performance) check, you can roll a d4 and add the number rolled to the ability check.' },
       { name: 'Shape Shadows', description: 'You know the minor illusion cantrip. Starting at 3rd level, you can also cast the invisibility spell once with this trait, and you regain the ability to do so when you finish a long rest. Charisma is your spellcasting ability for these spells.' },
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Shadow Spells table are added to the spell list of your spellcasting class.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
@@ -1739,6 +1908,10 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'Elvish'],
+    innateSpells: [
+      { spellId: 'minor-illusion', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'invisibility', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1756,6 +1929,10 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Storm Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'Elvish'],
+    innateSpells: [
+      { spellId: 'gust', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'gust-of-wind', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1772,6 +1949,9 @@ export const ALL_RACES: Race[] = [
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Warding Spells table are added to the spell list of your spellcasting class.' },
     ],
     languages: ['Common', 'Dwarvish'],
+    innateSpells: [
+      { spellId: 'arcane-lock', recharge: 'long', ability: 'int' },
+    ],
     isSubrace: false,
   },
   {
@@ -1835,6 +2015,10 @@ export const ALL_RACES: Race[] = [
     resistances: ['poison'],
     languages: ['Common', 'Dwarvish', 'Undercommon'],
     proficiencies: ['Battleaxe', 'Handaxe', 'Light hammer', 'Warhammer'],
+    innateSpells: [
+      { spellId: 'enlarge-reduce', recharge: 'long', minCharLevel: 3, ability: 'int' },
+      { spellId: 'invisibility', recharge: 'long', minCharLevel: 5, ability: 'int' },
+    ],
     isSubrace: true,
     parentRaceId: 'dwarf',
   },
@@ -1914,6 +2098,11 @@ export const ALL_RACES: Race[] = [
     ],
     darkvision: 60,
     languages: ['Common', 'Elvish', 'one extra language of your choice'],
+    innateSpells: [
+      { spellId: 'dancing-lights', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'faerie-fire', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1950,6 +2139,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'hellish-rebuke', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1967,6 +2161,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'vicious-mockery', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'charm-person', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'enthrall', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {
@@ -1985,6 +2184,11 @@ export const ALL_RACES: Race[] = [
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
+    innateSpells: [
+      { spellId: 'thaumaturgy', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'burning-hands', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'darkness', recharge: 'long', minCharLevel: 5, ability: 'cha' },
+    ],
     isSubrace: false,
   },
   {

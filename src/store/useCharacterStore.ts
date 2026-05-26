@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState } from '../types';
+import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, ClassLevel, PreparedSpell } from '../types';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
@@ -43,6 +43,34 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   return overrides;
 }
 
+/** IDs of all always-prepared spells unlocked at the given class/subclass levels. */
+function computeAlwaysPreparedIds(classes: ClassLevel[]): string[] {
+  const ids: string[] = [];
+  for (const cl of classes) {
+    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+    if (!sub?.alwaysPreparedSpells) continue;
+    for (const [minLevelStr, spellIds] of Object.entries(sub.alwaysPreparedSpells)) {
+      if (cl.level >= Number(minLevelStr)) ids.push(...spellIds);
+    }
+  }
+  return [...new Set(ids)];
+}
+
+/** Ensure the spellbook contains all alwaysPrepared IDs, flagged correctly. */
+function syncAlwaysPrepared(spellbook: PreparedSpell[], alwaysPreparedIds: string[]): PreparedSpell[] {
+  const result = spellbook.map(s => ({
+    ...s,
+    isAlwaysPrepared: alwaysPreparedIds.includes(s.spellId),
+    isPrepared: alwaysPreparedIds.includes(s.spellId) ? true : s.isPrepared,
+  }));
+  for (const id of alwaysPreparedIds) {
+    if (!result.some(s => s.spellId === id)) {
+      result.push({ spellId: id, isPrepared: true, isAlwaysPrepared: true });
+    }
+  }
+  return result;
+}
+
 interface CharacterState {
   character: Character | null;
   load: (c: Character) => void;
@@ -78,6 +106,7 @@ interface CharacterState {
   removeSpellFromBook: (spellId: string) => void;
   startConcentration: (spellId: string) => void;
   endConcentration: () => void;
+  useInnateSpell: (spellId: string) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -90,6 +119,7 @@ interface CharacterState {
   renameInventoryItem: (id: string, name: string) => void;
   setInventoryDescription: (id: string, description: string | undefined) => void;
   setItemCharges: (id: string, charges: number) => void;
+  useItemCharge: (itemId: string) => void;
 
   // Level up / hit dice
   levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice) => void;
@@ -216,7 +246,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         conditions: (c.conditions ?? []).filter((cond) => cond !== 'Exhaustion'),
         selectedFeats: c.selectedFeats ?? [],
         selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
-        spellbook: c.spellbook ?? [],
+        spellbook: syncAlwaysPrepared(
+          c.spellbook ?? [],
+          computeAlwaysPreparedIds(c.classes ?? []),
+        ),
+        // Migrate existing characters: add innate spell uses for any unlocked spells
+        // that weren't tracked yet (cantrips are unlimited and not stored).
+        innateSpellUses: (() => {
+          const race = getRace(c.raceId);
+          if (!race?.innateSpells) return c.innateSpellUses ?? {};
+          const totalLevel = totalCharacterLevel(c.classes ?? []);
+          const merged = { ...(c.innateSpellUses ?? {}) };
+          for (const spell of race.innateSpells) {
+            if (spell.recharge === 'cantrip') continue;
+            if ((spell.minCharLevel ?? 1) > totalLevel) continue;
+            if (merged[spell.spellId] == null) merged[spell.spellId] = 1;
+          }
+          return merged;
+        })(),
         inventory: c.inventory ?? [],
         hitDiceUsed: c.hitDiceUsed ?? {},
         currencies: c.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
@@ -427,6 +474,15 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, inventory } };
     }),
 
+  useItemCharge: (itemId) =>
+    set((s) => {
+      if (!s.character) return s;
+      const inventory = (s.character.inventory ?? []).map(i =>
+        i.id === itemId ? { ...i, charges: Math.max(0, (i.charges ?? i.maxCharges ?? 1) - 1) } : i
+      );
+      return { character: { ...s.character, inventory } };
+    }),
+
   levelUp: (classId, hpGained, hpRoll, subclassPick, asiChoice) =>
     set((s) => {
       if (!s.character) return s;
@@ -556,6 +612,26 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         newCurrentHP = Math.min(newMaxHP, newCurrentHP + retroHP);
       }
 
+      // Sync always-prepared spells for newly unlocked subclass spell tables.
+      const newSpellbook = syncAlwaysPrepared(
+        s.character.spellbook,
+        computeAlwaysPreparedIds(classes),
+      );
+
+      // Unlock any newly accessible innate spells (based on new total character level).
+      const newTotalLevelForInnate = classes.reduce((sum, cl) => sum + cl.level, 0);
+      const innateSpellUses = (() => {
+        const race = getRace(s.character.raceId);
+        if (!race?.innateSpells) return s.character.innateSpellUses ?? {};
+        const merged = { ...(s.character.innateSpellUses ?? {}) };
+        for (const spell of race.innateSpells) {
+          if (spell.recharge === 'cantrip') continue;
+          if ((spell.minCharLevel ?? 1) > newTotalLevelForInnate) continue;
+          if (merged[spell.spellId] == null) merged[spell.spellId] = 1;
+        }
+        return merged;
+      })();
+
       return {
         character: {
           ...s.character,
@@ -566,6 +642,8 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           pactMagic,
           baseAbilityScores,
           selectedFeats,
+          spellbook: newSpellbook,
+          innateSpellUses,
         },
       };
     }),
@@ -628,14 +706,53 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Apply ability-mod / prof-bonus overrides so restoring to r.max gives the correct value
       // even if r.max was set from a stale level-table entry (e.g. bardic inspiration with high CHA).
       const srOverrides = computeResourceMaxOverrides(s.character);
-      const resources = s.character.resources.map((r) => {
+      let resources = s.character.resources.map((r) => {
         if (!shortRestKeys.has(r.key)) return r;
         const correctMax = srOverrides[r.key] ?? r.max;
         return { ...r, max: correctMax, current: correctMax };
       });
+
+      // Bloodwell Vial (Tasha's): if one is equipped, regain 1d3 sorcery points per short rest.
+      const hasBloodwellVial = (s.character.inventory ?? []).some(
+        i => i.equipped && i.name.startsWith('Bloodwell Vial'),
+      );
+      if (hasBloodwellVial) {
+        const d3 = Math.ceil(Math.random() * 3);
+        resources = resources.map(r =>
+          r.key === 'sorcery_points'
+            ? { ...r, current: Math.min(r.current + d3, r.max) }
+            : r,
+        );
+      }
+
+      // Sorcerous Restoration (Sorcerer level 20): regain 4 sorcery points on short rest.
+      const sorcererLevel = s.character.classes.find(c => c.classId === 'sorcerer')?.level ?? 0;
+      if (sorcererLevel >= 20) {
+        resources = resources.map(r =>
+          r.key === 'sorcery_points'
+            ? { ...r, current: Math.min(r.current + 4, r.max) }
+            : r,
+        );
+      }
       // Restore pact magic on short rest
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
-      return { character: { ...s.character, resources, pactMagic } };
+      // Restore short-rest innate spell uses
+      const srInnateUses = (() => {
+        const race = getRace(s.character.raceId);
+        if (!race?.innateSpells) return s.character.innateSpellUses ?? {};
+        const merged = { ...(s.character.innateSpellUses ?? {}) };
+        for (const spell of race.innateSpells) {
+          if (spell.recharge === 'short') merged[spell.spellId] = 1;
+        }
+        return merged;
+      })();
+      // Restore charges on equipped items that recharge on short rest
+      const srInventory = (s.character.inventory ?? []).map(i =>
+        (i.equipped && i.maxCharges != null && i.recharge === 'short')
+          ? { ...i, charges: i.maxCharges }
+          : i
+      );
+      return { character: { ...s.character, resources, pactMagic, innateSpellUses: srInnateUses, inventory: srInventory } };
     }),
 
   longRest: () =>
@@ -665,6 +782,27 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           hitDiceUsed[cl.classId] = Math.max(0, used - regain);
         }
       }
+      // Restore all innate spell uses (long rest covers both long and short recharge).
+      const lrInnateUses = (() => {
+        const race = getRace(s.character.raceId);
+        if (!race?.innateSpells) return s.character.innateSpellUses ?? {};
+        const totalLevel = totalCharacterLevel(s.character.classes);
+        const merged = { ...(s.character.innateSpellUses ?? {}) };
+        for (const spell of race.innateSpells) {
+          if (spell.recharge === 'cantrip') continue;
+          if ((spell.minCharLevel ?? 1) > totalLevel) continue;
+          merged[spell.spellId] = 1;
+        }
+        return merged;
+      })();
+
+      // Restore charges on equipped items that recharge at dawn / long rest (both map to long rest here)
+      const lrInventory = (s.character.inventory ?? []).map(i =>
+        (i.equipped && i.maxCharges != null && (i.recharge === 'dawn' || i.recharge === 'long' || i.recharge === 'short'))
+          ? { ...i, charges: i.maxCharges }
+          : i
+      );
+
       return {
         character: {
           ...s.character,
@@ -681,8 +819,17 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           resources,
           pactMagic,
           hitDiceUsed,
+          innateSpellUses: lrInnateUses,
+          inventory: lrInventory,
         },
       };
+    }),
+
+  useInnateSpell: (spellId) =>
+    set((s) => {
+      if (!s.character) return s;
+      const innateSpellUses = { ...(s.character.innateSpellUses ?? {}), [spellId]: 0 };
+      return { character: { ...s.character, innateSpellUses } };
     }),
 
   toggleInspiration: () =>

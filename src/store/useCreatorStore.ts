@@ -1,11 +1,39 @@
 import { create } from 'zustand';
-import type { Character, BookId, AbilityKey, WizardStep } from '../types';
+import type { Character, BookId, AbilityKey, WizardStep, ClassLevel, PreparedSpell } from '../types';
 import { WIZARD_STEPS } from '../types';
 import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
+
+/** IDs of all always-prepared spells unlocked at the given class/subclass levels. */
+function computeAlwaysPreparedIds(classes: ClassLevel[]): string[] {
+  const ids: string[] = [];
+  for (const cl of classes) {
+    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+    if (!sub?.alwaysPreparedSpells) continue;
+    for (const [minLevelStr, spellIds] of Object.entries(sub.alwaysPreparedSpells)) {
+      if (cl.level >= Number(minLevelStr)) ids.push(...spellIds);
+    }
+  }
+  return [...new Set(ids)];
+}
+
+/** Ensure the spellbook contains all alwaysPrepared IDs, flagged correctly. */
+function syncAlwaysPrepared(spellbook: PreparedSpell[], alwaysPreparedIds: string[]): PreparedSpell[] {
+  const result = spellbook.map(s => ({
+    ...s,
+    isAlwaysPrepared: alwaysPreparedIds.includes(s.spellId),
+    isPrepared: alwaysPreparedIds.includes(s.spellId) ? true : s.isPrepared,
+  }));
+  for (const id of alwaysPreparedIds) {
+    if (!result.some(s => s.spellId === id)) {
+      result.push({ spellId: id, isPrepared: true, isAlwaysPrepared: true });
+    }
+  }
+  return result;
+}
 
 type Draft = Partial<Character> & {
   name: string;
@@ -230,7 +258,19 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       },
       inventory: draft.inventory ?? [],
       hitDiceUsed: {},
-      spellbook: draft.spellbook ?? [],
+      spellbook: syncAlwaysPrepared(
+        draft.spellbook ?? [],
+        computeAlwaysPreparedIds(draft.classes ?? []),
+      ),
+      innateSpellUses: (() => {
+        const totalCharLevel = (draft.classes ?? []).reduce((sum, cl) => sum + cl.level, 0);
+        const uses: Record<string, number> = {};
+        for (const spell of (race?.innateSpells ?? [])) {
+          if (spell.recharge === 'cantrip') continue;
+          if ((spell.minCharLevel ?? 1) <= totalCharLevel) uses[spell.spellId] = 1;
+        }
+        return uses;
+      })(),
       currentHP: maxHP,
       maxHP,
       tempHP: 0,

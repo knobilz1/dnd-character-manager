@@ -79,7 +79,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency } = useCharacterStore();
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [round, setRound] = React.useState(1);
@@ -491,6 +491,7 @@ export function SheetPage() {
                 setShowRageOverlay={setShowRageOverlay}
                 sendToGraveyard={sendToGraveyard}
                 navigate={navigate}
+                useItemCharge={useItemCharge}
               />
             )}
             {tab === 'spells' && (
@@ -504,6 +505,7 @@ export function SheetPage() {
                 removeSpellFromBook={removeSpellFromBook}
                 useSpellSlot={useSpellSlot}
                 usePactSlot={usePactSlot}
+                useInnateSpell={useInnateSpell}
               />
             )}
             {tab === 'inventory' && (
@@ -741,7 +743,7 @@ function SectionToggle({ label, open, onToggle, count }: { label: string; open: 
 
 function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
   slotTotals, spellSlotsUsed, pactMagic, useSpellSlot, usePactSlot,
-  startConcentration,
+  startConcentration, useItemCharge,
 }: {
   character: any;
   spellSaveDC: number;
@@ -752,6 +754,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
   useSpellSlot: (level: SlotLevel) => void;
   usePactSlot: () => void;
   startConcentration: (id: string) => void;
+  useItemCharge: (itemId: string) => void;
 }) {
   const [spellsOpen,     setSpellsOpen]     = React.useState(true);
   const [abilitiesOpen,  setAbilitiesOpen]  = React.useState(true);
@@ -810,9 +813,9 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
     });
 
   // ── Magic-item abilities ─────────────────────────────────────────────────────
-  // Show any item categorised as 'magic' that has a description or charge tracking.
+  // Only show equipped magic items. Unequipped items leave the panel automatically.
   const magicItems = (character.inventory ?? []).filter(
-    (item: any) => item.category === 'magic' && (item.description || item.maxCharges != null),
+    (item: any) => item.category === 'magic' && item.equipped && (item.description || item.maxCharges != null),
   );
 
   const hasSpells    = combatSpells.length > 0;
@@ -1052,24 +1055,68 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
             <div className="mt-3 space-y-px">
               {magicItems.map((item: any) => {
                 const key = `item-${item.id}`;
+                const hasCharges = item.maxCharges != null;
+                const currentCharges = item.charges ?? item.maxCharges ?? 0;
+                const isSpent = hasCharges && currentCharges <= 0;
+                const rechargeLabel = item.recharge === 'dawn' ? 'Restores at dawn'
+                  : item.recharge === 'long' ? 'Restores on long rest'
+                  : item.recharge === 'short' ? 'Restores on short rest'
+                  : null;
                 return (
                   <div key={item.id} className="rounded-lg overflow-hidden">
-                    <button
-                      onClick={() => toggleExpand(key)}
-                      className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-slate-700/50 transition-colors text-left"
-                    >
-                      <span className="text-sm text-white font-medium flex-1 truncate">{item.name}</span>
-                      {item.maxCharges != null && (
-                        <span className="text-[10px] text-amber-300 shrink-0">{item.charges ?? 0}/{item.maxCharges} charges</span>
+                    {/* Summary row */}
+                    <div className="flex items-center gap-2 w-full px-2 py-1.5">
+                      <button
+                        onClick={() => toggleExpand(key)}
+                        className="flex items-center gap-2 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                      >
+                        <span className={cn('text-sm font-medium flex-1 truncate', isSpent ? 'text-slate-500' : 'text-white')}>{item.name}</span>
+                        {hasCharges && (
+                          <span className={cn('text-[10px] shrink-0', isSpent ? 'text-slate-600' : 'text-amber-300')}>
+                            {currentCharges}/{item.maxCharges}
+                          </span>
+                        )}
+                        <span className="text-slate-500 text-[10px] shrink-0">
+                          {expandedKey === key ? '▲' : '▼'}
+                        </span>
+                      </button>
+                      {hasCharges && (
+                        <button
+                          disabled={isSpent}
+                          onClick={() => useItemCharge(item.id)}
+                          className={cn(
+                            'shrink-0 text-[11px] px-2 py-0.5 rounded border transition-all',
+                            isSpent
+                              ? 'border-slate-700 bg-slate-800 text-slate-600 cursor-not-allowed'
+                              : 'border-amber-700 bg-amber-900/30 text-amber-300 hover:bg-amber-800/50',
+                          )}
+                        >
+                          {isSpent ? 'Spent' : 'Use'}
+                        </button>
                       )}
-                      <span className="text-slate-500 text-[10px] shrink-0 ml-1">
-                        {expandedKey === key ? '▲' : '▼'}
-                      </span>
-                    </button>
+                    </div>
+                    {/* Expanded detail */}
                     {expandedKey === key && (
                       <div className="px-3 pb-3 pt-1 bg-slate-900/60 border-t border-slate-700/50">
-                        {item.maxCharges != null && (
-                          <p className="text-[11px] text-amber-400 mb-1.5">Charges: {item.charges ?? 0} / {item.maxCharges}</p>
+                        {hasCharges && (
+                          <div className="flex items-center gap-2 mb-2">
+                            {/* Pip display for ≤ 12 charges, numeric for larger */}
+                            {item.maxCharges <= 12 ? (
+                              <div className="flex gap-0.5 flex-wrap">
+                                {Array.from({ length: item.maxCharges as number }).map((_: unknown, i: number) => (
+                                  <div
+                                    key={i}
+                                    className={cn('w-2.5 h-2.5 rounded-full border', i < currentCharges ? 'bg-amber-400 border-amber-300' : 'bg-slate-700 border-slate-600')}
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-amber-400">{currentCharges} / {item.maxCharges} charges</span>
+                            )}
+                            {rechargeLabel && (
+                              <span className="text-[10px] text-slate-500 ml-auto">{rechargeLabel}</span>
+                            )}
+                          </div>
                         )}
                         <p className="text-xs text-slate-300 leading-relaxed">{item.description || '(No description added)'}</p>
                       </div>
@@ -1185,7 +1232,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay,
-  sendToGraveyard, navigate }: any) {
+  sendToGraveyard, navigate, useItemCharge }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   // ── Death-save die ──────────────────────────────────────────────────────
@@ -1974,6 +2021,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
         useSpellSlot={useSpellSlot}
         usePactSlot={usePactSlot}
         startConcentration={startConcentration}
+        useItemCharge={useItemCharge}
       />
 
     </div>

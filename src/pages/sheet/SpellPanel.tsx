@@ -6,6 +6,7 @@ import { cn } from '../../utils/cn';
 import { SpellDetail } from '../creator/steps/StepSpells';
 import type { Character, Spell, SpellLevel, SlotLevel } from '../../types';
 import { getClass } from '../../data/classes';
+import { getRace } from '../../data/races';
 
 const SCHOOL_COLORS: Record<string, string> = {
   Abjuration: 'blue', Conjuration: 'purple', Divination: 'indigo',
@@ -23,11 +24,12 @@ interface SpellPanelProps {
   removeSpellFromBook: (id: string) => void;
   useSpellSlot: (level: SlotLevel) => void;
   usePactSlot: () => void;
+  useInnateSpell: (spellId: string) => void;
 }
 
 const PREPARED_CASTER_CLASSES = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
 
-export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot }: SpellPanelProps) {
+export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -253,6 +255,71 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
           );
         })
       )}
+
+      {/* Racial Innate Spells */}
+      {(() => {
+        const race = getRace(character.raceId);
+        if (!race?.innateSpells?.length) return null;
+        const totalLevel = character.classes.reduce((sum, cl) => sum + cl.level, 0);
+        const available = race.innateSpells.filter(s => (s.minCharLevel ?? 1) <= totalLevel);
+        if (!available.length) return null;
+        return (
+          <div className="bg-slate-800 border border-indigo-700/50 rounded-xl overflow-hidden">
+            <div className="px-4 py-2 bg-slate-750 border-b border-slate-700 flex items-center gap-2">
+              <h3 className="font-bold text-indigo-300 text-sm">Racial Innate Spells</h3>
+              <span className="text-xs text-slate-500">({race.name})</span>
+            </div>
+            <div className="divide-y divide-slate-700/50">
+              {available.map(innate => {
+                const spell = getSpell(innate.spellId);
+                if (!spell) return null;
+                const isCantrip = innate.recharge === 'cantrip';
+                const used = character.innateSpellUses?.[innate.spellId] ?? 1;
+                const isAvailable = isCantrip || used > 0;
+                const rechargeLabel = innate.recharge === 'long' ? 'Long rest' : innate.recharge === 'short' ? 'Short rest' : '';
+                return (
+                  <div key={innate.spellId} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-750/50 group">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <button
+                          className="font-medium text-white text-sm hover:text-red-300 transition-colors text-left"
+                          onClick={() => setDetailSpell(spell)}
+                        >{spell.name}</button>
+                        <Badge color={SCHOOL_COLORS[spell.school] ?? 'slate'} className="text-xs shrink-0">
+                          {spell.level === 0 ? 'C' : `L${spell.level}`}
+                        </Badge>
+                        {spell.concentration && <span className="text-xs text-amber-400 bg-amber-900/30 px-1 rounded">C</span>}
+                        {spell.ritual && <span className="text-xs text-blue-400 bg-blue-900/30 px-1 rounded">R</span>}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {spell.castingTime} · {spell.range} · {innate.ability.toUpperCase()}
+                        {rechargeLabel && <span className="text-slate-600"> · {rechargeLabel}</span>}
+                      </p>
+                    </div>
+                    {isCantrip ? (
+                      <span className="text-xs text-slate-400 shrink-0">At will</span>
+                    ) : (
+                      <button
+                        disabled={!isAvailable}
+                        onClick={() => useInnateSpell(innate.spellId)}
+                        className={cn(
+                          'shrink-0 text-xs px-2 py-1 rounded border transition-all',
+                          isAvailable
+                            ? 'border-indigo-600 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50'
+                            : 'border-slate-700 bg-slate-900 text-slate-600 cursor-not-allowed',
+                        )}
+                        title={isAvailable ? `Use (${rechargeLabel} to recharge)` : `Spent — recharges on ${rechargeLabel}`}
+                      >
+                        {isAvailable ? 'Use' : 'Spent'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Cast slot picker dialog */}
       <Dialog open={!!castSpell} onClose={() => setCastSpell(null)} title={castSpell ? `Cast ${castSpell.name}` : ''}>

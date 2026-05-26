@@ -9,17 +9,17 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Retaliation', level: 14, description: 'Starting at 14th level, when you take damage from a creature that is within 5 feet of you, you can use your reaction to make a melee weapon attack against that creature.' },
   ]},
   { id: 'totem-warrior', name: 'Path of the Totem Warrior', classId: 'barbarian', sourceBook: 'PHB', description: 'The Path of the Totem Warrior is a spiritual journey, as the barbarian accepts a spirit animal as guide, protector, and inspiration.', features: [
-    { name: 'Spirit Seeker', level: 3, description: 'Yours is a path that seeks attunement with the natural world, giving you a kinship with beasts.' },
+    { name: 'Spirit Seeker', level: 3, description: 'Yours is a path that seeks attunement with the natural world, giving you a kinship with beasts. You can cast the Beast Sense and Speak with Animals spells, but only as rituals.' },
     { name: 'Totem Spirit', level: 3, description: 'At 3rd level, when you adopt this path, you choose a totem spirit and gain its feature. You must make or acquire a physical totem object—an amulet or similar adornment—that incorporates fur or feathers, claws, teeth, or bones of the totem animal. Bear: While raging, you have resistance to all damage except psychic damage. Eagle: While you\'re raging, other creatures have disadvantage on opportunity attack rolls against you, and you can use the Dash action as a bonus action on your turn. Wolf: While you\'re raging, your friends have advantage on melee attack rolls against any creature within 5 feet of you that is hostile to you.' },
-    { name: 'Aspect of the Beast', level: 6, description: 'At 6th level, you gain a magical benefit based on the totem animal of your choice.' },
+    { name: 'Aspect of the Beast', level: 6, description: 'At 6th level, you gain a magical benefit based on the totem animal of your choice. Bear: your carrying capacity doubles, and you have advantage on Strength checks made to push, pull, lift, or break objects. Eagle: you can see up to 1 mile away with no difficulty, and dim light doesn\'t impose disadvantage on your Wisdom (Perception) checks. Wolf: you can track other creatures while traveling at a fast pace, and you can move stealthily while traveling at a normal pace.' },
     { name: 'Spirit Walker', level: 10, description: 'At 10th level, you can cast the commune with nature spell, but only as a ritual.' },
-    { name: 'Totemic Attunement', level: 14, description: 'At 14th level, you gain a magical benefit based on a totem animal of your choice.' },
+    { name: 'Totemic Attunement', level: 14, description: 'At 14th level, you gain a magical benefit based on a totem animal of your choice. Bear: while you\'re raging, any creature within 5 feet of you that\'s hostile to you has disadvantage on attack rolls against targets other than you or another character with this feature. Eagle: while raging, you have a flying speed equal to your current walking speed. Wolf: while you\'re raging, you can use a bonus action on your turn to knock a Large or smaller creature prone when you hit it with melee weapon attack.' },
   ]},
   { id: 'storm-herald', name: 'Path of the Storm Herald', classId: 'barbarian', sourceBook: 'XGtE', description: 'Typical barbarians harbor a fury that dwells within. Their rage grants them superior strength, durability, and speed. Barbarians who follow the Path of the Storm Herald learn instead to transform their rage into a mantle of primal magic.', features: [
     { name: 'Storm Aura', level: 3, description: 'You emanate a stormy, magical aura while you rage. The aura extends 10 feet from you in every direction, but not through total cover. Your aura has an effect that activates when you enter your rage, and you can activate the effect again on each of your turns as a bonus action.' },
     { name: 'Storm Soul', level: 6, description: 'The storm grants you benefits even when your aura isn\'t active. The benefits are based on the environment you chose for your Storm Aura.' },
     { name: 'Shielding Storm', level: 10, description: 'You learn to use your mastery of the storm to protect others. Each creature of your choice has the damage resistance you gained from the Storm Soul feature while the creature is in your Storm Aura.' },
-    { name: 'Raging Storm', level: 14, description: 'The power of the storm you channel grows mightier, lashing out at your foes.' },
+    { name: 'Raging Storm', level: 14, description: 'The power of the storm you channel grows mightier while you rage, based on your environment. Desert: when you hit with a melee weapon attack, creatures within 10 feet of you must succeed on a Dexterity save (DC 8 + prof + Con) or take lightning damage equal to your proficiency bonus and be blinded until the start of your next turn. Sea: when you hit with a melee weapon attack, you can force the target to make a Strength save (DC 8 + prof + Con) or be knocked prone. Tundra: when you hit with a melee weapon attack, you can force a creature within 30 feet of you to make a Strength save (DC 8 + prof + Con) or have its speed reduced to 0 until the start of your next turn.' },
   ]},
   // Bard
   { id: 'college-of-lore', name: 'College of Lore', classId: 'bard', sourceBook: 'PHB', description: 'Bards of the College of Lore know something about most things, collecting bits of knowledge from sources as diverse as scholarly tomes and peasant tales.', features: [
@@ -35,10 +35,10 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Battle Magic', level: 14, description: 'At 14th level, you have mastered the art of weaving spellcasting and weapon use into a single harmonious act. When you use your action to cast a bard spell, you can make one weapon attack as a bonus action.' },
   ]},
   { id: 'college-of-glamour', name: 'College of Glamour', classId: 'bard', sourceBook: 'XGtE', description: 'The College of Glamour is the home of bards who mastered their craft in the vibrant realm of the Feywild or under the tutelage of someone who dwelled there.', features: [
-    { name: 'Mantle of Inspiration', level: 3, description: 'When you join the College of Glamour at 3rd level, you gain the ability to weave a song of fey magic that imbues your allies with vigor and speed.' },
-    { name: 'Enthralling Performance', level: 3, description: 'Starting at 3rd level, you can charge your performance with the captivating magic of the Feywild.' },
-    { name: 'Mantle of Majesty', level: 6, description: 'At 6th level, you gain the ability to cloak yourself in a fey magic that makes others want to serve you.' },
-    { name: 'Unbreakable Majesty', level: 14, description: 'At 14th level, your appearance permanently takes on an otherworldly aspect that makes you look more lovely and fierce.' },
+    { name: 'Mantle of Inspiration', level: 3, description: 'When you join the College of Glamour at 3rd level, you gain the ability to weave a song of fey magic that imbues your allies with vigor and speed. As a bonus action, expend one use of Bardic Inspiration. Choose a number of creatures within 60 feet of you equal to your Charisma modifier (minimum one). Each creature gains temporary hit points equal to your Bardic Inspiration die roll + your Charisma modifier, and can use its reaction to move up to its speed without provoking opportunity attacks.' },
+    { name: 'Enthralling Performance', level: 3, description: 'Starting at 3rd level, if you perform for at least 1 minute, at the end of the performance choose a number of humanoids within 60 feet equal to your Charisma modifier (minimum one). Each must make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or be charmed by you. While charmed, the creature idolizes you and speaks glowingly of you to anyone who talks to it. It can repeat the save every 24 hours or when it suffers harm. Once per long rest.' },
+    { name: 'Mantle of Majesty', level: 6, description: 'At 6th level, as a bonus action, you cast Command without expending a spell slot and assume a magisterial presence for 1 minute. For the duration, you can cast Command as a bonus action on each of your turns without a spell slot. Creatures that are charmed by you automatically fail their saving throw against this Command. Once per long rest.' },
+    { name: 'Unbreakable Majesty', level: 14, description: 'At 14th level, your appearance permanently takes on an otherworldly aspect. As a bonus action, you enter a magical presence for 1 minute. For the duration, when any creature tries to attack you for the first time on a turn, that creature must succeed on a Charisma saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or forfeit the attack and be immune to this feature until the start of your next turn. Once per short or long rest.' },
   ]},
   // Cleric
   { id: 'life-domain', name: 'Life Domain', classId: 'cleric', sourceBook: 'PHB', description: 'The Life domain focuses on the vibrant positive energy—one of the fundamental forces of the universe—that sustains all life.', features: [
@@ -51,18 +51,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'knowledge-domain', name: 'Knowledge Domain', classId: 'cleric', sourceBook: 'PHB', description: 'The gods of knowledge—including Ioun, Oghma, Thoth, and others—value learning and understanding above all.', features: [
     { name: 'Blessings of Knowledge', level: 1, description: 'At 1st level, you learn two languages of your choice. You also become proficient in your choice of two of the following skills: Arcana, History, Nature, or Religion. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen skills.' },
     { name: 'Channel Divinity: Knowledge of the Ages', level: 2, description: 'Starting at 2nd level, you can use your Channel Divinity to tap into a divine well of knowledge. As an action, you choose one skill or tool. For 10 minutes, you have proficiency with the chosen skill or tool.' },
-    { name: 'Read Thoughts', level: 6, description: 'At 6th level, you can use your Channel Divinity to read a creature\'s thoughts.' },
+    { name: 'Read Thoughts', level: 6, description: 'At 6th level, you can use your Channel Divinity to read a creature\'s thoughts. Choose one creature you can see within 60 feet. That creature must make a Wisdom saving throw. On a failed save, you read its surface thoughts for 1 minute, learning its emotional state and anything it is actively thinking about. As an action while the effect lasts, you can end it to cast Suggestion on the creature without expending a spell slot (save automatically fails). On a successful save, the creature doesn\'t know you tried to read its mind.' },
     { name: 'Potent Spellcasting', level: 8, description: 'Starting at 8th level, you add your Wisdom modifier to the damage you deal with any cleric cantrip.' },
     { name: 'Visions of the Past', level: 17, description: 'Starting at 17th level, you can call up visions of the past that relate to an object you hold or your immediate surroundings.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['command', 'identify'], 3: ['augury', 'suggestion'], 5: ['nondetection', 'speak-with-dead'], 7: ['arcane-eye', 'confusion'], 9: ['legend-lore', 'true-seeing'] }},
   { id: 'light-domain', name: 'Light Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods of light—including Helm, Lathander, Pholtus, Branchala, the Silver Flame, Belenus, Apollo, and Re-Horakhty—promote the ideals of rebirth and renewal, truth, vigilance, and beauty.', features: [
     { name: 'Bonus Cantrip', level: 1, description: 'When you choose this domain at 1st level, you gain the light cantrip if you don\'t already know it.' },
     { name: 'Warding Flare', level: 1, description: 'Also at 1st level, you can interpose divine light between yourself and an attacking enemy. When you are attacked by a creature within 30 feet of you that you can see, you can use your reaction to impose disadvantage on the attack roll, causing light to flare before the attacker before it hits or misses.' },
-    { name: 'Channel Divinity: Radiance of the Dawn', level: 2, description: 'Starting at 2nd level, you can use your Channel Divinity to harness sunlight, banishing darkness and dealing radiant damage to your foes.' },
+    { name: 'Channel Divinity: Radiance of the Dawn', level: 2, description: 'Starting at 2nd level, you can use your Channel Divinity to harness sunlight. As an action, you present your holy symbol, and any magical darkness within 30 feet is dispelled. Additionally, each hostile creature within 30 feet that can see you must make a Constitution saving throw (DC 8 + your proficiency bonus + your Wisdom modifier). A creature takes 2d10 + your cleric level radiant damage on a failed save, or half as much on a successful one.' },
     { name: 'Improved Flare', level: 6, description: 'Starting at 6th level, you can also use your Warding Flare feature when a creature that you can see within 30 feet of you attacks a creature other than you.' },
     { name: 'Potent Spellcasting', level: 8, description: 'Starting at 8th level, you add your Wisdom modifier to the damage you deal with any cleric cantrip.' },
-    { name: 'Corona of Light', level: 17, description: 'Starting at 17th level, you can use your action to activate an aura of sunlight that lasts for 1 minute or until you dismiss it using another action.' },
-  ]},
+    { name: 'Corona of Light', level: 17, description: 'Starting at 17th level, you can use your action to activate an aura of sunlight that lasts for 1 minute or until you dismiss it using another action. While active, bright light shines from you in a 60-foot radius, and dim light shines 30 feet beyond that. Enemies in the bright light have disadvantage on saving throws against any spell that deals fire or radiant damage.' },
+  ], alwaysPreparedSpells: { 1: ['burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
   // Fighter
   { id: 'champion', name: 'Champion', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypal Champion focuses on the development of raw physical power honed to deadly perfection.', features: [
     { name: 'Improved Critical', level: 3, description: 'Beginning when you choose this archetype at 3rd level, your weapon attacks score a critical hit on a roll of 19 or 20.' },
@@ -92,7 +92,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.', },
     { name: 'Weapon Bond', level: 3, description: 'At 3rd level, you learn a ritual that creates a magical bond between yourself and one weapon.' },
     { name: 'War Magic', level: 7, description: 'Beginning at 7th level, when you use your action to cast a cantrip, you can make one weapon attack as a bonus action.' },
-    { name: 'Eldritch Strike', level: 10, description: 'At 10th level, you learn how to make your weapon strikes undercut a creature\'s resistance to your spells.' },
+    { name: 'Eldritch Strike', level: 10, description: 'At 10th level, when you hit a creature with a weapon attack, that creature has disadvantage on the next saving throw it makes against a spell you cast before the end of your next turn.' },
     { name: 'Arcane Charge', level: 15, description: 'At 15th level, you gain the ability to teleport up to 30 feet to an unoccupied space you can see when you use your Action Surge.' },
     { name: 'Improved War Magic', level: 18, description: 'Starting at 18th level, when you use your action to cast a spell, you can make one weapon attack as a bonus action.' },
   ]},
@@ -100,8 +100,8 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'way-of-the-open-hand', name: 'Way of the Open Hand', classId: 'monk', sourceBook: 'PHB', description: 'Monks of the Way of the Open Hand are the ultimate masters of martial arts combat, whether armed or unarmed.', features: [
     { name: 'Open Hand Technique', level: 3, description: 'Starting when you choose this tradition at 3rd level, you can manipulate your enemy\'s ki when you harness your own. Whenever you hit a creature with one of the attacks granted by your Flurry of Blows, you can impose one of the following effects on that target: It must succeed on a Dexterity saving throw or be knocked prone. It must make a Strength saving throw. If it fails, you can push it up to 15 feet away from you. It can\'t take reactions until the end of your next turn.' },
     { name: 'Wholeness of Body', level: 6, description: 'At 6th level, you gain the ability to heal yourself. As an action, you can regain hit points equal to three times your monk level. You must finish a long rest before you can use this feature again.' },
-    { name: 'Tranquility', level: 11, description: 'Beginning at 11th level, you can enter a special meditation that surrounds you with an aura of peace.' },
-    { name: 'Quivering Palm', level: 17, description: 'At 17th level, you gain the ability to set up lethal vibrations in someone\'s body.' },
+    { name: 'Tranquility', level: 11, description: 'Beginning at 11th level, at the start of each long rest you enter a special meditation. Until your next long rest ends, you gain the effect of a sanctuary spell that only triggers against the first attack targeting you on each turn (DC = 8 + your Wisdom modifier + your proficiency bonus). The effect doesn\'t end if you attack or cast a spell.' },
+    { name: 'Quivering Palm', level: 17, description: 'At 17th level, when you hit a creature with an unarmed strike, you can spend 3 ki points to start imperceptible vibrations in the target. These vibrations are harmless unless you use your action to end them within 1 month. When you do, the target must make a Constitution saving throw. On a failed save, it is reduced to 0 hit points. On a success, it takes 10d10 necrotic damage. You can only have one creature under this effect at a time.' },
   ]},
   { id: 'way-of-shadow', name: 'Way of Shadow', classId: 'monk', sourceBook: 'PHB', description: 'Monks of the Way of Shadow follow a tradition that values stealth and subterfuge. These monks might be called ninjas or shadowdancers.', features: [
     { name: 'Shadow Arts', level: 3, description: 'Starting when you choose this tradition at 3rd level, you can use your ki to duplicate the effects of certain spells. As an action, you can spend 2 ki points to cast darkness, darkvision, pass without trace, or silence, without providing material components.' },
@@ -115,15 +115,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Turn the Unholy', level: 3, description: 'As an action, you present your holy symbol and speak a prayer censuring fiends and undead, using your Channel Divinity. Each fiend or undead that can see or hear you within 30 feet of you must make a Wisdom saving throw.' },
     { name: 'Aura of Devotion', level: 7, description: 'Starting at 7th level, you and friendly creatures within 10 feet of you can\'t be charmed while you are conscious.' },
     { name: 'Purity of Spirit', level: 15, description: 'Beginning at 15th level, you are always under the effects of a protection from evil and good spell.' },
-    { name: 'Holy Nimbus', level: 20, description: 'At 20th level, as an action, you can emanate an aura of sunlight. For 1 minute, bright light shines from you in a 30-foot radius, and dim light shines 30 feet beyond that.' },
-  ], alwaysPreparedSpells: { 3: ['protection-from-evil-and-good', 'sanctuary'], 5: ['lesser-restoration', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] }},
+    { name: 'Holy Nimbus', level: 20, description: 'At 20th level, as an action, you can emanate an aura of sunlight. For 1 minute, bright light shines from you in a 30-foot radius, and dim light shines 30 feet beyond that. Any enemy that starts its turn in the bright light takes 10 radiant damage. You also have advantage on saving throws against spells cast by fiends or undead. Once per long rest.' },
+  ], alwaysPreparedSpells: { 3: ['protection-from-evil-good', 'sanctuary'], 5: ['lesser-restoration', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-ancients', name: 'Oath of the Ancients', classId: 'paladin', sourceBook: 'PHB', description: 'The Oath of the Ancients is as old as the race of elves and the rituals of the druids.', features: [
-    { name: 'Nature\'s Wrath', level: 3, description: 'You can use your Channel Divinity to invoke primeval forces to ensnare a foe. As an action, you can cause spectral vines to spring up and reach for a creature within 10 feet of you that you can see.' },
-    { name: 'Turn the Faithless', level: 3, description: 'You can use your Channel Divinity to utter ancient words that are painful for fey and fiends to hear.' },
+    { name: "Nature's Wrath", level: 3, description: 'You can use your Channel Divinity to invoke primeval forces to ensnare a foe. As an action, you can cause spectral vines to spring up and reach for a creature within 10 feet of you that you can see. The creature must succeed on a Strength or Dexterity saving throw (its choice) or be restrained. While restrained by the vines, the creature repeats the saving throw at the end of each of its turns. On a success, it frees itself and the vines vanish.' },
+    { name: 'Turn the Faithless', level: 3, description: 'You can use your Channel Divinity to utter ancient words that are painful for fey and fiends to hear. Each fey or fiend that can see or hear you within 30 feet must make a Wisdom saving throw. On a failed save, the creature is turned for 1 minute or until it takes any damage. A turned creature must spend its turns trying to move as far away as possible and can\'t willingly move to a space within 30 feet of you. Creatures immune to the charmed condition are immune to this feature.' },
     { name: 'Aura of Warding', level: 7, description: 'Beginning at 7th level, ancient magic lies so heavily upon you that it creates an aegis around you. You and friendly creatures within 10 feet of you have resistance to damage from spells.' },
     { name: 'Undying Sentinel', level: 15, description: 'Starting at 15th level, when you are reduced to 0 hit points and are not killed outright, you can choose to drop to 1 hit point instead. Once you use this ability, you can\'t use it again until you finish a long rest.' },
-    { name: 'Elder Champion', level: 20, description: 'At 20th level, you can assume the form of an ancient force of nature, taking on an appearance you choose.' },
-  ]},
+    { name: 'Elder Champion', level: 20, description: 'At 20th level, as an action you can assume the form of an ancient force of nature for 1 minute. For the duration: you regain 10 hit points at the start of each of your turns; whenever you cast a paladin spell with a casting time of 1 action, you can cast it using a bonus action instead; hostile creatures within 10 feet have disadvantage on saving throws against your paladin spells and Channel Divinity options. Once per long rest.' },
+  ], alwaysPreparedSpells: { 3: ['ensnaring-strike', 'speak-with-animals'], 5: ['moonbeam', 'misty-step'], 9: ['plant-growth', 'wind-wall'], 13: ['ice-storm', 'stoneskin'], 17: ['commune-with-nature', 'tree-stride'] }},
   // Ranger
   { id: 'hunter', name: 'Hunter', classId: 'ranger', sourceBook: 'PHB', description: 'Emulating the Hunter archetype means accepting your place as a bulwark between civilization and the terrors of the wilderness.', features: [
     { name: 'Hunter\'s Prey', level: 3, description: 'At 3rd level, you gain one of the following features of your choice: Colossus Slayer (deal extra d8 damage to creatures below their max HP), Giant Killer (reaction attack on large+ creature missing you), Horde Breaker (attack another creature within 5 ft. of target).' },
@@ -154,7 +154,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', spellListClassId: 'wizard', features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.' },
-    { name: 'Mage Hand Legerdemain', level: 3, description: 'Starting at 3rd level, when you cast mage hand, you can make the spectral hand invisible, and you can perform the following additional tasks with it.' },
+    { name: 'Mage Hand Legerdemain', level: 3, description: 'Starting at 3rd level, when you cast mage hand, you can make the spectral hand invisible, and you can perform the following additional tasks with it: stow one object the hand is holding in a container worn or carried by another creature; retrieve an object in a container worn or carried by another creature; use thieves\' tools to pick locks and disarm traps at range. Additionally, you can use a bonus action to take control of the hand when you don\'t have it active. When making a Dexterity (Sleight of Hand) check or a check to use thieves\' tools, you can use your spellcasting ability modifier instead of Dexterity.' },
     { name: 'Magical Ambush', level: 9, description: 'Starting at 9th level, if you are hidden from a creature when you cast a spell on it, the creature has disadvantage on any saving throw it makes against the spell this turn.' },
     { name: 'Versatile Trickster', level: 13, description: 'At 13th level, you gain the ability to distract targets with your mage hand.' },
     { name: 'Spell Thief', level: 17, description: 'At 17th level, you gain the ability to magically steal the knowledge of how to cast a spell from another spellcaster.' },
@@ -183,16 +183,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ], expandedSpells: { 1: ['burning-hands', 'command'], 3: ['blindness-deafness', 'scorching-ray'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['flame-strike', 'hallow'] }},
   { id: 'the-great-old-one', name: 'The Great Old One', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a mysterious entity whose nature is utterly foreign to the fabric of reality. It might come from the Far Realm, the space beyond reality, or it could be one of the elder gods known only in legends.', features: [
     { name: 'Awakened Mind', level: 1, description: 'Starting at 1st level, your alien knowledge gives you the ability to touch the minds of other creatures. You can communicate telepathically with any creature you can see within 30 feet of you.' },
-    { name: 'Entropic Ward', level: 6, description: 'At 6th level, you learn to magically ward yourself against attack and to turn an enemy\'s failed strike into good luck for yourself.' },
+    { name: 'Entropic Ward', level: 6, description: 'At 6th level, when a creature makes an attack roll against you, you can use your reaction to impose disadvantage on that roll. If the attack misses you, your next attack roll against that creature has advantage, and you can reroll one of the dice once. Once per short or long rest.' },
     { name: 'Thought Shield', level: 10, description: 'Starting at 10th level, your thoughts can\'t be read by telepathy or other means unless you allow it.' },
-    { name: 'Create Thrall', level: 14, description: 'At 14th level, you gain the ability to infect a humanoid\'s mind with the alien magic of your patron.' },
-  ]},
+    { name: 'Create Thrall', level: 14, description: 'At 14th level, you can touch an incapacitated humanoid to infect its mind. After you spend 1 minute doing so, the creature is charmed by you until a remove curse spell is cast on it, the charmed condition is removed from it, or you use this feature again. You can communicate telepathically with the thrall as long as you are on the same plane of existence.' },
+  ], expandedSpells: { 1: ['dissonant-whispers', 'tashas-hideous-laughter'], 3: ['detect-thoughts', 'phantasmal-force'], 5: ['clairvoyance', 'sending'], 7: ['dominate-beast', 'evards-black-tentacles'], 9: ['dominate-person', 'true-seeing'] }},
   { id: 'the-archfey', name: 'The Archfey', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a lord or lady of the fey, a creature of legend who holds secrets that were forgotten before the mortal races were born.', features: [
     { name: 'Fey Presence', level: 1, description: 'Starting at 1st level, your patron bestows upon you the ability to project the fearsome presence of the Fey. As an action, you can cause each creature in a 10-foot cube originating from you to make a Wisdom saving throw against your warlock spell save DC. The creatures that fail their saving throws are all charmed or frightened by you (your choice) until the end of your next turn.' },
     { name: 'Misty Escape', level: 6, description: 'Starting at 6th level, you can vanish in a puff of mist in response to harm. When you take damage, you can use your reaction to turn invisible and teleport up to 60 feet to an unoccupied space you can see.' },
-    { name: 'Beguiling Defenses', level: 10, description: 'Beginning at 10th level, your patron teaches you how to turn the mind-affecting magic of your enemies against them.' },
-    { name: 'Dark Delirium', level: 14, description: 'Starting at 14th level, you can plunge a creature into an illusory realm. As an action, choose a creature that you can see within 60 feet of you.' },
-  ]},
+    { name: 'Beguiling Defenses', level: 10, description: 'Beginning at 10th level, your mind is not easily beguiled. You are immune to being charmed. When another creature attempts to charm you, you can use your reaction to turn the effect back on that creature if it fails a Wisdom saving throw against your warlock spell save DC. The creature is then charmed by you for 1 minute or until the creature takes any damage.' },
+    { name: 'Dark Delirium', level: 14, description: 'Starting at 14th level, as an action, choose a creature that you can see within 60 feet of you. It must make a Wisdom saving throw against your spell save DC or be charmed or frightened by you (your choice) for 1 minute or until your concentration is broken. This spell has no effect if the creature is immune to being charmed or frightened. The creature can repeat the saving throw at the end of each of its turns, ending the effect on a success. Once per short or long rest.' },
+  ], expandedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['calm-emotions', 'phantasmal-force'], 5: ['blink', 'plant-growth'], 7: ['dominate-beast', 'greater-invisibility'], 9: ['dominate-person', 'seeming'] }},
   // Wizard
   { id: 'school-of-evocation', name: 'School of Evocation', classId: 'wizard', sourceBook: 'PHB', description: 'You focus your study on magic that creates powerful elemental effects such as bitter cold, searing flame, rolling thunder, crackling lightning, and burning acid.', features: [
     { name: 'Evocation Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an evocation spell into your spellbook is halved.' },
@@ -224,7 +224,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Dampen Elements', level: 6, description: 'When you or a creature within 30 feet takes acid, cold, fire, lightning, or thunder damage, you can use your reaction to grant resistance against that instance of damage.' },
     { name: 'Divine Strike', level: 8, description: 'Once on each of your turns when you hit a creature with a weapon attack, you can cause the attack to deal an extra 1d8 cold, fire, or lightning damage (2d8 at 14th level).' },
     { name: 'Master of Nature', level: 17, description: 'You gain the ability to command animals and plant creatures. While charmed by your Channel Divinity, you can use a bonus action to verbally command them.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['animal-friendship', 'speak-with-animals'], 3: ['barkskin', 'spike-growth'], 5: ['plant-growth', 'wind-wall'], 7: ['dominate-beast', 'grasping-vine'], 9: ['insect-plague', 'tree-stride'] }},
   { id: 'tempest-domain', name: 'Tempest Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods whose portfolios include the Tempest domain govern storms, sea, and sky. They include gods of lightning and thunder, of earthquakes, fire, and the fury of the elements.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with martial weapons and heavy armor.' },
     { name: 'Wrath of the Storm', level: 1, description: 'When a creature within 5 feet hits you, you can use your reaction to cause it to make a Dexterity save, taking 2d8 lightning or thunder damage on a fail. Usable a number of times equal to your Wisdom modifier per long rest.' },
@@ -232,14 +232,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Thunderbolt Strike', level: 6, description: 'When you deal lightning damage to a Large or smaller creature, you can also push it up to 10 feet away.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 thunder damage (2d8 at 14th).' },
     { name: 'Stormborn', level: 17, description: 'You have a flying speed equal to your walking speed when not underground or indoors.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }},
   { id: 'trickery-domain', name: 'Trickery Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods of trickery are mischief-makers and instigators who stand as a constant challenge to the accepted order among both gods and mortals.', features: [
     { name: 'Blessing of the Trickster', level: 1, description: 'You can use your action to touch a willing creature other than yourself to give it advantage on Dex (Stealth) checks for 1 hour.' },
     { name: 'Channel Divinity: Invoke Duplicity', level: 2, description: 'You create a perfect illusion of yourself within 30 feet that lasts for 1 minute. As a bonus action, you can move it up to 30 feet. You can cast spells through it and gain advantage on attacks against creatures within 5 feet of both you and the illusion.' },
     { name: 'Channel Divinity: Cloak of Shadows', level: 6, description: 'You become invisible until the end of your next turn.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 poison damage (2d8 at 14th).' },
     { name: 'Improved Duplicity', level: 17, description: 'You can create up to four duplicates of yourself with Invoke Duplicity instead of one.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['charm-person', 'disguise-self'], 3: ['mirror-image', 'pass-without-trace'], 5: ['blink', 'dispel-magic'], 7: ['dimension-door', 'polymorph'], 9: ['dominate-person', 'modify-memory'] }},
   { id: 'war-domain', name: 'War Domain', classId: 'cleric', sourceBook: 'PHB', description: 'War has many manifestations. It can make heroes of ordinary people. It can be desperate and horrific, with acts of cruelty and cowardice eclipsing examples of excellence and courage.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with martial weapons and heavy armor.' },
     { name: 'War Priest', level: 1, description: 'When you use the Attack action, you can make one weapon attack as a bonus action. Usable a number of times equal to your Wis modifier per long rest.' },
@@ -247,7 +247,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Channel Divinity: War God\'s Blessing', level: 6, description: 'As a reaction when a creature within 30 feet makes an attack roll, you can use Channel Divinity to grant a +10 bonus to the roll.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 damage of the weapon\'s type (2d8 at 14th).' },
     { name: 'Avatar of Battle', level: 17, description: 'You gain resistance to bludgeoning, piercing, and slashing damage from nonmagical attacks.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }},
 
   // ── PHB: DRUID CIRCLES ────────────────────────────────────────────────
   { id: 'circle-of-the-land', name: 'Circle of the Land', classId: 'druid', sourceBook: 'PHB', description: 'The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites through a vast oral tradition.',
@@ -279,7 +279,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   // ── PHB: MONK ─────────────────────────────────────────────────────────
   { id: 'way-of-the-four-elements', name: 'Way of the Four Elements', classId: 'monk', sourceBook: 'PHB', description: 'You follow a monastic tradition that teaches you to harness the elements. When you focus your ki, you can align yourself with the forces of creation.', features: [
     { name: 'Disciple of the Elements', level: 3, description: 'You learn magical disciplines that harness the power of the four elements. You know the Elemental Attunement discipline plus one of your choice. You learn additional disciplines at 6th, 11th, and 17th level.' },
-    { name: 'Elemental Disciplines', level: 3, description: 'Disciplines include effects like Fist of Unbroken Air, Water Whip, Fist of Four Thunders, Rush of the Gale Spirits, and Shape the Flowing River.' },
+    { name: 'Elemental Disciplines', level: 3, description: 'You learn magical elemental disciplines that cost ki points to use. Elemental Attunement (free): minor manipulation of air, earth, fire, or water as an action. Other disciplines require ki: Fist of Unbroken Air (2 ki) — ranged attack, 2d10 bludgeoning, push 20 ft; Water Whip (2+ ki) — restrain or knock prone, 3d10 bludgeoning; Fist of Four Thunders (2 ki) — Thunderwave as action; Rush of the Gale Spirits (2 ki) — Gust of Wind; Shape the Flowing River (1 ki) — freeze/thaw water in 30 ft cube; and more. You learn additional disciplines at 6th, 11th, and 17th level.' },
     { name: 'Additional Elemental Discipline', level: 6, description: 'At 6th level, you learn one additional Elemental Discipline of your choice. Some disciplines require you to be a certain level in this class to learn them.' },
     { name: 'Additional Elemental Discipline', level: 11, description: 'At 11th level, you learn one additional Elemental Discipline of your choice.' },
     { name: 'Additional Elemental Discipline', level: 17, description: 'At 17th level, you learn one additional Elemental Discipline of your choice. Some disciplines are available only to monks of sufficient level.' },
@@ -292,7 +292,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Relentless Avenger', level: 7, description: 'When you hit a creature with an opportunity attack, you can move up to half your speed immediately after the attack and as part of the same reaction.' },
     { name: 'Soul of Vengeance', level: 15, description: 'When a creature marked by Vow of Enmity makes an attack, you can use your reaction to make a melee weapon attack against it.' },
     { name: 'Avenging Angel', level: 20, description: 'You can use your action to assume the form of an angelic avenger for 1 hour. You gain a flying speed of 60 feet, and creatures within 30 feet that you can see must succeed on a Wis save or be frightened.' },
-  ]},
+  ], alwaysPreparedSpells: { 3: ['bane', 'hunters-mark'], 5: ['hold-person', 'misty-step'], 9: ['haste', 'protection-from-energy'], 13: ['banishment', 'dimension-door'], 17: ['hold-monster', 'scrying'] }},
 
   // ── PHB: REMAINING WIZARD SCHOOLS ─────────────────────────────────────
   { id: 'school-of-conjuration', name: 'School of Conjuration', classId: 'wizard', sourceBook: 'PHB', description: 'As a conjurer, you favor spells that produce objects and creatures out of thin air. You can teleport across vast distances and call up creatures from other planes.', features: [
@@ -369,7 +369,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Soul of the Forge', level: 6, description: 'You gain resistance to fire damage, +1 AC while wearing heavy armor, and your weapon attacks deal +1 fire damage.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 fire damage (2d8 at 14th).' },
     { name: 'Saint of Forge and Fire', level: 17, description: 'You have immunity to fire damage and resistance to nonmagical bludgeoning, piercing, and slashing damage while wearing heavy armor.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['identify', 'searing-smite'], 3: ['heat-metal', 'magic-weapon'], 5: ['elemental-weapon', 'protection-from-energy'], 7: ['fabricate', 'wall-of-fire'], 9: ['animate-objects', 'creation'] }},
   { id: 'grave-domain', name: 'Grave Domain', classId: 'cleric', sourceBook: 'XGtE', description: 'Gods of the grave watch over the line between life and death. To these deities, death and the afterlife are a foundational part of the multiverse.', features: [
     { name: 'Circle of Mortality', level: 1, description: 'You gain the Spare the Dying cantrip and can cast it as a bonus action at range 30 feet. Healing spells on creatures at 0 HP are maximized.' },
     { name: 'Eyes of the Grave', level: 1, description: 'As an action, you can sense the presence of undead within 60 feet that aren\'t behind total cover and don\'t have a CR higher than your cleric level. Wis modifier uses per long rest.' },
@@ -377,7 +377,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Sentinel at Death\'s Door', level: 6, description: 'When a creature you can see within 30 feet would suffer a critical hit, you can use your reaction to make it a normal hit. Wis modifier uses per long rest.' },
     { name: 'Potent Spellcasting', level: 8, description: 'You add your Wisdom modifier to damage from cleric cantrips.' },
     { name: 'Keeper of Souls', level: 17, description: 'When an enemy you can see within 60 feet dies, you or a creature within 60 feet regains HP equal to the dying creature\'s HD.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
 
   // ── XGtE: DRUID ──────────────────────────────────────────────────────
   { id: 'circle-of-dreams', name: 'Circle of Dreams', classId: 'druid', sourceBook: 'XGtE', description: 'Druids who are members of the Circle of Dreams hail from regions that have strong ties to the Feywild and its dreamlike realms.', features: [
@@ -395,7 +395,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── XGtE: FIGHTER ────────────────────────────────────────────────────
-  { id: 'arcane-archer', name: 'Arcane Archer', classId: 'fighter', sourceBook: 'XGtE', description: 'An Arcane Archer studies a unique elven method of archery that weaves magic into attacks to produce supernatural effects.', features: [
+  { id: 'arcane-archer', name: 'Arcane Archer', classId: 'fighter', sourceBook: 'XGtE', description: 'An Arcane Archer studies a unique elven method of archery that weaves magic into attacks to produce supernatural effects.',
+    resources: [
+      {
+        name: 'Arcane Shot',
+        key: 'arcane_shot',
+        rechargeOn: 'short' as const,
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 },
+      },
+    ],
+    features: [
     { name: 'Arcane Archer Lore', level: 3, description: 'You gain proficiency in Arcana or Nature, and you learn the Prestidigitation or Druidcraft cantrip.' },
     { name: 'Arcane Shot', level: 3, description: 'You learn two Arcane Shot options of your choice (Banishing, Beguiling, Bursting, Enfeebling, Grasping, Piercing, Seeking, or Shadow Arrow). You have two uses, regaining all on a short or long rest.' },
     { name: 'Additional Arcane Shot', level: 7, description: 'You learn one additional Arcane Shot option of your choice.' },
@@ -458,14 +467,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aura of Conquest', level: 7, description: 'Frightened creatures within 10 feet (30 ft at 18th) have speed 0 and take 4 psychic damage at the start of their turn (8 at 18th).' },
     { name: 'Scornful Rebuke', level: 15, description: 'When a creature hits you with an attack, it takes psychic damage equal to your Charisma modifier (if positive).' },
     { name: 'Invincible Conqueror', level: 20, description: 'As an action, you assume a form of supernatural power for 1 minute: resistance to all damage, extra attack on Attack action, and crit on 19-20.' },
-  ]},
+  ], alwaysPreparedSpells: { 3: ['armor-of-agathys', 'command'], 5: ['hold-person', 'spiritual-weapon'], 9: ['bestow-curse', 'fear'], 13: ['dominate-beast', 'stoneskin'], 17: ['cloudkill', 'dominate-person'] }},
   { id: 'oath-of-redemption', name: 'Oath of Redemption', classId: 'paladin', sourceBook: 'XGtE', description: 'The Oath of Redemption sets a paladin on a difficult path, one that requires a holy warrior to use violence only as a last resort.', features: [
     { name: 'Emissary of Peace', level: 3, description: 'As a bonus action, gain +5 bonus to Cha (Persuasion) checks for 10 minutes. Cha modifier uses per long rest.' },
     { name: 'Rebuke the Violent', level: 3, description: 'When a creature within 30 feet hits another with an attack, you can use your reaction to force a Wisdom save or take radiant damage equal to the damage dealt.' },
     { name: 'Aura of the Guardian', level: 7, description: 'When a creature within 10 feet (30 ft at 18th) takes damage, you can use your reaction to magically take that damage instead.' },
     { name: 'Protective Spirit', level: 15, description: 'You regain HP equal to 1d6 + half your paladin level if you end your turn in combat with fewer than half your HP and aren\'t incapacitated.' },
     { name: 'Emissary of Redemption', level: 20, description: 'You have resistance to all damage from creatures, and any creature that damages you takes radiant damage equal to twice the damage dealt.' },
-  ]},
+  ], alwaysPreparedSpells: { 3: ['sanctuary', 'sleep'], 5: ['calm-emotions', 'hold-person'], 9: ['counterspell', 'hypnotic-pattern'], 13: ['otilukes-resilient-sphere', 'stoneskin'], 17: ['hold-monster', 'wall-of-force'] }},
 
   // ── XGtE: RANGER ─────────────────────────────────────────────────────
   { id: 'gloom-stalker', name: 'Gloom Stalker', classId: 'ranger', sourceBook: 'XGtE', description: 'Gloom Stalkers are at home in the darkest places: deep under the earth, in gloomy alleyways, in primeval forests, and wherever else the light dims.', features: [
@@ -560,14 +569,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Accursed Specter', level: 6, description: 'When you slay a humanoid, you can cause its spirit to rise as a specter under your control for 1 hour. Once per long rest.' },
     { name: 'Armor of Hexes', level: 10, description: 'When your Hexblade\'s Cursed target hits you with an attack, roll a d6. On 4 or higher, the attack misses you.' },
     { name: 'Master of Hexes', level: 14, description: 'When the target of your Hexblade\'s Curse dies, you can apply the curse to a different creature within 30 feet.' },
-  ]},
+  ], expandedSpells: { 1: ['armor-of-agathys', 'shield'], 3: ['blur', 'branding-smite'], 5: ['blink', 'elemental-weapon'], 7: ['phantasmal-killer', 'staggering-smite'], 9: ['banishing-smite', 'cone-of-cold'] }},
   { id: 'the-celestial', name: 'The Celestial', classId: 'warlock', sourceBook: 'XGtE', description: 'Your patron is a powerful being of the Upper Planes. You have bound yourself to an ancient empyrean, solar, or other powerful entity of light.', features: [
     { name: 'Bonus Cantrips', level: 1, description: 'You learn the Light and Sacred Flame cantrips.' },
     { name: 'Healing Light', level: 1, description: 'You have a pool of d6s equal to 1 + warlock level. As a bonus action, choose a creature within 60 feet (including yourself) and spend dice to heal them.' },
     { name: 'Radiant Soul', level: 6, description: 'You gain resistance to radiant damage, and once per turn when you cast a spell that deals radiant or fire damage, you can add your Cha modifier to one damage roll.' },
     { name: 'Celestial Resilience', level: 10, description: 'At the end of a short or long rest, you and up to five creatures of your choice within 30 feet gain temporary HP.' },
     { name: 'Searing Vengeance', level: 14, description: 'When you or an ally within 60 feet are reduced to 0 HP, you can use your reaction to stand the ally up with HP equal to half their max and deal radiant damage to creatures within 30 feet. Once per long rest.' },
-  ]},
+  ], expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'mass-cure-wounds'] }},
 
   // ── XGtE: WIZARD ─────────────────────────────────────────────────────
   { id: 'war-magic', name: 'War Magic', classId: 'wizard', sourceBook: 'XGtE', description: 'Practitioners of War Magic stand bravely on the front lines of battle, balancing offense and defense as they wield powerful evocations and abjurations.', features: [
@@ -615,8 +624,8 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Channel Divinity: Order\'s Demand', level: 2, description: 'Choose any creatures within 30 feet. Each must succeed on a Wisdom save or be charmed by you until end of your next turn (or drop what they\'re holding).' },
     { name: 'Embodiment of the Law', level: 6, description: 'If you cast an enchantment spell, you can do so as a bonus action instead of an action. Wis-mod uses per long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 psychic damage (2d8 at 14th).' },
-    { name: 'Order\'s Wrath', level: 17, description: 'When you deal Divine Strike damage to a creature, pick another creature within 30 feet; the next time anyone attacks the picked creature before your next turn, it takes 2d8 psychic damage.' },
-  ]},
+    { name: "Order's Wrath", level: 17, description: 'When you deal Divine Strike damage to a creature, pick another creature within 30 feet; the next time anyone attacks the picked creature before your next turn, it takes 2d8 psychic damage.' },
+  ], alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compelled-duel', 'locate-creature'], 9: ['commune', 'dominate-person'] }},
   { id: 'peace-domain', name: 'Peace Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The teachings of the gods of the Peace Domain unite people of all sorts to live with one another in tranquility.', features: [
     { name: 'Implement of Peace', level: 1, description: 'You gain proficiency in Insight, Performance, or Persuasion (your choice).' },
     { name: 'Emboldening Bond', level: 1, description: 'As an action, choose up to prof-bonus willing creatures within 30 feet (including you). You form a bond between them for 10 minutes; while within 30 feet of each other, a bonded creature can add 1d4 to an attack roll, save, or ability check. Prof-bonus uses per long rest.' },
@@ -624,7 +633,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Protective Bond', level: 6, description: 'When a bonded creature is about to take damage, another bonded creature within 30 feet can use its reaction to teleport to an unoccupied space within 5 feet and take the damage instead.' },
     { name: 'Potent Spellcasting', level: 8, description: 'You add your Wisdom modifier to damage from cleric cantrips.' },
     { name: 'Expansive Bond', level: 17, description: 'Emboldening Bond range becomes 60 feet, and the d4 becomes a d6. Protective Bond grants resistance to damage.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['heroism', 'sanctuary'], 3: ['aid', 'warding-bond'], 5: ['beacon-of-hope', 'counterspell'], 7: ['otilukes-resilient-sphere', 'aura-of-purity'], 9: ['rarys-telepathic-bond', 'greater-restoration'] }},
   { id: 'twilight-domain', name: 'Twilight Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The Twilight Domain represents the night sky, the protective veil of dusk, and the encroaching twilight.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with martial weapons and heavy armor.' },
     { name: 'Eyes of Night', level: 1, description: 'You have darkvision 300 feet. As an action, you can grant this darkvision to willing creatures within 10 feet for 1 hour.' },
@@ -633,7 +642,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Steps of Night', level: 6, description: 'In dim light or darkness, as a bonus action, gain a flying speed equal to your walking speed for 1 minute. Prof-bonus uses per long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 radiant damage (2d8 at 14th).' },
     { name: 'Twilight Shroud', level: 17, description: 'Allies in your Twilight Sanctuary have half cover.' },
-  ]},
+  ], alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'calm-emotions'], 5: ['aura-of-vitality', 'aura-of-life'], 7: ['greater-invisibility', 'death-ward'], 9: ['circle-of-power', 'mislead'] }},
 
   // ── TCE: DRUID ───────────────────────────────────────────────────────
   { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
@@ -699,14 +708,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aura of Alacrity', level: 7, description: 'Your walking speed increases by 10 feet. Allies within 5 feet (10 ft at 18th) also gain +10 ft speed.' },
     { name: 'Glorious Defense', level: 15, description: 'When you or an ally within 10 feet are hit by an attack, use your reaction to grant +Cha-mod AC against that attack. If the attack misses, make one weapon attack against the attacker. Cha-mod uses per long rest.' },
     { name: 'Living Legend', level: 20, description: 'As a bonus action for 1 minute: advantage on Cha checks, advantage on missed attack rolls (reroll once), and force enemies to reroll their successful saves vs your spells. Once per long rest.' },
-  ]},
+  ], alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'legend-lore'] }},
   { id: 'oath-of-the-watchers', name: 'Oath of the Watchers', classId: 'paladin', sourceBook: 'TCE', description: 'The Oath of the Watchers binds paladins to protect mortals from the dangers posed by extraplanar entities.', features: [
     { name: 'Channel Divinity: Watcher\'s Will', level: 3, description: 'As an action, choose up to Cha-mod creatures within 30 feet. They gain advantage on Int, Wis, and Cha saves for 1 minute.' },
     { name: 'Channel Divinity: Abjure the Extraplanar', level: 3, description: 'Each aberration, celestial, elemental, fey, or fiend within 30 feet must make a Wis save or be turned for 1 minute.' },
     { name: 'Aura of the Sentinel', level: 7, description: 'You and allies within 10 feet (30 ft at 18th) gain a bonus to initiative rolls equal to your prof bonus.' },
     { name: 'Vigilant Rebuke', level: 15, description: 'When you or a creature within 30 feet succeeds on an Int, Wis, or Cha save, use your reaction to deal 2d8 + Cha mod force damage to the source.' },
     { name: 'Mortal Bulwark', level: 20, description: 'As a bonus action for 1 minute: truesight 120 ft, advantage on attacks vs aberrations/celestials/elementals/fey/fiends, and banish them on a hit (Cha save). Once per long rest.' },
-  ]},
+  ], alwaysPreparedSpells: { 3: ['alarm', 'detect-magic'], 5: ['moonbeam', 'see-invisibility'], 9: ['counterspell', 'nondetection'], 13: ['aura-of-purity', 'banishment'], 17: ['hold-monster', 'scrying'] }},
 
   // ── TCE: RANGER ──────────────────────────────────────────────────────
   { id: 'fey-wanderer', name: 'Fey Wanderer', classId: 'ranger', sourceBook: 'TCE', description: 'Mysterious wardens of the Feywild, Fey Wanderers are infused with otherworldly magic.', features: [
@@ -766,7 +775,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Guardian Coil', level: 6, description: 'As a reaction when you or a creature within 10 feet of your tentacle takes damage, reduce it by 2d8 (3d8 at 10th).' },
     { name: 'Grasping Tentacles', level: 10, description: 'You learn Evard\'s Black Tentacles. You can cast it once per long rest without a slot, and gain temporary HP equal to your warlock level when you cast it.' },
     { name: 'Fathomless Plunge', level: 14, description: 'As an action, teleport yourself and up to 5 willing creatures within 30 feet through a portal to a body of water you have seen, up to 1 mile away. Once per short or long rest.' },
-  ]},
+  ], expandedSpells: { 1: ['create-or-destroy-water', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['lightning-bolt', 'sleet-storm'], 7: ['control-water', 'summon-elemental'], 9: ['cone-of-cold', 'maelstrom'] }},
   { id: 'the-genie', name: 'The Genie', classId: 'warlock', sourceBook: 'TCE', description: 'You have made a pact with one of the rarest kinds of genie, a noble genie of an exotic court.', features: [
     { name: 'Genie\'s Vessel', level: 1, description: 'Your patron gifts you a vessel — a lamp, urn, ring, or bottle. As a bonus action, you can vanish into the vessel for up to twice your prof-bonus hours. You can also use it to deal extra damage based on your genie\'s kind (Dao: bludgeoning, Djinni: thunder, Efreeti: fire, Marid: cold).' },
     { name: 'Elemental Gift', level: 6, description: 'You gain resistance to a damage type based on your genie kind, and as a bonus action a flying speed of 30 feet for 10 minutes. Prof-bonus uses per long rest.' },

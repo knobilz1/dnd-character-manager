@@ -64,6 +64,14 @@ export interface Trait {
   description: string;
 }
 
+export interface InnateSpell {
+  spellId: string;
+  recharge: 'cantrip' | 'long' | 'short';
+  /** Minimum total character level to have this spell. Defaults to 1. */
+  minCharLevel?: number;
+  ability: AbilityKey;
+}
+
 export interface Race {
   id: string;
   name: string;
@@ -79,6 +87,7 @@ export interface Race {
   isSubrace: boolean;
   parentRaceId?: string;
   subraces?: Race[];
+  innateSpells?: InnateSpell[];
 }
 
 export interface ClassFeature {
@@ -282,6 +291,7 @@ export interface InventoryItem {
   source?: 'class' | 'background' | 'manual';
   maxCharges?: number;    // optional charge tracking (e.g. magic items)
   charges?: number;       // current charges remaining
+  recharge?: 'dawn' | 'long' | 'short';  // when charges restore (undefined = no auto-restore)
 }
 
 // Equipment choice option: each option is a labeled bundle of items.
@@ -375,6 +385,7 @@ export interface Character {
   spellSlotsUsed: Record<SlotLevel, number>;
   pactMagic?: PactMagicState;
   resources: ResourceState[];
+  innateSpellUses?: Record<string, number>;
   inspiration: boolean;
   experiencePoints: number;
   notes: string;

@@ -48,7 +48,7 @@ export function InventoryPanel({
 }: InventoryPanelProps) {
   const [addOpen, setAddOpen] = React.useState(false);
   const [draftItem, setDraftItem] = React.useState<{
-    name: string; quantity: number; category: ItemCategory; weight?: number; description?: string; maxCharges?: number;
+    name: string; quantity: number; category: ItemCategory; weight?: number; description?: string; maxCharges?: number; recharge?: 'dawn' | 'long' | 'short';
   }>({ name: '', quantity: 1, category: 'gear' });
   const [suggestions, setSuggestions] = React.useState<ItemTemplate[]>([]);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
@@ -77,6 +77,7 @@ export function InventoryPanel({
       description: draftItem.description,
       maxCharges: mc,
       charges: mc,
+      recharge: draftItem.recharge,
     });
     setDraftItem({ name: '', quantity: 1, category: 'gear' });
     setSuggestions([]);
@@ -98,7 +99,8 @@ export function InventoryPanel({
       category: item.category,
       weight: item.weight,
       description: item.description ?? d.description,
-      maxCharges: undefined,
+      maxCharges: item.maxCharges,
+      recharge: item.recharge,
     }));
     setSuggestions([]);
     setShowSuggestions(false);
