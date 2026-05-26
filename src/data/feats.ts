@@ -507,7 +507,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Gift of the Gem Dragon',
     sourceBook: 'FToD',
     prerequisite: { other: '4th level' },
-    description: 'You have manifested the power of gem dragons:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Telekinetic Reprisal. When a creature within 10 feet of you deals damage to you, you can use your reaction to force the creature to make a Strength save. On failure, it takes 2d8 force damage, is pushed 10 feet, and knocked prone; on success, half damage. Prof-bonus uses per long rest.\n• Psionic Wings. Spectral wings emerge from your back, granting you a flying speed equal to your walking speed for 10 minutes. Once per long rest.',
+    description: 'You have manifested the power of gem dragons:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Telekinetic Reprisal. When you take damage from a creature within 10 feet of you, you can use your reaction to emanate telekinetic energy. The creature must make a Strength saving throw (DC 8 + your proficiency bonus + the ability modifier of the score increased by this feat). On a failed save, the creature takes 2d8 force damage and is pushed up to 10 feet from you; on a successful save, the creature takes half as much damage and isn\'t pushed. You can use this reaction a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
   },
   {
     id: 'gift-of-the-metallic-dragon',

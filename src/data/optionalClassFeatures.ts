@@ -44,7 +44,7 @@ export const ALL_OPTIONAL_CLASS_FEATURES: OptionalClassFeature[] = [
     sourceBook: 'TCE',
     classId: 'cleric',
     minLevel: 2,
-    description: 'As a bonus action, you can expend a use of your Channel Divinity to fuel your spells. Choose one expended spell slot of 1st or 2nd level. That slot is restored. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
+    description: 'As a bonus action, you can expend a use of your Channel Divinity to fuel your spells. Choose one expended spell slot of 4th level or lower. That slot is restored. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
   },
   {
     id: 'cleric-cantrip-versatility',
