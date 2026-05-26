@@ -1,4 +1,7 @@
-import { Textarea, SectionHeader, HoverCard } from '../../components/ui';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
+import { SectionHeader, HoverCard } from '../../components/ui';
+import { cn } from '../../utils/cn';
 import { getBackground } from '../../data/backgrounds';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
@@ -273,15 +276,151 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
       )}
 
       {/* Notes */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-        <SectionHeader>Notes</SectionHeader>
-        <Textarea
-          value={character.notes}
-          onChange={e => setNotes(e.target.value)}
-          placeholder="Adventure notes, reminders, contacts, lore..."
-          className="min-h-32"
-        />
+      <NotesSection notes={character.notes ?? ''} setNotes={setNotes} />
+    </div>
+  );
+}
+
+// ── Notes with built-in search ─────────────────────────────────────────────────
+function NotesSection({ notes, setNotes }: { notes: string; setNotes: (n: string) => void }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery]           = useState('');
+  const [matchIdx, setMatchIdx]     = useState(0);
+  const taRef    = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Compute all match positions (case-insensitive)
+  const matches = useMemo<{ start: number; end: number }[]>(() => {
+    if (!query.trim()) return [];
+    const lower = notes.toLowerCase();
+    const q     = query.toLowerCase();
+    const found: { start: number; end: number }[] = [];
+    let i = 0;
+    while (i <= lower.length - q.length) {
+      const idx = lower.indexOf(q, i);
+      if (idx === -1) break;
+      found.push({ start: idx, end: idx + q.length });
+      i = idx + 1;
+    }
+    return found;
+  }, [notes, query]);
+
+  // Reset to first match whenever query changes
+  useEffect(() => { setMatchIdx(0); }, [query]);
+
+  // Jump to the current match inside the textarea
+  useEffect(() => {
+    if (!matches.length || !taRef.current) return;
+    const { start, end } = matches[Math.min(matchIdx, matches.length - 1)];
+    const ta = taRef.current;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    // Scroll so the selection is roughly centred
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    const linesBefore = notes.slice(0, start).split('\n').length - 1;
+    ta.scrollTop = Math.max(0, linesBefore * lineHeight - ta.clientHeight / 2);
+  }, [matchIdx, matches, notes]);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setQuery('');
+    setMatchIdx(0);
+  }, []);
+
+  const next = useCallback(() =>
+    setMatchIdx(i => matches.length ? (i + 1) % matches.length : 0),
+  [matches.length]);
+
+  const prev = useCallback(() =>
+    setMatchIdx(i => matches.length ? (i - 1 + matches.length) % matches.length : 0),
+  [matches.length]);
+
+  function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter')     { e.preventDefault(); next(); }
+    if (e.key === 'Escape')    { closeSearch(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); prev(); }
+  }
+
+  const hasResults   = matches.length > 0;
+  const noResults    = query.trim().length > 0 && matches.length === 0;
+  const currentLabel = hasResults ? `${matchIdx + 1}/${matches.length}` : null;
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      {/* Header row */}
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={searchOpen ? closeSearch : openSearch}
+          title={searchOpen ? 'Close search' : 'Search notes'}
+          className={cn(
+            'p-0.5 rounded transition-colors shrink-0',
+            searchOpen ? 'text-sky-400 hover:text-sky-300' : 'text-slate-500 hover:text-slate-300',
+          )}
+        >
+          <Search size={13} />
+        </button>
+        <SectionHeader className="mb-0">Notes</SectionHeader>
       </div>
+
+      {/* Search bar — slides in when open */}
+      {searchOpen && (
+        <div className="flex items-center gap-1.5 mb-2 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={onSearchKey}
+            placeholder="Find in notes…"
+            className="flex-1 min-w-0 bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
+          />
+          {currentLabel && (
+            <span className="text-[10px] text-slate-400 shrink-0 tabular-nums">{currentLabel}</span>
+          )}
+          {noResults && (
+            <span className="text-[10px] text-red-400 shrink-0">no results</span>
+          )}
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              onClick={prev}
+              disabled={!hasResults}
+              title="Previous match"
+              className="p-0.5 rounded text-slate-500 hover:text-slate-300 disabled:opacity-30 transition-colors"
+            >
+              <ChevronUp size={13} />
+            </button>
+            <button
+              onClick={next}
+              disabled={!hasResults}
+              title="Next match"
+              className="p-0.5 rounded text-slate-500 hover:text-slate-300 disabled:opacity-30 transition-colors"
+            >
+              <ChevronDown size={13} />
+            </button>
+            <button
+              onClick={closeSearch}
+              title="Close search"
+              className="p-0.5 rounded text-slate-500 hover:text-slate-300 transition-colors ml-0.5"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Textarea — raw element so we can attach a ref */}
+      <textarea
+        ref={taRef}
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+        placeholder="Adventure notes, reminders, contacts, lore..."
+        className="w-full min-h-32 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-500 transition-colors resize-none"
+      />
     </div>
   );
 }
