@@ -232,7 +232,7 @@ export const usesDriveStore = create<DriveState>()(
 
         try {
           const accessToken = await getValidAccessToken(state);
-          const { folderId, fileId } = await ensureIds(accessToken);
+          const { fileId } = await ensureIds(accessToken);
 
           if (!fileId) throw new Error('No backup found on Google Drive.');
 

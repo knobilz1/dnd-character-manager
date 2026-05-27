@@ -117,7 +117,7 @@ export function StepSpells() {
     : spellsKnownFor(primaryClass!.classId, charLevel); // >0 for known-casters only
 
   // For prepared casters: how many spells they can prepare each day (informational)
-  const abilityScores = draft.abilityScores ?? {};
+  const abilityScores = draft.baseAbilityScores ?? {};
   const spellAbilityMap: Record<string, string> = {
     cleric: 'wis', druid: 'wis', paladin: 'wis',
     wizard: 'int', artificer: 'int',

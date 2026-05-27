@@ -135,6 +135,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const { addSpellToBook, updateClassOptions } = useCharacterStore();
   const derived = useCharacterDerived(character);
   const [selectedClassIdx, setSelectedClassIdx] = React.useState(0);
+  const [pendingSubclass, setPendingSubclass] = React.useState<string | undefined>(undefined);
 
   const primary = character.classes[selectedClassIdx] ?? character.classes[0];
   const classDef = primary ? getClass(primary.classId) : null;
@@ -152,7 +153,6 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const [method, setMethod] = React.useState<HpMethod>('average');
   const [rollResult, setRollResult] = React.useState<number | null>(null);
-  const [pendingSubclass, setPendingSubclass] = React.useState<string | undefined>(undefined);
   const [asiMode, setASIMode] = React.useState<ASIMode>('asi');
   const [asiIncreases, setASIIncreases] = React.useState<Partial<Record<AbilityKey, number>>>({});
   const [selectedFeat, setSelectedFeat] = React.useState<string | undefined>(undefined);
