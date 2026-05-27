@@ -5,6 +5,7 @@ import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
 import { getSubclass } from '../../../data/subclasses';
+import { bookEnabled } from '../../../utils/bookEnabled';
 import {
   cantripsKnownFor,
   spellsKnownFor,
@@ -126,7 +127,7 @@ export function StepSpells() {
   // All spells accessible to this class, filtered by level access and books
   const classSpells = ALL_SPELLS.filter(s =>
     (s.classes.includes(spellListClassId) || expandedSpellIds.has(s.id)) &&
-    draft.enabledBooks.includes(s.sourceBook) &&
+    bookEnabled(s, draft.enabledBooks) &&
     (s.level === 0 || s.level <= maxSpellLevel) &&  // enforce max spell level
     (filterLevel === 'all' || s.level === filterLevel) &&
     (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))

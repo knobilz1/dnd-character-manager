@@ -475,6 +475,55 @@ export const ALL_BACKGROUNDS: Background[] = [
     ],
   },
 
+  // ── XGtE Backgrounds ──────────────────────────────────────────────────
+  {
+    id: 'xgte-haunted-one',
+    name: 'Haunted One',
+    sourceBook: 'XGtE',
+    skillProficiencies: ['Investigation', 'Survival'],
+    toolProficiencies: [],
+    languages: 1,
+    equipment: ["Monster hunter's pack (a chest, a crowbar, a hammer, three wooden stakes, a holy symbol, a flask of holy water, a set of manacles, a steel mirror, a flask of oil, a tinderbox, and 3 torches)", '1 sp'],
+    feature: {
+      name: 'Heart of Darkness',
+      description: "Those who look into your eyes can see that you have faced unimaginable horror and that you are no stranger to darkness. Though they might fear you, commoners will extend you every courtesy and do their utmost to help you. Unless you have shown yourself to be a danger to them, they will even take up arms to fight alongside you, should you find yourself facing an enemy alone.",
+    },
+    personalityTraits: [
+      "I don't run from evil. Evil runs from me.",
+      'I like to read and memorize poetry. It keeps me calm and brings me fleeting moments of happiness.',
+      'I spend money freely and live life to the fullest, knowing that tomorrow I might be dead.',
+      'I live for the thrill of the hunt.',
+      "I don't talk about the thing that torments me. I'd rather not burden others with my curse.",
+      'I expect danger around every corner.',
+      'I am a hopeless romantic, always searching for that special someone.',
+      'I carry a trinket from the night the monster came for me. It reminds me why I fight.',
+    ],
+    ideals: [
+      'I try to help those in need, no matter what the personal cost. (Good)',
+      "I'll stop the tyrants and evil that destroyed my life. (Chaotic)",
+      'I have a dark calling that I must fulfill. (Evil)',
+      "I like to know my enemy's capabilities and weaknesses before rushing into battle. (Lawful)",
+      'Avoiding collateral damage is of the utmost importance, even in a fight for survival. (Neutral)',
+      "No matter where evil hides, I'll hunt it down. (Any)",
+    ],
+    bonds: [
+      'I tried to save someone from a monster and failed. I will not make that mistake again.',
+      "A monster slaughtered my entire family. I'll kill it and every other monster I can find.",
+      'I carry a terrible evil within me. I must atone for what I\'ve done.',
+      "I'll destroy the monster that killed someone I loved, or die trying.",
+      "A powerful monster spared my life once. I don't know why, but I hope to repay the favor somehow.",
+      'The people of my hometown helped me escape a monster that was hunting me. I owe them everything.',
+    ],
+    flaws: [
+      'I have certain tastes that others might find monstrous.',
+      'I am secretly afraid of the monster that haunts me, and I\'ll do anything to keep it from finding me.',
+      'I have disturbing visions at night that I cannot shake.',
+      'I refuse to become a monster myself, even if vampire or lycanthropy infection takes hold.',
+      'I put no trust in divine beings.',
+      'I would do anything to wipe away my past.',
+    ],
+  },
+
   {
     id: 'acqinc-rival-intern',
     name: 'Rival Intern',

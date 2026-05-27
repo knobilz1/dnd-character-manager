@@ -108,6 +108,8 @@ export interface DClass {
   id: string;
   name: string;
   sourceBook: BookId;
+  /** Additional books this entry is available in (reprints). Used alongside sourceBook for filtering. */
+  alsoIn?: BookId[];
   hitDie: 4 | 6 | 8 | 10 | 12;
   primaryAbility: AbilityKey[];
   savingThrows: [AbilityKey, AbilityKey];
@@ -130,6 +132,8 @@ export interface Subclass {
   name: string;
   classId: string;
   sourceBook: BookId;
+  /** Additional books this entry is available in (reprints). */
+  alsoIn?: BookId[];
   description: string;
   features: ClassFeature[];
   alwaysPreparedSpells?: Record<number, string[]>;
@@ -146,6 +150,8 @@ export interface Spell {
   level: SpellLevel;
   school: SpellSchool;
   sourceBook: BookId;
+  /** Additional books this entry is available in (reprints). */
+  alsoIn?: BookId[];
   castingTime: string;
   range: string;
   components: SpellComponent[];

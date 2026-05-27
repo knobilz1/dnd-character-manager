@@ -609,7 +609,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Animating Performance', level: 6, description: 'As an action, animate a Large or smaller nonmagical item that you can see within 30 feet (Dancing Item). Uses prof-bonus times per long rest.' },
     { name: 'Creative Crescendo', level: 14, description: 'When you cast Performance of Creation, you can create three items at once.' },
   ]},
-  { id: 'college-of-eloquence', name: 'College of Eloquence', classId: 'bard', sourceBook: 'TCE', description: 'Adherents of the College of Eloquence master the art of oratory. They sway hearts and minds with practiced charm and an unassailable logic.', features: [
+  { id: 'college-of-eloquence', name: 'College of Eloquence', classId: 'bard', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Adherents of the College of Eloquence master the art of oratory. They sway hearts and minds with practiced charm and an unassailable logic.', features: [
     { name: 'Silver Tongue', level: 3, description: 'When you make a Cha (Persuasion) or Cha (Deception) check, you can treat a d20 roll of 9 or lower as a 10.' },
     { name: 'Unsettling Words', level: 3, description: 'As a bonus action, spend a Bardic Inspiration die. Choose one creature within 60 feet; it must subtract the rolled number from its next save before end of your next turn.' },
     { name: 'Unfailing Inspiration', level: 6, description: 'When a creature uses a Bardic Inspiration die from you and fails the roll, they keep the die.' },
@@ -618,7 +618,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── TCE: CLERIC ──────────────────────────────────────────────────────
-  { id: 'order-domain', name: 'Order Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The Order Domain represents discipline, dedication to a just cause, and devotion to a well-organized society.', features: [
+  { id: 'order-domain', name: 'Order Domain', classId: 'cleric', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'The Order Domain represents discipline, dedication to a just cause, and devotion to a well-organized society.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with heavy armor, and proficiency in one of: Intimidation or Persuasion.' },
     { name: 'Voice of Authority', level: 1, description: 'When you cast a 1st-level+ spell that targets an ally, that ally can use its reaction to make one weapon attack.' },
     { name: 'Channel Divinity: Order\'s Demand', level: 2, description: 'Choose any creatures within 30 feet. Each must succeed on a Wisdom save or be charmed by you until end of your next turn (or drop what they\'re holding).' },
@@ -645,7 +645,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ], alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'calm-emotions'], 5: ['aura-of-vitality', 'aura-of-life'], 7: ['greater-invisibility', 'death-ward'], 9: ['circle-of-power', 'mislead'] }},
 
   // ── TCE: DRUID ───────────────────────────────────────────────────────
-  { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
+  { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
     { name: 'Halo of Spores', level: 2, description: 'As a reaction when a creature moves into 10 feet of you or starts its turn there, force a Con save or take 1d4 necrotic damage (scales with level).' },
     { name: 'Symbiotic Entity', level: 2, description: 'As an action, expend a Wild Shape use to gain temp HP equal to 4 x druid level. Halo of Spores damage doubles, and weapon attacks deal +1d6 necrotic damage.' },
     { name: 'Fungal Infestation', level: 6, description: 'When a Small or Medium beast or humanoid within 10 feet dies, you can use your reaction to animate it as a zombie under your control for 1 hour. Wis-mod uses per long rest.' },
@@ -702,7 +702,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── TCE: PALADIN ─────────────────────────────────────────────────────
-  { id: 'oath-of-glory', name: 'Oath of Glory', classId: 'paladin', sourceBook: 'TCE', description: 'Paladins who take the Oath of Glory believe they are destined — and divinely fated — for great deeds.', features: [
+  { id: 'oath-of-glory', name: 'Oath of Glory', classId: 'paladin', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Paladins who take the Oath of Glory believe they are destined — and divinely fated — for great deeds.', features: [
     { name: 'Channel Divinity: Peerless Athlete', level: 3, description: 'As a bonus action, gain advantage on Str (Athletics) and Dex (Acrobatics) checks for 10 minutes. Carrying capacity doubles.' },
     { name: 'Channel Divinity: Inspiring Smite', level: 3, description: 'Right after using Divine Smite, use a bonus action to grant temp HP (2d8 + paladin level) to creatures of your choice within 30 feet.' },
     { name: 'Aura of Alacrity', level: 7, description: 'Your walking speed increases by 10 feet. Allies within 5 feet (10 ft at 18th) also gain +10 ft speed.' },

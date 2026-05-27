@@ -9,6 +9,7 @@ import { ALL_METAMAGIC } from '../../../data/metamagic';
 import { ALL_MANEUVERS } from '../../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../../data/optionalClassFeatures';
+import { bookEnabled } from '../../../utils/bookEnabled';
 import type { BookId, ClassOptionsState } from '../../../types';
 
 function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' | 'indigo' | 'violet' | 'rose' | 'yellow' | 'cyan' | 'gray' {
@@ -155,7 +156,7 @@ export function StepClassOptions() {
   else if (classId === 'ranger' && level >= 2) fightingStyleCount = 1;
 
   const fightingStylesAvail = ALL_FIGHTING_STYLES
-    .filter(fs => enabledBooks.has(fs.sourceBook))
+    .filter(fs => bookEnabled(fs, enabledBooks))
     .filter(fs => fs.classes.includes(classId));
 
   // ── Eldritch Invocations & Pact Boon ────────────────────────────────
@@ -173,11 +174,11 @@ export function StepClassOptions() {
   const hasPactBoon = isWarlock && level >= 3;
 
   const invocationsAvail = ALL_INVOCATIONS
-    .filter(i => enabledBooks.has(i.sourceBook))
+    .filter(i => bookEnabled(i, enabledBooks))
     .filter(i => i.minLevel <= level)
     .filter(i => !i.prerequisitePact || i.prerequisitePact === (opts.pactBoon?.replace('pact-of-the-', '') as any));
 
-  const pactBoonsAvail = ALL_PACT_BOONS.filter(p => enabledBooks.has(p.sourceBook));
+  const pactBoonsAvail = ALL_PACT_BOONS.filter(p => bookEnabled(p, enabledBooks));
 
   // ── Metamagic ────────────────────────────────────────────────────────
   const isSorcerer = classId === 'sorcerer';
@@ -187,7 +188,7 @@ export function StepClassOptions() {
     if (level >= 10) metamagicCount = 3;
     if (level >= 17) metamagicCount = 4;
   }
-  const metamagicAvail = ALL_METAMAGIC.filter(m => enabledBooks.has(m.sourceBook));
+  const metamagicAvail = ALL_METAMAGIC.filter(m => bookEnabled(m, enabledBooks));
 
   // ── Maneuvers (Battle Master) ────────────────────────────────────────
   const isBattleMaster = classId === 'fighter' && subclassId === 'battle-master';
@@ -198,7 +199,7 @@ export function StepClassOptions() {
     if (level >= 10) maneuverCount = 7;
     if (level >= 15) maneuverCount = 9;
   }
-  const maneuversAvail = ALL_MANEUVERS.filter(m => enabledBooks.has(m.sourceBook));
+  const maneuversAvail = ALL_MANEUVERS.filter(m => bookEnabled(m, enabledBooks));
 
   // ── Infusions (Artificer) ────────────────────────────────────────────
   const isArtificer = classId === 'artificer';
@@ -209,12 +210,12 @@ export function StepClassOptions() {
   if (isArtificer && level >= 14) infusionsKnownCount = 10;
   if (isArtificer && level >= 18) infusionsKnownCount = 12;
   const infusionsAvail = ALL_INFUSIONS
-    .filter(i => enabledBooks.has(i.sourceBook))
+    .filter(i => bookEnabled(i, enabledBooks))
     .filter(i => i.minLevel <= level);
 
   // ── Optional Class Features (TCE) ────────────────────────────────────
   const optionalFeaturesAvail = ALL_OPTIONAL_CLASS_FEATURES
-    .filter(f => enabledBooks.has(f.sourceBook))
+    .filter(f => bookEnabled(f, enabledBooks))
     .filter(f => f.classId === classId)
     .filter(f => f.minLevel <= level);
 

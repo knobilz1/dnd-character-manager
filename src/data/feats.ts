@@ -2,6 +2,7 @@ import type { Feat, Character, AbilityKey, BookId } from '../types';
 import { getClass } from './classes';
 import { getSubclass } from './subclasses';
 import { getRace } from './races';
+import { bookEnabled } from '../utils/bookEnabled';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -516,6 +517,23 @@ export const ALL_FEATS: Feat[] = [
     description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. Prof-bonus uses per long rest.',
   },
 
+  // ── ERLW FEATS ─────────────────────────────────────────────────────────
+  {
+    id: 'aberrant-dragonmark',
+    name: 'Aberrant Dragonmark',
+    sourceBook: 'ERLW',
+    description: 'You have developed a dragonmark born of chaos and wild magic, manifesting unpredictably. You gain the following benefits:\n• Increase your Constitution score by 1, to a maximum of 20.\n• You learn one cantrip of your choice and one 1st-level spell of your choice from the sorcerer spell list. Constitution is your spellcasting ability for these spells.\n• You can cast the 1st-level spell without expending a spell slot. Once you do so, you can\'t cast it this way again until you finish a long rest. You can also cast it using spell slots you have.\n• Each time you cast the 1st-level spell, you can choose to unleash the unstable power of your mark. If you do, roll a d8. On a 1, you take 1d6 psychic damage and the spell fails. On an 8, one creature of your choice within 30 feet regains 1d6 + Constitution modifier hit points. Other results produce varied wild effects at the DM\'s discretion (see Aberrant Dragonmark Wild Surge table, ERLW p. 52).',
+    abilityScoreIncrease: { con: 1 },
+  },
+  {
+    id: 'greater-dragonmark',
+    name: 'Greater Dragonmark',
+    sourceBook: 'ERLW',
+    prerequisite: { minLevel: 8, other: 'Dragonmark racial trait (ERLW)' },
+    description: 'Your dragonmark has grown in power, manifesting as a greater mark that unlocks expanded magical abilities. You gain the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• The spells associated with your dragonmark\'s greater tier are now available to you (see the Greater Dragonmark Spells table, ERLW p. 247, for your house). You can cast each of those spells once per long rest without expending a spell slot; Constitution is your spellcasting ability for them. You can also cast them using any spell slots you have.\n• If your mark\'s least-tier spells required charges or limited uses, you can now use each of them an additional time between long rests.',
+    abilityScoreIncrease: {},
+  },
+
   // ── SCoC FEATS ─────────────────────────────────────────────────────────
   {
     id: 'scoc-strixhaven-initiate',
@@ -576,7 +594,7 @@ export function getEligibleFeats(character: Character, enabledBooks: BookId[]): 
   });
 
   return ALL_FEATS.filter(feat => {
-    if (!enabledBooks.includes(feat.sourceBook)) return false;
+    if (!bookEnabled(feat, enabledBooks)) return false;
     if (alreadyTaken.has(feat.id)) return false;
 
     const prereq = feat.prerequisite;

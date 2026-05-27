@@ -3,6 +3,7 @@ import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_RACES } from '../../../data/races';
 import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
+import { bookEnabled } from '../../../utils/bookEnabled';
 import type { Race } from '../../../types';
 
 export function StepRace() {
@@ -12,10 +13,10 @@ export function StepRace() {
   );
 
   const availableRaces = ALL_RACES.filter(r =>
-    draft.enabledBooks.includes(r.sourceBook) && !r.isSubrace
+    bookEnabled(r, draft.enabledBooks) && !r.isSubrace
   );
   const subraceRaces = ALL_RACES.filter(r =>
-    draft.enabledBooks.includes(r.sourceBook) && r.isSubrace
+    bookEnabled(r, draft.enabledBooks) && r.isSubrace
   );
 
   // Group subraces by parentRaceId — no parent entry required in ALL_RACES

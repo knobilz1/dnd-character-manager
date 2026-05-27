@@ -522,6 +522,7 @@ export const ALL_CLASSES: DClass[] = [
     id: 'artificer',
     name: 'Artificer',
     sourceBook: 'TCE',
+    alsoIn: ['ERLW'],
     hitDie: 8,
     primaryAbility: ['int'],
     savingThrows: ['con', 'int'],

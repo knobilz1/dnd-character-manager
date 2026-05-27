@@ -17,6 +17,7 @@ import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../data/optionalClassFeatures';
 import { BOOKS } from '../../data/books';
+import { bookEnabled } from '../../utils/bookEnabled';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import type { Character, AbilityKey, ASIChoice, BookId } from '../../types';
@@ -237,7 +238,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const needsSubclass = newLevel === classDef.subclassLevel && !primary?.subclassId;
   const availableSubclasses = needsSubclass
-    ? ALL_SUBCLASSES.filter(s => s.classId === classDef.id && character.enabledBooks.includes(s.sourceBook))
+    ? ALL_SUBCLASSES.filter(s => s.classId === classDef.id && bookEnabled(s, character.enabledBooks))
     : [];
 
   const isASI = newFeatures.some(f => (f as any).isASI);
@@ -361,7 +362,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const availableCantrips = ALL_SPELLS.filter(s =>
     s.level === 0 &&
-    enabledBooks.includes(s.sourceBook) &&
+    bookEnabled(s, enabledBooks) &&
     s.classes.includes(classId) &&
     !spellbookIds.has(s.id) &&
     !pendingCantrips.includes(s.id)
@@ -391,7 +392,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const availableSpells = ALL_SPELLS.filter(s =>
     s.level > 0 &&
     s.level <= effectiveMaxSpellLevel &&
-    enabledBooks.includes(s.sourceBook) &&
+    bookEnabled(s, enabledBooks) &&
     s.classes.includes(classId) &&
     !spellbookIds.has(s.id) &&
     !pendingSpells.includes(s.id) &&
@@ -459,7 +460,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     asiChoiceValid;
 
   const pactBoonsAvail = needsPactBoon
-    ? ALL_PACT_BOONS.filter(p => enabledBooks.includes(p.sourceBook))
+    ? ALL_PACT_BOONS.filter(p => bookEnabled(p, enabledBooks))
     : [];
 
   // totalNew* measures what the level-up TABLE grants (newLevel count minus prevLevel count),
@@ -486,27 +487,27 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const allPickedInfusions = [...classOpts.infusions, ...pendingInfusions];
 
   const invocationsAvail = ALL_INVOCATIONS
-    .filter(i => enabledBooks.includes(i.sourceBook))
+    .filter(i => bookEnabled(i, enabledBooks))
     .filter(i => i.minLevel <= newLevel)
     .filter(i => !i.prerequisitePact || i.prerequisitePact === (classOpts.pactBoon?.replace('pact-of-the-', '') as any))
     .filter(i => !allPickedInvocations.includes(i.id));
 
   const metamagicAvail = ALL_METAMAGIC
-    .filter(m => enabledBooks.includes(m.sourceBook))
+    .filter(m => bookEnabled(m, enabledBooks))
     .filter(m => !allPickedMetamagic.includes(m.id));
 
   const maneuversAvail = ALL_MANEUVERS
-    .filter(m => enabledBooks.includes(m.sourceBook))
+    .filter(m => bookEnabled(m, enabledBooks))
     .filter(m => !allPickedManeuvers.includes(m.id));
 
   const infusionsAvail = ALL_INFUSIONS
-    .filter(i => enabledBooks.includes(i.sourceBook))
+    .filter(i => bookEnabled(i, enabledBooks))
     .filter(i => i.minLevel <= newLevel)
     .filter(i => !allPickedInfusions.includes(i.id));
 
   const existingOptionalFeatures = classOpts.optionalFeatures ?? [];
   const optionalFeaturesNewAtLevel = ALL_OPTIONAL_CLASS_FEATURES
-    .filter(f => enabledBooks.includes(f.sourceBook))
+    .filter(f => bookEnabled(f, enabledBooks))
     .filter(f => f.classId === classId)
     .filter(f => f.minLevel === newLevel);
 

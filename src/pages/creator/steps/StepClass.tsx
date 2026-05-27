@@ -3,6 +3,7 @@ import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_CLASSES } from '../../../data/classes';
 import { Badge, NumberStepper, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
+import { bookEnabled } from '../../../utils/bookEnabled';
 import type { DClass } from '../../../types';
 
 const SCHOOL_COLORS: Record<string, string> = {
@@ -57,7 +58,7 @@ export function StepClass() {
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">
-          {ALL_CLASSES.map(cls => (
+          {ALL_CLASSES.filter(cls => bookEnabled(cls, draft.enabledBooks)).map(cls => (
             <HoverCard
               key={cls.id}
               content={

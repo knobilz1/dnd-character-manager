@@ -3,6 +3,7 @@ import { ALL_SUBCLASSES } from '../../../data/subclasses';
 import { Badge, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
+import { bookEnabled } from '../../../utils/bookEnabled';
 
 export function StepSubclass() {
   const { draft, updateDraft } = useCreatorStore();
@@ -13,7 +14,7 @@ export function StepSubclass() {
   const hasSubclass = (primaryClass?.level ?? 0) >= subclassLevel;
 
   const available = ALL_SUBCLASSES.filter(
-    s => s.classId === primaryClass?.classId && draft.enabledBooks.includes(s.sourceBook)
+    s => s.classId === primaryClass?.classId && bookEnabled(s, draft.enabledBooks)
   );
 
   const selectedId = primaryClass?.subclassId;

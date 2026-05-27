@@ -6,6 +6,7 @@ import { cn } from '../../../utils/cn';
 import { ASI_LEVELS } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
 import { BOOKS } from '../../../data/books';
+import { bookEnabled } from '../../../utils/bookEnabled';
 import type { Feat, BookId } from '../../../types';
 
 const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
@@ -20,7 +21,7 @@ export function StepFeats() {
   const asiLevels = ASI_LEVELS[classId] ?? [];
   const asiCount = asiLevels.filter(l => l <= level).length;
 
-  const available = ALL_FEATS.filter(f => draft.enabledBooks.includes(f.sourceBook));
+  const available = ALL_FEATS.filter(f => bookEnabled(f, draft.enabledBooks));
   const selected = new Set(draft.selectedFeats ?? []);
 
   function toggle(featId: string) {
