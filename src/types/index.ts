@@ -355,6 +355,55 @@ export interface ResourceState {
   max: number;
 }
 
+// ── Alternate Forms ──────────────────────────────────────────────────────────
+
+export interface BeastFormAttack {
+  name: string;
+  toHit: number;        // integer bonus, e.g. +4 → 4
+  damage: string;       // e.g. "2d6+4"
+  damageType: DamageType;
+  reach?: number;       // feet, defaults to 5
+  range?: string;       // e.g. "20/60 ft" for ranged
+  notes?: string;       // e.g. "Grapple on hit DC 13"
+}
+
+export interface BeastFormSpeed {
+  walk?: number;
+  swim?: number;
+  fly?: number;
+  climb?: number;
+  burrow?: number;
+}
+
+export interface ActiveWildShape {
+  id: string;           // beast id from beastForms.ts, or 'custom'
+  name: string;
+  cr: number | string;  // e.g. '0', '1/4', '1/2', 1, 2 …
+  size: 'Tiny' | 'Small' | 'Medium' | 'Large' | 'Huge';
+  maxHp: number;
+  currentHp: number;
+  ac: number;
+  str: number;
+  dex: number;
+  con: number;
+  speed: BeastFormSpeed;
+  attacks: BeastFormAttack[];
+  specialAbilities?: string[];
+  isCustom?: boolean;
+}
+
+// ── Campaign Journal ─────────────────────────────────────────────────────────
+
+export interface JournalEntry {
+  id: string;
+  date: string;           // "YYYY-MM-DD"
+  sessionNumber?: number;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface PreparedSpell {
   spellId: string;
   isPrepared: boolean;
@@ -407,6 +456,13 @@ export interface Character {
   notes: string;
   currencies: { cp: number; sp: number; ep: number; gp: number; pp: number };
   inGraveyard?: boolean;
+  // Campaign journal
+  campaignName?: string;
+  journal?: JournalEntry[];
+  // Alternate form state
+  activeWildShape?: ActiveWildShape | null;
+  armorerMode?: 'guardian' | 'infiltrator';
+  pathOfBeastForm?: 'bite' | 'claws' | 'tail' | null;
 }
 
 export type WizardStep =

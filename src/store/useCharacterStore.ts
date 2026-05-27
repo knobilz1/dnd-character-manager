@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, ClassLevel, PreparedSpell } from '../types';
+import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, ClassLevel, PreparedSpell, JournalEntry } from '../types';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
@@ -137,6 +137,19 @@ interface CharacterState {
   setExperiencePoints: (xp: number) => void;
   updateCurrency: (coin: 'cp' | 'sp' | 'ep' | 'gp' | 'pp', value: number) => void;
   setPortrait: (dataUrl: string | undefined) => void;
+
+  // Alternate Forms (Wild Shape, Path of the Beast, Armorer)
+  activateWildShape: (form: import('../types').ActiveWildShape) => void;
+  deactivateWildShape: () => void;
+  damageWildShape: (amount: number) => void;
+  healWildShape: (amount: number) => void;
+  setArmorerMode: (mode: 'guardian' | 'infiltrator') => void;
+  setPathOfBeastForm: (form: 'bite' | 'claws' | 'tail' | null) => void;
+  // Journal
+  setCampaignName: (name: string) => void;
+  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateJournalEntry: (id: string, patch: Partial<Pick<JournalEntry, 'title' | 'date' | 'sessionNumber' | 'content'>>) => void;
+  deleteJournalEntry: (id: string) => void;
 }
 
 export const useCharacterStore = create<CharacterState>((set, get) => ({
@@ -273,6 +286,12 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         notes: c.notes ?? '',
         alignment: c.alignment ?? '',
         playerName: c.playerName ?? '',
+        // Alternate forms migration
+        activeWildShape: c.activeWildShape ?? null,
+        armorerMode: c.armorerMode ?? 'guardian',
+        pathOfBeastForm: c.pathOfBeastForm ?? null,
+        campaignName: c.campaignName ?? '',
+        journal: c.journal ?? [],
       },
     });
   },
@@ -821,6 +840,8 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           hitDiceUsed,
           innateSpellUses: lrInnateUses,
           inventory: lrInventory,
+          // Long rest reverts Wild Shape (druid reverts when resting)
+          activeWildShape: null,
         },
       };
     }),
@@ -849,4 +870,69 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setPortrait: (dataUrl) =>
     set((s) => s.character ? { character: { ...s.character, portrait: dataUrl } } : s),
+
+  // ── Alternate Forms ────────────────────────────────────────────────────
+  activateWildShape: (form) =>
+    set((s) => s.character ? { character: { ...s.character, activeWildShape: form } } : s),
+
+  deactivateWildShape: () =>
+    set((s) => s.character ? { character: { ...s.character, activeWildShape: null } } : s),
+
+  damageWildShape: (amount) =>
+    set((s) => {
+      if (!s.character?.activeWildShape) return s;
+      const ws = s.character.activeWildShape;
+      const newHp = Math.max(0, ws.currentHp - amount);
+      // PHB p. 67: when beast HP hits 0, druid simply reverts — excess damage
+      // does NOT carry over to the druid's own HP pool.
+      if (newHp === 0) return { character: { ...s.character, activeWildShape: null } };
+      return { character: { ...s.character, activeWildShape: { ...ws, currentHp: newHp } } };
+    }),
+
+  healWildShape: (amount) =>
+    set((s) => {
+      if (!s.character?.activeWildShape) return s;
+      const ws = s.character.activeWildShape;
+      return { character: { ...s.character, activeWildShape: { ...ws, currentHp: Math.min(ws.currentHp + amount, ws.maxHp) } } };
+    }),
+
+  setArmorerMode: (mode) =>
+    set((s) => s.character ? { character: { ...s.character, armorerMode: mode } } : s),
+
+  setPathOfBeastForm: (form) =>
+    set((s) => s.character ? { character: { ...s.character, pathOfBeastForm: form } } : s),
+
+  setCampaignName: (name) =>
+    set((s) => s.character ? { character: { ...s.character, campaignName: name } } : s),
+
+  addJournalEntry: (entry) =>
+    set((s) => {
+      if (!s.character) return s;
+      const newEntry: JournalEntry = {
+        ...entry,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      return { character: { ...s.character, journal: [newEntry, ...(s.character.journal ?? [])] } };
+    }),
+
+  updateJournalEntry: (id, patch) =>
+    set((s) => {
+      if (!s.character) return s;
+      return {
+        character: {
+          ...s.character,
+          journal: (s.character.journal ?? []).map(e =>
+            e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e,
+          ),
+        },
+      };
+    }),
+
+  deleteJournalEntry: (id) =>
+    set((s) => {
+      if (!s.character) return s;
+      return { character: { ...s.character, journal: (s.character.journal ?? []).filter(e => e.id !== id) } };
+    }),
 }));

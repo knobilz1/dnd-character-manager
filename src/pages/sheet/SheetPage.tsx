@@ -2,7 +2,9 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap, Eye } from 'lucide-react';
+import { openPath } from '@tauri-apps/plugin-opener';
+import { generateCharacterSheetHTML } from '../../utils/printSheet';
+import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap, Eye, Printer } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
@@ -29,6 +31,8 @@ import { lookupWeapon, damageLine } from '../../data/weapons';
 import { getRace } from '../../data/races';
 import { useSidebarStore, type SidebarModuleId } from '../../store/useSidebarStore';
 import { SidebarPanel } from './SidebarPanel';
+import { AlternateFormPanel } from '../../components/AlternateFormPanel';
+import { WildShapeModal } from '../../components/WildShapeModal';
 
 // Find a resource definition by key, checking both class and subclass.
 function getResourceDef(character: any, key: string) {
@@ -79,7 +83,8 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell } = useCharacterStore();
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell,
+    activateWildShape, deactivateWildShape, damageWildShape, healWildShape, setArmorerMode, setPathOfBeastForm } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
   const [round, setRound] = React.useState(1);
@@ -95,6 +100,7 @@ export function SheetPage() {
   const [levelUpOpen, setLevelUpOpen] = React.useState(false);
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const [wildShapeModalOpen, setWildShapeModalOpen] = React.useState(false);
   const portraitInputRef = React.useRef<HTMLInputElement>(null);
 
   const { saveSnapshot } = useSnapshotStore();
@@ -164,6 +170,16 @@ export function SheetPage() {
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
+
+  // ── Alternate form flags ─────────────────────────────────────────────────────
+  const druidEntry = character.classes.find(cl => cl.classId === 'druid');
+  const isDruid = !!druidEntry;
+  const druidLevel = druidEntry?.level ?? 0;
+  const isMoonDruid = druidEntry?.subclassId === 'circle-of-the-moon';
+  const isPathOfBeast = character.classes.some(cl => cl.classId === 'barbarian' && cl.subclassId === 'path-of-the-beast');
+  const isArmorer = character.classes.some(cl => cl.classId === 'artificer' && cl.subclassId === 'armorer');
+  const hasAlternateForm = isDruid || isPathOfBeast || isArmorer;
+
   // At exhaustion 4 the HP maximum is halved (PHB p. 291)
   const effectiveMaxHP = (character.exhaustionLevel ?? 0) >= 4
     ? Math.floor(character.maxHP / 2)
@@ -259,6 +275,30 @@ export function SheetPage() {
           <DiceRoller exhaustionLevel={exhaustionLevel} />
           <button
             onClick={async () => {
+              const html = generateCharacterSheetHTML(character, {
+                finalScores: finalScores as unknown as Record<string, number>,
+                mods: mods as unknown as Record<string, number>,
+                profBonus, ac, initiative, speed,
+                savingThrows: savingThrows as unknown as Record<string, number>,
+                savingThrowProficiencies, skills, allSkillProficiencies,
+                passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel,
+              });
+              const path = await saveDialog({
+                defaultPath: `${character.name || 'character'}-sheet.html`,
+                filters: [{ name: 'HTML', extensions: ['html'] }],
+              });
+              if (path) {
+                await writeTextFile(path, html);
+                await openPath(path);
+              }
+            }}
+            className="p-1.5 rounded text-slate-500 hover:text-emerald-400 transition-colors"
+            title="Print character sheet (opens in browser)"
+          >
+            <Printer size={18} />
+          </button>
+          <button
+            onClick={async () => {
               const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
               const payload = { tavernSheet: true, version: 1, character, snapshots };
               const json = JSON.stringify(payload, null, 2);
@@ -269,7 +309,7 @@ export function SheetPage() {
               if (path) await writeTextFile(path, json);
             }}
             className="p-1.5 rounded text-slate-500 hover:text-blue-400 transition-colors"
-            title="Export character"
+            title="Export character data (JSON)"
           >
             <Download size={18} />
           </button>
@@ -492,6 +532,18 @@ export function SheetPage() {
                 sendToGraveyard={sendToGraveyard}
                 navigate={navigate}
                 useItemCharge={useItemCharge}
+                hasAlternateForm={hasAlternateForm}
+                isDruid={isDruid}
+                druidLevel={druidLevel}
+                isMoonDruid={isMoonDruid}
+                isPathOfBeast={isPathOfBeast}
+                isArmorer={isArmorer}
+                onOpenWildShapeModal={() => setWildShapeModalOpen(true)}
+                deactivateWildShape={deactivateWildShape}
+                damageWildShape={damageWildShape}
+                healWildShape={healWildShape}
+                setPathOfBeastForm={setPathOfBeastForm}
+                setArmorerMode={setArmorerMode}
               />
             )}
             {tab === 'spells' && (
@@ -632,6 +684,20 @@ export function SheetPage() {
           </Button>
         </div>
       </Dialog>
+
+      {/* Wild Shape form picker */}
+      <WildShapeModal
+        open={wildShapeModalOpen}
+        onClose={() => setWildShapeModalOpen(false)}
+        druidLevel={druidLevel}
+        isMoon={isMoonDruid}
+        onActivate={(form) => {
+          activateWildShape(form);
+          // Consume one wild_shape use
+          const wsRes = character.resources.find((r: any) => r.key === 'wild_shape');
+          if (wsRes && wsRes.current > 0) setResource('wild_shape', wsRes.current - 1);
+        }}
+      />
 
       {/* Arcane Recovery (accessible from short rest) */}
       {(() => {
@@ -1232,7 +1298,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay,
-  sendToGraveyard, navigate, useItemCharge }: any) {
+  sendToGraveyard, navigate, useItemCharge,
+  hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
+  onOpenWildShapeModal, deactivateWildShape, damageWildShape, healWildShape,
+  setPathOfBeastForm, setArmorerMode }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   // ── Death-save die ──────────────────────────────────────────────────────
@@ -1291,6 +1360,26 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
       {/* Weapon Attacks */}
       <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} />
+
+      {/* Alternate Forms (Wild Shape / Path of the Beast / Armorer) */}
+      {hasAlternateForm && (
+        <AlternateFormPanel
+          character={character}
+          isDruid={isDruid}
+          druidLevel={druidLevel}
+          isPathOfBeast={isPathOfBeast}
+          isArmorer={isArmorer}
+          onOpenWildShapeModal={onOpenWildShapeModal}
+          deactivateWildShape={deactivateWildShape}
+          damageWildShape={damageWildShape}
+          healWildShape={healWildShape}
+          isRaging={isRaging}
+          setPathOfBeastForm={setPathOfBeastForm}
+          setArmorerMode={setArmorerMode}
+          mods={mods}
+          profBonus={profBonus}
+        />
+      )}
 
       {/* Concentration banner */}
       {concentrationSpellId && (

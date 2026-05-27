@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
 import { SectionHeader, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { getBackground } from '../../data/backgrounds';
@@ -15,10 +15,10 @@ import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { totalCharacterLevel } from '../../data/mechanics';
 import { useCharacterStore } from '../../store/useCharacterStore';
-import type { Character } from '../../types';
+import type { Character, JournalEntry } from '../../types';
 
 export function TraitsPanel({ character, setNotes }: { character: Character; setNotes: (n: string) => void }) {
-  const { setExperiencePoints } = useCharacterStore();
+  const { setExperiencePoints, setCampaignName, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
   const bg = getBackground(character.backgroundId);
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -58,19 +58,31 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
           ))}
         </div>
 
-        {/* XP editor */}
-        <div className="mt-3 flex items-center gap-2">
-          <label className="text-xs text-slate-400 shrink-0">XP:</label>
-          <input
-            type="number"
-            min={0}
-            value={character.experiencePoints}
-            onChange={e => {
-              const xp = Number(e.target.value);
-              if (!isNaN(xp) && xp >= 0) setExperiencePoints(xp);
-            }}
-            className="w-28 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm"
-          />
+        {/* XP + Campaign name row */}
+        <div className="mt-3 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-400 shrink-0">XP:</label>
+            <input
+              type="number"
+              min={0}
+              value={character.experiencePoints}
+              onChange={e => {
+                const xp = Number(e.target.value);
+                if (!isNaN(xp) && xp >= 0) setExperiencePoints(xp);
+              }}
+              className="w-28 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm"
+            />
+          </div>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <label className="text-xs text-slate-400 shrink-0">Campaign:</label>
+            <input
+              type="text"
+              value={character.campaignName ?? ''}
+              onChange={e => setCampaignName(e.target.value)}
+              placeholder="Campaign name…"
+              className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-slate-400"
+            />
+          </div>
         </div>
       </div>
 
@@ -275,8 +287,251 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
         </div>
       )}
 
+      {/* Campaign Journal */}
+      <JournalSection
+        entries={character.journal ?? []}
+        onAdd={addJournalEntry}
+        onUpdate={updateJournalEntry}
+        onDelete={deleteJournalEntry}
+      />
+
       {/* Notes */}
       <NotesSection notes={character.notes ?? ''} setNotes={setNotes} />
+    </div>
+  );
+}
+
+// ── Campaign Journal ────────────────────────────────────────────────────────────
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDate(iso: string) {
+  if (!iso) return '';
+  try {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return iso;
+  }
+}
+
+interface EntryFormState {
+  sessionNumber: string;
+  date: string;
+  title: string;
+  content: string;
+}
+
+const EMPTY_FORM: EntryFormState = { sessionNumber: '', date: todayISO(), title: '', content: '' };
+
+function EntryForm({
+  initial = EMPTY_FORM,
+  onSave,
+  onCancel,
+  saveLabel = 'Save Entry',
+}: {
+  initial?: EntryFormState;
+  onSave: (v: EntryFormState) => void;
+  onCancel: () => void;
+  saveLabel?: string;
+}) {
+  const [v, setV] = useState<EntryFormState>(initial);
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { titleRef.current?.focus(); }, []);
+
+  return (
+    <div className="space-y-2 bg-slate-900 border border-slate-600 rounded-lg p-3">
+      <div className="flex gap-2">
+        <div className="w-20">
+          <label className="text-[10px] text-slate-400 uppercase tracking-wide">Session #</label>
+          <input
+            type="number"
+            min={1}
+            value={v.sessionNumber}
+            onChange={e => setV(p => ({ ...p, sessionNumber: e.target.value }))}
+            placeholder="—"
+            className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-slate-400"
+          />
+        </div>
+        <div className="w-36">
+          <label className="text-[10px] text-slate-400 uppercase tracking-wide">Date</label>
+          <input
+            type="date"
+            value={v.date}
+            onChange={e => setV(p => ({ ...p, date: e.target.value }))}
+            className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-slate-400"
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <label className="text-[10px] text-slate-400 uppercase tracking-wide">Title</label>
+          <input
+            ref={titleRef}
+            type="text"
+            value={v.title}
+            onChange={e => setV(p => ({ ...p, title: e.target.value }))}
+            placeholder="Session title…"
+            className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-slate-400"
+          />
+        </div>
+      </div>
+      <textarea
+        value={v.content}
+        onChange={e => setV(p => ({ ...p, content: e.target.value }))}
+        placeholder="What happened this session?"
+        rows={5}
+        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-slate-400 resize-none"
+      />
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={onCancel}
+          className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded border border-slate-600 hover:border-slate-400 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => { if (v.title.trim()) onSave(v); }}
+          disabled={!v.title.trim()}
+          className="px-3 py-1.5 text-xs bg-violet-700 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded border border-violet-600 transition-colors flex items-center gap-1"
+        >
+          <Check size={11} /> {saveLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function JournalSection({
+  entries,
+  onAdd,
+  onUpdate,
+  onDelete,
+}: {
+  entries: JournalEntry[];
+  onAdd: (e: Omit<JournalEntry, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  onUpdate: (id: string, patch: Partial<Pick<JournalEntry, 'title' | 'date' | 'sessionNumber' | 'content'>>) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  function handleAdd(v: EntryFormState) {
+    onAdd({
+      date: v.date,
+      sessionNumber: v.sessionNumber ? Number(v.sessionNumber) : undefined,
+      title: v.title.trim(),
+      content: v.content,
+    });
+    setAdding(false);
+  }
+
+  function handleUpdate(id: string, v: EntryFormState) {
+    onUpdate(id, {
+      date: v.date,
+      sessionNumber: v.sessionNumber ? Number(v.sessionNumber) : undefined,
+      title: v.title.trim(),
+      content: v.content,
+    });
+    setEditingId(null);
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <SectionHeader className="mb-0">Campaign Journal</SectionHeader>
+        {!adding && (
+          <button
+            onClick={() => { setAdding(true); setExpandedId(null); setEditingId(null); }}
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-violet-300 transition-colors border border-slate-600 hover:border-violet-600 rounded-lg px-2 py-1"
+          >
+            <Plus size={11} /> New Entry
+          </button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="mb-3">
+          <EntryForm onSave={handleAdd} onCancel={() => setAdding(false)} saveLabel="Add Entry" />
+        </div>
+      )}
+
+      {entries.length === 0 && !adding && (
+        <p className="text-slate-500 text-sm italic">No journal entries yet. Click "+ New Entry" to start.</p>
+      )}
+
+      <div className="space-y-1.5">
+        {entries.map(entry => {
+          const isExpanded = expandedId === entry.id;
+          const isEditing = editingId === entry.id;
+          const sessionLabel = entry.sessionNumber != null ? `Session ${entry.sessionNumber}` : null;
+          const dateLabel = entry.date ? formatDate(entry.date) : null;
+          const meta = [sessionLabel, dateLabel].filter(Boolean).join(' · ');
+
+          return (
+            <div key={entry.id} className="border border-slate-700 rounded-lg overflow-hidden">
+              {/* Header row */}
+              <button
+                onClick={() => {
+                  if (isEditing) return;
+                  setExpandedId(isExpanded ? null : entry.id);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700/50 transition-colors text-left"
+              >
+                {sessionLabel && (
+                  <span className="shrink-0 text-[10px] bg-violet-900/60 text-violet-300 border border-violet-700/50 px-1.5 py-0.5 rounded font-medium">
+                    {sessionLabel}
+                  </span>
+                )}
+                <span className="text-sm font-medium text-white truncate flex-1">{entry.title}</span>
+                {dateLabel && <span className="text-[10px] text-slate-500 shrink-0">{dateLabel}</span>}
+                <span className="text-slate-500 text-[10px] shrink-0 ml-1">{isExpanded ? '▲' : '▼'}</span>
+              </button>
+
+              {/* Expanded body */}
+              {isExpanded && !isEditing && (
+                <div className="px-3 pb-3 pt-1 bg-slate-900/50 border-t border-slate-700/50">
+                  {meta && <p className="text-[10px] text-slate-500 mb-2">{meta}</p>}
+                  <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{entry.content || <span className="italic text-slate-500">No notes written.</span>}</p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => setEditingId(entry.id)}
+                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-violet-300 transition-colors border border-slate-600 hover:border-violet-600 rounded px-2 py-1"
+                    >
+                      <Pencil size={11} /> Edit
+                    </button>
+                    <button
+                      onClick={() => { onDelete(entry.id); setExpandedId(null); }}
+                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-400 transition-colors border border-slate-600 hover:border-red-700 rounded px-2 py-1"
+                    >
+                      <Trash2 size={11} /> Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Inline edit form */}
+              {isEditing && (
+                <div className="px-3 pb-3 pt-2 bg-slate-900/50 border-t border-slate-700/50">
+                  <EntryForm
+                    initial={{
+                      sessionNumber: entry.sessionNumber != null ? String(entry.sessionNumber) : '',
+                      date: entry.date ?? todayISO(),
+                      title: entry.title,
+                      content: entry.content,
+                    }}
+                    onSave={v => handleUpdate(entry.id, v)}
+                    onCancel={() => setEditingId(null)}
+                    saveLabel="Save Changes"
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
