@@ -54,6 +54,7 @@ export function StepSpells() {
   const [search, setSearch] = React.useState('');
   const [filterLevel, setFilterLevel] = React.useState<number | 'all'>('all');
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
+  const [showAllSchools, setShowAllSchools] = React.useState(false);
 
   const primaryClass = draft.classes?.[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
@@ -65,6 +66,19 @@ export function StepSpells() {
   const subclassDef = primaryClass?.subclassId ? getSubclass(primaryClass.subclassId) : null;
   const isSubclassSpellcaster =
     !!subclassDef?.spellcastingType && subclassDef.spellcastingType !== 'none';
+
+  // EK/AT: use per-level tables from the subclass for cantrip and spell-known limits.
+  const subclassCantripLimit = isSubclassSpellcaster
+    ? (subclassDef?.cantripsKnownByClassLevel?.[Math.min(charLevel, 20) - 1] ?? null)
+    : null;
+  const subclassSpellLimit = isSubclassSpellcaster
+    ? (subclassDef?.spellsKnownByClassLevel?.[Math.min(charLevel, 20) - 1] ?? null)
+    : null;
+  // School restriction: EK = Abjuration/Evocation; AT = Enchantment/Illusion. Cantrips unrestricted.
+  const schoolRestriction: string[] | null =
+    isSubclassSpellcaster && (subclassDef?.restrictedSchools?.length ?? 0) > 0
+      ? subclassDef!.restrictedSchools!
+      : null;
 
   const isSpellcaster =
     (classDef && classDef.spellcastingType !== 'none') || isSubclassSpellcaster;
@@ -94,9 +108,13 @@ export function StepSpells() {
   // Max spell level the character can cast at their current level
   const maxSpellLevel = computeMaxSpellLevel(effectiveType, primaryClass!.classId, charLevel);
 
-  // Cantrip and spell limits
-  const cantripLimit = cantripsKnownFor(primaryClass!.classId, charLevel);
-  const knownSpellLimit = spellsKnownFor(primaryClass!.classId, charLevel); // >0 for known-casters only
+  // Cantrip and spell limits (EK/AT override via subclass level tables)
+  const cantripLimit = subclassCantripLimit !== null
+    ? subclassCantripLimit
+    : cantripsKnownFor(primaryClass!.classId, charLevel);
+  const knownSpellLimit = subclassSpellLimit !== null
+    ? subclassSpellLimit
+    : spellsKnownFor(primaryClass!.classId, charLevel); // >0 for known-casters only
 
   // For prepared casters: how many spells they can prepare each day (informational)
   const abilityScores = draft.abilityScores ?? {};
@@ -124,11 +142,12 @@ export function StepSpells() {
     return ids;
   }, [subclassDef]);
 
-  // All spells accessible to this class, filtered by level access and books
+  // All spells accessible to this class, filtered by level access, books, and school restriction
   const classSpells = ALL_SPELLS.filter(s =>
     (s.classes.includes(spellListClassId) || expandedSpellIds.has(s.id)) &&
     bookEnabled(s, draft.enabledBooks) &&
     (s.level === 0 || s.level <= maxSpellLevel) &&  // enforce max spell level
+    (!schoolRestriction || showAllSchools || s.level === 0 || schoolRestriction.includes(s.school)) &&
     (filterLevel === 'all' || s.level === filterLevel) &&
     (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))
   );
@@ -212,6 +231,30 @@ export function StepSpells() {
           <p className="text-xs text-slate-500">You don't have spell slots yet — spells become available at higher levels.</p>
         )}
       </div>
+
+      {/* School restriction banner for EK / Arcane Trickster */}
+      {schoolRestriction && (
+        <div className="bg-yellow-950/30 border border-yellow-700/50 rounded-lg px-3 py-2 mb-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-yellow-300">
+            <span className="font-semibold">School restriction:</span>{' '}
+            {schoolRestriction.join(' or ')} only (cantrips unrestricted).
+            {subclassDef?.freePickLevels?.length
+              ? ` Free pick (any school) at levels ${subclassDef.freePickLevels.join(', ')}.`
+              : ''}
+          </p>
+          <button
+            onClick={() => setShowAllSchools(prev => !prev)}
+            className={cn(
+              'shrink-0 text-xs px-2.5 py-1 rounded-md border font-medium transition-colors',
+              showAllSchools
+                ? 'bg-yellow-700/40 border-yellow-500 text-yellow-200'
+                : 'border-yellow-700 text-yellow-400 hover:bg-yellow-900/30',
+            )}
+          >
+            {showAllSchools ? 'Show restricted' : 'Show all schools'}
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3 mb-4 flex-wrap">

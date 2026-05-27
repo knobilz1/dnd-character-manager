@@ -92,6 +92,8 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // PHB EK spellcasting table, indexed by fighter level (index = level-1)
     cantripsKnownByClassLevel: [0,0,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3],
     spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
+    restrictedSchools: ['Abjuration', 'Evocation'],
+    freePickLevels: [8, 14, 20],
     features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.', },
     { name: 'Weapon Bond', level: 3, description: 'At 3rd level, you learn a ritual that creates a magical bond between yourself and one weapon.' },
@@ -160,6 +162,8 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // PHB AT spellcasting table, indexed by rogue level (index = level-1)
     cantripsKnownByClassLevel: [0,0,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
     spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
+    restrictedSchools: ['Enchantment', 'Illusion'],
+    freePickLevels: [8, 14, 20],
     features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.' },
     { name: 'Mage Hand Legerdemain', level: 3, description: 'Starting at 3rd level, when you cast mage hand, you can make the spectral hand invisible, and you can perform the following additional tasks with it: stow one object the hand is holding in a container worn or carried by another creature; retrieve an object in a container worn or carried by another creature; use thieves\' tools to pick locks and disarm traps at range. Additionally, you can use a bonus action to take control of the hand when you don\'t have it active. When making a Dexterity (Sleight of Hand) check or a check to use thieves\' tools, you can use your spellcasting ability modifier instead of Dexterity.' },

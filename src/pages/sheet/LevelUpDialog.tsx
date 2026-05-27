@@ -245,6 +245,14 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // Which class's spell list to use for filtering available cantrips/spells.
   const spellListClassId = isSubclassSpellcaster ? (sub!.spellListClassId ?? classId) : classId;
 
+  // EK/AT school restrictions: certain levels grant a free pick from any school;
+  // all others are limited to the subclass's restricted schools (cantrips are never restricted).
+  const isFreePick = isSubclassSpellcaster && (sub?.freePickLevels ?? []).includes(newLevel);
+  const schoolRestriction: string[] | null =
+    isSubclassSpellcaster && !isFreePick && (sub?.restrictedSchools?.length ?? 0) > 0
+      ? sub!.restrictedSchools!
+      : null;
+
   const newFeatures = [
     ...classDef.features.filter(f => f.level === newLevel).map(f => ({ source: 'Class', ...f })),
     ...(sub?.features ?? []).filter(f => f.level === newLevel).map(f => ({ source: sub!.name, ...f })),
@@ -419,6 +427,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     s.level <= effectiveMaxSpellLevel &&
     bookEnabled(s, enabledBooks) &&
     s.classes.includes(spellListClassId) &&
+    (!schoolRestriction || schoolRestriction.includes(s.school)) &&
     !spellbookIds.has(s.id) &&
     !pendingSpells.includes(s.id) &&
     (spellLevelFilter === 'all' || s.level === spellLevelFilter) &&
@@ -971,6 +980,17 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
             {isPreparedCaster && (
               <p className="text-xs text-slate-400 mb-2">
                 Add spells to your spellbook — you can choose which to prepare each day.
+              </p>
+            )}
+            {schoolRestriction && (
+              <p className="text-xs text-yellow-400/90 mb-2">
+                School restriction: <span className="font-semibold">{schoolRestriction.join(' or ')}</span> only
+                {sub?.freePickLevels?.length ? ` — free pick (any school) at levels ${sub.freePickLevels.join(', ')}` : ''}.
+              </p>
+            )}
+            {isFreePick && (
+              <p className="text-xs text-green-400 mb-2">
+                ✓ Level {newLevel} free pick — any wizard school allowed.
               </p>
             )}
 

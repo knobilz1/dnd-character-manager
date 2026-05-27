@@ -147,6 +147,10 @@ export interface Subclass {
   spellsKnownByClassLevel?: number[];
   /** Flat HP bonus gained per class level (e.g. 1 for Draconic Bloodline). */
   hpBonusPerLevel?: number;
+  /** Schools of magic restricted for non-cantrip spell picks (EK: Abjuration/Evocation; AT: Enchantment/Illusion). Cantrips are never restricted. */
+  restrictedSchools?: SpellSchool[];
+  /** Class levels where the player may choose a spell from any school instead of the restricted set. */
+  freePickLevels?: number[];
   resources?: ClassResourceDefinition[];
 }
 
