@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw } from 'lucide-react';
+import { DriveSyncButton } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
@@ -103,6 +104,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
+            <DriveSyncButton />
             {graveyardCount > 0 && (
               <button
                 onClick={() => navigate('/graveyard')}

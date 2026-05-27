@@ -12,6 +12,17 @@
     "dialog:default",
     "fs:default",
     "fs:allow-write-text-file",
-    "fs:allow-exists"
+    "fs:allow-exists",
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://oauth2.googleapis.com/**" },
+        { "url": "https://accounts.google.com/**" },
+        { "url": "https://www.googleapis.com/**" }
+      ]
+    },
+    "opener:default",
+    "opener:allow-open-url"
   ]
 }

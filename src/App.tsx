@@ -6,6 +6,7 @@ import { SheetPage } from './pages/sheet/SheetPage';
 import { GraveyardPage } from './pages/GraveyardPage';
 import { useAppUpdater } from './hooks/useAppUpdater';
 import { useThemeStore } from './store/useThemeStore';
+import { useDriveSync } from './hooks/useDriveSync';
 import { SnowOverlay } from './components/SnowOverlay';
 import { HauntOverlay } from './components/HauntOverlay';
 import { DeepSeaOverlay } from './components/DeepSeaOverlay';
@@ -15,6 +16,7 @@ import { EidOverlay } from './components/EidOverlay';
 export default function App() {
   const updater = useAppUpdater();
   const { theme } = useThemeStore();
+  useDriveSync();
 
   // Keep the <html> data-theme attribute in sync with the store
   React.useEffect(() => {
