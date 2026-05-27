@@ -143,7 +143,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const conMod = derived?.mods.con ?? abilityMod(character.baseAbilityScores.con);
   const hitDie = classDef?.hitDie ?? 8;
-  const averagePerLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
+  // Some subclasses grant +N HP per class level (e.g. Draconic Bloodline: +1).
+  // We need this before pendingSubclass state but primary?.subclassId covers existing
+  // subclasses; pendingSubclass covers the case where the subclass is picked this level.
+  const subHPBonusPerLevel =
+    getSubclass(primary?.subclassId ?? pendingSubclass ?? '')?.hpBonusPerLevel ?? 0;
+  const averagePerLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + subHPBonusPerLevel;
 
   const [method, setMethod] = React.useState<HpMethod>('average');
   const [rollResult, setRollResult] = React.useState<number | null>(null);
@@ -231,6 +236,15 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // This ensures the subclass's entry-level features appear in "Features Gained" as soon as
   // the player selects a subclass in this level-up dialog.
   const sub = getSubclass(primary?.subclassId ?? pendingSubclass ?? '');
+
+  // Subclass-granted spellcasting (EK, AT): class itself has spellcastingType 'none'
+  // but the subclass grants third-caster spellcasting from a different class's list.
+  const isSubclassSpellcaster =
+    classDef.spellcastingType === 'none' &&
+    !!sub?.spellcastingType && sub.spellcastingType !== 'none';
+  // Which class's spell list to use for filtering available cantrips/spells.
+  const spellListClassId = isSubclassSpellcaster ? (sub!.spellListClassId ?? classId) : classId;
+
   const newFeatures = [
     ...classDef.features.filter(f => f.level === newLevel).map(f => ({ source: 'Class', ...f })),
     ...(sub?.features ?? []).filter(f => f.level === newLevel).map(f => ({ source: sub!.name, ...f })),
@@ -248,7 +262,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // averagePerLevel, which would inflate the stored value when Con is very negative.
   const hpRoll = method === 'roll' ? (rollResult ?? 0) : Math.floor(hitDie / 2) + 1;
   const hpGained = method === 'roll'
-    ? Math.max(1, (rollResult ?? 0) + conMod)
+    ? Math.max(1, (rollResult ?? 0) + conMod) + subHPBonusPerLevel
     : averagePerLevel;
 
   // Effective scores (base + racial + feat bonuses) for display and cap-checking
@@ -353,8 +367,14 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const hasSlotChanges = slotsGained.some(g => g > 0) || pactSlotsGained > 0 || pactLevelGained > 0;
 
   // ── Cantrip changes ──────────────────────────────────────────────────────
-  const oldCantripCount = cantripsKnownFor(classId, currentLevel);
-  const newCantripCount = cantripsKnownFor(classId, newLevel);
+  // For EK/AT the class itself (fighter/rogue) has no cantrip table; use the
+  // subclass's per-class-level table instead.
+  const oldCantripCount = isSubclassSpellcaster
+    ? (sub?.cantripsKnownByClassLevel?.[currentLevel - 1] ?? 0)
+    : cantripsKnownFor(classId, currentLevel);
+  const newCantripCount = isSubclassSpellcaster
+    ? (sub?.cantripsKnownByClassLevel?.[newLevel - 1] ?? 0)
+    : cantripsKnownFor(classId, newLevel);
   const cantripsGained = newCantripCount - oldCantripCount;
 
   const spellbookIds = new Set(character.spellbook.map(sp => sp.spellId));
@@ -363,19 +383,24 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const availableCantrips = ALL_SPELLS.filter(s =>
     s.level === 0 &&
     bookEnabled(s, enabledBooks) &&
-    s.classes.includes(classId) &&
+    s.classes.includes(spellListClassId) &&
     !spellbookIds.has(s.id) &&
     !pendingCantrips.includes(s.id)
   );
 
   // ── Spell known/prepared changes ─────────────────────────────────────────
-  const hasSpellcasting = classDef.spellcastingType !== 'none';
-  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger'].includes(classId);
+  // EK/AT: class has spellcastingType 'none' but subclass grants it — use effectiveSpellcastingType.
+  const hasSpellcasting = classDef.spellcastingType !== 'none' || isSubclassSpellcaster;
+  // EK/AT are known casters with their own per-class-level spell table.
+  const isSubclassKnownCaster = isSubclassSpellcaster && !!sub?.spellsKnownByClassLevel;
+  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger'].includes(classId) || isSubclassKnownCaster;
   const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'].includes(classId);
 
-  const spellsKnownGained = isKnownCaster
-    ? Math.max(0, spellsKnownFor(classId, newLevel) - spellsKnownFor(classId, currentLevel))
-    : 0;
+  const spellsKnownGained = isSubclassKnownCaster
+    ? Math.max(0, (sub!.spellsKnownByClassLevel![newLevel - 1] ?? 0) - (sub!.spellsKnownByClassLevel![currentLevel - 1] ?? 0))
+    : isKnownCaster
+      ? Math.max(0, spellsKnownFor(classId, newLevel) - spellsKnownFor(classId, currentLevel))
+      : 0;
 
   const spellcastingAbility = classDef.spellcastingAbility as AbilityKey | undefined;
   const spellMod = spellcastingAbility
@@ -393,7 +418,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     s.level > 0 &&
     s.level <= effectiveMaxSpellLevel &&
     bookEnabled(s, enabledBooks) &&
-    s.classes.includes(classId) &&
+    s.classes.includes(spellListClassId) &&
     !spellbookIds.has(s.id) &&
     !pendingSpells.includes(s.id) &&
     (spellLevelFilter === 'all' || s.level === spellLevelFilter) &&
@@ -555,7 +580,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
             >
               <p className="text-sm font-bold text-white">Take Average</p>
               <p className="text-xs text-slate-400">
-                +{averagePerLevel} HP <span className="text-slate-500">({Math.floor(hitDie / 2) + 1} {conMod !== 0 ? `${conMod >= 0 ? '+' : ''}${conMod} Con` : ''})</span>
+                +{averagePerLevel} HP <span className="text-slate-500">({Math.floor(hitDie / 2) + 1}{conMod !== 0 ? ` ${conMod >= 0 ? '+' : ''}${conMod} Con` : ''}{subHPBonusPerLevel > 0 ? ` +${subHPBonusPerLevel} subclass` : ''})</span>
               </p>
             </button>
             <button
@@ -568,7 +593,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
               <p className="text-sm font-bold text-white">Roll d{hitDie}</p>
               <p className="text-xs text-slate-400">
                 {rollResult != null
-                  ? <>+{Math.max(1, rollResult + conMod)} HP <span className="text-slate-500">({rollResult} {conMod !== 0 ? `${conMod >= 0 ? '+' : ''}${conMod}` : ''})</span></>
+                  ? <>+{Math.max(1, rollResult + conMod) + subHPBonusPerLevel} HP <span className="text-slate-500">({rollResult}{conMod !== 0 ? ` ${conMod >= 0 ? '+' : ''}${conMod}` : ''}{subHPBonusPerLevel > 0 ? ` +${subHPBonusPerLevel} subclass` : ''})</span></>
                   : 'Click Roll to roll your hit die'}
               </p>
             </button>

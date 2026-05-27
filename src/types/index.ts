@@ -141,6 +141,12 @@ export interface Subclass {
   spellcastingType?: SpellcastingType;
   /** For subclass-granted spellcasting, the class whose spell list to use (e.g. 'wizard' for EK/AT). */
   spellListClassId?: string;
+  /** Cantrips known at each class level (index = level-1). For subclass-granted spellcasters (EK, AT). */
+  cantripsKnownByClassLevel?: number[];
+  /** Spells known at each class level (index = level-1). For subclass-granted spellcasters (EK, AT). */
+  spellsKnownByClassLevel?: number[];
+  /** Flat HP bonus gained per class level (e.g. 1 for Draconic Bloodline). */
+  hpBonusPerLevel?: number;
   resources?: ClassResourceDefinition[];
 }
 

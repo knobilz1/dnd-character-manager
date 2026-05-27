@@ -184,8 +184,11 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
     const effectiveCon = (draft.baseAbilityScores?.con ?? 10) + racialCon;
     const conMod = Math.floor((effectiveCon - 10) / 2);
     const level = primaryClass.level;
-    const lvl1HP = Math.max(1, hitDie + conMod);
-    const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
+    // Some subclasses grant bonus HP per class level (e.g. Draconic Bloodline: +1/level).
+    const primarySub = primaryClass.subclassId ? getSubclass(primaryClass.subclassId) : undefined;
+    const subHPBonusPerLevel = primarySub?.hpBonusPerLevel ?? 0;
+    const lvl1HP = Math.max(1, hitDie + conMod) + subHPBonusPerLevel;
+    const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + subHPBonusPerLevel;
     const maxHP = lvl1HP + (level - 1) * perLevelHP;
 
     // Compute pact magic if warlock

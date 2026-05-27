@@ -88,7 +88,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Improved Combat Superiority', level: 10, description: 'At 10th level, your superiority dice turn into d10s. At 18th level, they turn into d12s.' },
     { name: 'Relentless', level: 15, description: 'Starting at 15th level, when you roll initiative and have no superiority dice remaining, you regain 1 superiority die.' },
   ]},
-  { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', spellcastingType: 'third', spellListClassId: 'wizard', features: [
+  { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', spellcastingType: 'third', spellListClassId: 'wizard',
+    // PHB EK spellcasting table, indexed by fighter level (index = level-1)
+    cantripsKnownByClassLevel: [0,0,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3],
+    spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
+    features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.', },
     { name: 'Weapon Bond', level: 3, description: 'At 3rd level, you learn a ritual that creates a magical bond between yourself and one weapon.' },
     { name: 'War Magic', level: 7, description: 'Beginning at 7th level, when you use your action to cast a cantrip, you can make one weapon attack as a bonus action.' },
@@ -152,7 +156,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Impostor', level: 13, description: 'At 13th level, you gain the ability to unerringly mimic another person\'s speech, writing, and behavior.' },
     { name: 'Death Strike', level: 17, description: 'Starting at 17th level, you become a master of instant death. When you attack and hit a creature that is surprised, it must make a Constitution saving throw (DC 8 + your Dexterity modifier + your proficiency bonus). On a failed save, double the damage of your attack against the creature.' },
   ]},
-  { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', spellListClassId: 'wizard', features: [
+  { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', spellListClassId: 'wizard',
+    // PHB AT spellcasting table, indexed by rogue level (index = level-1)
+    cantripsKnownByClassLevel: [0,0,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+    spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
+    features: [
     { name: 'Spellcasting', level: 3, description: 'When you reach 3rd level, you augment your martial prowess with the ability to cast spells.' },
     { name: 'Mage Hand Legerdemain', level: 3, description: 'Starting at 3rd level, when you cast mage hand, you can make the spectral hand invisible, and you can perform the following additional tasks with it: stow one object the hand is holding in a container worn or carried by another creature; retrieve an object in a container worn or carried by another creature; use thieves\' tools to pick locks and disarm traps at range. Additionally, you can use a bonus action to take control of the hand when you don\'t have it active. When making a Dexterity (Sleight of Hand) check or a check to use thieves\' tools, you can use your spellcasting ability modifier instead of Dexterity.' },
     { name: 'Magical Ambush', level: 9, description: 'Starting at 9th level, if you are hidden from a creature when you cast a spell on it, the creature has disadvantage on any saving throw it makes against the spell this turn.' },
@@ -160,7 +168,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Spell Thief', level: 17, description: 'At 17th level, you gain the ability to magically steal the knowledge of how to cast a spell from another spellcaster.' },
   ]},
   // Sorcerer
-  { id: 'draconic-bloodline', name: 'Draconic Bloodline', classId: 'sorcerer', sourceBook: 'PHB', description: 'Your innate magic comes from draconic magic that was mingled with your blood or that of your ancestors. Most often, sorcerers with this origin trace their descent back to a mighty sorcerer of ancient times who made a bargain with a dragon or who might even have claimed a dragon parent.', features: [
+  { id: 'draconic-bloodline', name: 'Draconic Bloodline', classId: 'sorcerer', sourceBook: 'PHB', hpBonusPerLevel: 1, description: 'Your innate magic comes from draconic magic that was mingled with your blood or that of your ancestors. Most often, sorcerers with this origin trace their descent back to a mighty sorcerer of ancient times who made a bargain with a dragon or who might even have claimed a dragon parent.', features: [
     { name: 'Dragon Ancestor', level: 1, description: 'At 1st level, you choose one type of dragon as your ancestor. The damage type associated with each dragon is used by features you gain later.' },
     { name: 'Draconic Resilience', level: 1, description: 'As magic flows through your body, it causes physical traits of your dragon ancestors to emerge. At 1st level, your hit point maximum increases by 1 and increases by 1 again whenever you gain a level in this class. Additionally, parts of your skin are covered by a thin sheen of dragon-like scales. When you aren\'t wearing armor, your AC equals 13 + your Dexterity modifier.' },
     { name: 'Elemental Affinity', level: 6, description: 'Starting at 6th level, when you cast a spell that deals damage of the type associated with your draconic ancestry, you can add your Charisma modifier to one damage roll of that spell. At the same time, you can spend 1 sorcery point to gain resistance to that damage type for 1 hour.' },
