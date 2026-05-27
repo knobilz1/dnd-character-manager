@@ -1,151 +1,99 @@
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { Character } from '../types';
 import type { Snapshot } from '../store/useSnapshotStore';
 
-// ── Public client ID — safe to embed (no secret, PKCE only) ─────────────────
-// Injected at build time from .env — never committed to git.
-export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
-// Required by Google for Desktop app token exchange — not truly secret for installed apps.
-export const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET as string;
+// ── Note on credentials ───────────────────────────────────────────────────────
+// GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are embedded in the Rust binary at
+// compile time via env!() — they never appear in this JavaScript bundle.
+// All PKCE generation, token exchange, and refresh token handling happen in Rust.
+// ─────────────────────────────────────────────────────────────────────────────
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
 
-// ── PKCE helpers ─────────────────────────────────────────────────────────────
+// ── OAuth types ───────────────────────────────────────────────────────────────
 
-function base64url(buf: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-export async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
-  const array = new Uint8Array(64);
-  crypto.getRandomValues(array);
-  const verifier = base64url(array.buffer);
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  const challenge = base64url(digest);
-  return { verifier, challenge };
+export interface OAuthTokens {
+  accessToken: string;
+  expiresAt: number; // Date.now() + expires_in * 1000
 }
 
 // ── OAuth flow ────────────────────────────────────────────────────────────────
 
-export interface OAuthTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number; // Date.now() + expires_in * 1000
+/**
+ * Full authorization code + PKCE exchange, handled entirely in Rust.
+ *
+ * 1. Registers event listeners for `oauth-complete` / `oauth-error`
+ * 2. Calls `start_oauth_server` — Rust generates PKCE, starts a loopback listener,
+ *    and returns the Google auth URL
+ * 3. Opens the auth URL in the system browser
+ * 4. Rust's listener receives the callback, exchanges the code (using embedded
+ *    credentials), stores the refresh token in the OS keychain, and emits the event
+ * 5. Returns tokens on success; throws on error or timeout
+ */
+export async function connectGoogleDrive(): Promise<OAuthTokens> {
+  return new Promise<OAuthTokens>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error('OAuth timed out — please try connecting again')),
+      2 * 60 * 1000,
+    );
+
+    let unlistenComplete: (() => void) | null = null;
+    let unlistenError: (() => void) | null = null;
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      unlistenComplete?.();
+      unlistenError?.();
+    };
+
+    // Register listeners BEFORE invoking so we don't miss a fast event.
+    Promise.all([
+      listen<{ access_token: string; expires_at: number }>('oauth-complete', (event) => {
+        cleanup();
+        resolve({
+          accessToken: event.payload.access_token,
+          expiresAt: event.payload.expires_at,
+        });
+      }),
+      listen<string>('oauth-error', (event) => {
+        cleanup();
+        reject(new Error(event.payload));
+      }),
+    ])
+      .then(([ul1, ul2]) => {
+        unlistenComplete = ul1;
+        unlistenError = ul2;
+        // Rust generates PKCE + auth URL, starts listener thread, returns URL.
+        return invoke<string>('start_oauth_server');
+      })
+      .then(async (authUrl) => {
+        // Open the auth URL in the system browser.
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl(authUrl);
+      })
+      .catch((err) => {
+        cleanup();
+        reject(err);
+      });
+  });
 }
 
 /**
- * Full authorization code + PKCE exchange. Returns tokens on success.
- * Opens the system browser and waits for the loopback callback.
+ * Asks the Rust layer to refresh the access token using the refresh token stored
+ * in the OS keychain — credentials never touch JavaScript.
  */
-export async function connectGoogleDrive(): Promise<OAuthTokens> {
-  const { verifier, challenge } = await generatePkce();
-
-  // Start the loopback listener and get the port
-  const port: number = await invoke('start_oauth_server');
-
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
-
-  const authUrl =
-    'https://accounts.google.com/o/oauth2/v2/auth?' +
-    new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: SCOPES,
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      access_type: 'offline',
-      prompt: 'consent', // always request refresh_token
-    }).toString();
-
-  // Open the browser
-  const { openUrl } = await import('@tauri-apps/plugin-opener');
-  await openUrl(authUrl);
-
-  // Wait for the Rust listener to emit the code.
-  // listen() is async internally — chain .catch so any rejection is handled.
-  const code = await new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('OAuth timed out — please try connecting again')), 2 * 60 * 1000);
-    listen<string>('oauth-code', (event) => {
-      clearTimeout(timeout);
-      resolve(event.payload);
-    }).catch((err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
-
-  return exchangeCodeForTokens(code, verifier, redirectUri);
-}
-
-async function exchangeCodeForTokens(
-  code: string,
-  verifier: string,
-  redirectUri: string,
-): Promise<OAuthTokens> {
-  const res = await tauriFetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
-      code,
-      code_verifier: verifier,
-    }).toString(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token exchange failed: ${res.status} ${text}`);
-  }
-
-  const data = await res.json() as {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-  };
-
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-  };
-}
-
-/** Refreshes an expired access token using the stored refresh token. */
-export async function refreshAccessToken(refreshToken: string): Promise<{
+export async function refreshAccessToken(): Promise<{
   accessToken: string;
   expiresAt: number;
 }> {
-  const res = await tauriFetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }).toString(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Token refresh failed: ${res.status} ${text}`);
-  }
-
-  const data = await res.json() as { access_token: string; expires_in: number };
+  const result = await invoke<{ access_token: string; expires_at: number }>(
+    'get_fresh_access_token',
+  );
   return {
-    accessToken: data.access_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
+    accessToken: result.access_token,
+    expiresAt: result.expires_at,
   };
 }
 
@@ -383,7 +331,6 @@ export function snapshotAllForRestore(
 
 export interface TokenState {
   accessToken: string;
-  refreshToken: string;
   expiresAt: number;
 }
 

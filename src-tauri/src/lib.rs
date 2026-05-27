@@ -21,8 +21,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       oauth::start_oauth_server,
-      oauth::store_google_token,
-      oauth::get_google_token,
+      oauth::get_fresh_access_token,
       oauth::clear_google_token,
     ])
     .run(tauri::generate_context!())
