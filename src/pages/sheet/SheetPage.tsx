@@ -30,6 +30,7 @@ import { useDiceStore } from '../../store/useDiceStore';
 import type { RollDie } from '../../store/useDiceStore';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 import { getRace } from '../../data/races';
+import { ALL_METAMAGIC } from '../../data/metamagic';
 import { useSidebarStore, type SidebarModuleId } from '../../store/useSidebarStore';
 import { SidebarPanel } from './SidebarPanel';
 import { AlternateFormPanel } from '../../components/AlternateFormPanel';
@@ -804,6 +805,22 @@ const SUSTAINED_ABILITIES: Record<string, SustainedMeta> = {
   // ── Wizard / Bladesinging ──────────────────────────────────────────────────
   bladesong:        { durationRounds: 10, bg: 'bg-teal-950/60',   border: 'border-teal-500',   text: 'text-teal-300',   progressBg: 'bg-teal-400',   dotBg: 'bg-teal-300',   label: 'Bladesinging'     },
 };
+
+// ── Ki ability buttons ───────────────────────────────────────────────────────
+const KI_ABILITIES: { name: string; minLevel: number; cost: number; description: string }[] = [
+  { name: 'Flurry of Blows',  minLevel: 2,  cost: 1, description: 'Bonus action: make two unarmed strikes.' },
+  { name: 'Patient Defense',  minLevel: 2,  cost: 1, description: 'Bonus action: take the Dodge action.' },
+  { name: 'Step of the Wind', minLevel: 2,  cost: 1, description: 'Bonus action: Disengage or Dash; jump distance doubled.' },
+  { name: 'Stunning Strike',  minLevel: 5,  cost: 1, description: 'After hitting with a melee attack: the target makes a Con save (DC = spell save DC) or is stunned until end of your next turn.' },
+  { name: 'Diamond Soul',     minLevel: 14, cost: 1, description: 'Reaction: reroll a failed saving throw and take the new result.' },
+  { name: 'Empty Body',       minLevel: 18, cost: 4, description: 'Action: become invisible for 1 minute, gaining resistance to all damage except force.' },
+];
+
+/** Returns the numeric sorcery-point cost, or 'var' for Twinned Spell. */
+function parseSorceryCost(costStr: string): number | 'var' {
+  const m = costStr.match(/^(\d+)/);
+  return m ? parseInt(m[1], 10) : 'var';
+}
 
 // ── Combat Abilities Panel ───────────────────────────────────────────────────
 // Shows prepared/known spells, class features, and magic-item abilities at the
@@ -1982,6 +1999,81 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                       <span className="text-xs text-slate-400 self-center ml-1">{r.current} / ∞</span>
                     )}
                   </div>
+
+                  {/* ── Ki ability buttons (Monk) ─────────────────────── */}
+                  {r.key === 'ki' && (() => {
+                    const monkEntry = character.classes.find((c: any) => c.classId === 'monk');
+                    if (!monkEntry) return null;
+                    const monkLevel: number = monkEntry.level;
+                    const available = KI_ABILITIES.filter(a => a.minLevel <= monkLevel);
+                    if (!available.length) return null;
+                    return (
+                      <div className="mt-3 pt-2.5 border-t border-slate-700/50 space-y-1.5">
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Ki Abilities</p>
+                        {available.map(ability => {
+                          const canAfford = cappedCurrent >= ability.cost;
+                          return (
+                            <button
+                              key={ability.name}
+                              disabled={!canAfford}
+                              onClick={() => setResource('ki', cappedCurrent - ability.cost)}
+                              title={ability.description}
+                              className={cn(
+                                'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                                canAfford
+                                  ? 'bg-blue-900/30 border-blue-700/50 text-blue-200 hover:bg-blue-800/50 hover:border-blue-600/60'
+                                  : 'bg-slate-800/40 border-slate-700/30 text-slate-500 cursor-not-allowed',
+                              )}
+                            >
+                              <span>{ability.name}</span>
+                              <span className={cn('text-[10px] font-semibold', canAfford ? 'text-blue-400' : 'text-slate-600')}>
+                                {ability.cost} ki
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── Metamagic buttons (Sorcerer) ──────────────────── */}
+                  {r.key === 'sorcery_points' && (() => {
+                    const selectedIds: string[] = character.classOptions?.metamagic ?? [];
+                    if (!selectedIds.length) return null;
+                    const options = ALL_METAMAGIC.filter(m => selectedIds.includes(m.id));
+                    if (!options.length) return null;
+                    return (
+                      <div className="mt-3 pt-2.5 border-t border-slate-700/50 space-y-1.5">
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Metamagic</p>
+                        {options.map(m => {
+                          const numCost = parseSorceryCost(m.cost);
+                          const isVar = numCost === 'var';
+                          const canAfford = isVar || cappedCurrent >= numCost;
+                          return (
+                            <button
+                              key={m.id}
+                              disabled={!canAfford}
+                              onClick={() => { if (!isVar) setResource('sorcery_points', cappedCurrent - (numCost as number)); }}
+                              title={isVar ? `${m.description}\n\nCost varies by spell level — deduct manually.` : m.description}
+                              className={cn(
+                                'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                                isVar
+                                  ? 'bg-slate-800/40 border-slate-700/30 text-slate-400 cursor-default'
+                                  : canAfford
+                                    ? 'bg-purple-900/30 border-purple-700/50 text-purple-200 hover:bg-purple-800/50 hover:border-purple-600/60'
+                                    : 'bg-slate-800/40 border-slate-700/30 text-slate-500 cursor-not-allowed',
+                              )}
+                            >
+                              <span>{m.name}</span>
+                              <span className={cn('text-[10px] font-semibold', isVar ? 'text-slate-500' : canAfford ? 'text-purple-400' : 'text-slate-600')}>
+                                {isVar ? 'spell lvl' : `${numCost} SP`}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
