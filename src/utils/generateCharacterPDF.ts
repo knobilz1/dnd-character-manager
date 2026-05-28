@@ -4,14 +4,15 @@
  * No external template required — works immediately on every print.
  */
 
-import { PDFDocument, PDFPage, PDFFont, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, PDFPage, PDFFont, rgb, degrees, StandardFonts } from 'pdf-lib';
 import type { Character } from '../types';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getSpell } from '../data/spells';
-import { totalCharacterLevel } from '../data/mechanics';
-import { SKILL_ABILITY } from '../data/mechanics';
+import { totalCharacterLevel, SKILL_ABILITY } from '../data/mechanics';
+import { getRace } from '../data/races/index';
+import { getBackground } from '../data/backgrounds';
 
 // ── Page constants ────────────────────────────────────────────────────────────
 const PW = 612;   // US Letter width  (pt)
@@ -147,7 +148,7 @@ function drawSkillRow(pg: PDFPage, label: string, value: number, proficient: boo
   // Proficiency dot (and expert diamond)
   if (expert) {
     pg.drawRectangle({ x: x + 4, y: rowCY - 3.5, width: 7, height: 7,
-      color: C.dotOn, rotate: { type: 'degrees', angle: 45 } });
+      color: C.dotOn, rotate: degrees(45) });
   } else {
     drawDot(pg, x + 7, rowCY, proficient);
   }
@@ -161,7 +162,7 @@ function drawSkillRow(pg: PDFPage, label: string, value: number, proficient: boo
 
 // ── PAGE 1 ────────────────────────────────────────────────────────────────────
 
-function drawHeader(pg: PDFPage, character: Character, d: ReturnType<typeof computeCharacterDerived>,
+function drawHeader(pg: PDFPage, character: Character, _d: ReturnType<typeof computeCharacterDerived>,
   reg: PDFFont, bld: PDFFont) {
   const hH = 40;
   // Dark background
@@ -188,10 +189,9 @@ function drawInfoRow(pg: PDFPage, character: Character, d: ReturnType<typeof com
   const subStr = character.classes
     .map(cl => cl.subclassId ? getSubclass(cl.subclassId)?.name ?? '' : '')
     .filter(Boolean).join(', ');
-  const raceStr = character.raceName || character.raceId || '—';
-  const bgStr = character.background || '—';
+  const raceStr = getRace(character.raceId)?.name || character.raceId || '—';
+  const bgStr = getBackground(character.backgroundId)?.name || character.backgroundId || '—';
   const alignStr = character.alignment || '—';
-  const xpStr = character.xp != null ? String(character.xp) : '—';
   const profStr = `+${d.profBonus}`;
 
   const fields = [
@@ -284,13 +284,13 @@ function drawSkills(pg: PDFPage, d: ReturnType<typeof computeCharacterDerived>,
 }
 
 function drawPassivePerception(pg: PDFPage, d: ReturnType<typeof computeCharacterDerived>,
-  character: Character, x: number, topY: number, w: number, reg: PDFFont, bld: PDFFont) {
+  _character: Character, x: number, topY: number, w: number, reg: PDFFont, bld: PDFFont) {
   drawRect(pg, x, ry(topY, 24), w, 24, C.white, C.border, 0.6);
   drawText(pg, 'Passive Perception', x + 4, ty(topY + 4, 7), reg, 7, C.muted);
   drawText(pg, String(d.passivePerception), x + w - tw(String(d.passivePerception), bld, 12) - 6, ty(topY + 4, 12), bld, 12);
 }
 
-function drawCombatStats(pg: PDFPage, character: Character, d: ReturnType<typeof computeCharacterDerived>,
+function drawCombatStats(pg: PDFPage, _character: Character, d: ReturnType<typeof computeCharacterDerived>,
   x: number, topY: number, w: number, reg: PDFFont, bld: PDFFont) {
   const h = 54;
   const bw = Math.floor((w - 2 * 4) / 3);
@@ -311,7 +311,7 @@ function drawHP(pg: PDFPage, character: Character,
   drawStatBox(pg, 'Temporary HP',String(character.tempHP > 0 ? character.tempHP : '—'), x + 2*(bw+4), topY, bw, h, reg, bld, 17);
 }
 
-function drawHitDiceAndDeathSaves(pg: PDFPage, character: Character, d: ReturnType<typeof computeCharacterDerived>,
+function drawHitDiceAndDeathSaves(pg: PDFPage, character: Character, _d: ReturnType<typeof computeCharacterDerived>,
   x: number, topY: number, w: number, reg: PDFFont, bld: PDFFont) {
   const h = 46;
 
@@ -354,7 +354,6 @@ function drawAttacks(pg: PDFPage, character: Character, d: ReturnType<typeof com
   // Column header
   const nameW = Math.floor(w * 0.42);
   const atkW  = Math.floor(w * 0.20);
-  const dmgW  = w - nameW - atkW - 2;
   drawRect(pg, x, ry(topY, 11), w, 11, C.fill);
   drawText(pg, 'NAME',        x + 3,              ty(topY + 2, 6.5), reg, 6.5, C.muted);
   drawText(pg, 'ATK BONUS',   x + nameW + 2,      ty(topY + 2, 6.5), reg, 6.5, C.muted);
@@ -363,7 +362,7 @@ function drawAttacks(pg: PDFPage, character: Character, d: ReturnType<typeof com
 
   // Weapons (up to 4 equipped)
   const weapons = (character.inventory ?? [])
-    .filter(it => it.equipped && (it.category === 'weapon' || it.category === 'gear') && it.damage);
+    .filter(it => it.equipped && (it.category === 'weapon' || it.category === 'gear') && (it as any).damage);
   const rows = Math.min(weapons.length + 1, 4); // at least 1 blank row
 
   for (let i = 0; i < rows; i++) {
@@ -395,15 +394,16 @@ function drawAttacks(pg: PDFPage, character: Character, d: ReturnType<typeof com
 }
 
 function drawPersonalitySection(pg: PDFPage, character: Character,
-  x: number, topY: number, w: number, h: number, reg: PDFFont, bld: PDFFont) {
+  x: number, topY: number, w: number, h: number, reg: PDFFont, _bld: PDFFont) {
   const halfW  = Math.floor((w - 4) / 2);
   const halfH  = Math.floor((h - 4) / 2);
 
+  const bg = getBackground(character.backgroundId);
   const boxes = [
-    { label: 'Personality Traits', value: character.personalityTraits ?? '', x: x,            yTop: topY },
-    { label: 'Ideals',             value: character.ideals ?? '',           x: x + halfW + 4, yTop: topY },
-    { label: 'Bonds',              value: character.bonds ?? '',            x: x,             yTop: topY + halfH + 4 },
-    { label: 'Flaws',              value: character.flaws ?? '',            x: x + halfW + 4, yTop: topY + halfH + 4 },
+    { label: 'Personality Traits', value: bg?.personalityTraits?.[0] ?? character.notes ?? '', x: x,            yTop: topY },
+    { label: 'Ideals',             value: bg?.ideals?.[0] ?? '',           x: x + halfW + 4, yTop: topY },
+    { label: 'Bonds',              value: bg?.bonds?.[0] ?? '',            x: x,             yTop: topY + halfH + 4 },
+    { label: 'Flaws',              value: bg?.flaws?.[0] ?? '',            x: x + halfW + 4, yTop: topY + halfH + 4 },
   ];
 
   boxes.forEach(b => {
@@ -417,7 +417,7 @@ function drawPersonalitySection(pg: PDFPage, character: Character,
 }
 
 function drawFeaturesSection(pg: PDFPage, character: Character,
-  x: number, topY: number, w: number, h: number, reg: PDFFont, bld: PDFFont) {
+  x: number, topY: number, w: number, h: number, reg: PDFFont, _bld: PDFFont) {
   drawSecLabel(pg, 'Features & Traits', x, topY, w, reg);
   topY += 11;
   drawRect(pg, x, ry(topY, h - 11), w, h - 11, C.white, C.border, 0.6);
@@ -431,7 +431,7 @@ function drawFeaturesSection(pg: PDFPage, character: Character,
     ];
   });
 
-  const featureText = features.join(' · ') || (character.features || '');
+  const featureText = features.join(' · ');
   const lineH = 9;
   const maxL = Math.floor((h - 14) / lineH);
   drawWrappedText(pg, featureText, x + 4, topY + 4, w - 8, reg, 7.5, lineH, C.ink, maxL);
@@ -512,7 +512,7 @@ function drawPage1(pg: PDFPage, character: Character, d: ReturnType<typeof compu
 
   // 4. Attacks: 11 label + 11 header + 4*20 weapons + 22 spell info = ~124 (max)
   const spellInfoH = d.spellSaveDC > 0 ? 22 : 0;
-  const weaponRows = Math.min((character.inventory ?? []).filter(it => it.equipped && it.damage).length + 1, 4);
+  const weaponRows = Math.min((character.inventory ?? []).filter(it => it.equipped && (it as any).damage).length + 1, 4);
   const attacksH = 11 + 11 + weaponRows * 20 + spellInfoH;
   drawAttacks(pg, character, d, rightX, ry2, rightW, reg, bld);
   ry2 += attacksH + 6;
@@ -626,7 +626,6 @@ function drawSpellPage(pg: PDFPage, character: Character, d: ReturnType<typeof c
 
       const spellBg = idx % 2 === 0 ? C.white : C.fill;
       drawRect(pg, sx, ry(sTopY, rowH), colW, rowH, spellBg);
-      const maxNameW = colW - 40;
       const nameStr = spell.name.length > 24 ? spell.name.slice(0, 23) + '…' : spell.name;
       drawText(pg, nameStr, sx + 3, ty(sTopY + 2, 8), reg, 8);
       // Tags: C = concentration, R = ritual

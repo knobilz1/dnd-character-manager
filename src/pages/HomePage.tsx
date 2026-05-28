@@ -122,8 +122,6 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     if (selected.length === 0) return;
     setPrinting(true);
     try {
-      const templateBytes = await getTemplateBytes();
-
       if (selected.length === 1) {
         const filled = await printCharacterToPDF(selected[0]);
         const outPath = await save({
@@ -144,6 +142,8 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
       }
     } catch (err) {
       console.error('Print failed:', err);
+      const msg = err instanceof Error ? err.message : 'PDF generation failed';
+      alert(`Print failed: ${msg}`);
     } finally {
       setPrinting(false);
     }

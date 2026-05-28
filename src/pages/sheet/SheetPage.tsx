@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { printCharacterToPDF, pickAndStoreTemplatePath, clearCustomTemplatePath, getCustomTemplatePath } from '../../utils/pdfTemplate';
+import { printCharacterToPDF, getCustomTemplatePath } from '../../utils/pdfTemplate';
 import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap, Eye, Printer } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
@@ -101,6 +101,7 @@ export function SheetPage() {
   const [levelUpOpen, setLevelUpOpen] = React.useState(false);
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const [printError, setPrintError] = React.useState<string | null>(null);
   const [wildShapeModalOpen, setWildShapeModalOpen] = React.useState(false);
   const portraitInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -274,24 +275,34 @@ export function SheetPage() {
             <History size={18} />
           </button>
           <DiceRoller exhaustionLevel={exhaustionLevel} />
-          <button
-            onClick={async () => {
-              try {
-                const filled = await printCharacterToPDF(character);
-                const outPath = await saveDialog({
-                  defaultPath: `${character.name || 'character'}-sheet.pdf`,
-                  filters: [{ name: 'PDF', extensions: ['pdf'] }],
-                });
-                if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
-              } catch (err) {
-                console.error('Print failed:', err);
-              }
-            }}
-            className="p-1.5 rounded text-slate-500 hover:text-emerald-400 transition-colors"
-            title={getCustomTemplatePath() ? 'Print (using custom template)' : 'Print character sheet as PDF'}
-          >
-            <Printer size={18} />
-          </button>
+          <div className="relative">
+            <button
+              onClick={async () => {
+                setPrintError(null);
+                try {
+                  const filled = await printCharacterToPDF(character);
+                  const outPath = await saveDialog({
+                    defaultPath: `${character.name || 'character'}-sheet.pdf`,
+                    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+                  });
+                  if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
+                } catch (err) {
+                  console.error('Print failed:', err);
+                  setPrintError(err instanceof Error ? err.message : 'PDF generation failed');
+                }
+              }}
+              className="p-1.5 rounded text-slate-500 hover:text-emerald-400 transition-colors"
+              title={getCustomTemplatePath() ? 'Print (using custom template)' : 'Print character sheet as PDF'}
+            >
+              <Printer size={18} />
+            </button>
+            {printError && (
+              <div className="absolute right-0 top-8 z-50 w-64 rounded bg-red-900 border border-red-700 p-2 text-xs text-red-200 shadow-lg">
+                {printError}
+                <button className="ml-2 text-red-400 hover:text-white" onClick={() => setPrintError(null)}>✕</button>
+              </div>
+            )}
+          </div>
           <button
             onClick={async () => {
               const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
