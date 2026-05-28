@@ -4,7 +4,7 @@ import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw,
 import { DriveSyncButton } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
 import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
-import { writeTextFile, readFile, writeBinaryFile } from '@tauri-apps/plugin-fs';
+import { writeTextFile, readFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { fillCharacterPDF } from '../utils/fillCharacterPDF';
 import { useLibraryStore } from '../store/useLibraryStore';
@@ -140,7 +140,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             defaultPath: `${selected[0].name}-sheet.pdf`,
             filters: [{ name: 'PDF', extensions: ['pdf'] }],
           });
-          if (outPath) { await writeBinaryFile(outPath, filled); await openPath(outPath); setPrintOpen(false); }
+          if (outPath) { await writeFile(outPath, filled); await openPath(outPath); setPrintOpen(false); }
         } else {
           // Multiple characters: save each as its own PDF in a folder the user picks
           // For simplicity, generate one PDF per character, named individually
@@ -150,7 +150,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
               defaultPath: `${char.name}-sheet.pdf`,
               filters: [{ name: 'PDF', extensions: ['pdf'] }],
             });
-            if (outPath) { await writeBinaryFile(outPath, filled); await openPath(outPath); }
+            if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
           }
           setPrintOpen(false);
         }

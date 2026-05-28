@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { save as saveDialog, open as openDialog } from '@tauri-apps/plugin-dialog';
-import { writeTextFile, readFile, writeBinaryFile } from '@tauri-apps/plugin-fs';
+import { writeTextFile, readFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { generateCharacterSheetHTML } from '../../utils/printSheet';
 import { fillCharacterPDF } from '../../utils/fillCharacterPDF';
@@ -293,7 +293,7 @@ export function SheetPage() {
                     filters: [{ name: 'PDF', extensions: ['pdf'] }],
                   });
                   if (outPath) {
-                    await writeBinaryFile(outPath, filled);
+                    await writeFile(outPath, filled);
                     await openPath(outPath);
                   }
                 } catch (err) {

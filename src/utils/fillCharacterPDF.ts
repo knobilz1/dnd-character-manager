@@ -15,7 +15,6 @@ import { ALL_SUBCLASSES } from '../data/subclasses';
 import { getBackground } from '../data/backgrounds';
 import { getSpell } from '../data/spells';
 import { lookupWeapon, damageLine } from '../data/weapons';
-import { totalCharacterLevel } from '../data/mechanics';
 
 function fmt(n: number) { return n >= 0 ? `+${n}` : String(n); }
 
@@ -121,7 +120,6 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
     ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId)
     : null;
   const bg = getBackground(character.backgroundId);
-  const totalLevel = totalCharacterLevel(character.classes);
 
   const multiclassLabel = character.classes.length > 1
     ? character.classes.map(cl => `${getClass(cl.classId)?.name ?? cl.classId} ${cl.level}`).join(' / ')
@@ -175,13 +173,12 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
   // Hit Dice
   const hdStr = character.classes.map(cl => {
     const def = getClass(cl.classId);
-    const used = (character.hitDiceUsed ?? {})[cl.classId] ?? 0;
     return `d${def?.hitDie ?? '?'}`;
   }).join('/');
   const hdTotal = character.classes.map(cl => {
-    const used = (character.hitDiceUsed ?? {})[cl.classId] ?? 0;
+    const spent = (character.hitDiceUsed ?? {})[cl.classId] ?? 0;
     const def = getClass(cl.classId);
-    return `${cl.level - used}/${cl.level}d${def?.hitDie ?? '?'}`;
+    return `${cl.level - spent}/${cl.level}d${def?.hitDie ?? '?'}`;
   }).join(', ');
   setTextField(form, 'HD', hdStr);
   setTextField(form, 'HDTotal', hdTotal);
