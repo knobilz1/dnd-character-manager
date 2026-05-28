@@ -6,8 +6,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { fillCharacterPDF } from '../utils/fillCharacterPDF';
-import { getTemplateBytes } from '../utils/pdfTemplate';
+import { printCharacterToPDF, pickAndStoreTemplatePath, clearCustomTemplatePath, getCustomTemplatePath } from '../utils/pdfTemplate';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog, ThemeToggleButton } from '../components/ui';
 import { getClass } from '../data/classes';
@@ -17,7 +16,6 @@ import type { Character } from '../types';
 import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useThemeStore } from '../store/useThemeStore';
-import { generateMultiCharacterSheetHTML } from '../utils/printSheet';
 
 async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
@@ -126,36 +124,23 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     try {
       const templateBytes = await getTemplateBytes();
 
-      if (templateBytes) {
-        if (selected.length === 1) {
-          const filled = await fillCharacterPDF(selected[0], templateBytes);
+      if (selected.length === 1) {
+        const filled = await printCharacterToPDF(selected[0]);
+        const outPath = await save({
+          defaultPath: `${selected[0].name}-sheet.pdf`,
+          filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        });
+        if (outPath) { await writeFile(outPath, filled); await openPath(outPath); setPrintOpen(false); }
+      } else {
+        for (const char of selected) {
+          const filled = await printCharacterToPDF(char);
           const outPath = await save({
-            defaultPath: `${selected[0].name}-sheet.pdf`,
+            defaultPath: `${char.name}-sheet.pdf`,
             filters: [{ name: 'PDF', extensions: ['pdf'] }],
           });
-          if (outPath) { await writeFile(outPath, filled); await openPath(outPath); setPrintOpen(false); }
-        } else {
-          for (const char of selected) {
-            const filled = await fillCharacterPDF(char, templateBytes);
-            const outPath = await save({
-              defaultPath: `${char.name}-sheet.pdf`,
-              filters: [{ name: 'PDF', extensions: ['pdf'] }],
-            });
-            if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
-          }
-          setPrintOpen(false);
+          if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
         }
-      } else {
-        // User cancelled template picker — fall back to combined HTML
-        const html = generateMultiCharacterSheetHTML(selected);
-        const defaultName = selected.length === 1
-          ? `${selected[0].name}-sheet.html`
-          : `party-sheets-${selected.length}.html`;
-        const path = await save({
-          defaultPath: defaultName,
-          filters: [{ name: 'HTML', extensions: ['html'] }],
-        });
-        if (path) { await writeTextFile(path, html); await openPath(path); setPrintOpen(false); }
+        setPrintOpen(false);
       }
     } catch (err) {
       console.error('Print failed:', err);
@@ -309,7 +294,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
       {/* Print picker dialog */}
       <Dialog open={printOpen} onClose={() => setPrintOpen(false)} title="Print Character Sheets">
         <p className="text-slate-400 text-sm mb-4">
-          Choose which characters to include. All selected sheets will be saved to a single HTML file you can print from your browser.
+          Choose which characters to print. Each character is saved as a separate PDF.
         </p>
 
         {/* Select all toggle */}
@@ -360,6 +345,30 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
               </label>
             );
           })}
+        </div>
+
+        {/* Template switcher */}
+        <div className="flex items-center gap-2 mb-4 p-2 rounded-lg bg-slate-800/50 border border-slate-700">
+          <span className="text-xs text-slate-400 flex-1">
+            Template: <span className="text-slate-200 font-medium">
+              {getCustomTemplatePath() ? '📄 Custom (WotC PDF)' : '✨ Built-in'}
+            </span>
+          </span>
+          {getCustomTemplatePath() ? (
+            <button
+              onClick={() => { clearCustomTemplatePath(); }}
+              className="text-xs text-slate-400 hover:text-red-400 transition-colors"
+            >
+              Use built-in
+            </button>
+          ) : (
+            <button
+              onClick={async () => { await pickAndStoreTemplatePath(); }}
+              className="text-xs text-slate-400 hover:text-emerald-400 transition-colors"
+            >
+              Use custom template…
+            </button>
+          )}
         </div>
 
         <div className="flex gap-3 justify-end items-center">
