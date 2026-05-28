@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer } from 'lucide-react';
 import { DriveSyncButton } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
-import { save } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
+import { writeTextFile, readFile, writeBinaryFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
+import { fillCharacterPDF } from '../utils/fillCharacterPDF';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog, ThemeToggleButton } from '../components/ui';
 import { getClass } from '../data/classes';
@@ -122,19 +123,51 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     if (selected.length === 0) return;
     setPrinting(true);
     try {
-      const html = generateMultiCharacterSheetHTML(selected);
-      const defaultName = selected.length === 1
-        ? `${selected[0].name}-sheet.html`
-        : `party-sheets-${selected.length}.html`;
-      const path = await save({
-        defaultPath: defaultName,
-        filters: [{ name: 'HTML', extensions: ['html'] }],
+      // Ask for PDF template first
+      const templatePath = await openDialog({
+        title: 'Select D&D 5E Character Sheet PDF template',
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        multiple: false,
+        directory: false,
       });
-      if (path) {
-        await writeTextFile(path, html);
-        await openPath(path);
-        setPrintOpen(false);
+
+      if (templatePath && typeof templatePath === 'string') {
+        // Fill each character into their own PDF (merged into one if possible, else save individually)
+        const templateBytes = await readFile(templatePath);
+        if (selected.length === 1) {
+          const filled = await fillCharacterPDF(selected[0], templateBytes);
+          const outPath = await save({
+            defaultPath: `${selected[0].name}-sheet.pdf`,
+            filters: [{ name: 'PDF', extensions: ['pdf'] }],
+          });
+          if (outPath) { await writeBinaryFile(outPath, filled); await openPath(outPath); setPrintOpen(false); }
+        } else {
+          // Multiple characters: save each as its own PDF in a folder the user picks
+          // For simplicity, generate one PDF per character, named individually
+          for (const char of selected) {
+            const filled = await fillCharacterPDF(char, templateBytes);
+            const outPath = await save({
+              defaultPath: `${char.name}-sheet.pdf`,
+              filters: [{ name: 'PDF', extensions: ['pdf'] }],
+            });
+            if (outPath) { await writeBinaryFile(outPath, filled); await openPath(outPath); }
+          }
+          setPrintOpen(false);
+        }
+      } else {
+        // User cancelled template picker — fall back to combined HTML
+        const html = generateMultiCharacterSheetHTML(selected);
+        const defaultName = selected.length === 1
+          ? `${selected[0].name}-sheet.html`
+          : `party-sheets-${selected.length}.html`;
+        const path = await save({
+          defaultPath: defaultName,
+          filters: [{ name: 'HTML', extensions: ['html'] }],
+        });
+        if (path) { await writeTextFile(path, html); await openPath(path); setPrintOpen(false); }
       }
+    } catch (err) {
+      console.error('Print failed:', err);
     } finally {
       setPrinting(false);
     }
