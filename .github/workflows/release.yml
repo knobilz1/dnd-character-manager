@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  build:
     permissions:
       contents: write
     strategy:
@@ -88,4 +88,82 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
+
+  publish-updater:
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys
+          from datetime import datetime, timezone
+
+          tag = os.environ['TAG']
+          version = tag.lstrip('v')
+          repo = os.environ['GITHUB_REPOSITORY']
+          base_url = f"https://github.com/{repo}/releases/download/{tag}"
+
+          # Download all .sig files from the release
+          os.makedirs('sigs', exist_ok=True)
+          result = subprocess.run(
+              ['gh', 'release', 'download', tag, '--repo', repo, '--pattern', '*.sig', '--dir', 'sigs'],
+              capture_output=True, text=True
+          )
+          if result.returncode != 0:
+              print(f"Warning: {result.stderr}", file=sys.stderr)
+
+          def read_sig(filename):
+              path = f"sigs/{filename}"
+              return open(path).read().strip() if os.path.exists(path) else ""
+
+          aarch64_sig = read_sig("Tavern.Sheet_aarch64.app.tar.gz.sig")
+          x64_sig     = read_sig("Tavern.Sheet_x64.app.tar.gz.sig")
+          win_sig     = read_sig(f"Tavern.Sheet_{version}_x64_en-US.msi.sig")
+
+          pub_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+          data = {
+              "version": version,
+              "notes": f"See release notes at https://github.com/{repo}/releases/tag/{tag}",
+              "pub_date": pub_date,
+              "platforms": {}
+          }
+
+          if aarch64_sig:
+              url = f"{base_url}/Tavern.Sheet_aarch64.app.tar.gz"
+              data["platforms"]["darwin-aarch64"]     = {"signature": aarch64_sig, "url": url}
+              data["platforms"]["darwin-aarch64-app"] = {"signature": aarch64_sig, "url": url}
+
+          if x64_sig:
+              url = f"{base_url}/Tavern.Sheet_x64.app.tar.gz"
+              data["platforms"]["darwin-x86_64"]     = {"signature": x64_sig, "url": url}
+              data["platforms"]["darwin-x86_64-app"] = {"signature": x64_sig, "url": url}
+
+          if win_sig:
+              url = f"{base_url}/Tavern.Sheet_{version}_x64_en-US.msi"
+              data["platforms"]["windows-x86_64"]     = {"signature": win_sig, "url": url}
+              data["platforms"]["windows-x86_64-msi"] = {"signature": win_sig, "url": url}
+
+          if not data["platforms"]:
+              print("ERROR: No signature files found — builds likely failed", file=sys.stderr)
+              sys.exit(1)
+
+          with open('latest.json', 'w') as f:
+              json.dump(data, f, indent=2)
+
+          print(json.dumps(data, indent=2))
+
+          subprocess.run(
+              ['gh', 'release', 'upload', tag, 'latest.json', '--repo', repo, '--clobber'],
+              check=True
+          )
+          print(f"\nSuccessfully uploaded latest.json for {tag}")
+          PYEOF
