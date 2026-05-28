@@ -1,10 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer } from 'lucide-react';
 import { DriveSyncButton } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog, ThemeToggleButton } from '../components/ui';
 import { getClass } from '../data/classes';
@@ -14,6 +15,7 @@ import type { Character } from '../types';
 import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useThemeStore } from '../store/useThemeStore';
+import { generateMultiCharacterSheetHTML } from '../utils/printSheet';
 
 async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
@@ -36,6 +38,9 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const [importError, setImportError] = React.useState<string | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
   const [appVersion, setAppVersion] = React.useState<string | null>(null);
+  const [printOpen, setPrintOpen] = React.useState(false);
+  const [printSelected, setPrintSelected] = React.useState<Set<string>>(new Set());
+  const [printing, setPrinting] = React.useState(false);
 
   React.useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -90,6 +95,51 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     e.target.value = '';
   }
 
+  function openPrintModal() {
+    // Pre-select all characters when opening the modal
+    setPrintSelected(new Set(characters.map(c => c.id)));
+    setPrintOpen(true);
+  }
+
+  function togglePrintChar(id: string) {
+    setPrintSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function togglePrintAll() {
+    if (printSelected.size === characters.length) {
+      setPrintSelected(new Set());
+    } else {
+      setPrintSelected(new Set(characters.map(c => c.id)));
+    }
+  }
+
+  async function handlePrint() {
+    const selected = characters.filter(c => printSelected.has(c.id));
+    if (selected.length === 0) return;
+    setPrinting(true);
+    try {
+      const html = generateMultiCharacterSheetHTML(selected);
+      const defaultName = selected.length === 1
+        ? `${selected[0].name}-sheet.html`
+        : `party-sheets-${selected.length}.html`;
+      const path = await save({
+        defaultPath: defaultName,
+        filters: [{ name: 'HTML', extensions: ['html'] }],
+      });
+      if (path) {
+        await writeTextFile(path, html);
+        await openPath(path);
+        setPrintOpen(false);
+      }
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 p-6">
       <div className="max-w-5xl mx-auto">
@@ -115,6 +165,12 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
               </button>
             )}
             <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+            {characters.length > 0 && (
+              <Button variant="outline" size="lg" onClick={openPrintModal} title="Print character sheets">
+                <Printer size={18} />
+                Print
+              </Button>
+            )}
             <Button variant="outline" size="lg" onClick={() => importRef.current?.click()}>
               <Upload size={18} />
               Import
@@ -225,6 +281,79 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           </div>
         )}
       </div>
+
+      {/* Print picker dialog */}
+      <Dialog open={printOpen} onClose={() => setPrintOpen(false)} title="Print Character Sheets">
+        <p className="text-slate-400 text-sm mb-4">
+          Choose which characters to include. All selected sheets will be saved to a single HTML file you can print from your browser.
+        </p>
+
+        {/* Select all toggle */}
+        <button
+          onClick={togglePrintAll}
+          className="text-xs text-slate-400 hover:text-slate-200 mb-3 transition-colors"
+        >
+          {printSelected.size === characters.length ? 'Deselect all' : 'Select all'}
+        </button>
+
+        {/* Character list */}
+        <div className="flex flex-col gap-2 mb-6 max-h-80 overflow-y-auto pr-1">
+          {characters.map(character => {
+            const level = totalCharacterLevel(character.classes);
+            const primaryClass = character.classes[0];
+            const classDef = primaryClass ? getClass(primaryClass.classId) : null;
+            const race = getRace(character.raceId);
+            const checked = printSelected.has(character.id);
+
+            return (
+              <label
+                key={character.id}
+                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all select-none ${
+                  checked
+                    ? 'border-red-500/50 bg-red-950/20'
+                    : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => togglePrintChar(character.id)}
+                  className="accent-red-500 w-4 h-4 shrink-0"
+                />
+                {character.portrait && (
+                  <img
+                    src={character.portrait}
+                    alt=""
+                    className="w-9 h-9 rounded-md object-cover border border-slate-600 shrink-0"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-white text-sm truncate">{character.name || 'Unnamed'}</div>
+                  <div className="text-xs text-slate-400">
+                    Lv.{level} {race?.name ?? ''} {classDef?.name ?? ''}
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-3 justify-end items-center">
+          <span className="text-xs text-slate-500 mr-auto">
+            {printSelected.size} of {characters.length} selected
+          </span>
+          <Button variant="secondary" onClick={() => setPrintOpen(false)} disabled={printing}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handlePrint}
+            disabled={printSelected.size === 0 || printing}
+          >
+            <Printer size={16} />
+            {printing ? 'Generating…' : `Print ${printSelected.size > 0 ? `(${printSelected.size})` : ''}`}
+          </Button>
+        </div>
+      </Dialog>
 
       {/* Delete confirm dialog */}
       <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} title="Delete Character?">

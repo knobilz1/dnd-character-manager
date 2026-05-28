@@ -1,9 +1,10 @@
 /**
- * printSheet.ts — generates a self-contained, print-optimised HTML character sheet.
+ * printSheet.ts — self-contained HTML character sheet matching the
+ * official WotC D&D 5E character sheet layout (3 pages).
  *
- * Call generateCharacterSheetHTML() with the character + derived values already
- * computed in SheetPage, then writeTextFile + openPath to let the user print/save-as-PDF
- * from their default browser.
+ * Page 1: Ability scores · saves · skills · combat stats · attacks · personality / features
+ * Page 2: Spells (only if character has spells)
+ * Page 3: Campaign journal + notes (only if content exists)
  */
 import type { Character } from '../types';
 import { getRace } from '../data/races';
@@ -13,6 +14,7 @@ import { getBackground } from '../data/backgrounds';
 import { getSpell } from '../data/spells';
 import { lookupWeapon, damageLine } from '../data/weapons';
 import { totalCharacterLevel } from '../data/mechanics';
+import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -24,8 +26,15 @@ function esc(s: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
-function pip(filled: boolean) {
-  return `<span class="pip${filled ? ' pip-filled' : ''}">${filled ? '●' : '○'}</span>`;
+function dsPips(total: number, filled: number): string {
+  return Array.from({ length: total }, (_, i) =>
+    `<span class="ds-pip${i < filled ? ' dsp-filled' : ''}"></span>`
+  ).join('');
+}
+function emptyRows(n: number, cols: number): string {
+  return Array.from({ length: n }, () =>
+    `<tr class="empty-row">${Array.from({ length: cols }, () => '<td></td>').join('')}</tr>`
+  ).join('');
 }
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
@@ -34,305 +43,1091 @@ const ABILITY_LABELS: Record<string, string> = {
   int: 'Intelligence', wis: 'Wisdom', cha: 'Charisma',
 };
 const SKILL_LIST: { name: string; ability: string }[] = [
-  { name: 'Acrobatics', ability: 'dex' }, { name: 'Animal Handling', ability: 'wis' },
-  { name: 'Arcana', ability: 'int' },      { name: 'Athletics', ability: 'str' },
-  { name: 'Deception', ability: 'cha' },   { name: 'History', ability: 'int' },
-  { name: 'Insight', ability: 'wis' },     { name: 'Intimidation', ability: 'cha' },
-  { name: 'Investigation', ability: 'int' },{ name: 'Medicine', ability: 'wis' },
-  { name: 'Nature', ability: 'int' },      { name: 'Perception', ability: 'wis' },
-  { name: 'Performance', ability: 'cha' }, { name: 'Persuasion', ability: 'cha' },
-  { name: 'Religion', ability: 'int' },    { name: 'Sleight of Hand', ability: 'dex' },
-  { name: 'Stealth', ability: 'dex' },     { name: 'Survival', ability: 'wis' },
+  { name: 'Acrobatics',      ability: 'Dex' },
+  { name: 'Animal Handling', ability: 'Wis' },
+  { name: 'Arcana',          ability: 'Int' },
+  { name: 'Athletics',       ability: 'Str' },
+  { name: 'Deception',       ability: 'Cha' },
+  { name: 'History',         ability: 'Int' },
+  { name: 'Insight',         ability: 'Wis' },
+  { name: 'Intimidation',    ability: 'Cha' },
+  { name: 'Investigation',   ability: 'Int' },
+  { name: 'Medicine',        ability: 'Wis' },
+  { name: 'Nature',          ability: 'Int' },
+  { name: 'Perception',      ability: 'Wis' },
+  { name: 'Performance',     ability: 'Cha' },
+  { name: 'Persuasion',      ability: 'Cha' },
+  { name: 'Religion',        ability: 'Int' },
+  { name: 'Sleight of Hand', ability: 'Dex' },
+  { name: 'Stealth',         ability: 'Dex' },
+  { name: 'Survival',        ability: 'Wis' },
 ];
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 
 const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
+
   body {
-    font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
-    font-size: 9pt;
-    color: #1a1a1a;
+    font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+    font-size: 8pt;
+    color: #111;
     background: #fff;
-    padding: 0.4in;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  h1 { font-size: 18pt; font-weight: 700; letter-spacing: 0.5px; }
-  h2 { font-size: 7pt; font-weight: 700; text-transform: uppercase;
-       letter-spacing: 1.5px; color: #5a0000; border-bottom: 1px solid #5a0000;
-       padding-bottom: 2px; margin-bottom: 6px; }
-  h3 { font-size: 8pt; font-weight: 700; margin-bottom: 3px; }
-  .page { max-width: 100%; }
 
-  /* ── Top header ── */
-  .header { display: flex; align-items: flex-end; gap: 18px; margin-bottom: 12px;
-            border-bottom: 2px solid #5a0000; padding-bottom: 8px; }
-  .header .char-name { flex: 1; }
-  .header .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px;
-                  font-size: 8pt; }
-  .meta-field { display: flex; flex-direction: column; }
-  .meta-field .label { font-size: 7pt; color: #666; text-transform: uppercase; letter-spacing: 1px; }
-  .meta-field .val { font-weight: 600; border-bottom: 1px solid #bbb; min-width: 90px; }
-
-  /* ── Three-column body ── */
-  .body { display: grid; grid-template-columns: 120px 1fr 1fr; gap: 10px; }
-
-  /* ── Ability scores ── */
-  .abilities { display: flex; flex-direction: column; gap: 4px; }
-  .ability-box {
-    border: 1.5px solid #5a0000; border-radius: 5px; text-align: center;
-    padding: 4px 2px; background: #fffaf5;
+  /* ── Pages ── */
+  .page {
+    width: 7.9in;
+    margin: 0 auto;
+    padding: 0.32in 0.28in 0.28in;
+    background: #fff;
   }
-  .ability-box .ab-name { font-size: 6pt; text-transform: uppercase; letter-spacing: 1px; color: #5a0000; }
-  .ability-box .ab-mod  { font-size: 14pt; font-weight: 700; line-height: 1.1; }
-  .ability-box .ab-score{ font-size: 7pt; color: #555; }
+  .page-break { page-break-before: always; }
 
-  /* ── Left column sub-sections ── */
-  .left-section { border: 1px solid #c0a060; border-radius: 4px; padding: 5px 6px;
-                  margin-top: 6px; background: #fffaf5; }
-  .proficiency-bonus { text-align: center; border: 1.5px solid #5a0000; border-radius: 4px;
-                       padding: 4px; margin-bottom: 6px; background: #fffaf5; }
-  .proficiency-bonus .pb-val { font-size: 14pt; font-weight: 700; }
-  .proficiency-bonus .pb-label { font-size: 6.5pt; text-transform: uppercase; letter-spacing: 1px; color: #5a0000; }
+  /* ── Shared panel style (label below, inside border) ── */
+  .panel {
+    border: 1.5px solid #2a2a2a;
+    border-radius: 6px;
+    background: #f9f9f9;
+    position: relative;
+  }
+  .panel > .panel-label {
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1.1px;
+    background: #f9f9f9;
+    padding: 0 5px;
+    white-space: nowrap;
+    color: #111;
+  }
 
-  /* ── Saving throws / skills ── */
-  .check-row { display: flex; align-items: center; gap: 4px; margin-bottom: 1.5px; font-size: 8pt; }
-  .check-row .pip { font-size: 9pt; line-height: 1; }
-  .pip-filled { color: #5a0000; }
-  .check-row .bonus { margin-left: auto; font-weight: 600; min-width: 22px; text-align: right; }
-  .check-row .skill-ab { font-size: 6.5pt; color: #777; margin-left: 2px; }
+  /* ── HEADER (page 1) ── */
+  .sheet-header {
+    display: flex;
+    align-items: stretch;
+    margin-bottom: 9px;
+    border-bottom: 3px solid #222;
+    padding-bottom: 7px;
+  }
+  .name-banner {
+    flex: 0 0 230px;
+    border: 2px solid #222;
+    border-radius: 5px 0 0 5px;
+    padding: 4px 10px 5px;
+    background: #f5f5f5;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .name-val {
+    font-family: 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+    font-size: 17pt;
+    font-weight: 700;
+    border-bottom: 1.5px solid #555;
+    min-height: 22px;
+    line-height: 1.15;
+    letter-spacing: 0.3px;
+  }
+  .name-lbl {
+    font-size: 5.5pt;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #555;
+    margin-top: 3px;
+  }
+  .meta-grid {
+    flex: 1;
+    border: 2px solid #222;
+    border-left: none;
+    border-radius: 0 5px 5px 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .mc {
+    padding: 3px 8px;
+    border-right: 1px solid #ccc;
+    border-bottom: 1px solid #ccc;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .mc:nth-child(3n) { border-right: none; }
+  .mc:nth-child(n+4) { border-bottom: none; }
+  .mc .mc-v {
+    font-size: 9pt;
+    font-weight: 600;
+    border-bottom: 1px solid #999;
+    min-height: 14px;
+    line-height: 1.3;
+  }
+  .mc .mc-l {
+    font-size: 5.5pt;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #555;
+    margin-top: 2px;
+  }
 
-  /* ── Middle / right column boxes ── */
-  .stat-row { display: flex; gap: 6px; margin-bottom: 8px; }
-  .stat-box { border: 1.5px solid #5a0000; border-radius: 4px; text-align: center;
-              padding: 4px 8px; background: #fffaf5; flex: 1; }
-  .stat-box .s-label { font-size: 6pt; text-transform: uppercase; letter-spacing: 1px; color: #5a0000; }
-  .stat-box .s-val   { font-size: 13pt; font-weight: 700; }
+  /* ── MAIN BODY GRID ── */
+  .sheet-body {
+    display: grid;
+    grid-template-columns: 86px 192px 1fr 185px;
+    gap: 5px;
+    align-items: start;
+  }
 
-  .hp-section { border: 1.5px solid #5a0000; border-radius: 4px; padding: 6px;
-                background: #fffaf5; margin-bottom: 8px; }
-  .hp-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-  .hp-field { text-align: center; }
-  .hp-field .hf-label { font-size: 6.5pt; text-transform: uppercase; letter-spacing: 1px; color: #5a0000; }
-  .hp-field .hf-val   { font-size: 14pt; font-weight: 700; }
+  /* ── ABILITY SCORES (col A) ── */
+  .ability-col { display: flex; flex-direction: column; gap: 7px; }
 
-  .death-row { display: flex; align-items: center; gap: 8px; font-size: 8pt; margin-top: 6px; }
-  .death-label { font-size: 7pt; text-transform: uppercase; letter-spacing: 1px; color: #5a0000; }
+  .ability-block {
+    text-align: center;
+    position: relative;
+    padding-bottom: 14px;
+  }
+  .ab-name {
+    display: block;
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: #dcdcdc;
+    border: 1.5px solid #333;
+    border-bottom: none;
+    border-radius: 5px 5px 0 0;
+    padding: 2px 2px;
+    line-height: 1.2;
+  }
+  .ab-frame {
+    border: 1.5px solid #333;
+    border-radius: 0 0 7px 7px;
+    padding: 4px 2px 20px;
+    background: #fff;
+    position: relative;
+  }
+  /* decorative inner line */
+  .ab-frame::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 0.5px solid #ccc;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  .ab-score {
+    display: block;
+    font-size: 23pt;
+    font-weight: 900;
+    line-height: 1;
+  }
+  .ab-mod {
+    position: absolute;
+    bottom: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 33px;
+    height: 33px;
+    border-radius: 50%;
+    border: 1.5px solid #333;
+    background: #fff;
+    font-size: 10.5pt;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    letter-spacing: -0.5px;
+  }
 
-  /* ── Attacks table ── */
-  .attacks-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-top: 4px; }
-  .attacks-table th { font-size: 7pt; text-transform: uppercase; letter-spacing: 1px;
-                      color: #5a0000; border-bottom: 1px solid #5a0000; padding: 2px 3px; text-align: left; }
-  .attacks-table td { padding: 2px 3px; border-bottom: 1px solid #e0d0b0; }
-  .attacks-table tr:last-child td { border-bottom: none; }
+  /* ── LEFT STATS (col B) ── */
+  .left-stats-col { display: flex; flex-direction: column; gap: 5px; }
 
-  /* ── Spell slots ── */
-  .slot-grid { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
-  .slot-level { display: flex; align-items: center; gap: 4px; font-size: 8pt; }
-  .slot-pips { display: flex; gap: 2px; }
-  .slot-pip { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #5a0000;
-              display: inline-block; background: #fffaf5; }
-  .slot-pip.used { background: #5a0000; }
+  /* Inspiration + Prof Bonus row */
+  .insp-prof-row { display: flex; gap: 4px; }
 
-  /* ── Features / traits ── */
-  .feature-item { margin-bottom: 5px; }
-  .feature-item .fi-name { font-size: 8pt; font-weight: 700; }
-  .feature-item .fi-source { font-size: 7pt; color: #777; }
-  .feature-item .fi-desc { font-size: 7.5pt; color: #333; margin-top: 1px; line-height: 1.4;
-                           max-height: 3.5em; overflow: hidden; }
+  .insp-box {
+    flex: 1;
+    border: 1.5px solid #333;
+    border-radius: 5px;
+    padding: 3px 6px;
+    background: #f5f5f5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .insp-check {
+    width: 22px; height: 18px;
+    border: 1.5px solid #444;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13pt;
+    font-weight: 900;
+  }
+  .insp-lbl {
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    line-height: 1.2;
+    text-align: right;
+  }
 
-  /* ── Notes / journal ── */
-  .notes-box { border: 1px solid #c0a060; border-radius: 4px; padding: 6px;
-               background: #fffaf5; min-height: 80px; font-size: 8pt; white-space: pre-wrap;
-               line-height: 1.5; }
-  .journal-entry { border-bottom: 1px solid #e0d0b0; padding-bottom: 6px; margin-bottom: 6px; }
-  .journal-entry:last-child { border-bottom: none; }
-  .je-header { font-size: 7.5pt; font-weight: 700; margin-bottom: 2px; }
-  .je-meta { font-size: 7pt; color: #777; margin-bottom: 3px; }
-  .je-content { font-size: 8pt; white-space: pre-wrap; line-height: 1.4; }
+  .prof-box {
+    flex: 1;
+    border: 1.5px solid #333;
+    border-radius: 5px;
+    padding: 3px 6px;
+    background: #f5f5f5;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    justify-content: space-between;
+  }
+  .prof-circle {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    border: 1.5px solid #333;
+    background: #fff;
+    font-size: 12pt;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .prof-lbl {
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    line-height: 1.2;
+    text-align: right;
+    flex: 1;
+  }
 
-  /* ── Spells page ── */
-  .page-break { page-break-before: always; padding-top: 0.4in; }
-  .spells-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .spell-level-section { margin-bottom: 8px; }
-  .spell-row { display: flex; align-items: baseline; gap: 6px; font-size: 8pt;
-               padding: 2px 0; border-bottom: 1px solid #f0e8d8; }
-  .spell-row:last-child { border-bottom: none; }
-  .spell-row .sp-name { flex: 1; }
-  .spell-row .sp-school { font-size: 7pt; color: #777; }
-  .spell-row .sp-conc { font-size: 7pt; color: #b06000; }
-  .spell-stats { display: flex; gap: 10px; margin-bottom: 8px; font-size: 8pt; }
-  .spell-stat { display: flex; flex-direction: column; align-items: center;
-                border: 1px solid #c0a060; border-radius: 4px; padding: 3px 8px; background: #fffaf5; }
-  .spell-stat .ss-label { font-size: 6.5pt; text-transform: uppercase; letter-spacing: 1px; color: #5a0000; }
-  .spell-stat .ss-val   { font-size: 11pt; font-weight: 700; }
+  /* Saving throws / skills panels */
+  .saves-panel, .skills-panel {
+    border: 1.5px solid #333;
+    border-radius: 7px;
+    padding: 5px 7px 14px;
+    background: #f5f5f5;
+    position: relative;
+  }
+  .saves-panel .pl, .skills-panel .pl {
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: #f5f5f5;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+
+  /* Check rows */
+  .ck-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-bottom: 0.8px;
+    min-height: 10.5px;
+  }
+  .pip-o {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    border: 1px solid #333;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .pip-o.filled { background: #333; }
+  .ck-v {
+    width: 17px;
+    font-size: 6.5pt;
+    font-weight: 600;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .ck-n { font-size: 6.5pt; flex: 1; }
+  .ck-ab { font-size: 6pt; color: #666; font-style: italic; }
+
+  /* Passive perception */
+  .passive-row {
+    border: 1.5px solid #333;
+    border-radius: 5px;
+    padding: 3px 8px;
+    background: #f5f5f5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 2px;
+    margin-bottom: 5px;
+  }
+  .passive-v { font-size: 13pt; font-weight: 700; }
+  .passive-lbl { font-size: 5pt; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 800; text-align: right; }
+
+  /* Other proficiencies panel */
+  .other-prof-panel {
+    border: 1.5px solid #333;
+    border-radius: 7px;
+    padding: 5px 7px 14px;
+    background: #f5f5f5;
+    position: relative;
+    flex: 1;
+    font-size: 6.5pt;
+    line-height: 1.55;
+    min-height: 70px;
+  }
+  .other-prof-panel .pl {
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: #f5f5f5;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+
+  /* ── COMBAT (col C) ── */
+  .combat-col { display: flex; flex-direction: column; gap: 4px; }
+
+  .combat-top-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 2px;
+  }
+
+  /* Shield AC */
+  .ac-shield-wrap {
+    width: 60px; height: 68px;
+    flex-shrink: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ac-shield-wrap svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .ac-inner {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding-top: 6px;
+  }
+  .ac-lbl { font-size: 5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.3px; line-height: 1.2; }
+  .ac-v { font-size: 18pt; font-weight: 900; line-height: 1; }
+
+  /* Initiative / Speed boxes */
+  .c-stat {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    background: #f5f5f5;
+    text-align: center;
+    padding: 5px 4px 16px;
+    flex: 1;
+    position: relative;
+  }
+  .c-stat-v { font-size: 15pt; font-weight: 700; line-height: 1; display: block; }
+  .c-stat-lbl {
+    position: absolute;
+    bottom: 4px; left: 0; right: 0;
+    font-size: 5.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  /* HP block */
+  .hp-block {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    background: #f5f5f5;
+    overflow: hidden;
+    margin-bottom: 2px;
+  }
+  .hp-max-line {
+    padding: 3px 8px;
+    border-bottom: 1px solid #ccc;
+    font-size: 6.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .hp-max-line .hpmax-v {
+    font-size: 9pt;
+    font-weight: 700;
+    margin-left: 5px;
+    border-bottom: 1px solid #888;
+    padding-bottom: 1px;
+  }
+  .hp-current-area {
+    padding: 7px 8px 20px;
+    text-align: center;
+    position: relative;
+    border-bottom: 1px dashed #bbb;
+  }
+  .hp-big { font-size: 24pt; font-weight: 900; line-height: 1; display: block; }
+  .hp-area-lbl {
+    position: absolute;
+    bottom: 4px; left: 0; right: 0;
+    font-size: 5.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    font-weight: 800;
+    text-align: center;
+  }
+  .hp-temp-area {
+    padding: 5px 8px 18px;
+    text-align: center;
+    position: relative;
+  }
+  .hp-temp-v { font-size: 18pt; font-weight: 700; line-height: 1; display: block; color: #777; }
+  .hp-temp-v.has-temp { color: #111; }
+
+  /* Hit Dice + Death Saves */
+  .hd-ds-row { display: flex; gap: 4px; margin-bottom: 3px; }
+  .hd-box {
+    flex: 1;
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 5px 7px 15px;
+    background: #f5f5f5;
+    position: relative;
+    font-size: 7.5pt;
+    font-weight: 600;
+  }
+  .ds-box {
+    flex: 1;
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 5px 7px 15px;
+    background: #f5f5f5;
+    position: relative;
+  }
+  .ds-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+  }
+  .ds-row-lbl {
+    font-size: 6.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    width: 52px;
+    flex-shrink: 0;
+  }
+  .ds-pip {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    border: 1.5px solid #333;
+    background: #fff;
+    display: inline-block;
+    margin-left: 2px;
+  }
+  .dsp-filled { background: #333 !important; }
+  .box-lbl {
+    position: absolute;
+    bottom: -7px; left: 50%; right: auto;
+    transform: translateX(-50%);
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    background: #f5f5f5;
+    padding: 0 5px;
+    white-space: nowrap;
+  }
+
+  /* Attacks & Spellcasting */
+  .attacks-section {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 5px 5px 16px;
+    background: #f5f5f5;
+    position: relative;
+    margin-bottom: 5px;
+  }
+  .atk-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7pt;
+  }
+  .atk-table th {
+    font-size: 5.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 800;
+    border-bottom: 1px solid #333;
+    padding: 1px 4px 2px;
+    text-align: left;
+    background: #e8e8e8;
+  }
+  .atk-table td { padding: 2.5px 4px; border-bottom: 0.5px solid #ddd; }
+  .atk-table tr:last-child td { border-bottom: none; }
+  .atk-table .empty-row td { height: 14px; background: #f2f2f2; }
+
+  /* Equipment */
+  .equip-section {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 5px 7px 15px;
+    background: #f5f5f5;
+    position: relative;
+    flex: 1;
+    font-size: 7pt;
+    line-height: 1.6;
+  }
+
+  /* Currency row */
+  .currency-row {
+    display: flex;
+    gap: 5px;
+    margin-top: 5px;
+    flex-wrap: wrap;
+  }
+  .coin {
+    text-align: center;
+    border: 1px solid #aaa;
+    border-radius: 50%;
+    width: 28px; height: 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 5.5pt;
+    line-height: 1.1;
+    background: #fff;
+  }
+  .coin .coin-v { font-size: 7.5pt; font-weight: 700; }
+
+  /* ── RIGHT COLUMN (col D) ── */
+  .right-col { display: flex; flex-direction: column; gap: 5px; }
+
+  .pers-box {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 5px 7px 14px;
+    background: #f5f5f5;
+    position: relative;
+    font-size: 7pt;
+    line-height: 1.45;
+    min-height: 50px;
+  }
+  .pers-box .pl {
+    position: absolute;
+    bottom: -7px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    background: #f5f5f5;
+    padding: 0 5px;
+    white-space: nowrap;
+  }
+  .features-box {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 5px 7px 14px;
+    background: #f5f5f5;
+    position: relative;
+    flex: 1;
+    font-size: 7pt;
+    line-height: 1.4;
+    min-height: 60px;
+  }
+  .features-box .pl {
+    position: absolute;
+    bottom: -7px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 5.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    background: #f5f5f5;
+    padding: 0 5px;
+    white-space: nowrap;
+  }
+  .ft-item { margin-bottom: 5px; }
+  .ft-name { font-size: 7.5pt; font-weight: 700; }
+  .ft-src { font-size: 6.5pt; color: #555; font-style: italic; margin-left: 3px; }
+  .ft-desc { font-size: 6.5pt; color: #333; line-height: 1.35; max-height: 4.5em; overflow: hidden; margin-top: 1px; }
+
+  /* ── SPELL PAGE ── */
+  .spell-header {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 8px;
+    border-bottom: 3px solid #222;
+    padding-bottom: 6px;
+  }
+  .spell-class-box {
+    flex: 0 0 210px;
+    border: 1.5px solid #333;
+    border-radius: 5px 0 0 5px;
+    padding: 4px 10px;
+    background: #f5f5f5;
+  }
+  .sc-lbl { font-size: 5.5pt; text-transform: uppercase; letter-spacing: 1px; font-weight: 800; color: #555; }
+  .sc-v { font-size: 12pt; font-weight: 700; border-bottom: 1px solid #888; line-height: 1.25; }
+  .spell-top-stats {
+    flex: 1;
+    border: 1.5px solid #333;
+    border-left: none;
+    border-radius: 0 5px 5px 0;
+    display: flex;
+  }
+  .sts-box {
+    flex: 1;
+    text-align: center;
+    padding: 4px 6px;
+    border-right: 1px solid #ccc;
+  }
+  .sts-box:last-child { border-right: none; }
+  .sts-v { font-size: 15pt; font-weight: 900; display: block; line-height: 1; }
+  .sts-l { font-size: 5.5pt; text-transform: uppercase; letter-spacing: 0.3px; font-weight: 800; display: block; margin-top: 3px; color: #444; }
+
+  .spell-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 5px;
+    align-items: start;
+  }
+  .sl-col { display: flex; flex-direction: column; gap: 6px; }
+  .sl-section {}
+
+  .sl-header {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-bottom: 3px;
+  }
+  .sl-badge {
+    border: 2px solid #333;
+    border-radius: 3px;
+    width: 19px; height: 19px;
+    font-size: 9.5pt; font-weight: 900;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    background: #fff;
+  }
+  .sl-banner {
+    flex: 1;
+    border: 1.5px solid #333;
+    border-radius: 4px;
+    padding: 2px 5px;
+    background: #f5f5f5;
+    font-size: 5.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 16px;
+  }
+  .sl-slots { font-size: 6pt; color: #444; }
+  .sl-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    border-bottom: 0.5px solid #ddd;
+    padding: 1px 0;
+    min-height: 11px;
+  }
+  .sl-row:last-child { border-bottom: none; }
+  .sl-pip {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    border: 1px solid #333;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .sl-pip.prepared { background: #333; }
+  .sl-name { font-size: 7pt; flex: 1; }
+  .sl-conc { font-size: 6pt; color: #666; margin-left: 2px; }
+  .sl-school { font-size: 6pt; color: #888; }
+
+  /* ── JOURNAL PAGE ── */
+  .j-section-title {
+    font-size: 12pt;
+    font-weight: 700;
+    border-bottom: 2px solid #333;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+    font-family: 'Palatino Linotype', Georgia, serif;
+    letter-spacing: 0.3px;
+  }
+  .je {
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+  }
+  .je:last-child { border-bottom: none; }
+  .je-hdr { font-size: 9pt; font-weight: 700; margin-bottom: 2px; }
+  .je-sub { font-size: 7pt; color: #666; margin-bottom: 3px; }
+  .je-body { font-size: 8pt; white-space: pre-wrap; line-height: 1.45; }
+  .notes-panel {
+    border: 1.5px solid #333;
+    border-radius: 6px;
+    padding: 8px;
+    background: #f5f5f5;
+    font-size: 8pt;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    min-height: 100px;
+    margin-top: 10px;
+  }
+
+  /* ── Footer ── */
+  .sheet-footer {
+    text-align: right;
+    font-size: 6pt;
+    color: #aaa;
+    margin-top: 8px;
+    padding-top: 4px;
+    border-top: 0.5px solid #ddd;
+  }
 
   @media print {
-    @page { margin: 0.4in; size: letter; }
+    @page { margin: 0; size: letter portrait; }
     body { padding: 0; }
-    .no-print { display: none; }
+    .page { padding: 0.32in 0.28in; }
   }
 `;
 
-// ── section builders ──────────────────────────────────────────────────────────
+// ── Section builders ──────────────────────────────────────────────────────────
 
-function buildAbilityScores(mods: Record<string, number>, finalScores: Record<string, number>): string {
-  return `
-    <div class="abilities">
-      ${ABILITY_KEYS.map(k => `
-        <div class="ability-box">
-          <div class="ab-name">${ABILITY_LABELS[k].slice(0, 3)}</div>
-          <div class="ab-mod">${fmt(mods[k] ?? 0)}</div>
-          <div class="ab-score">${finalScores[k] ?? 10}</div>
+function buildAbilityCol(mods: Record<string, number>, finalScores: Record<string, number>): string {
+  return `<div class="ability-col">` +
+    ABILITY_KEYS.map(k => `
+      <div class="ability-block">
+        <span class="ab-name">${ABILITY_LABELS[k].toUpperCase()}</span>
+        <div class="ab-frame">
+          <span class="ab-score">${finalScores[k] ?? 10}</span>
         </div>
-      `).join('')}
-    </div>
-  `;
+        <div class="ab-mod">${fmt(mods[k] ?? 0)}</div>
+      </div>
+    `).join('') +
+  `</div>`;
 }
 
-function buildSavingThrows(
+function buildLeftStatsCol(
+  mods: Record<string, number>,
+  profBonus: number,
+  inspiration: boolean,
   savingThrows: Record<string, number>,
-  profSet: Set<string>,
-): string {
-  return `
-    <div class="left-section">
-      <h2>Saving Throws</h2>
-      ${ABILITY_KEYS.map(k => `
-        <div class="check-row">
-          ${pip(profSet.has(k))}
-          <span>${ABILITY_LABELS[k].slice(0, 3)}</span>
-          <span class="bonus">${fmt(savingThrows[k] ?? 0)}</span>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
-function buildSkills(
+  savingProfSet: Set<string>,
   skills: Record<string, number>,
-  profSet: Set<string>,
+  skillProfSet: Set<string>,
+  passivePerception: number,
+  proficiencies: string[],
+  languages: string[],
 ): string {
+  const savingRows = ABILITY_KEYS.map(k => `
+    <div class="ck-row">
+      <span class="pip-o${savingProfSet.has(k) ? ' filled' : ''}"></span>
+      <span class="ck-v">${fmt(savingThrows[k] ?? 0)}</span>
+      <span class="ck-n">${ABILITY_LABELS[k].slice(0, 3)}</span>
+    </div>
+  `).join('');
+
+  const skillRows = SKILL_LIST.map(s => `
+    <div class="ck-row">
+      <span class="pip-o${skillProfSet.has(s.name) ? ' filled' : ''}"></span>
+      <span class="ck-v">${fmt(skills[s.name] ?? mods[s.ability.toLowerCase()] ?? 0)}</span>
+      <span class="ck-n">${esc(s.name)} <span class="ck-ab">(${s.ability})</span></span>
+    </div>
+  `).join('');
+
+  const profText = proficiencies.length
+    ? `<div style="margin-bottom:3px;"><span style="font-weight:700;">Proficiencies:</span> ${proficiencies.map(esc).join(', ')}</div>` : '';
+  const langText = languages.length
+    ? `<div><span style="font-weight:700;">Languages:</span> ${languages.map(esc).join(', ')}</div>` : '';
+
   return `
-    <div class="left-section">
-      <h2>Skills</h2>
-      ${SKILL_LIST.map(s => `
-        <div class="check-row">
-          ${pip(profSet.has(s.name))}
-          <span>${esc(s.name)}</span>
-          <span class="skill-ab">(${s.ability.toUpperCase()})</span>
-          <span class="bonus">${fmt(skills[s.name] ?? 0)}</span>
+    <div class="left-stats-col">
+      <!-- Inspiration + Prof Bonus -->
+      <div class="insp-prof-row">
+        <div class="insp-box">
+          <div class="insp-check">${inspiration ? '★' : ''}</div>
+          <div class="insp-lbl">Inspiration</div>
         </div>
-      `).join('')}
+        <div class="prof-box">
+          <div class="prof-circle">${fmt(profBonus)}</div>
+          <div class="prof-lbl">Proficiency Bonus</div>
+        </div>
+      </div>
+
+      <!-- Saving Throws -->
+      <div class="saves-panel" style="margin-bottom:7px;">
+        ${savingRows}
+        <span class="pl">Saving Throws</span>
+      </div>
+
+      <!-- Skills -->
+      <div class="skills-panel" style="margin-bottom:7px;">
+        ${skillRows}
+        <span class="pl">Skills</span>
+      </div>
+
+      <!-- Passive Perception -->
+      <div class="passive-row">
+        <span class="passive-v">${passivePerception}</span>
+        <span class="passive-lbl">Passive Wisdom<br/>(Perception)</span>
+      </div>
+
+      <!-- Other Proficiencies & Languages -->
+      <div class="other-prof-panel">
+        ${profText}${langText}
+        <span class="pl">Other Proficiencies &amp; Languages</span>
+      </div>
     </div>
   `;
 }
 
-function buildAttacksTable(character: Character, mods: Record<string, number>, profBonus: number): string {
-  const equipped = (character.inventory ?? []).filter((i: any) => i.equipped && i.category === 'weapon');
-  if (equipped.length === 0) return '';
+function buildCombatCol(
+  character: Character,
+  ac: number,
+  initiative: number,
+  speed: number,
+  mods: Record<string, number>,
+  profBonus: number,
+  slotTotals: Record<number, number>,
+): string {
+  const dSucc = character.deathSaves?.successes ?? 0;
+  const dFail = character.deathSaves?.failures ?? 0;
+  const tempHP = character.tempHP ?? 0;
 
-  const rows = equipped.map((item: any) => {
+  // Hit dice
+  const hitDiceStr = character.classes.map(cl => {
+    const def = getClass(cl.classId);
+    const used = (character.hitDiceUsed ?? {})[cl.classId] ?? 0;
+    return `${cl.level - used}d${def?.hitDie ?? '?'} (${cl.level - used}/${cl.level})`;
+  }).join(', ');
+
+  // Attacks
+  const equipped = (character.inventory ?? []).filter((i: any) => i.equipped && i.category === 'weapon');
+  const atkRows = equipped.slice(0, 3).map((item: any) => {
     const w = lookupWeapon(item.name);
-    const abilityMod = w?.ability === 'finesse' ? Math.max(mods.str ?? 0, mods.dex ?? 0)
+    const abilMod = w?.ability === 'finesse'
+      ? Math.max(mods.str ?? 0, mods.dex ?? 0)
       : (w?.ability === 'dex' || w?.ranged) ? (mods.dex ?? 0) : (mods.str ?? 0);
-    const toHit = abilityMod + profBonus;
-    const dmg = w ? damageLine(w.damageDice, abilityMod) : '—';
+    const toHit = abilMod + profBonus;
+    const dmg = w ? damageLine(w.damageDice, abilMod) : '—';
     const type = w?.damageType ?? '—';
-    return `
-      <tr>
-        <td>${esc(item.name)}</td>
-        <td>${fmt(toHit)}</td>
-        <td>${esc(dmg)}</td>
-        <td>${esc(type)}</td>
-      </tr>
+    return `<tr><td>${esc(item.name)}</td><td>${fmt(toHit)}</td><td>${esc(dmg)} ${esc(type)}</td></tr>`;
+  }).join('');
+  const emptyAtk = emptyRows(Math.max(0, 3 - equipped.slice(0, 3).length), 3);
+
+  // Spell slots
+  const hasSlots = Object.values(slotTotals).some(v => v > 0) || character.pactMagic;
+  let slotHtml = '';
+  if (hasSlots) {
+    const slotRows: string[] = [];
+    if (character.pactMagic) {
+      const pm = character.pactMagic;
+      const pips = Array.from({ length: pm.slotsTotal }, (_, i) =>
+        `<span class="ds-pip${i < pm.slotsUsed ? ' dsp-filled' : ''}"></span>`
+      ).join('');
+      slotRows.push(`<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;font-size:7pt;"><strong>Pact (L${pm.slotLevel})</strong> ${pips}</div>`);
+    }
+    for (let lvl = 1; lvl <= 9; lvl++) {
+      const total = slotTotals[lvl] ?? 0;
+      if (!total) continue;
+      const used = (character.spellSlotsUsed ?? {})[lvl as 1] ?? 0;
+      const pips = Array.from({ length: total }, (_, i) =>
+        `<span class="ds-pip${i < used ? ' dsp-filled' : ''}"></span>`
+      ).join('');
+      slotRows.push(`<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;font-size:7pt;"><strong>L${lvl}</strong> ${pips}</div>`);
+    }
+    slotHtml = `
+      <div class="equip-section" style="margin-bottom:5px;">
+        ${slotRows.join('')}
+        <span class="box-lbl">Spell Slots</span>
+      </div>
     `;
+  }
+
+  // Equipment / inventory
+  const allItems = (character.inventory ?? []);
+  const itemLines = allItems.slice(0, 20).map((i: any) =>
+    `${esc(i.name)}${(i.quantity ?? 1) > 1 ? ` ×${i.quantity}` : ''}${i.equipped ? ' ✦' : ''}`
+  ).join('<br/>');
+
+  const currencies = character.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  const coinDisplay = (['pp', 'gp', 'ep', 'sp', 'cp'] as const).map(c => {
+    const val = currencies[c] ?? 0;
+    return `<div class="coin"><span class="coin-v">${val}</span><span>${c.toUpperCase()}</span></div>`;
   }).join('');
 
   return `
-    <div style="margin-bottom:8px;">
-      <h2>Attacks &amp; Spellcasting</h2>
-      <table class="attacks-table">
-        <thead><tr><th>Name</th><th>ATK Bonus</th><th>Damage</th><th>Type</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <div class="combat-col">
+      <!-- AC / Initiative / Speed -->
+      <div class="combat-top-row">
+        <!-- Shield AC -->
+        <div class="ac-shield-wrap">
+          <svg viewBox="0 0 60 68" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 14 L30 3 L56 14 L56 46 L30 65 L4 46 Z"
+              fill="#f5f5f5" stroke="#333" stroke-width="2"/>
+            <path d="M7 15.5 L30 5.5 L53 15.5 L53 45 L30 62 L7 45 Z"
+              fill="none" stroke="#aaa" stroke-width="0.8"/>
+          </svg>
+          <div class="ac-inner">
+            <div class="ac-lbl">Armor<br/>Class</div>
+            <div class="ac-v">${ac}</div>
+          </div>
+        </div>
+
+        <!-- Initiative -->
+        <div class="c-stat">
+          <span class="c-stat-v">${fmt(initiative)}</span>
+          <span class="c-stat-lbl">Initiative</span>
+        </div>
+
+        <!-- Speed -->
+        <div class="c-stat">
+          <span class="c-stat-v">${speed}</span>
+          <span class="c-stat-lbl">Speed</span>
+        </div>
+      </div>
+
+      <!-- HP -->
+      <div class="hp-block">
+        <div class="hp-max-line">
+          Hit Point Maximum <span class="hpmax-v">${character.maxHP}</span>
+        </div>
+        <div class="hp-current-area">
+          <span class="hp-big">${character.currentHP}</span>
+          <span class="hp-area-lbl">Current Hit Points</span>
+        </div>
+        <div class="hp-temp-area">
+          <span class="hp-temp-v${tempHP > 0 ? ' has-temp' : ''}">${tempHP > 0 ? tempHP : '—'}</span>
+          <span class="hp-area-lbl">Temporary Hit Points</span>
+        </div>
+      </div>
+
+      <!-- Hit Dice + Death Saves -->
+      <div class="hd-ds-row">
+        <div class="hd-box">
+          <div style="font-size:6.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:2px;">Total</div>
+          <div>${esc(hitDiceStr)}</div>
+          <span class="box-lbl">Hit Dice</span>
+        </div>
+        <div class="ds-box">
+          <div class="ds-row">
+            <span class="ds-row-lbl">Successes</span>
+            ${dsPips(3, dSucc)}
+          </div>
+          <div class="ds-row">
+            <span class="ds-row-lbl">Failures</span>
+            ${dsPips(3, dFail)}
+          </div>
+          <span class="box-lbl">Death Saves</span>
+        </div>
+      </div>
+
+      <!-- Attacks & Spellcasting -->
+      <div class="attacks-section">
+        <table class="atk-table">
+          <thead>
+            <tr><th>Name</th><th>ATK Bonus</th><th>Damage / Type</th></tr>
+          </thead>
+          <tbody>
+            ${atkRows}
+            ${emptyAtk}
+          </tbody>
+        </table>
+        <span class="box-lbl">Attacks &amp; Spellcasting</span>
+      </div>
+
+      ${slotHtml}
+
+      <!-- Equipment -->
+      <div class="equip-section" style="flex:1;">
+        <div>${itemLines || '<span style="color:#bbb;">—</span>'}</div>
+        <div class="currency-row">${coinDisplay}</div>
+        <span class="box-lbl">Equipment</span>
+      </div>
     </div>
   `;
 }
 
-function buildSpellSlots(
-  slotTotals: Record<number, number>,
-  spellSlotsUsed: Record<number, number>,
-  pactMagic: any,
-): string {
-  const hasSlots = Object.values(slotTotals).some(v => (v as number) > 0) || pactMagic;
-  if (!hasSlots) return '';
+function buildRightCol(character: Character, classDef: any, subclass: any, bg: any): string {
+  // Personality boxes: pull from background tables if no custom data
+  const bgPT = (bg?.personalityTraits ?? []).slice(0, 1).join(' ');
+  const bgI  = (bg?.ideals ?? []).slice(0, 1).join(' ');
+  const bgB  = (bg?.bonds ?? []).slice(0, 1).join(' ');
+  const bgF  = (bg?.flaws ?? []).slice(0, 1).join(' ');
 
-  const rows: string[] = [];
-
-  if (pactMagic) {
-    const pips = Array.from({ length: pactMagic.slotsTotal }, (_, i) =>
-      `<span class="slot-pip${i < pactMagic.slotsUsed ? ' used' : ''}"></span>`
-    ).join('');
-    rows.push(`<div class="slot-level"><strong>Pact (L${pactMagic.slotLevel})</strong><div class="slot-pips">${pips}</div></div>`);
-  }
-
-  for (let lvl = 1; lvl <= 9; lvl++) {
-    const total = slotTotals[lvl] ?? 0;
-    if (total === 0) continue;
-    const used = spellSlotsUsed[lvl] ?? 0;
-    const pips = Array.from({ length: total }, (_, i) =>
-      `<span class="slot-pip${i < used ? ' used' : ''}"></span>`
-    ).join('');
-    rows.push(`<div class="slot-level"><strong>L${lvl}</strong><div class="slot-pips">${pips}</div></div>`);
-  }
-
-  return `
-    <div style="margin-bottom:8px;">
-      <h2>Spell Slots</h2>
-      <div class="slot-grid">${rows.join('')}</div>
-    </div>
-  `;
-}
-
-function buildFeaturesBox(character: Character): string {
+  // Features
   const race = getRace(character.raceId);
   const primary = character.classes[0];
-  const classDef = primary ? getClass(primary.classId) : null;
-  const subclass = primary?.subclassId ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId) : null;
-
   const items: { name: string; source: string; desc: string }[] = [];
 
-  // Racial traits
-  (race?.traits ?? []).slice(0, 3).forEach(t =>
+  (race?.traits ?? []).slice(0, 2).forEach(t =>
     items.push({ name: t.name, source: race!.name, desc: t.description })
   );
-
-  // Class features (latest 4)
   if (classDef && primary) {
     classDef.features
-      .filter(f => f.level <= primary.level && !f.isASI)
-      .slice(-4)
-      .forEach(f => items.push({ name: f.name, source: classDef.name, desc: f.description }));
+      .filter((f: any) => f.level <= primary.level && !f.isASI)
+      .slice(-5)
+      .forEach((f: any) => items.push({ name: f.name, source: classDef.name, desc: f.description }));
   }
-
-  // Subclass features
   if (subclass && primary) {
     subclass.features
-      .filter(f => f.level <= primary.level)
+      .filter((f: any) => f.level <= primary.level)
       .slice(-2)
-      .forEach(f => items.push({ name: f.name, source: subclass.name, desc: f.description }));
+      .forEach((f: any) => items.push({ name: f.name, source: subclass.name, desc: f.description }));
   }
 
-  if (items.length === 0) return '';
+  const featureHtml = items.map(it => `
+    <div class="ft-item">
+      <span class="ft-name">${esc(it.name)}</span>
+      <span class="ft-src">(${esc(it.source)})</span>
+      <div class="ft-desc">${esc(it.desc)}</div>
+    </div>
+  `).join('');
 
   return `
-    <div style="margin-bottom:8px;">
-      <h2>Features &amp; Traits</h2>
-      ${items.map(it => `
-        <div class="feature-item">
-          <div class="fi-name">${esc(it.name)} <span class="fi-source">(${esc(it.source)})</span></div>
-          <div class="fi-desc">${esc(it.desc)}</div>
-        </div>
-      `).join('')}
+    <div class="right-col">
+      <div class="pers-box">
+        <div>${esc(bgPT)}</div>
+        <span class="pl">Personality Traits</span>
+      </div>
+      <div class="pers-box">
+        <div>${esc(bgI)}</div>
+        <span class="pl">Ideals</span>
+      </div>
+      <div class="pers-box">
+        <div>${esc(bgB)}</div>
+        <span class="pl">Bonds</span>
+      </div>
+      <div class="pers-box">
+        <div>${esc(bgF)}</div>
+        <span class="pl">Flaws</span>
+      </div>
+      <div class="features-box" style="flex:1;">
+        ${featureHtml || '<span style="color:#bbb;font-size:7pt;">—</span>'}
+        <span class="pl">Features &amp; Traits</span>
+      </div>
     </div>
   `;
 }
@@ -342,109 +1137,144 @@ function buildSpellPage(
   spellSaveDC: number,
   spellAttackBonus: number,
   slotTotals: Record<number, number>,
-  spellSlotsUsed: Record<number, number>,
+  classDef: any,
 ): string {
-  const prepared = (character.spellbook ?? []).filter((sp: any) =>
-    sp.isPrepared || sp.isAlwaysPrepared || (() => {
-      const spell = getSpell(sp.spellId);
-      return spell?.level === 0;
-    })()
-  );
-  if (prepared.length === 0) return '';
+  const spellbook = (character.spellbook ?? []);
+  if (spellbook.length === 0) return '';
 
-  // Group by level
-  const byLevel: Record<number, string[]> = {};
-  prepared.forEach((sp: any) => {
+  const byLevel: Record<number, { name: string; prepared: boolean; conc: boolean; school: string }[]> = {};
+  spellbook.forEach((sp: any) => {
     const spell = getSpell(sp.spellId);
     if (!spell) return;
     const lvl = spell.level;
     if (!byLevel[lvl]) byLevel[lvl] = [];
-    const conc = spell.concentration ? '<span class="sp-conc">⊙</span>' : '';
-    const ritual = spell.ritual ? '<span class="sp-conc">®</span>' : '';
-    byLevel[lvl].push(`
-      <div class="spell-row">
-        <span class="sp-name">${esc(spell.name)}${conc}${ritual}</span>
-        <span class="sp-school">${spell.school.slice(0, 4)}</span>
-        <span>${esc(spell.castingTime.replace('1 action', 'A').replace('1 bonus action', 'BA').replace('1 reaction', 'R'))}</span>
-        <span>${esc(spell.range.replace(' feet', 'ft').replace(' foot', 'ft'))}</span>
-      </div>
-    `);
+    byLevel[lvl].push({
+      name: spell.name,
+      prepared: sp.isPrepared || sp.isAlwaysPrepared || lvl === 0,
+      conc: spell.concentration,
+      school: spell.school.slice(0, 4),
+    });
   });
 
-  const levelNames = ['Cantrips', '1st Level', '2nd Level', '3rd Level', '4th Level', '5th Level', '6th Level', '7th Level', '8th Level', '9th Level'];
+  const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b);
+  if (!levels.length) return '';
 
-  const sections = Object.keys(byLevel)
-    .map(Number)
-    .sort((a, b) => a - b)
-    .map(lvl => {
-      const total = slotTotals[lvl] ?? 0;
-      const used = spellSlotsUsed[lvl] ?? 0;
-      const slotInfo = lvl > 0 && total > 0
-        ? ` <span style="font-size:7pt;color:#777;">(${total - used}/${total} slots)</span>` : '';
-      return `
-        <div class="spell-level-section">
-          <h3>${levelNames[lvl] ?? `Level ${lvl}`}${slotInfo}</h3>
-          ${byLevel[lvl].join('')}
+  // Distribute into 3 columns: col 0 = lvl 0,1,2  col 1 = lvl 3,4,5  col 2 = lvl 6,7,8,9
+  const colAssign: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 2, 7: 2, 8: 2, 9: 2 };
+  const cols: [number[], number[], number[]] = [[], [], []];
+  levels.forEach(l => cols[colAssign[l] ?? 2].push(l));
+
+  const levelNames = ['Cantrips', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th'];
+
+  function renderLevelSection(lvl: number): string {
+    const spells = byLevel[lvl] ?? [];
+    const total = slotTotals[lvl] ?? 0;
+    const used = (character.spellSlotsUsed ?? {})[lvl as 1] ?? 0;
+    const slotsText = lvl > 0 && total > 0
+      ? `<span class="sl-slots">Slots: ${total - used}/${total}</span>` : '';
+
+    const rows = spells.map(s => `
+      <div class="sl-row">
+        <span class="sl-pip${s.prepared ? ' prepared' : ''}"></span>
+        <span class="sl-name">${esc(s.name)}</span>
+        ${s.conc ? '<span class="sl-conc">©</span>' : ''}
+        <span class="sl-school">${esc(s.school)}</span>
+      </div>
+    `).join('');
+
+    return `
+      <div class="sl-section">
+        <div class="sl-header">
+          <div class="sl-badge">${lvl}</div>
+          <div class="sl-banner">
+            <span>${levelNames[lvl] ?? `L${lvl}`}</span>
+            ${slotsText}
+          </div>
         </div>
-      `;
-    }).join('');
+        ${rows}
+      </div>
+    `;
+  }
 
-  if (!sections) return '';
+  const spellcastingAbility = classDef?.spellcastingAbility
+    ? ABILITY_LABELS[classDef.spellcastingAbility]?.slice(0, 3).toUpperCase() ?? '—'
+    : '—';
 
   return `
-    <div class="page-break">
-      <h2 style="font-size:12pt;margin-bottom:10px;">Spells</h2>
-      <div class="spell-stats">
-        <div class="spell-stat">
-          <span class="ss-label">Save DC</span>
-          <span class="ss-val">${spellSaveDC}</span>
+    <div class="page page-break">
+
+      <!-- Spell page header -->
+      <div class="spell-header">
+        <div class="spell-class-box">
+          <div class="sc-lbl">Spellcasting Class</div>
+          <div class="sc-v">${esc(classDef?.name ?? '—')}</div>
+          <div class="sc-lbl" style="margin-top:2px;">Spellcasting Class</div>
         </div>
-        <div class="spell-stat">
-          <span class="ss-label">Attack Bonus</span>
-          <span class="ss-val">${fmt(spellAttackBonus)}</span>
+        <div class="spell-top-stats">
+          <div class="sts-box">
+            <span class="sts-v">${esc(spellcastingAbility)}</span>
+            <span class="sts-l">Spellcasting Ability</span>
+          </div>
+          <div class="sts-box">
+            <span class="sts-v">${spellSaveDC}</span>
+            <span class="sts-l">Spell Save DC</span>
+          </div>
+          <div class="sts-box">
+            <span class="sts-v">${fmt(spellAttackBonus)}</span>
+            <span class="sts-l">Spell Attack Bonus</span>
+          </div>
         </div>
       </div>
-      <div class="spells-grid">${sections}</div>
+
+      <!-- Spell grid: 3 columns -->
+      <div class="spell-grid">
+        <div class="sl-col">${cols[0].map(renderLevelSection).join('')}</div>
+        <div class="sl-col">${cols[1].map(renderLevelSection).join('')}</div>
+        <div class="sl-col">${cols[2].map(renderLevelSection).join('')}</div>
+      </div>
+
     </div>
   `;
 }
 
-function buildJournal(character: Character): string {
-  const entries = (character.journal ?? []);
-  if (entries.length === 0 && !character.notes?.trim()) return '';
+function buildJournalPage(character: Character): string {
+  const entries = character.journal ?? [];
+  const hasNotes = character.notes?.trim();
+  if (!entries.length && !hasNotes) return '';
 
   const entryHtml = entries.map(e => {
-    const dateLabel = e.date ? new Date(e.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
-    const sessionLabel = e.sessionNumber != null ? `Session ${e.sessionNumber}` : '';
-    const meta = [sessionLabel, dateLabel].filter(Boolean).join(' · ');
+    const dateLabel = e.date
+      ? new Date(e.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : '';
+    const meta = [e.sessionNumber != null ? `Session ${e.sessionNumber}` : '', dateLabel].filter(Boolean).join(' · ');
     return `
-      <div class="journal-entry">
-        <div class="je-header">${esc(e.title)}</div>
-        ${meta ? `<div class="je-meta">${esc(meta)}</div>` : ''}
-        <div class="je-content">${esc(e.content)}</div>
+      <div class="je">
+        <div class="je-hdr">${esc(e.title)}</div>
+        ${meta ? `<div class="je-sub">${esc(meta)}</div>` : ''}
+        <div class="je-body">${esc(e.content)}</div>
       </div>
     `;
   }).join('');
 
-  const notesHtml = character.notes?.trim() ? `
-    <div style="margin-top:${entries.length ? '12px' : '0'}">
-      <h3>General Notes</h3>
-      <div class="notes-box">${esc(character.notes)}</div>
+  const notesHtml = hasNotes ? `
+    <div>
+      <div style="font-size:9pt;font-weight:700;margin-bottom:5px;margin-top:${entries.length ? '10px' : '0'};">General Notes</div>
+      <div class="notes-panel">${esc(character.notes)}</div>
     </div>
   ` : '';
 
   return `
-    <div class="page-break">
-      <h2 style="font-size:12pt;margin-bottom:10px;">
+    <div class="page page-break">
+      <div class="j-section-title">
         Campaign Journal${character.campaignName ? ` — ${esc(character.campaignName)}` : ''}
-      </h2>
+      </div>
       ${entryHtml}
       ${notesHtml}
     </div>
   `;
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── Public interface ──────────────────────────────────────────────────────────
 
 export interface SheetDerivedData {
   finalScores: Record<string, number>;
@@ -464,40 +1294,81 @@ export interface SheetDerivedData {
   totalLevel: number;
 }
 
-export function generateCharacterSheetHTML(
-  character: Character,
-  d: SheetDerivedData,
-): string {
+// ── Internal page builder (no HTML/head wrapper) ─────────────────────────────
+
+function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefore = false): string {
   const race = getRace(character.raceId);
   const primary = character.classes[0];
   const classDef = primary ? getClass(primary.classId) : null;
-  const subclass = primary?.subclassId ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId) : null;
+  const subclass = primary?.subclassId
+    ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId)
+    : null;
   const bg = getBackground(character.backgroundId);
+  const totalLevel = totalCharacterLevel(character.classes);
+
   const multiclassLabel = character.classes.length > 1
     ? character.classes.map(cl => `${getClass(cl.classId)?.name ?? cl.classId} ${cl.level}`).join(' / ')
     : `${classDef?.name ?? ''} ${primary?.level ?? ''}`;
 
-  const totalLevel = totalCharacterLevel(character.classes);
   const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  // ── Death save pips ──
-  const dSucc = character.deathSaves?.successes ?? 0;
-  const dFail = character.deathSaves?.failures ?? 0;
-  const dsPips = (count: number, filled: number) =>
-    Array.from({ length: count }, (_, i) => pip(i < filled)).join(' ');
-
-  // ── Proficiencies & languages ──
   const proficiencies: string[] = [];
-  if (race?.proficiencies?.length) proficiencies.push(...race.proficiencies);
   if (bg?.toolProficiencies?.length) proficiencies.push(...bg.toolProficiencies);
   if (classDef?.weaponProficiencies) proficiencies.push(...classDef.weaponProficiencies);
   if (classDef?.armorProficiencies)  proficiencies.push(...classDef.armorProficiencies);
-  const langs = race?.languages ?? [];
+  if (race?.proficiencies?.length)   proficiencies.push(...race.proficiencies);
+  const languages = race?.languages ?? [];
 
-  const spellSlotsSection = buildSpellSlots(d.slotTotals, character.spellSlotsUsed ?? {}, character.pactMagic ?? null);
-  const spellPage = buildSpellPage(character, d.spellSaveDC, d.spellAttackBonus, d.slotTotals, character.spellSlotsUsed ?? {});
-  const journalPage = buildJournal(character);
+  const spellPage = buildSpellPage(character, d.spellSaveDC, d.spellAttackBonus, d.slotTotals, classDef);
+  const journalPage = buildJournalPage(character);
+  const breakClass = addBreakBefore ? ' page-break' : '';
 
+  return `
+<!-- ════════════════ ${esc(character.name)} ════════════════ -->
+<div class="page${breakClass}">
+
+  <div class="sheet-header">
+    <div class="name-banner">
+      <div class="name-val">${esc(character.name)}</div>
+      <div class="name-lbl">Character Name</div>
+    </div>
+    <div class="meta-grid">
+      <div class="mc"><div class="mc-v">${esc(multiclassLabel)}</div><div class="mc-l">Class &amp; Level</div></div>
+      <div class="mc"><div class="mc-v">${esc(bg?.name ?? '—')}</div><div class="mc-l">Background</div></div>
+      <div class="mc"><div class="mc-v">${esc(character.playerName || '—')}</div><div class="mc-l">Player Name</div></div>
+      <div class="mc"><div class="mc-v">${esc(race?.name ?? '—')}</div><div class="mc-l">Race</div></div>
+      <div class="mc"><div class="mc-v">${esc(character.alignment || '—')}</div><div class="mc-l">Alignment</div></div>
+      <div class="mc"><div class="mc-v">${(character.experiencePoints ?? 0).toLocaleString()}</div><div class="mc-l">Experience Points</div></div>
+    </div>
+  </div>
+
+  <div class="sheet-body">
+    ${buildAbilityCol(d.mods, d.finalScores)}
+    ${buildLeftStatsCol(
+      d.mods, d.profBonus, character.inspiration,
+      d.savingThrows, d.savingThrowProficiencies,
+      d.skills, d.allSkillProficiencies,
+      d.passivePerception, proficiencies, languages,
+    )}
+    ${buildCombatCol(character, d.ac, d.initiative, d.speed, d.mods, d.profBonus, d.slotTotals)}
+    ${buildRightCol(character, classDef, subclass, bg)}
+  </div>
+
+  <div class="sheet-footer">
+    Tavern Sheet · ${esc(today)} · Level ${totalLevel} ${esc(race?.name ?? '')} ${esc(classDef?.name ?? '')}
+  </div>
+</div>
+${spellPage}
+${journalPage}
+`;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export function generateCharacterSheetHTML(
+  character: Character,
+  d: SheetDerivedData,
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -507,173 +1378,48 @@ export function generateCharacterSheetHTML(
 <style>${CSS}</style>
 </head>
 <body>
-<div class="page">
+${buildSheetPages(character, d)}
+</body>
+</html>`;
+}
 
-  <!-- ── Header ── -->
-  <div class="header">
-    <div class="char-name">
-      <div style="font-size:7pt;text-transform:uppercase;letter-spacing:1.5px;color:#5a0000;margin-bottom:2px;">Character Name</div>
-      <h1>${esc(character.name)}</h1>
-    </div>
-    <div class="meta">
-      <div class="meta-field"><span class="label">Class &amp; Level</span><span class="val">${esc(multiclassLabel)}</span></div>
-      <div class="meta-field"><span class="label">Background</span><span class="val">${esc(bg?.name ?? '—')}</span></div>
-      <div class="meta-field"><span class="label">Player Name</span><span class="val">${esc(character.playerName || '—')}</span></div>
-      <div class="meta-field"><span class="label">Race</span><span class="val">${esc(race?.name ?? '—')}</span></div>
-      <div class="meta-field"><span class="label">Alignment</span><span class="val">${esc(character.alignment || '—')}</span></div>
-      <div class="meta-field"><span class="label">Experience Points</span><span class="val">${(character.experiencePoints ?? 0).toLocaleString()}</span></div>
-    </div>
-  </div>
+/**
+ * Generate a single HTML document containing sheets for multiple characters.
+ * Derives all stats internally — callers just pass the raw Character objects.
+ */
+export function generateMultiCharacterSheetHTML(characters: Character[]): string {
+  const pages = characters.map((character, i) => {
+    const derived = computeCharacterDerived(character);
+    const d: SheetDerivedData = {
+      finalScores: derived.finalScores as unknown as Record<string, number>,
+      mods:         derived.mods         as unknown as Record<string, number>,
+      savingThrows: derived.savingThrows  as unknown as Record<string, number>,
+      profBonus:    derived.profBonus,
+      ac:           derived.ac,
+      initiative:   derived.initiative,
+      speed:        derived.speed,
+      savingThrowProficiencies: derived.savingThrowProficiencies,
+      skills:       derived.skills,
+      allSkillProficiencies: derived.allSkillProficiencies,
+      passivePerception: derived.passivePerception,
+      spellSaveDC:  derived.spellSaveDC,
+      spellAttackBonus: derived.spellAttackBonus,
+      slotTotals:   derived.slotTotals,
+      totalLevel:   derived.totalLevel,
+    };
+    return buildSheetPages(character, d, i > 0);
+  }).join('\n');
 
-  <!-- ── Body ── -->
-  <div class="body">
-
-    <!-- Left column -->
-    <div>
-      ${buildAbilityScores(d.mods, d.finalScores)}
-
-      <div class="proficiency-bonus" style="margin-top:8px;">
-        <div class="pb-val">${fmt(d.profBonus)}</div>
-        <div class="pb-label">Proficiency Bonus</div>
-      </div>
-
-      <div class="left-section" style="text-align:center;margin-bottom:6px;">
-        <div style="font-size:7pt;text-transform:uppercase;letter-spacing:1px;color:#5a0000;">Inspiration</div>
-        <div style="font-size:16pt;">${character.inspiration ? '★' : '☆'}</div>
-      </div>
-
-      ${buildSavingThrows(d.savingThrows, d.savingThrowProficiencies)}
-      ${buildSkills(d.skills, d.allSkillProficiencies)}
-
-      <div class="left-section" style="text-align:center;margin-top:6px;">
-        <div style="font-size:7pt;text-transform:uppercase;letter-spacing:1px;color:#5a0000;">Passive Perception</div>
-        <div style="font-size:13pt;font-weight:700;">${d.passivePerception}</div>
-      </div>
-    </div>
-
-    <!-- Middle column -->
-    <div>
-      <!-- Core stats -->
-      <div class="stat-row">
-        <div class="stat-box"><div class="s-label">Armour Class</div><div class="s-val">${d.ac}</div></div>
-        <div class="stat-box"><div class="s-label">Initiative</div><div class="s-val">${fmt(d.initiative)}</div></div>
-        <div class="stat-box"><div class="s-label">Speed</div><div class="s-val">${d.speed} ft</div></div>
-      </div>
-
-      <!-- HP -->
-      <div class="hp-section">
-        <h2>Hit Points</h2>
-        <div class="hp-row">
-          <div class="hp-field">
-            <div class="hf-label">Maximum</div>
-            <div class="hf-val">${character.maxHP}</div>
-          </div>
-          <div class="hp-field">
-            <div class="hf-label">Current</div>
-            <div class="hf-val">${character.currentHP}</div>
-          </div>
-          <div class="hp-field">
-            <div class="hf-label">Temporary</div>
-            <div class="hf-val">${character.tempHP || '—'}</div>
-          </div>
-        </div>
-        <div class="death-row">
-          <span class="death-label">Death Saves</span>
-          <span>Success ${dsPips(3, dSucc)}</span>
-          <span style="margin-left:6px;">Failure ${dsPips(3, dFail)}</span>
-        </div>
-      </div>
-
-      <!-- Hit Dice -->
-      <div style="font-size:8pt;margin-bottom:8px;">
-        <span style="font-size:7pt;text-transform:uppercase;letter-spacing:1px;color:#5a0000;">Hit Dice: </span>
-        ${character.classes.map(cl => {
-          const def = getClass(cl.classId);
-          const used = (character.hitDiceUsed ?? {})[cl.classId] ?? 0;
-          return `d${def?.hitDie ?? '?'} × ${cl.level - used}/${cl.level}`;
-        }).join(', ')}
-      </div>
-
-      <!-- Attacks -->
-      ${buildAttacksTable(character, d.mods, d.profBonus)}
-
-      <!-- Spell slots -->
-      ${spellSlotsSection}
-
-      <!-- Conditions -->
-      ${character.conditions?.length ? `
-        <div style="margin-bottom:8px;">
-          <h2>Conditions</h2>
-          <div style="font-size:8pt;">${character.conditions.map(esc).join(', ')}</div>
-          ${(character.exhaustionLevel ?? 0) > 0 ? `<div style="font-size:8pt;margin-top:2px;">Exhaustion ${character.exhaustionLevel}</div>` : ''}
-        </div>
-      ` : ''}
-
-      <!-- Proficiencies & Languages -->
-      <div style="margin-bottom:8px;">
-        <h2>Proficiencies &amp; Languages</h2>
-        <div style="font-size:8pt;line-height:1.5;">
-          ${proficiencies.length ? `<div><strong>Prof:</strong> ${proficiencies.slice(0,8).map(esc).join(', ')}</div>` : ''}
-          ${langs.length ? `<div><strong>Languages:</strong> ${langs.map(esc).join(', ')}</div>` : ''}
-        </div>
-      </div>
-    </div>
-
-    <!-- Right column -->
-    <div>
-      ${buildFeaturesBox(character)}
-
-      <!-- Equipment summary -->
-      ${(character.inventory ?? []).filter((i: any) => i.equipped).length ? `
-        <div style="margin-bottom:8px;">
-          <h2>Equipment (Equipped)</h2>
-          <div style="font-size:8pt;line-height:1.6;">
-            ${(character.inventory ?? []).filter((i: any) => i.equipped).map((i: any) =>
-              `<div>• ${esc(i.name)}${(i.quantity ?? 1) > 1 ? ` ×${i.quantity}` : ''}</div>`
-            ).join('')}
-          </div>
-        </div>
-      ` : ''}
-
-      <!-- Currency -->
-      <div style="margin-bottom:8px;">
-        <h2>Currency</h2>
-        <div style="display:flex;gap:8px;font-size:8pt;">
-          ${(['pp','gp','ep','sp','cp'] as const).map(c => {
-            const val = (character.currencies ?? {})[c] ?? 0;
-            return val > 0 ? `<span><strong>${val}</strong> ${c}</span>` : '';
-          }).filter(Boolean).join('') || '<span style="color:#777;">—</span>'}
-        </div>
-      </div>
-
-      <!-- Subclass / Background blurb -->
-      ${subclass ? `
-        <div style="margin-bottom:8px;">
-          <h2>${esc(classDef?.subclassLabel ?? 'Subclass')}: ${esc(subclass.name)}</h2>
-          <div style="font-size:7.5pt;color:#333;line-height:1.4;">${esc(subclass.description ?? '')}</div>
-        </div>
-      ` : ''}
-
-      ${bg ? `
-        <div style="margin-bottom:8px;">
-          <h2>Background: ${esc(bg.name)}</h2>
-          <div style="font-size:7.5pt;font-weight:600;margin-bottom:2px;">${esc(bg.feature.name)}</div>
-          <div style="font-size:7.5pt;color:#333;line-height:1.4;max-height:5em;overflow:hidden;">${esc(bg.feature.description)}</div>
-        </div>
-      ` : ''}
-    </div>
-
-  </div><!-- /.body -->
-
-  <div style="margin-top:8px;font-size:7pt;color:#aaa;text-align:right;">
-    Generated by Tavern Sheet · ${esc(today)} · Level ${totalLevel} ${esc(race?.name ?? '')} ${esc(classDef?.name ?? '')}
-  </div>
-
-</div><!-- /.page -->
-
-${spellPage}
-${journalPage}
-
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Character Sheets</title>
+<style>${CSS}</style>
+</head>
+<body>
+${pages}
 </body>
 </html>`;
 }

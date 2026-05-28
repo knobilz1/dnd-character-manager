@@ -24,10 +24,8 @@ function effectiveSpellcasting(classId: string, subclassId: string | undefined) 
   return null;
 }
 
-export function useCharacterDerived(character: Character | null) {
-  return useMemo(() => {
-    if (!character) return null;
-
+/** Pure computation — safe to call outside React (no hooks). */
+export function computeCharacterDerived(character: Character) {
     const race = getRace(character.raceId);
     const primaryClassLevel = character.classes[0];
     const primaryClassDef = primaryClassLevel ? getClass(primaryClassLevel.classId) : null;
@@ -251,5 +249,11 @@ export function useCharacterDerived(character: Character | null) {
       passiveInsight,
       resourceMaxOverrides,
     };
+}
+
+export function useCharacterDerived(character: Character | null) {
+  return useMemo(() => {
+    if (!character) return null;
+    return computeCharacterDerived(character);
   }, [character]);
 }
