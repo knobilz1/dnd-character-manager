@@ -288,7 +288,10 @@ export function SheetPage() {
                   if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
                 } catch (err) {
                   console.error('Print failed:', err);
-                  setPrintError(err instanceof Error ? err.message : 'PDF generation failed');
+                  const msg = err instanceof Error ? err.message
+                    : typeof err === 'string' ? err
+                    : JSON.stringify(err) || 'Unknown error';
+                  setPrintError(msg);
                 }
               }}
               className="p-1.5 rounded text-slate-500 hover:text-emerald-400 transition-colors"

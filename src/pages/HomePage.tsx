@@ -142,7 +142,9 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
       }
     } catch (err) {
       console.error('Print failed:', err);
-      const msg = err instanceof Error ? err.message : 'PDF generation failed';
+      const msg = err instanceof Error ? err.message
+        : typeof err === 'string' ? err
+        : JSON.stringify(err) || 'Unknown error';
       alert(`Print failed: ${msg}`);
     } finally {
       setPrinting(false);
