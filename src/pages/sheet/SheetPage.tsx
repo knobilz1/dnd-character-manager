@@ -1,10 +1,11 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { save as saveDialog, open as openDialog } from '@tauri-apps/plugin-dialog';
-import { writeTextFile, readFile, writeFile } from '@tauri-apps/plugin-fs';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { writeTextFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { generateCharacterSheetHTML } from '../../utils/printSheet';
 import { fillCharacterPDF } from '../../utils/fillCharacterPDF';
+import { getTemplateBytes } from '../../utils/pdfTemplate';
 import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap, Eye, Printer } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
@@ -277,29 +278,17 @@ export function SheetPage() {
           <DiceRoller exhaustionLevel={exhaustionLevel} />
           <button
             onClick={async () => {
-              // Try PDF first — ask user to select the WotC template
-              const templatePath = await openDialog({
-                title: 'Select D&D 5E Character Sheet PDF template',
-                filters: [{ name: 'PDF', extensions: ['pdf'] }],
-                multiple: false,
-                directory: false,
-              });
-              if (templatePath && typeof templatePath === 'string') {
-                // Fill the official PDF form
-                try {
-                  const templateBytes = await readFile(templatePath);
+              try {
+                const templateBytes = await getTemplateBytes();
+                if (templateBytes) {
                   const filled = await fillCharacterPDF(character, templateBytes);
                   const outPath = await saveDialog({
                     defaultPath: `${character.name || 'character'}-sheet.pdf`,
                     filters: [{ name: 'PDF', extensions: ['pdf'] }],
                   });
-                  if (outPath) {
-                    await writeFile(outPath, filled);
-                    await openPath(outPath);
-                  }
-                } catch (err) {
-                  // Fall back to HTML if PDF filling fails
-                  console.error('PDF fill failed, falling back to HTML:', err);
+                  if (outPath) { await writeFile(outPath, filled); await openPath(outPath); }
+                } else {
+                  // User cancelled template picker — fall back to HTML
                   const html = generateCharacterSheetHTML(character, {
                     finalScores: finalScores as unknown as Record<string, number>,
                     mods: mods as unknown as Record<string, number>,
@@ -314,25 +303,12 @@ export function SheetPage() {
                   });
                   if (path) { await writeTextFile(path, html); await openPath(path); }
                 }
-              } else if (templatePath === null) {
-                // User cancelled — fall back to HTML
-                const html = generateCharacterSheetHTML(character, {
-                  finalScores: finalScores as unknown as Record<string, number>,
-                  mods: mods as unknown as Record<string, number>,
-                  profBonus, ac, initiative, speed,
-                  savingThrows: savingThrows as unknown as Record<string, number>,
-                  savingThrowProficiencies, skills, allSkillProficiencies,
-                  passivePerception, spellSaveDC, spellAttackBonus, slotTotals, totalLevel,
-                });
-                const path = await saveDialog({
-                  defaultPath: `${character.name || 'character'}-sheet.html`,
-                  filters: [{ name: 'HTML', extensions: ['html'] }],
-                });
-                if (path) { await writeTextFile(path, html); await openPath(path); }
+              } catch (err) {
+                console.error('Print failed:', err);
               }
             }}
             className="p-1.5 rounded text-slate-500 hover:text-emerald-400 transition-colors"
-            title="Print character sheet — select WotC PDF template to fill, or cancel for HTML"
+            title="Print character sheet as PDF"
           >
             <Printer size={18} />
           </button>

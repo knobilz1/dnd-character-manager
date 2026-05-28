@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer } from 'lucide-react';
 import { DriveSyncButton } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
-import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
-import { writeTextFile, readFile, writeFile } from '@tauri-apps/plugin-fs';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { fillCharacterPDF } from '../utils/fillCharacterPDF';
+import { getTemplateBytes } from '../utils/pdfTemplate';
 import { useLibraryStore } from '../store/useLibraryStore';
 import { Button, Dialog, ThemeToggleButton } from '../components/ui';
 import { getClass } from '../data/classes';
@@ -123,17 +124,9 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     if (selected.length === 0) return;
     setPrinting(true);
     try {
-      // Ask for PDF template first
-      const templatePath = await openDialog({
-        title: 'Select D&D 5E Character Sheet PDF template',
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-        multiple: false,
-        directory: false,
-      });
+      const templateBytes = await getTemplateBytes();
 
-      if (templatePath && typeof templatePath === 'string') {
-        // Fill each character into their own PDF (merged into one if possible, else save individually)
-        const templateBytes = await readFile(templatePath);
+      if (templateBytes) {
         if (selected.length === 1) {
           const filled = await fillCharacterPDF(selected[0], templateBytes);
           const outPath = await save({
@@ -142,8 +135,6 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           });
           if (outPath) { await writeFile(outPath, filled); await openPath(outPath); setPrintOpen(false); }
         } else {
-          // Multiple characters: save each as its own PDF in a folder the user picks
-          // For simplicity, generate one PDF per character, named individually
           for (const char of selected) {
             const filled = await fillCharacterPDF(char, templateBytes);
             const outPath = await save({
