@@ -55,6 +55,11 @@ export function computeCharacterDerived(character: Character) {
         }
       }
     }
+    // Barbarian Primal Champion (lv.20): +4 STR and CON (cap raised to 24 below)
+    if (barbLevel >= 20) {
+      finalScores.str = (finalScores.str ?? 10) + 4;
+      finalScores.con = (finalScores.con ?? 10) + 4;
+    }
     // Cap at 20 (unless a feature raises it); guard against undefined scores.
     // Primal Champion (Barbarian 20) raises STR and CON cap to 24.
     for (const k of Object.keys(finalScores) as AbilityKey[]) {
@@ -80,22 +85,44 @@ export function computeCharacterDerived(character: Character) {
       // Wearing armor: use its base AC + DEX (capped per armor type)
       const stats = ARMOR_STATS[equippedArmor.name];
       if (stats) {
-        const dexBonus = stats.dexCap === 0 ? 0
-          : stats.dexCap !== undefined ? Math.min(mods.dex, stats.dexCap)
+        // Medium Armor Master feat: raises DEX cap from +2 to +3 when DEX score ≥ 16
+        let effectiveDexCap = stats.dexCap;
+        if (
+          stats.armorType === 'medium' &&
+          effectiveDexCap === 2 &&
+          character.selectedFeats.includes('medium-armor-master') &&
+          (finalScores.dex ?? 10) >= 16
+        ) {
+          effectiveDexCap = 3;
+        }
+        const dexBonus = effectiveDexCap === 0 ? 0
+          : effectiveDexCap !== undefined ? Math.min(mods.dex, effectiveDexCap)
           : mods.dex;
         ac = stats.baseAC + dexBonus;
       } else {
         // Custom / magic armor not in table — fall back to 10 + DEX
         ac = 10 + mods.dex;
       }
-    } else if (primaryClassDef?.id === 'barbarian') {
-      // Barbarian Unarmored Defense: 10 + DEX + CON (only when not wearing armor)
-      ac = 10 + mods.dex + mods.con;
-    } else if (primaryClassDef?.id === 'monk' && !equippedShield) {
-      // Monk Unarmored Defense: 10 + DEX + WIS (only when not wearing armor OR shield)
-      ac = 10 + mods.dex + mods.wis;
     } else {
+      // Unarmored: start at 10 + DEX, then apply any Unarmored Defense features
       ac = 10 + mods.dex;
+      // Barbarian Unarmored Defense: +CON (applies regardless of which class is primary)
+      if (character.classes.some(c => c.classId === 'barbarian')) {
+        ac = Math.max(ac, 10 + mods.dex + mods.con);
+      }
+      // Monk Unarmored Defense: +WIS (only without a shield; applies regardless of primary class)
+      if (!equippedShield && character.classes.some(c => c.classId === 'monk')) {
+        ac = Math.max(ac, 10 + mods.dex + mods.wis);
+      }
+    }
+    // Racial natural armor (Lizardfolk: 13+DEX, Tortle: 17, Loxodon: 12+CON)
+    if (race?.naturalArmor) {
+      const { base, mod, canUseWithArmor } = race.naturalArmor;
+      const naturalAC = base + (mod ? mods[mod] : 0);
+      // Always applies when unarmored; Loxodon can also compare against worn armor
+      if (!equippedArmor || canUseWithArmor) {
+        ac = Math.max(ac, naturalAC);
+      }
     }
     // Dragon Hide feat (XGtE): AC = 13 + DEX when unarmored — take the better of this and the class formula
     if (!equippedArmor && character.selectedFeats.includes('dragon-hide')) {
@@ -300,6 +327,14 @@ export function computeCharacterDerived(character: Character) {
     const exhaustionHpMaxHalved  = exhaustionLevel >= 4; // HP maximum is halved
     const baseSpeed = _baseSpeed; // keep reference for tooltip display
 
+    // Class-scaling display values
+    // Rogue Sneak Attack: 1d6 per 2 rogue levels (1d6 at lv1, 2d6 at lv3, … 10d6 at lv19)
+    const sneakAttackDice = rogueLevel > 0 ? Math.ceil(rogueLevel / 2) : 0;
+    // Monk Martial Arts die: d4/d6/d8/d10 by monk level
+    const martialArtsDie = monkLevel >= 17 ? 10 : monkLevel >= 11 ? 8 : monkLevel >= 5 ? 6 : monkLevel > 0 ? 4 : 0;
+    // Barbarian Rage damage bonus: +2 at lv1, +3 at lv9, +4 at lv16
+    const rageDamageBonus = barbLevel >= 16 ? 4 : barbLevel >= 9 ? 3 : barbLevel > 0 ? 2 : 0;
+
     return {
       finalScores,
       mods,
@@ -330,6 +365,9 @@ export function computeCharacterDerived(character: Character) {
       exhaustionHpMaxHalved,
       passiveInsight,
       resourceMaxOverrides,
+      sneakAttackDice,
+      martialArtsDie,
+      rageDamageBonus,
     };
 }
 

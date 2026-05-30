@@ -424,6 +424,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: { con: 2, wis: 1 },
+    naturalArmor: { base: 13, mod: 'dex' },
     traits: [
       { name: 'Bite', description: 'Your fanged maw is a natural weapon, dealing 1d6 + Str piercing damage on hit.' },
       { name: 'Cunning Artisan', description: 'During a short rest, you can harvest bone and hide from a slain beast, construct, dragon, monstrosity, or plant to create a shield, club, javelin, or 1d4 darts/blowgun needles.' },
@@ -968,6 +969,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    naturalArmor: { base: 17 },
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Claws', description: 'Your claws deal 1d4 + Str slashing damage.' },
@@ -1371,6 +1373,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: { con: 2, wis: 1 },
+    naturalArmor: { base: 12, mod: 'con', canUseWithArmor: true },
     traits: [
       { name: 'Powerful Build', description: 'You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.' },
       { name: 'Loxodon Serenity', description: 'You have advantage on saving throws against being charmed or frightened.' },

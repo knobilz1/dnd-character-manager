@@ -194,6 +194,16 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
     }
 
+    // Insert feat-granted resources (e.g. Lucky feat: 3 luck points).
+    for (const featId of (c.selectedFeats ?? [])) {
+      const feat = ALL_FEATS.find(f => f.id === featId);
+      for (const fr of (feat?.grantedResources ?? [])) {
+        if (!resources.some(r => r.key === fr.key)) {
+          resources.push({ key: fr.key, current: fr.max, max: fr.max });
+        }
+      }
+    }
+
     // Pre-compute ability-mod / profBonus overrides.
     // These must be applied AFTER the maxPerLevel re-sync below (otherwise re-sync
     // overwrites the corrected values back to the table defaults).
@@ -775,6 +785,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Bard level 5+ (Font of Inspiration): bardic inspiration also recharges on short rest.
       const bardLevel = s.character.classes.find(c => c.classId === 'bard')?.level ?? 0;
       if (bardLevel >= 5) shortRestKeys.add('bardic_inspiration');
+      // Feat-granted short-rest resources
+      for (const featId of (s.character.selectedFeats ?? [])) {
+        const feat = ALL_FEATS.find(f => f.id === featId);
+        for (const fr of (feat?.grantedResources ?? [])) {
+          if (fr.rechargeOn === 'short') shortRestKeys.add(fr.key);
+        }
+      }
 
       // Apply ability-mod / prof-bonus overrides so restoring to r.max gives the correct value
       // even if r.max was set from a stale level-table entry (e.g. bardic inspiration with high CHA).

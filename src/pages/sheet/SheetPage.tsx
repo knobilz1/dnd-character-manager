@@ -30,6 +30,7 @@ import type { RollDie } from '../../store/useDiceStore';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 import { getRace } from '../../data/races';
 import { ALL_METAMAGIC } from '../../data/metamagic';
+import { ALL_FEATS } from '../../data/feats';
 import { useSidebarStore, type SidebarModuleId } from '../../store/useSidebarStore';
 import { SidebarPanel } from './SidebarPanel';
 import { AlternateFormPanel } from '../../components/AlternateFormPanel';
@@ -44,6 +45,12 @@ function getResourceDef(character: any, key: string) {
     const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
     const fromSub = sub?.resources?.find((rd: any) => rd.key === key);
     if (fromSub) return fromSub;
+  }
+  // Feat-granted resources (e.g. Lucky Points)
+  for (const featId of (character.selectedFeats ?? [])) {
+    const feat = ALL_FEATS.find((f: any) => f.id === featId);
+    const fromFeat = (feat?.grantedResources ?? []).find((fr: any) => fr.key === key);
+    if (fromFeat) return fromFeat;
   }
   return undefined;
 }
@@ -189,7 +196,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -588,6 +595,9 @@ export function SheetPage() {
                 healWildShape={healWildShape}
                 setPathOfBeastForm={setPathOfBeastForm}
                 setArmorerMode={setArmorerMode}
+                sneakAttackDice={sneakAttackDice}
+                martialArtsDie={martialArtsDie}
+                rageDamageBonus={rageDamageBonus}
               />
             )}
             {tab === 'spells' && (
@@ -1363,7 +1373,8 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   sendToGraveyard, navigate, useItemCharge,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
   onOpenWildShapeModal, deactivateWildShape, damageWildShape, healWildShape,
-  setPathOfBeastForm, setArmorerMode }: any) {
+  setPathOfBeastForm, setArmorerMode,
+  sneakAttackDice, martialArtsDie, rageDamageBonus }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   // ── Death-save die ──────────────────────────────────────────────────────
@@ -1419,6 +1430,24 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           </button>
         </div>
       </div>
+
+      {/* Class combat stat badges: Sneak Attack, Martial Arts die */}
+      {(sneakAttackDice > 0 || martialArtsDie > 0) && (
+        <div className="flex flex-wrap gap-2">
+          {sneakAttackDice > 0 && (
+            <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium">Sneak Attack</span>
+              <span className="text-sm font-bold text-amber-300">{sneakAttackDice}d6</span>
+            </div>
+          )}
+          {martialArtsDie > 0 && (
+            <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium">Martial Arts</span>
+              <span className="text-sm font-bold text-blue-300">d{martialArtsDie}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Weapon Attacks */}
       <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} />
@@ -1825,6 +1854,13 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                     )}
                     {!expired && sustained.durationRounds === undefined && (
                       <p className="text-xs text-slate-400 mb-2">No time limit — end manually.</p>
+                    )}
+
+                    {/* Rage damage bonus badge */}
+                    {r.key === 'rage' && !expired && rageDamageBonus > 0 && (
+                      <p className="text-[11px] text-red-300 bg-red-950/30 border border-red-700/40 rounded-lg px-2 py-1.5 mb-2">
+                        ⚔ Rage bonus: <span className="font-bold">+{rageDamageBonus}</span> to melee damage (STR-based attacks)
+                      </p>
                     )}
 
                     {/* Berserker subclass features during rage */}

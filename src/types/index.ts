@@ -89,6 +89,9 @@ export interface Race {
   subraces?: Race[];
   innateSpells?: InnateSpell[];
   hpBonusPerLevel?: number;
+  /** Racial natural armor formula. base + optional ability mod. If canUseWithArmor is true,
+   *  the character can also use this formula when wearing armor (taking the better value). */
+  naturalArmor?: { base: number; mod?: AbilityKey; canUseWithArmor?: boolean };
 }
 
 export interface ClassFeature {
@@ -241,6 +244,8 @@ export interface Feat {
   grantsSaveForChosenAbility?: boolean;
   /** Spells granted by this feat with their use-tracking metadata. */
   grantedSpells?: Array<{ spellId: string; recharge: 'cantrip' | 'long' | 'short'; ability: AbilityKey }>;
+  /** Trackable resources granted by this feat (e.g. Lucky: 3 luck points). */
+  grantedResources?: Array<{ key: string; name: string; max: number; rechargeOn: 'short' | 'long' }>;
 }
 
 export interface FightingStyle {
