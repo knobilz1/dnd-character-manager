@@ -40,6 +40,13 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['bladesong'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'samurai'))
     overrides['fighting_spirit'] = 3;
+  // Way of the Ascendant Dragon: Wings Unfurled (monk 6) + Aspect of the Wyrm
+  // (monk 11) — proficiency-bonus uses per long rest, level-gated.
+  if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon')) {
+    const monkLvl = c.classes.find(cl => cl.classId === 'monk')?.level ?? 0;
+    if (monkLvl >= 6)  overrides['wings_unfurled']     = profBonus;
+    if (monkLvl >= 11) overrides['aspect_of_the_wyrm'] = profBonus;
+  }
   return overrides;
 }
 

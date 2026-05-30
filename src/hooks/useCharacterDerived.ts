@@ -320,6 +320,13 @@ export function computeCharacterDerived(character: Character) {
       // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)
       resourceMaxOverrides['fighting_spirit'] = 3;
     }
+    // Way of the Ascendant Dragon (FToD): Wings Unfurled (lv6) and Aspect of the
+    // Wyrm (lv11) both have proficiency-bonus uses per long rest. Level-gated so the
+    // resource only exists once the feature is actually unlocked.
+    if (character.classes.some(c => c.subclassId === 'way-of-the-ascendant-dragon')) {
+      if (monkLevel >= 6)  resourceMaxOverrides['wings_unfurled']      = profBonus;
+      if (monkLevel >= 11) resourceMaxOverrides['aspect_of_the_wyrm']  = profBonus;
+    }
 
     // Exhaustion flags
     const exhaustionDisadvChecks = exhaustionLevel >= 1; // disadvantage on ability checks / skills
@@ -334,6 +341,10 @@ export function computeCharacterDerived(character: Character) {
     const martialArtsDie = monkLevel >= 17 ? 10 : monkLevel >= 11 ? 8 : monkLevel >= 5 ? 6 : monkLevel > 0 ? 4 : 0;
     // Barbarian Rage damage bonus: +2 at lv1, +3 at lv9, +4 at lv16
     const rageDamageBonus = barbLevel >= 16 ? 4 : barbLevel >= 9 ? 3 : barbLevel > 0 ? 2 : 0;
+    // Monk Ki save DC = 8 + proficiency bonus + WIS modifier (Stunning Strike,
+    // Four Elements, Open Hand, Astral Self, etc.). Monks are non-casters, so this
+    // is distinct from spellSaveDC (which is 0 for a pure monk).
+    const kiSaveDC = monkLevel > 0 ? 8 + profBonus + mods.wis : 0;
 
     return {
       finalScores,
@@ -368,6 +379,7 @@ export function computeCharacterDerived(character: Character) {
       sneakAttackDice,
       martialArtsDie,
       rageDamageBonus,
+      kiSaveDC,
     };
 }
 

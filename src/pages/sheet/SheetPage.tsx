@@ -196,7 +196,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -598,6 +598,7 @@ export function SheetPage() {
                 sneakAttackDice={sneakAttackDice}
                 martialArtsDie={martialArtsDie}
                 rageDamageBonus={rageDamageBonus}
+                kiSaveDC={kiSaveDC}
               />
             )}
             {tab === 'spells' && (
@@ -824,13 +825,49 @@ const SUSTAINED_ABILITIES: Record<string, SustainedMeta> = {
 };
 
 // ── Ki ability buttons ───────────────────────────────────────────────────────
-const KI_ABILITIES: { name: string; minLevel: number; cost: number; description: string }[] = [
+// `subclassId` (string or array) limits an ability to specific subclasses; entries
+// with none are core monk abilities shown for every monk. `variable: true` marks
+// abilities whose ki cost varies — shown as info (no auto-deduction), like Twinned Spell.
+const KI_ABILITIES: { name: string; minLevel: number; cost: number; description: string; subclassId?: string | string[]; variable?: boolean }[] = [
+  // ── Core monk ──
   { name: 'Flurry of Blows',  minLevel: 2,  cost: 1, description: 'Bonus action: make two unarmed strikes.' },
   { name: 'Patient Defense',  minLevel: 2,  cost: 1, description: 'Bonus action: take the Dodge action.' },
   { name: 'Step of the Wind', minLevel: 2,  cost: 1, description: 'Bonus action: Disengage or Dash; jump distance doubled.' },
-  { name: 'Stunning Strike',  minLevel: 5,  cost: 1, description: 'After hitting with a melee attack: the target makes a Con save (DC = spell save DC) or is stunned until end of your next turn.' },
+  { name: 'Stunning Strike',  minLevel: 5,  cost: 1, description: 'After hitting with a melee attack: the target makes a Con save vs your Ki save DC or is stunned until the end of your next turn.' },
   { name: 'Diamond Soul',     minLevel: 14, cost: 1, description: 'Reaction: reroll a failed saving throw and take the new result.' },
   { name: 'Empty Body',       minLevel: 18, cost: 4, description: 'Action: become invisible for 1 minute, gaining resistance to all damage except force.' },
+  // ── Way of the Open Hand ──
+  { name: 'Quivering Palm', minLevel: 17, cost: 3, subclassId: 'way-of-the-open-hand', description: 'After an unarmed strike: set up vibrations. Later end them (action) → Con save vs Ki DC or drop to 0 HP; 10d10 necrotic on a success.' },
+  // ── Way of Shadow ──
+  { name: 'Shadow Arts', minLevel: 3, cost: 2, subclassId: 'way-of-shadow', description: 'Action: cast darkness, darkvision, pass without trace, or silence without material components.' },
+  // ── Way of the Four Elements ──
+  { name: 'Elemental Discipline', minLevel: 3, cost: 1, variable: true, subclassId: 'way-of-the-four-elements', description: 'Spend ki to use an elemental discipline (e.g. Fist of Unbroken Air, Water Whip). Cost varies by discipline — deduct manually.' },
+  // ── Way of the Drunken Master ──
+  { name: 'Redirect Attack',   minLevel: 6,  cost: 1, subclassId: 'way-of-the-drunken-master', description: 'When a creature within 5 ft misses you, redirect the attack to another creature within 5 ft.' },
+  { name: "Drunkard's Luck",   minLevel: 11, cost: 2, subclassId: 'way-of-the-drunken-master', description: 'Cancel disadvantage on an ability check, attack roll, or saving throw you make.' },
+  // ── Way of the Kensei ──
+  { name: 'Deft Strike',       minLevel: 6,  cost: 1, subclassId: 'way-of-the-kensei', description: 'Once per turn: add a Martial Arts die to a kensei weapon damage roll.' },
+  { name: 'Sharpen the Blade', minLevel: 11, cost: 1, variable: true, subclassId: 'way-of-the-kensei', description: 'Bonus action: spend up to 3 ki to give a kensei weapon +1/+2/+3 to attack and damage for 1 minute.' },
+  // ── Way of the Sun Soul (XGtE + SCAG) ──
+  { name: 'Sun Bolt Flurry',   minLevel: 3, cost: 1, subclassId: ['way-of-the-sun-soul', 'scag-way-of-sun-soul'], description: 'Bonus action after the Attack action: make two Radiant Sun Bolt attacks (ranged, Martial Arts die radiant).' },
+  { name: 'Searing Arc Strike', minLevel: 6, cost: 2, variable: true, subclassId: ['way-of-the-sun-soul', 'scag-way-of-sun-soul'], description: 'After the Attack action: cast Burning Hands as a bonus action. +1 ki per extra spell level.' },
+  // ── Way of Mercy ──
+  { name: 'Hand of Healing',   minLevel: 3, cost: 1, subclassId: 'way-of-mercy', description: 'Action: touch a creature to restore HP equal to a Martial Arts die + your WIS modifier.' },
+  { name: 'Hand of Harm',      minLevel: 3, cost: 1, subclassId: 'way-of-mercy', description: 'Once per turn on an unarmed-strike hit: deal extra necrotic damage equal to a Martial Arts die + your WIS modifier.' },
+  // ── Way of the Astral Self ──
+  { name: 'Arms of the Astral Self', minLevel: 3, cost: 1, subclassId: 'way-of-the-astral-self', description: 'Bonus action: summon spectral arms for 10 minutes (WIS-based attacks, 1d10 force, 10-ft reach).' },
+  // ── Way of the Cobalt Soul ──
+  { name: 'Extort Truth',       minLevel: 3,  cost: 1, subclassId: 'cobalt-soul', description: 'On a Flurry of Blows hit: Cha save vs Ki DC or the creature can\'t knowingly lie for 1 minute.' },
+  { name: 'Debilitating Barrage', minLevel: 11, cost: 3, subclassId: 'cobalt-soul', description: 'On a Flurry of Blows hit: give the creature vulnerability to one damage type until the start of your next turn.' },
+  // ── Way of the Depths (ToB) ──
+  { name: 'Deep Embrace',      minLevel: 3,  cost: 1, subclassId: 'tob-way-of-the-depths', description: 'On a melee hit: Con save vs Ki DC or the creature can\'t speak or breathe for 1 minute (repeats save).' },
+  { name: 'Last Fathom',       minLevel: 17, cost: 5, subclassId: 'tob-way-of-the-depths', description: 'Create a 15-ft sphere of crushing pressure within 60 ft: Str save, 8d8 bludgeoning + movement 0 on a fail.' },
+  // ── Way of the Lighthouse (ToB) ──
+  { name: 'Light the Way',     minLevel: 6,  cost: 1, subclassId: 'tob-way-of-the-lighthouse', description: 'When you jump a gap: leave a 20-ft path of light allies can walk on for 1 minute.' },
+  { name: 'Signal Boost',      minLevel: 17, cost: 2, subclassId: 'tob-way-of-the-lighthouse', description: 'Forgo one attack: a companion uses their reaction to attack with advantage + extra radiant damage.' },
+  // ── Way of the Long Death (SCAG) ──
+  { name: 'Mastery of Death',  minLevel: 11, cost: 1, subclassId: 'scag-way-of-long-death', description: 'When reduced to 0 HP (no action): drop to 1 HP instead.' },
+  { name: 'Touch of the Long Death', minLevel: 17, cost: 1, variable: true, subclassId: 'scag-way-of-long-death', description: 'Action: touch a creature and spend 1–10 ki. Con save, 2d10 necrotic per ki spent (half on a success).' },
 ];
 
 /** Returns the numeric sorcery-point cost, or 'var' for Twinned Spell. */
@@ -1374,7 +1411,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
   onOpenWildShapeModal, deactivateWildShape, damageWildShape, healWildShape,
   setPathOfBeastForm, setArmorerMode,
-  sneakAttackDice, martialArtsDie, rageDamageBonus }: any) {
+  sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   // ── Death-save die ──────────────────────────────────────────────────────
@@ -1431,8 +1468,8 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
         </div>
       </div>
 
-      {/* Class combat stat badges: Sneak Attack, Martial Arts die */}
-      {(sneakAttackDice > 0 || martialArtsDie > 0) && (
+      {/* Class combat stat badges: Sneak Attack, Martial Arts die, Ki Save DC */}
+      {(sneakAttackDice > 0 || martialArtsDie > 0 || kiSaveDC > 0) && (
         <div className="flex flex-wrap gap-2">
           {sneakAttackDice > 0 && (
             <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -1444,6 +1481,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
             <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 flex items-center gap-2">
               <span className="text-xs text-slate-400 font-medium">Martial Arts</span>
               <span className="text-sm font-bold text-blue-300">d{martialArtsDie}</span>
+            </div>
+          )}
+          {kiSaveDC > 0 && (
+            <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-3 py-2 flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium">Ki Save DC</span>
+              <span className="text-sm font-bold text-blue-300">{kiSaveDC}</span>
             </div>
           )}
         </div>
@@ -2054,29 +2097,42 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                     const monkEntry = character.classes.find((c: any) => c.classId === 'monk');
                     if (!monkEntry) return null;
                     const monkLevel: number = monkEntry.level;
-                    const available = KI_ABILITIES.filter(a => a.minLevel <= monkLevel);
+                    const monkSubclass: string | undefined = monkEntry.subclassId;
+                    const matchesSubclass = (sc?: string | string[]) =>
+                      sc == null || (Array.isArray(sc) ? sc.includes(monkSubclass ?? '') : sc === monkSubclass);
+                    const available = KI_ABILITIES.filter(a => a.minLevel <= monkLevel && matchesSubclass(a.subclassId));
                     if (!available.length) return null;
                     return (
                       <div className="mt-3 pt-2.5 border-t border-slate-700/50 space-y-1.5">
-                        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Ki Abilities</p>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className="text-[10px] text-slate-500 uppercase tracking-wide">Ki Abilities</p>
+                          {kiSaveDC > 0 && (
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wide">
+                              Ki Save DC <span className="text-blue-300 font-bold">{kiSaveDC}</span>
+                            </p>
+                          )}
+                        </div>
                         {available.map(ability => {
-                          const canAfford = cappedCurrent >= ability.cost;
+                          // Variable-cost abilities (e.g. Sharpen the Blade): show as info, no deduction.
+                          const canAfford = ability.variable || cappedCurrent >= ability.cost;
                           return (
                             <button
                               key={ability.name}
                               disabled={!canAfford}
-                              onClick={() => setResource('ki', cappedCurrent - ability.cost)}
-                              title={ability.description}
+                              onClick={() => { if (!ability.variable) setResource('ki', cappedCurrent - ability.cost); }}
+                              title={ability.variable ? `${ability.description}\n\nCost varies — deduct ki manually.` : ability.description}
                               className={cn(
                                 'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
-                                canAfford
-                                  ? 'bg-blue-900/30 border-blue-700/50 text-blue-200 hover:bg-blue-800/50 hover:border-blue-600/60'
-                                  : 'bg-slate-800/40 border-slate-700/30 text-slate-500 cursor-not-allowed',
+                                ability.variable
+                                  ? 'bg-slate-800/40 border-slate-700/30 text-slate-300 cursor-default'
+                                  : canAfford
+                                    ? 'bg-blue-900/30 border-blue-700/50 text-blue-200 hover:bg-blue-800/50 hover:border-blue-600/60'
+                                    : 'bg-slate-800/40 border-slate-700/30 text-slate-500 cursor-not-allowed',
                               )}
                             >
                               <span>{ability.name}</span>
-                              <span className={cn('text-[10px] font-semibold', canAfford ? 'text-blue-400' : 'text-slate-600')}>
-                                {ability.cost} ki
+                              <span className={cn('text-[10px] font-semibold', ability.variable ? 'text-slate-500' : canAfford ? 'text-blue-400' : 'text-slate-600')}>
+                                {ability.variable ? 'var ki' : `${ability.cost} ki`}
                               </span>
                             </button>
                           );

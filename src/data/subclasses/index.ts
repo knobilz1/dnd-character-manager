@@ -820,7 +820,17 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
 
   // ── FToD: MONK ───────────────────────────────────────────────────────
-  { id: 'way-of-the-ascendant-dragon', name: 'Way of the Ascendant Dragon', classId: 'monk', sourceBook: 'FToD', description: 'Monks of the Way of the Ascendant Dragon emulate the might of dragons by harnessing their power within themselves.', features: [
+  { id: 'way-of-the-ascendant-dragon', name: 'Way of the Ascendant Dragon', classId: 'monk', sourceBook: 'FToD',
+    resources: [
+      // Both are proficiency-bonus uses per long rest; max overridden dynamically in
+      // useCharacterDerived + computeResourceMaxOverrides. Table values mirror prof
+      // bonus at each monk level (0 before the feature unlocks).
+      { name: 'Wings Unfurled', key: 'wings_unfurled', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+      { name: 'Aspect of the Wyrm', key: 'aspect_of_the_wyrm', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+    ],
+    description: 'Monks of the Way of the Ascendant Dragon emulate the might of dragons by harnessing their power within themselves.', features: [
     { name: 'Draconic Disciple', level: 3, description: 'You learn Draconic. You can imbue your unarmed strikes with draconic energy, dealing acid, cold, fire, lightning, or poison damage. You gain proficiency in Cha (Intimidation or Persuasion).' },
     { name: 'Breath of the Dragon', level: 3, description: 'When you use Attack action, replace one attack with a breath weapon — a 20-foot cone or 30-foot line dealing Martial Arts die damage of your chosen element (Dex save half).' },
     { name: 'Wings Unfurled', level: 6, description: 'When you use Step of the Wind, you can sprout spectral wings, gaining a flying speed equal to your walking speed until the end of your turn. Prof-bonus uses per long rest.' },
