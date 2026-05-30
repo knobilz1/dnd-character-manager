@@ -155,7 +155,7 @@ export const SUBCLASS_TIPS: Record<string, string> = {
   'way-of-the-ascendant-dragon':
     'A draconic monk who infuses strikes with elemental energy, breathes out dragon breath cones, and eventually flies. You deal devastating elemental bursts and have excellent combat versatility. Feels like an upgraded, flashier version of Way of the Open Hand — great for players who want their monk to feel legendary.',
   'way-of-the-astral-self':
-    'A monk who summons spectral arms from their astral body. The arms let you use Wisdom for attacks, hit at extra reach, and eventually summon a full visage that grants blindsight and terrifies enemies. Perfect for monks built around Wisdom — and one of the most visually dramatic subclasses in the game.',
+    'A monk who summons spectral arms from their astral body. The arms let you use Wisdom for attacks, hit at extra reach, and eventually summon a full visage that lets you see in darkness and gives an edge on Insight and Intimidation. Perfect for monks built around Wisdom — and one of the most visually dramatic subclasses in the game.',
   'cobalt-soul':
     "An investigator-monk who can expose an enemy's weaknesses mid-fight. Once exposed, you and your allies exploit specific vulnerabilities for bonus damage and extra effects. Rewards patient, tactical play — you do more work up front to set up devastating payoffs. Excellent against bosses and named enemies.",
   'scag-way-of-long-death':
