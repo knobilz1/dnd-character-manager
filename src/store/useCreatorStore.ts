@@ -180,15 +180,38 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
     // minimum of 1 hit point per level (even with very low Con).
     const hitDie = classDef?.hitDie ?? 8;
     const race = getRace(draft.raceId!);
+
+    // Apply player-choice feat ability increases to baseAbilityScores (mirrors levelUp logic).
+    // Done early so HP calculation uses the correct post-feat CON.
+    const draftFeatChoices = (draft.featChoices ?? {}) as Record<string, import('../types').AbilityKey>;
+    let finalBaseScores = { ...(draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 }) };
+    for (const featId of (draft.selectedFeats ?? [])) {
+      const feat = ALL_FEATS.find(f => f.id === featId);
+      if (feat?.abilityScoreChoice && draftFeatChoices[featId]) {
+        const key = draftFeatChoices[featId] as import('../types').AbilityKey;
+        const racialBonus = ((race?.abilityScoreIncreases ?? {}) as Record<string, number>)[key] ?? 0;
+        const maxBase = 20 - racialBonus;
+        finalBaseScores = { ...finalBaseScores, [key]: Math.min(maxBase, (finalBaseScores[key] ?? 0) + 1) };
+      }
+    }
+
     const racialCon = (race?.abilityScoreIncreases as any)?.con ?? 0;
-    const effectiveCon = (draft.baseAbilityScores?.con ?? 10) + racialCon;
+    const effectiveCon = (finalBaseScores.con ?? 10) + racialCon;
     const conMod = Math.floor((effectiveCon - 10) / 2);
     const level = primaryClass.level;
-    // Some subclasses grant bonus HP per class level (e.g. Draconic Bloodline: +1/level).
+    // Per-level HP bonuses from subclass (e.g. Draconic Bloodline: +1), race (e.g. Hill Dwarf: +1),
+    // and feats (e.g. Tough: +2). For feats with a retroactive bonus (Tough), modeling as +2/level
+    // from level 1 gives the correct total (2 × totalLevel) at any starting level.
     const primarySub = primaryClass.subclassId ? getSubclass(primaryClass.subclassId) : undefined;
     const subHPBonusPerLevel = primarySub?.hpBonusPerLevel ?? 0;
-    const lvl1HP = Math.max(1, hitDie + conMod) + subHPBonusPerLevel;
-    const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + subHPBonusPerLevel;
+    const raceHPBonusPerLevel = race?.hpBonusPerLevel ?? 0;
+    const featHPBonusPerLevel = (draft.selectedFeats ?? []).reduce((sum, fid) => {
+      const feat = ALL_FEATS.find(f => f.id === fid);
+      return sum + (feat?.hpBonusPerLevel ?? 0);
+    }, 0);
+    const totalHPBonusPerLevel = subHPBonusPerLevel + raceHPBonusPerLevel + featHPBonusPerLevel;
+    const lvl1HP = Math.max(1, hitDie + conMod) + totalHPBonusPerLevel;
+    const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + totalHPBonusPerLevel;
     const maxHP = lvl1HP + (level - 1) * perLevelHP;
 
     // Compute pact magic if warlock
@@ -211,8 +234,8 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
         featInt += feat.abilityScoreIncrease.int  ?? 0;
       }
     }
-    const effectiveCha = (draft.baseAbilityScores?.cha ?? 10) + racialCha + featCha;
-    const effectiveInt = (draft.baseAbilityScores?.int ?? 10) + racialInt + featInt;
+    const effectiveCha = (finalBaseScores.cha ?? 10) + racialCha + featCha;
+    const effectiveInt = (finalBaseScores.int ?? 10) + racialInt + featInt;
     const chaMod = Math.floor((effectiveCha - 10) / 2);
     const intMod  = Math.floor((effectiveInt  - 10) / 2);
 
@@ -248,7 +271,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       backgroundId: draft.backgroundId!,
       classes: draft.classes!,
       abilityScoreMethod: draft.abilityScoreMethod ?? 'manual',
-      baseAbilityScores: draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 },
+      baseAbilityScores: finalBaseScores,
       selectedSkillProficiencies: draft.selectedSkillProficiencies ?? [],
       selectedFeats: draft.selectedFeats ?? [],
       classOptions: draft.classOptions ?? {
@@ -287,6 +310,9 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       experiencePoints: 0,
       notes: '',
       currencies: draft.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      expertiseSkills: (draft.expertiseSkills as string[] | undefined) ?? [],
+      featChoices: draftFeatChoices,
+      knowledgeDomainSkills: (draft.knowledgeDomainSkills as string[] | undefined) ?? [],
     };
 
     return character;

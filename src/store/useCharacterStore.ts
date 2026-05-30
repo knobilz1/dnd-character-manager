@@ -107,6 +107,7 @@ interface CharacterState {
   startConcentration: (spellId: string) => void;
   endConcentration: () => void;
   useInnateSpell: (spellId: string) => void;
+  useFeatSpell: (featId: string, spellId: string) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -122,7 +123,7 @@ interface CharacterState {
   useItemCharge: (itemId: string) => void;
 
   // Level up / hit dice
-  levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice) => void;
+  levelUp: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice, expertiseToAdd?: string[]) => void;
   updateClassOptions: (partial: Partial<ClassOptionsState>) => void;
   useHitDie: (classId: string) => void;
   restoreHitDie: (classId: string) => void;
@@ -267,13 +268,23 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         // that weren't tracked yet (cantrips are unlimited and not stored).
         innateSpellUses: (() => {
           const race = getRace(c.raceId);
-          if (!race?.innateSpells) return c.innateSpellUses ?? {};
-          const totalLevel = totalCharacterLevel(c.classes ?? []);
           const merged = { ...(c.innateSpellUses ?? {}) };
-          for (const spell of race.innateSpells) {
-            if (spell.recharge === 'cantrip') continue;
-            if ((spell.minCharLevel ?? 1) > totalLevel) continue;
-            if (merged[spell.spellId] == null) merged[spell.spellId] = 1;
+          if (race?.innateSpells) {
+            const totalLevel = totalCharacterLevel(c.classes ?? []);
+            for (const spell of race.innateSpells) {
+              if (spell.recharge === 'cantrip') continue;
+              if ((spell.minCharLevel ?? 1) > totalLevel) continue;
+              if (merged[spell.spellId] == null) merged[spell.spellId] = 1;
+            }
+          }
+          // Feat-granted spells use prefixed keys: feat:FEATID:SPELLID
+          for (const featId of (c.selectedFeats ?? [])) {
+            const feat = ALL_FEATS.find(f => f.id === featId);
+            for (const gs of feat?.grantedSpells ?? []) {
+              if (gs.recharge === 'cantrip') continue;
+              const key = `feat:${featId}:${gs.spellId}`;
+              if (merged[key] == null) merged[key] = 1;
+            }
           }
           return merged;
         })(),
@@ -292,6 +303,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         pathOfBeastForm: c.pathOfBeastForm ?? null,
         campaignName: c.campaignName ?? '',
         journal: c.journal ?? [],
+        expertiseSkills: c.expertiseSkills ?? [],
+        featChoices: c.featChoices ?? {},
+        knowledgeDomainSkills: c.knowledgeDomainSkills ?? [],
       },
     });
   },
@@ -502,7 +516,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, inventory } };
     }),
 
-  levelUp: (classId, hpGained, hpRoll, subclassPick, asiChoice) =>
+  levelUp: (classId, hpGained, hpRoll, subclassPick, asiChoice, expertiseToAdd) =>
     set((s) => {
       if (!s.character) return s;
       // Find the matching class entry; if the character doesn't have this class yet
@@ -605,6 +619,18 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           if (!selectedFeats.includes(asiChoice.featId)) {
             selectedFeats = [...selectedFeats, asiChoice.featId];
           }
+          // Apply player-chosen ability score increase from feat (e.g. Resilient, Athlete, etc.)
+          if (asiChoice.abilityIncrease) {
+            for (const [k, inc] of Object.entries(asiChoice.abilityIncrease)) {
+              const key = k as AbilityKey;
+              const racial = (racialBonuses as Partial<Record<AbilityKey, number>>)[key] ?? 0;
+              const maxBase = 20 - racial;
+              baseAbilityScores = {
+                ...baseAbilityScores,
+                [key]: Math.min(maxBase, (baseAbilityScores[key] ?? 0) + (inc as number)),
+              };
+            }
+          }
         } else {
           for (const [k, inc] of Object.entries(asiChoice.increases)) {
             const key = k as AbilityKey;
@@ -640,16 +666,42 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Unlock any newly accessible innate spells (based on new total character level).
       const newTotalLevelForInnate = classes.reduce((sum, cl) => sum + cl.level, 0);
       const innateSpellUses = (() => {
-        const race = getRace(s.character.raceId);
-        if (!race?.innateSpells) return s.character.innateSpellUses ?? {};
         const merged = { ...(s.character.innateSpellUses ?? {}) };
-        for (const spell of race.innateSpells) {
-          if (spell.recharge === 'cantrip') continue;
-          if ((spell.minCharLevel ?? 1) > newTotalLevelForInnate) continue;
-          if (merged[spell.spellId] == null) merged[spell.spellId] = 1;
+        const race = getRace(s.character.raceId);
+        if (race?.innateSpells) {
+          for (const spell of race.innateSpells) {
+            if (spell.recharge === 'cantrip') continue;
+            if ((spell.minCharLevel ?? 1) > newTotalLevelForInnate) continue;
+            if (merged[spell.spellId] == null) merged[spell.spellId] = 1;
+          }
+        }
+        // Initialize uses for any feat-granted spells (covers feat just taken this level-up).
+        for (const featId of selectedFeats) {
+          const feat = ALL_FEATS.find(f => f.id === featId);
+          for (const gs of feat?.grantedSpells ?? []) {
+            if (gs.recharge === 'cantrip') continue;
+            const key = `feat:${featId}:${gs.spellId}`;
+            if (merged[key] == null) merged[key] = 1;
+          }
         }
         return merged;
       })();
+
+      // Merge expertise picks
+      const expertiseSkills = [
+        ...(s.character.expertiseSkills ?? []),
+        ...(expertiseToAdd ?? []),
+      ];
+
+      // Derive featChoices: if the ASI feat has grantsSaveForChosenAbility, record it
+      const newFeatChoices = { ...(s.character.featChoices ?? {}) };
+      if (asiChoice?.type === 'feat' && asiChoice.abilityIncrease) {
+        const feat = ALL_FEATS.find(f => f.id === asiChoice.featId);
+        if (feat?.grantsSaveForChosenAbility) {
+          const chosenAbility = Object.keys(asiChoice.abilityIncrease)[0] as AbilityKey;
+          if (chosenAbility) newFeatChoices[asiChoice.featId] = chosenAbility;
+        }
+      }
 
       return {
         character: {
@@ -663,6 +715,8 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           selectedFeats,
           spellbook: newSpellbook,
           innateSpellUses,
+          expertiseSkills,
+          featChoices: newFeatChoices,
         },
       };
     }),
@@ -755,13 +809,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
       // Restore pact magic on short rest
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
-      // Restore short-rest innate spell uses
+      // Restore short-rest innate spell uses (racial + feat-granted)
       const srInnateUses = (() => {
-        const race = getRace(s.character.raceId);
-        if (!race?.innateSpells) return s.character.innateSpellUses ?? {};
         const merged = { ...(s.character.innateSpellUses ?? {}) };
-        for (const spell of race.innateSpells) {
-          if (spell.recharge === 'short') merged[spell.spellId] = 1;
+        const race = getRace(s.character.raceId);
+        if (race?.innateSpells) {
+          for (const spell of race.innateSpells) {
+            if (spell.recharge === 'short') merged[spell.spellId] = 1;
+          }
+        }
+        for (const featId of (s.character.selectedFeats ?? [])) {
+          const feat = ALL_FEATS.find(f => f.id === featId);
+          for (const gs of feat?.grantedSpells ?? []) {
+            if (gs.recharge === 'short') merged[`feat:${featId}:${gs.spellId}`] = 1;
+          }
         }
         return merged;
       })();
@@ -803,14 +864,21 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
       // Restore all innate spell uses (long rest covers both long and short recharge).
       const lrInnateUses = (() => {
-        const race = getRace(s.character.raceId);
-        if (!race?.innateSpells) return s.character.innateSpellUses ?? {};
-        const totalLevel = totalCharacterLevel(s.character.classes);
         const merged = { ...(s.character.innateSpellUses ?? {}) };
-        for (const spell of race.innateSpells) {
-          if (spell.recharge === 'cantrip') continue;
-          if ((spell.minCharLevel ?? 1) > totalLevel) continue;
-          merged[spell.spellId] = 1;
+        const race = getRace(s.character.raceId);
+        if (race?.innateSpells) {
+          const totalLevel = totalCharacterLevel(s.character.classes);
+          for (const spell of race.innateSpells) {
+            if (spell.recharge === 'cantrip') continue;
+            if ((spell.minCharLevel ?? 1) > totalLevel) continue;
+            merged[spell.spellId] = 1;
+          }
+        }
+        for (const featId of (s.character.selectedFeats ?? [])) {
+          const feat = ALL_FEATS.find(f => f.id === featId);
+          for (const gs of feat?.grantedSpells ?? []) {
+            if (gs.recharge !== 'cantrip') merged[`feat:${featId}:${gs.spellId}`] = 1;
+          }
         }
         return merged;
       })();
@@ -850,6 +918,14 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     set((s) => {
       if (!s.character) return s;
       const innateSpellUses = { ...(s.character.innateSpellUses ?? {}), [spellId]: 0 };
+      return { character: { ...s.character, innateSpellUses } };
+    }),
+
+  useFeatSpell: (featId, spellId) =>
+    set((s) => {
+      if (!s.character) return s;
+      const key = `feat:${featId}:${spellId}`;
+      const innateSpellUses = { ...(s.character.innateSpellUses ?? {}), [key]: 0 };
       return { character: { ...s.character, innateSpellUses } };
     }),
 

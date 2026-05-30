@@ -48,6 +48,28 @@ function getResourceDef(character: any, key: string) {
   return undefined;
 }
 
+/** Returns the current die size for a scaling resource (e.g. Bardic Inspiration d6→d12).
+ *  Reads resourceDie from the class/subclass definition using the owning class's level. */
+function getResourceDie(character: any, key: string): number | undefined {
+  for (const cl of character.classes ?? []) {
+    const check = (rd: any) => {
+      if (rd?.key !== key || !rd.resourceDie) return undefined;
+      const entries = Object.entries(rd.resourceDie as Record<string, number>)
+        .map(([lvl, die]) => ({ lvl: parseInt(lvl), die }))
+        .filter(e => e.lvl <= cl.level)
+        .sort((a, b) => b.lvl - a.lvl);
+      return entries[0]?.die;
+    };
+    const def = getClass(cl.classId);
+    const d = check(def?.resources.find((rd: any) => rd.key === key));
+    if (d != null) return d;
+    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+    const d2 = check(sub?.resources?.find((rd: any) => rd.key === key));
+    if (d2 != null) return d2;
+  }
+  return undefined;
+}
+
 // Exhaustion is tracked separately via exhaustionLevel; it has its own +/- UI
 // and a dedicated button in the Add Condition dialog, so it's omitted here to
 // prevent duplicate tracking on a single character.
@@ -84,7 +106,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell,
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell,
     activateWildShape, deactivateWildShape, damageWildShape, healWildShape, setArmorerMode, setPathOfBeastForm } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
@@ -167,7 +189,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, passivePerception, passiveInsight, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -408,6 +430,11 @@ export function SheetPage() {
                 <p className="text-xs text-slate-400">Pass. Ins</p>
                 <p className="font-bold text-white">{passiveInsight}</p>
               </div>
+              {/* Passive Investigation */}
+              <div className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center" title="10 + Investigation bonus">
+                <p className="text-xs text-slate-400">Pass. Inv</p>
+                <p className="font-bold text-white">{passiveInvestigation}</p>
+              </div>
             </div>
           </div>
 
@@ -454,18 +481,26 @@ export function SheetPage() {
               )}
               {Object.entries(skills).map(([skill, bonus]) => {
                 const isProficient = allSkillProficiencies.has(skill);
+                const hasExpertise = expertiseSkills.has(skill);
                 return (
                   <button
                     key={skill}
                     onClick={() => triggerRoll(20, bonus, `${skill} Check`, exhaustionDisadvChecks ? 'disadvantage' : undefined)}
                     className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
-                    title={`Roll ${skill} check`}
+                    title={`Roll ${skill} check${hasExpertise ? ' (Expertise)' : ''}`}
                   >
                     <div className="flex items-center gap-1.5">
-                      <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
-                      <span className={cn('text-xs truncate', exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300 group-hover:text-white')}>{skill}</span>
+                      {hasExpertise ? (
+                        <div className="flex gap-0.5 shrink-0">
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        </div>
+                      ) : (
+                        <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
+                      )}
+                      <span className={cn('text-xs truncate', exhaustionDisadvChecks ? 'text-orange-300' : hasExpertise ? 'text-emerald-300 group-hover:text-emerald-200' : 'text-slate-300 group-hover:text-white')}>{skill}</span>
                     </div>
-                    <span className={cn('text-xs font-bold shrink-0', bonus >= 0 ? (exhaustionDisadvChecks ? 'text-orange-300' : 'text-slate-300') : 'text-red-400')}>
+                    <span className={cn('text-xs font-bold shrink-0', bonus >= 0 ? (exhaustionDisadvChecks ? 'text-orange-300' : hasExpertise ? 'text-emerald-300' : 'text-slate-300') : 'text-red-400')}>
                       {bonus >= 0 ? '+' : ''}{bonus}
                     </span>
                   </button>
@@ -567,11 +602,13 @@ export function SheetPage() {
                 useSpellSlot={useSpellSlot}
                 usePactSlot={usePactSlot}
                 useInnateSpell={useInnateSpell}
+                useFeatSpell={useFeatSpell}
               />
             )}
             {tab === 'inventory' && (
               <InventoryPanel
                 character={character}
+                strScore={finalScores.str}
                 addInventoryItem={addInventoryItem}
                 removeInventoryItem={removeInventoryItem}
                 setInventoryQuantity={setInventoryQuantity}
@@ -604,9 +641,9 @@ export function SheetPage() {
         open={levelUpOpen}
         onClose={() => setLevelUpOpen(false)}
         character={character}
-        onConfirm={(classId, hpGained, hpRoll, subclassPick, asiChoice) => {
+        onConfirm={(classId, hpGained, hpRoll, subclassPick, asiChoice, expertiseToAdd) => {
           saveSnapshot(character!, 'Before Level Up');
-          levelUp(classId, hpGained, hpRoll, subclassPick, asiChoice);
+          levelUp(classId, hpGained, hpRoll, subclassPick, asiChoice, expertiseToAdd);
         }}
       />
 
@@ -1723,6 +1760,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           <div className="space-y-3">
             {resources.filter((r: any) => r.key !== 'arcane_recovery').map((r: any) => {
               const resourceDef = getResourceDef(character, r.key);
+              const resourceDieSz = getResourceDie(character, r.key);
               const displayMax = (resourceMaxOverrides?.[r.key] ?? r.max);
               const sustained = SUSTAINED_ABILITIES[r.key];
               const activatedRound: number | undefined = activeEffects[r.key];
@@ -1922,7 +1960,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                 <div key={r.key} className="bg-slate-900/40 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <p className="text-sm font-medium text-white">{resourceDef?.name ?? r.key}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-white">{resourceDef?.name ?? r.key}</p>
+                        {resourceDieSz && (
+                          <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">d{resourceDieSz}</span>
+                        )}
+                      </div>
                       {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
                     </div>
                     <div className="flex items-center gap-2">

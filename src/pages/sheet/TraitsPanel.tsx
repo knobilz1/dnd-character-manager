@@ -114,6 +114,12 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
                 <p className="text-xs text-slate-400 leading-relaxed">{trait.description}</p>
               </div>
             ))}
+            {(race.resistances?.length ?? 0) > 0 && (
+              <div className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">Damage Resistances</p>
+                <p className="text-xs text-slate-400 capitalize">{race.resistances!.join(', ')}</p>
+              </div>
+            )}
           </div>
         </div>
       )}

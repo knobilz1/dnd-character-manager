@@ -1,5 +1,7 @@
+import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_SUBCLASSES } from '../../../data/subclasses';
+import { SUBCLASS_TIPS } from '../../../data/subclassTips';
 import { Badge, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { getClass } from '../../../data/classes';
@@ -7,6 +9,7 @@ import { bookEnabled } from '../../../utils/bookEnabled';
 
 export function StepSubclass() {
   const { draft, updateDraft } = useCreatorStore();
+  const [openTipId, setOpenTipId] = React.useState<string | null>(null);
   const primaryClass = draft.classes?.[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
 
@@ -106,9 +109,29 @@ export function StepSubclass() {
             >
               <div className="flex items-center justify-between mb-1">
                 <h4 className="font-bold text-white">{sub.name}</h4>
-                <Badge color="slate">{sub.sourceBook}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge color="slate">{sub.sourceBook}</Badge>
+                  {SUBCLASS_TIPS[sub.id] && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setOpenTipId(openTipId === sub.id ? null : sub.id); }}
+                      className={cn(
+                        'text-xs font-bold px-2 py-0.5 rounded-full border transition-colors',
+                        openTipId === sub.id
+                          ? 'border-amber-400 bg-amber-400/20 text-amber-300'
+                          : 'border-slate-500 bg-slate-700 text-slate-400 hover:border-amber-400/60 hover:text-amber-300',
+                      )}
+                    >
+                      Tip
+                    </button>
+                  )}
+                </div>
               </div>
               <p className="text-sm text-slate-400 line-clamp-2">{sub.description}</p>
+              {openTipId === sub.id && SUBCLASS_TIPS[sub.id] && (
+                <p className="mt-2 text-xs text-amber-200/90 leading-relaxed border-t border-amber-400/20 pt-2">
+                  {SUBCLASS_TIPS[sub.id]}
+                </p>
+              )}
             </div>
             </HoverCard>
           ))}

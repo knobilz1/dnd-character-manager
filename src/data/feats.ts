@@ -11,13 +11,14 @@ export const ALL_FEATS: Feat[] = [
     name: 'Alert',
     sourceBook: 'PHB',
     description: 'Always on the lookout for danger, you gain the following benefits:\n• You gain a +5 bonus to initiative.\n• You can\'t be surprised while you are conscious.\n• Other creatures don\'t gain advantage on attack rolls against you as a result of being unseen by you.',
+    initiativeBonus: 5,
   },
   {
     id: 'athlete',
     name: 'Athlete',
     sourceBook: 'PHB',
     description: 'You have undergone extensive physical training to gain the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• When you are prone, standing up uses only 5 feet of your movement.\n• Climbing doesn\'t halve your speed.\n• You can make a running long jump or a running high jump after moving only 5 feet on foot.',
-    abilityScoreIncrease: {},
+    abilityScoreChoice: ['str', 'dex'],
   },
   {
     id: 'actor',
@@ -56,7 +57,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Dungeon Delver',
     sourceBook: 'PHB',
     description: 'Alert to the hidden traps and secret doors found in many dungeons, you gain the following benefits:\n• You have advantage on Wisdom (Perception) and Intelligence (Investigation) checks made to detect the presence of secret doors.\n• You have advantage on saving throws made to avoid or resist traps.\n• You have resistance to the damage dealt by traps.\n• You can search for traps while traveling at a normal pace, instead of only at a slow pace.',
-    grantsProficiency: ['Resistance to trap damage'],
+    // Trap damage resistance can't be modeled as a proficiency — reflected in description only.
   },
   {
     id: 'durable',
@@ -127,6 +128,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Lightly Armored',
     sourceBook: 'PHB',
     description: 'You have trained to master the use of light armor, gaining the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• You gain proficiency with light armor.',
+    abilityScoreChoice: ['str', 'dex'],
     grantsProficiency: ['Light armor'],
   },
   {
@@ -159,6 +161,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'PHB',
     prerequisite: { proficiency: 'Light Armor' },
     description: 'You have trained to master the use of medium armor and shields, gaining the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• You gain proficiency with medium armor and shields.',
+    abilityScoreChoice: ['str', 'dex'],
     grantsProficiency: ['Medium armor', 'Shields'],
   },
   {
@@ -172,6 +175,9 @@ export const ALL_FEATS: Feat[] = [
     name: 'Observant',
     sourceBook: 'PHB',
     description: 'Quick to notice details of your environment, you gain the following benefits:\n• Increase your Intelligence or Wisdom score by 1, to a maximum of 20.\n• If you can see a creature\'s mouth while it is speaking a language you understand, you can interpret what it\'s saying by reading its lips.\n• You have a +5 bonus to your passive Wisdom (Perception) and passive Intelligence (Investigation) scores.',
+    abilityScoreChoice: ['int', 'wis'],
+    passivePerceptionBonus: 5,
+    passiveInvestigationBonus: 5,
   },
   {
     id: 'polearm-master',
@@ -184,6 +190,8 @@ export const ALL_FEATS: Feat[] = [
     name: 'Resilient',
     sourceBook: 'PHB',
     description: 'Choose one ability score. You gain the following benefits:\n• Increase the chosen ability score by 1, to a maximum of 20.\n• You gain proficiency in saving throws using the chosen ability.',
+    abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+    grantsSaveForChosenAbility: true,
   },
   {
     id: 'ritual-caster',
@@ -242,12 +250,15 @@ export const ALL_FEATS: Feat[] = [
     name: 'Tavern Brawler',
     sourceBook: 'PHB',
     description: 'Accustomed to rough-and-tumble fighting using whatever weapons happen to be at hand, you gain the following benefits:\n• Increase your Strength or Constitution score by 1, to a maximum of 20.\n• You are proficient with improvised weapons.\n• Your unarmed strike uses a d4 for damage.\n• When you hit a creature with an unarmed strike or an improvised weapon on your turn, you can use a bonus action to attempt to grapple the target.',
+    abilityScoreChoice: ['str', 'con'],
   },
   {
     id: 'tough',
     name: 'Tough',
     sourceBook: 'PHB',
     description: 'Your hit point maximum increases by an amount equal to twice your level when you gain this feat. Whenever you gain a level thereafter, your hit point maximum increases by an additional 2 hit points.',
+    hpBonusPerLevel: 2,
+    hpRetroactiveBonusPerPastLevel: 2,
   },
   {
     id: 'war-caster',
@@ -261,6 +272,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Weapon Master',
     sourceBook: 'PHB',
     description: 'You have practiced extensively with a variety of weapons, gaining the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• You gain proficiency with four weapons of your choice. Each one must be a simple or a martial weapon.',
+    abilityScoreChoice: ['str', 'dex'],
     grantsProficiency: ['4 weapons of your choice'],
   },
   // XGtE Feats
@@ -277,6 +289,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'dragonborn' },
     description: 'When angered, you radiate menace. You gain the following benefits:\n• Increase your Strength, Constitution, or Charisma score by 1, to a maximum of 20.\n• Instead of exhaling destructive energy, you can expend a use of your Breath Weapon trait to roar, forcing each creature of your choice within 30 feet of you to make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier). A target automatically succeeds on the save if it can\'t hear or see you. On a failed save, a target becomes frightened of you for 1 minute.',
+    abilityScoreChoice: ['str', 'con', 'cha'],
   },
   {
     id: 'elven-accuracy',
@@ -284,6 +297,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { other: 'Elf or half-elf' },
     description: 'The accuracy of elves is legendary, especially that of elf archers and spellcasters. You have uncanny aim with attacks that rely on precision rather than brute force. You gain the following benefits:\n• Increase your Dexterity, Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Whenever you have advantage on an attack roll using Dexterity, Intelligence, Wisdom, or Charisma, you can reroll one of the dice once.',
+    abilityScoreChoice: ['dex', 'int', 'wis', 'cha'],
   },
   {
     id: 'fey-teleportation',
@@ -291,7 +305,9 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'elf-high' },
     description: 'Your study of high elven lore has unlocked fey power that few other elves possess, except your eladrin cousins. Drawing on your fey ancestry, you can momentarily stride through the Feywild to shorten your path from one place to another. You gain the following benefits:\n• Increase your Intelligence or Charisma score by 1, to a maximum of 20.\n• You learn to speak, read, and write Sylvan.\n• You can cast the misty step spell once using this trait. You regain the ability to do so when you finish a short or long rest. Intelligence is your spellcasting ability for this spell.',
+    abilityScoreChoice: ['int', 'cha'],
     grantsSpell: ['misty-step'],
+    grantedSpells: [{ spellId: 'misty-step', recharge: 'short', ability: 'int' }],
   },
   // TCE Feats
   {
@@ -312,32 +328,40 @@ export const ALL_FEATS: Feat[] = [
     name: 'Fey Touched',
     sourceBook: 'TCE',
     description: 'Your exposure to the Feywild\'s magic has changed you, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You learn the misty step spell and one 1st-level spell of your choice. The 1st-level spell must be from the divination or enchantment school of magic. You can cast each of these spells without expending a spell slot. Once you cast either of these spells in this way, you can\'t cast that spell in this way again until you finish a long rest. You can also cast these spells using spell slots you have of the appropriate level. The spells\' spellcasting ability is the ability increased by this feat.',
+    abilityScoreChoice: ['int', 'wis', 'cha'],
     grantsSpell: ['misty-step'],
+    grantedSpells: [{ spellId: 'misty-step', recharge: 'long', ability: 'cha' }],
   },
   {
     id: 'shadow-touched',
     name: 'Shadow Touched',
     sourceBook: 'TCE',
     description: 'Your exposure to the Shadowfell\'s magic has changed you, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You learn the invisibility spell and one 1st-level spell of your choice. The 1st-level spell must be from the illusion or necromancy school of magic. You can cast each of these spells without expending a spell slot. Once you cast either of these spells in this way, you can\'t cast that spell in this way again until you finish a long rest. You can also cast these spells using spell slots you have of the appropriate level. The spells\' spellcasting ability is the ability increased by this feat.',
+    abilityScoreChoice: ['int', 'wis', 'cha'],
     grantsSpell: ['invisibility'],
+    grantedSpells: [{ spellId: 'invisibility', recharge: 'long', ability: 'cha' }],
   },
   {
     id: 'skill-expert',
     name: 'Skill Expert',
     sourceBook: 'TCE',
     description: 'You have honed your proficiency with particular skills, granting you the following benefits:\n• Increase one ability score of your choice by 1, to a maximum of 20.\n• You gain proficiency in one skill of your choice.\n• Choose one skill in which you have proficiency. You gain expertise with that skill, which means your proficiency bonus is doubled for any ability check you make with it. The skill you choose must be one that isn\'t already benefiting from a feature, such as Expertise, that doubles your proficiency bonus.',
+    abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
   },
   {
     id: 'telekinetic',
     name: 'Telekinetic',
     sourceBook: 'TCE',
     description: 'You learn to move things with your mind, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You learn the mage hand cantrip. You can cast it without verbal or somatic components, and you can make the spectral hand invisible. If you already know this cantrip, its range increases by 30 feet when you cast it. Its spellcasting ability is the ability increased by this feat.\n• As a bonus action, you can try to telekinetically shove one creature you can see within 30 feet of you. When you do so, the target must succeed on a Strength saving throw (DC 8 + your proficiency bonus + the ability modifier of the score increased by this feat) or be moved 5 feet toward you or away from you. A creature can willingly fail this save.',
+    abilityScoreChoice: ['int', 'wis', 'cha'],
   },
   {
     id: 'telepathic',
     name: 'Telepathic',
     sourceBook: 'TCE',
     description: 'You awaken the ability to mentally connect with others, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You can speak telepathically to any creature you can see within 60 feet of you. Your telepathic utterances are in a language you know, and the creature understands you only if it knows that language. Your communication doesn\'t give the creature the ability to respond to you telepathically.\n• You can cast the detect thoughts spell, requiring no spell slot or components, and you must finish a long rest before you can cast it this way again. Your spellcasting ability for the spell is the ability increased by this feat. If you have spell slots of 2nd level or higher, you can cast this spell with them.',
+    abilityScoreChoice: ['int', 'wis', 'cha'],
+    grantedSpells: [{ spellId: 'detect-thoughts', recharge: 'long', ability: 'int' }],
   },
 
   // ── REMAINING PHB FEATS ────────────────────────────────────────────────
@@ -360,6 +384,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Mobile',
     sourceBook: 'PHB',
     description: 'You are exceptionally speedy and agile. You gain the following benefits:\n• Your speed increases by 10 feet.\n• When you use the Dash action, difficult terrain doesn\'t cost you extra movement on that turn.\n• When you make a melee attack against a creature, you don\'t provoke opportunity attacks from that creature for the rest of the turn, whether you hit or not.',
+    speedBonus: 10,
   },
 
   // ── REMAINING XGtE FEATS ───────────────────────────────────────────────
@@ -369,6 +394,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'dragonborn' },
     description: 'You manifest scales and claws reminiscent of your draconic ancestors:\n• Increase your Strength or Charisma score by 1, to a maximum of 20.\n• Your scales harden. While you aren\'t wearing armor, you can calculate your AC as 13 + your Dexterity modifier. You can use a shield and still gain this benefit.\n• You grow retractable claws from the tips of your fingers. The claws are natural weapons, which you can use to make unarmed strikes. If you hit with them, you deal slashing damage equal to 1d4 + your Strength modifier, instead of the bludgeoning damage normal for an unarmed strike.',
+    abilityScoreChoice: ['str', 'cha'],
   },
   {
     id: 'drow-high-magic',
@@ -376,6 +402,11 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'elf-drow' },
     description: 'You learn more of the magic typical of dark elves. You learn the detect magic spell and can cast it at will, without expending a spell slot. You also learn levitate and dispel magic, each of which you can cast once without expending a spell slot. You regain the ability to cast those two spells in this way when you finish a long rest. Charisma is your spellcasting ability for all three spells.',
+    grantedSpells: [
+      { spellId: 'detect-magic', recharge: 'cantrip', ability: 'cha' },
+      { spellId: 'levitate',     recharge: 'long',    ability: 'cha' },
+      { spellId: 'dispel-magic', recharge: 'long',    ability: 'cha' },
+    ],
   },
   {
     id: 'dwarven-fortitude',
@@ -391,6 +422,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'gnome' },
     description: 'Your people are clever, with a knack for illusion magic:\n• Increase your Dexterity or Intelligence score by 1, to a maximum of 20.\n• Immediately after you take damage, you can use a reaction to magically become invisible until the end of your next turn or until you attack, deal damage, or force someone to make a saving throw. Once you use this ability, you can\'t do so again until you finish a short or long rest.',
+    abilityScoreChoice: ['dex', 'int'],
   },
   {
     id: 'flames-of-phlegethos',
@@ -398,6 +430,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'tiefling' },
     description: 'You learn to call on hellfire to serve your commands:\n• Increase your Intelligence or Charisma score by 1, to a maximum of 20.\n• When you roll fire damage for a spell you cast, you can reroll any roll of 1 on the fire damage dice, but you must use the new roll, even if it is another 1.\n• Whenever you cast a spell that deals fire damage, you can cause flames to wreathe you until the end of your next turn. The flames shed bright light out to 30 feet and dim light for an additional 30 feet. While the flames are present, any creature within 5 feet that hits you with a melee attack takes 1d4 fire damage.',
+    abilityScoreChoice: ['int', 'cha'],
   },
   {
     id: 'infernal-constitution',
@@ -413,6 +446,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'half-orc' },
     description: 'Your fury burns tirelessly:\n• Increase your Strength or Constitution score by 1, to a maximum of 20.\n• When you hit with an attack using a simple or martial weapon, you can roll one of the weapon\'s damage dice an additional time and add it as extra damage of the weapon\'s damage type. Once you use this ability, you can\'t do so again until you finish a short or long rest.\n• Immediately after you use your Relentless Endurance trait, you can use your reaction to make one weapon attack.',
+    abilityScoreChoice: ['str', 'con'],
   },
   {
     id: 'prodigy',
@@ -427,6 +461,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'halfling' },
     description: 'Fortune favors you when someone tries to strike you:\n• Increase your Dexterity, Constitution, or Charisma score by 1, to a maximum of 20.\n• When a creature you can see hits you with an attack roll, you can use your reaction to force that creature to reroll. Once you use this ability, you can\'t use it again until you roll initiative at the start of combat or until you finish a short or long rest.',
+    abilityScoreChoice: ['dex', 'con', 'cha'],
   },
   {
     id: 'squat-nimbleness',
@@ -434,6 +469,8 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { other: 'Dwarf or a Small race' },
     description: 'You are uncommonly nimble for your race. You gain the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Your walking speed increases by 5 feet.\n• You gain proficiency in the Acrobatics or Athletics skill (your choice).\n• You have advantage on any Strength (Athletics) or Dexterity (Acrobatics) check you make to escape from being grappled.',
+    abilityScoreChoice: ['str', 'dex'],
+    speedBonus: 5,
   },
   {
     id: 'wood-elf-magic',
@@ -441,6 +478,10 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { race: 'elf-wood' },
     description: 'You learn the magic of the primeval woods, which are revered and protected by your kind. You learn one druid cantrip of your choice. You also learn the longstrider and pass without trace spells, each of which you can cast once without expending a spell slot. You regain the ability to cast those two spells in this way when you finish a long rest. Wisdom is your spellcasting ability for all three spells.',
+    grantedSpells: [
+      { spellId: 'longstrider',       recharge: 'long', ability: 'wis' },
+      { spellId: 'pass-without-trace', recharge: 'long', ability: 'wis' },
+    ],
   },
 
   // ── REMAINING TCE FEATS ────────────────────────────────────────────────
@@ -449,12 +490,14 @@ export const ALL_FEATS: Feat[] = [
     name: 'Chef',
     sourceBook: 'TCE',
     description: 'Time spent mastering the culinary arts has paid off:\n• Increase your Constitution or Wisdom score by 1, to a maximum of 20.\n• You gain proficiency with cook\'s utensils if you don\'t already have it.\n• As part of a short rest, you can cook special food, provided you have ingredients and cook\'s utensils on hand. You can prepare enough food for a number of creatures equal to 4 + your proficiency bonus. At the end of the short rest, any creature who eats the food and spends at least one Hit Die regains an extra 1d8 hit points.\n• With one hour of work or when you finish a long rest, you can cook a number of treats equal to your proficiency bonus. These treats last 8 hours after being made. A creature can use a bonus action to eat one of those treats to gain temporary hit points equal to your proficiency bonus.',
+    abilityScoreChoice: ['con', 'wis'],
   },
   {
     id: 'crusher',
     name: 'Crusher',
     sourceBook: 'TCE',
     description: 'You are practiced in the art of crushing your enemies:\n• Increase your Strength or Constitution score by 1, to a maximum of 20.\n• Once per turn, when you hit a creature with an attack that deals bludgeoning damage, you can move it 5 feet to an unoccupied space, provided the target is no more than one size larger than you.\n• When you score a critical hit that deals bludgeoning damage to a creature, attack rolls against that creature are made with advantage until the start of your next turn.',
+    abilityScoreChoice: ['str', 'con'],
   },
   {
     id: 'eldritch-adept',
@@ -482,6 +525,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Piercer',
     sourceBook: 'TCE',
     description: 'You have achieved a penetrating precision in combat:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Once per turn, when you hit a creature with an attack that deals piercing damage, you can reroll one of the attack\'s damage dice, and you must use the new roll.\n• When you score a critical hit that deals piercing damage to a creature, you can roll one additional damage die when determining the extra piercing damage the target takes.',
+    abilityScoreChoice: ['str', 'dex'],
   },
   {
     id: 'poisoner',
@@ -494,6 +538,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Slasher',
     sourceBook: 'TCE',
     description: 'You\'ve learned where to cut to have the greatest results:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Once per turn, when you hit a creature with an attack that deals slashing damage, you can reduce the speed of the target by 10 feet until the start of your next turn.\n• When you score a critical hit that deals slashing damage to a creature, you grievously wound it. Until the start of your next turn, the target has disadvantage on all attack rolls.',
+    abilityScoreChoice: ['str', 'dex'],
   },
 
   // ── FToD FEATS ─────────────────────────────────────────────────────────
@@ -509,12 +554,14 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'FToD',
     prerequisite: { other: '4th level' },
     description: 'You have manifested the power of gem dragons:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Telekinetic Reprisal. When you take damage from a creature within 10 feet of you, you can use your reaction to emanate telekinetic energy. The creature must make a Strength saving throw (DC 8 + your proficiency bonus + the ability modifier of the score increased by this feat). On a failed save, the creature takes 2d8 force damage and is pushed up to 10 feet from you; on a successful save, the creature takes half as much damage and isn\'t pushed. You can use this reaction a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
+    abilityScoreChoice: ['int', 'wis', 'cha'],
   },
   {
     id: 'gift-of-the-metallic-dragon',
     name: 'Gift of the Metallic Dragon',
     sourceBook: 'FToD',
     description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. Prof-bonus uses per long rest.',
+    grantedSpells: [{ spellId: 'cure-wounds', recharge: 'long', ability: 'wis' }],
   },
 
   // ── ERLW FEATS ─────────────────────────────────────────────────────────
@@ -531,7 +578,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'ERLW',
     prerequisite: { minLevel: 8, other: 'Dragonmark racial trait (ERLW)' },
     description: 'Your dragonmark has grown in power, manifesting as a greater mark that unlocks expanded magical abilities. You gain the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• The spells associated with your dragonmark\'s greater tier are now available to you (see the Greater Dragonmark Spells table, ERLW p. 247, for your house). You can cast each of those spells once per long rest without expending a spell slot; Constitution is your spellcasting ability for them. You can also cast them using any spell slots you have.\n• If your mark\'s least-tier spells required charges or limited uses, you can now use each of them an additional time between long rests.',
-    abilityScoreIncrease: {},
+    abilityScoreChoice: ['int', 'wis', 'cha'],
   },
 
   // ── SCoC FEATS ─────────────────────────────────────────────────────────

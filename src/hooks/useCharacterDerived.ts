@@ -32,6 +32,14 @@ export function computeCharacterDerived(character: Character) {
     const totalLevel = totalCharacterLevel(character.classes);
     const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;
 
+    // Hoist class levels — used throughout for features that scale with class level
+    const barbLevel    = character.classes.find(c => c.classId === 'barbarian')?.level ?? 0;
+    const bardLevel    = character.classes.find(c => c.classId === 'bard')?.level ?? 0;
+    const monkLevel    = character.classes.find(c => c.classId === 'monk')?.level ?? 0;
+    const rogueLevel   = character.classes.find(c => c.classId === 'rogue')?.level ?? 0;
+    const paladinLevel = character.classes.find(c => c.classId === 'paladin')?.level ?? 0;
+    const hasRemarkableAthlete = character.classes.some(cl => cl.subclassId === 'champion' && cl.level >= 7);
+
     // Final ability scores = base + racial + feat bonuses
     const finalScores: AbilityScores = { ...character.baseAbilityScores };
     if (race) {
@@ -49,7 +57,6 @@ export function computeCharacterDerived(character: Character) {
     }
     // Cap at 20 (unless a feature raises it); guard against undefined scores.
     // Primal Champion (Barbarian 20) raises STR and CON cap to 24.
-    const barbLevel = character.classes.find(c => c.classId === 'barbarian')?.level ?? 0;
     for (const k of Object.keys(finalScores) as AbilityKey[]) {
       const cap = barbLevel >= 20 && (k === 'str' || k === 'con') ? 24 : 20;
       finalScores[k] = Math.min(finalScores[k] ?? 10, cap);
@@ -90,6 +97,10 @@ export function computeCharacterDerived(character: Character) {
     } else {
       ac = 10 + mods.dex;
     }
+    // Dragon Hide feat (XGtE): AC = 13 + DEX when unarmored — take the better of this and the class formula
+    if (!equippedArmor && character.selectedFeats.includes('dragon-hide')) {
+      ac = Math.max(ac, 13 + mods.dex);
+    }
     // Shield: +2 AC bonus regardless of armor (Monk loses Unarmored Defense above if shield equipped)
     if (equippedShield) ac += 2;
 
@@ -104,9 +115,42 @@ export function computeCharacterDerived(character: Character) {
     const savingThrowProficiencies = new Set<AbilityKey>();
     const primarySaveDef = getClass(character.classes[0]?.classId);
     if (primarySaveDef) primarySaveDef.savingThrows.forEach(s => savingThrowProficiencies.add(s));
+    // Feat-granted saving throw proficiency (e.g. Resilient: chosen ability)
+    const featChoices = character.featChoices ?? {};
+    for (const featId of (character.selectedFeats ?? [])) {
+      const feat = ALL_FEATS.find(f => f.id === featId);
+      if (feat?.grantsSaveForChosenAbility && featChoices[featId]) {
+        savingThrowProficiencies.add(featChoices[featId] as AbilityKey);
+      }
+    }
+    // Rogue Slippery Mind (lv.15): WIS save proficiency
+    if (rogueLevel >= 15) savingThrowProficiencies.add('wis');
+    // Monk Diamond Soul (lv.14): proficiency in all saving throws
+    if (monkLevel >= 14) {
+      (['str','dex','con','int','wis','cha'] as AbilityKey[]).forEach(k => savingThrowProficiencies.add(k));
+    }
     const savingThrows: Record<AbilityKey, number> = {} as Record<AbilityKey, number>;
     for (const k of Object.keys(mods) as AbilityKey[]) {
       savingThrows[k] = mods[k] + (savingThrowProficiencies.has(k) ? profBonus : 0);
+    }
+    // Paladin Aura of Protection (lv.6): +CHA mod (min +1) to all saving throws
+    if (paladinLevel >= 6) {
+      const aura = Math.max(1, mods.cha);
+      for (const k of Object.keys(savingThrows) as AbilityKey[]) savingThrows[k] += aura;
+    }
+
+    // Feat-granted flat bonuses — computed before skills so passives can use them
+    let featInitiativeBonus = 0;
+    let featSpeedBonus = 0;
+    let featPassivePerceptionBonus = 0;
+    let featPassiveInvestigationBonus = 0;
+    for (const featId of character.selectedFeats) {
+      const feat = ALL_FEATS.find(f => f.id === featId);
+      if (!feat) continue;
+      featInitiativeBonus             += feat.initiativeBonus             ?? 0;
+      featSpeedBonus                  += feat.speedBonus                  ?? 0;
+      featPassivePerceptionBonus      += feat.passivePerceptionBonus      ?? 0;
+      featPassiveInvestigationBonus   += feat.passiveInvestigationBonus   ?? 0;
     }
 
     // Skill bonuses — merge class choices with background-granted proficiencies
@@ -115,24 +159,60 @@ export function computeCharacterDerived(character: Character) {
       ...character.selectedSkillProficiencies,
       ...(bg?.skillProficiencies ?? []),
     ]);
+    const expertiseSet = new Set<string>(character.expertiseSkills ?? []);
+
+    // Subclass auto-expertise (fixed skills, no player choice required)
+    const effectiveExpertiseSet = new Set<string>(expertiseSet);
+    for (const cl of character.classes) {
+      // Corsair (ToB) Ferocious Presence (lv.7): doubled proficiency in Intimidation
+      if (cl.subclassId === 'tob-corsair' && cl.level >= 7) effectiveExpertiseSet.add('Intimidation');
+      // Purple Dragon Knight (SCAG) Royal Envoy (lv.7): doubled proficiency in Persuasion
+      if (cl.subclassId === 'scag-purple-dragon-knight' && cl.level >= 7) effectiveExpertiseSet.add('Persuasion');
+    }
+    // Knowledge Domain: chosen skills gain both proficiency AND expertise
+    const kdAllowed = new Set(['Arcana', 'History', 'Nature', 'Religion']);
+    const kdSkills = character.knowledgeDomainSkills ?? [];
+    if (kdSkills.length > 0 && character.classes.some(cl => cl.subclassId === 'knowledge-domain')) {
+      for (const skill of kdSkills) {
+        if (kdAllowed.has(skill)) {
+          skillProfs.add(skill);
+          effectiveExpertiseSet.add(skill);
+        }
+      }
+    }
+
     const skills: Record<string, number> = {};
     for (const [skill, ability] of Object.entries(SKILL_ABILITY)) {
       const base = mods[ability as AbilityKey];
       const prof = skillProfs.has(skill as any) ? profBonus : 0;
+      // Expertise doubles proficiency bonus (must be proficient to have expertise)
+      const expertiseBonus = (effectiveExpertiseSet.has(skill) && skillProfs.has(skill as any)) ? profBonus : 0;
       // Bard: Jack of All Trades = half prof on non-proficient skills
-      const bardLevel = character.classes.find(c => c.classId === 'bard')?.level ?? 0;
       const jackOfAllTrades = bardLevel >= 2 && !skillProfs.has(skill as any) ? Math.floor(profBonus / 2) : 0;
-      skills[skill] = base + prof + jackOfAllTrades;
+      // Champion Remarkable Athlete (lv.7): ceil(prof/2) to non-proficient STR/DEX/CON checks
+      const remarkableBonus = hasRemarkableAthlete && !skillProfs.has(skill as any) && (ability === 'str' || ability === 'dex' || ability === 'con')
+        ? Math.ceil(profBonus / 2) : 0;
+      skills[skill] = base + prof + expertiseBonus + Math.max(jackOfAllTrades, remarkableBonus);
     }
-    const passivePerception = 10 + (skills['Perception'] ?? 0);
-    const passiveInsight    = 10 + (skills['Insight']    ?? 0);
+    const passivePerception    = 10 + (skills['Perception']    ?? 0) + featPassivePerceptionBonus;
+    const passiveInsight       = 10 + (skills['Insight']       ?? 0);
+    const passiveInvestigation = 10 + (skills['Investigation'] ?? 0) + featPassiveInvestigationBonus;
 
-    // Initiative
-    const initiative = mods.dex;
+    // Initiative — Bard Jack of All Trades (lv.2+) adds half prof bonus
+    const initiative = mods.dex + featInitiativeBonus + (bardLevel >= 2 ? Math.floor(profBonus / 2) : 0);
 
-    // Speed (adjusted for exhaustion)
+    // Class-based speed bonuses
+    // Monk Unarmored Movement: +10 ft at level 2, scaling up, only while unarmored and no shield
+    const monkSpeedBonus = (monkLevel >= 2 && !equippedArmor && !equippedShield)
+      ? monkLevel >= 18 ? 30 : monkLevel >= 14 ? 25 : monkLevel >= 10 ? 20 : monkLevel >= 6 ? 15 : 10
+      : 0;
+    // Barbarian Fast Movement: +10 ft at level 5+ when not wearing heavy armor
+    const barbFastMovement = (barbLevel >= 5 && (!equippedArmor || ARMOR_STATS[equippedArmor.name]?.armorType !== 'heavy'))
+      ? 10 : 0;
+
+    // Speed (feat + class bonuses applied before exhaustion halving)
     const exhaustionLevel = character.exhaustionLevel ?? 0;
-    const _baseSpeed = race?.speed ?? 30;
+    const _baseSpeed = (race?.speed ?? 30) + featSpeedBonus + monkSpeedBonus + barbFastMovement;
     const speed = exhaustionLevel >= 5 ? 0
       : exhaustionLevel >= 2 ? Math.floor(_baseSpeed / 2)
       : _baseSpeed;
@@ -232,7 +312,9 @@ export function computeCharacterDerived(character: Character) {
       savingThrowProficiencies,
       skills,
       allSkillProficiencies: skillProfs,
+      expertiseSkills: effectiveExpertiseSet,
       passivePerception,
+      passiveInvestigation,
       spellcastingAbility,
       spellSaveDC,
       spellAttackBonus,

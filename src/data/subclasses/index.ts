@@ -79,6 +79,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
         rechargeOn: 'short',
         // Subclass resource keyed on the multiclass\'s fighter level; tables here are by class level.
         maxPerLevel: { 1:0,2:0,3:4,4:4,5:4,6:4,7:5,8:5,9:5,10:5,11:5,12:5,13:5,14:5,15:6,16:6,17:6,18:6,19:6,20:6 },
+        resourceDie: { 3: 8, 10: 10, 18: 12 },
       },
     ],
     features: [

@@ -110,6 +110,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 25,
     abilityScoreIncreases: { con: 2, wis: 1 },
+    hpBonusPerLevel: 1,
     traits: [
       { name: 'Darkvision', description: 'Accustomed to life underground, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light.' },
       { name: 'Dwarven Resilience', description: 'You have advantage on saving throws against poison, and you have resistance against poison damage.' },

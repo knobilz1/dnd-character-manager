@@ -25,6 +25,7 @@ const CATEGORY_ORDER: ItemCategory[] = [
 
 interface InventoryPanelProps {
   character: Character;
+  strScore: number;
   addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
   removeInventoryItem: (id: string) => void;
   setInventoryQuantity: (id: string, qty: number) => void;
@@ -37,6 +38,7 @@ interface InventoryPanelProps {
 
 export function InventoryPanel({
   character,
+  strScore,
   addInventoryItem,
   removeInventoryItem,
   setInventoryQuantity,
@@ -65,6 +67,22 @@ export function InventoryPanel({
   const totalWeight = inventory.reduce(
     (sum, i) => sum + (i.weight ?? 0) * i.quantity, 0
   );
+
+  const carryCapacity = strScore * 15;
+  const lightThresh  = strScore * 5;
+  const heavyThresh  = strScore * 10;
+  const isLightly = totalWeight > lightThresh;
+  const isHeavy   = totalWeight > heavyThresh;
+  const isOverCap = totalWeight > carryCapacity;
+  const encPct = carryCapacity > 0 ? Math.min(totalWeight / carryCapacity, 1) : 0;
+  const barColor = isOverCap ? 'bg-red-500' : isHeavy ? 'bg-orange-500' : isLightly ? 'bg-yellow-400' : 'bg-blue-400';
+  const weightColor = isOverCap ? 'text-red-400' : isHeavy ? 'text-orange-400' : isLightly ? 'text-yellow-300' : 'text-white';
+  const encLabel = isOverCap ? 'Over Capacity' : isHeavy ? 'Heavily Encumbered' : isLightly ? 'Lightly Encumbered' : null;
+  const encBadge = isOverCap
+    ? 'bg-red-900/40 text-red-300 border border-red-700/50'
+    : isHeavy
+      ? 'bg-orange-900/40 text-orange-300 border border-orange-700/50'
+      : 'bg-yellow-900/40 text-yellow-300 border border-yellow-700/50';
 
   function handleAdd() {
     if (!draftItem.name.trim()) return;
@@ -110,10 +128,28 @@ export function InventoryPanel({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="text-sm text-slate-400">
-          <span className="font-bold text-white">{inventory.length}</span> items
+        <div className="text-sm text-slate-400 flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span><span className="font-bold text-white">{inventory.length}</span> items</span>
+            {totalWeight > 0 && (
+              <>
+                <span className="text-slate-600">·</span>
+                <span>
+                  <span className={cn('font-bold', weightColor)}>{totalWeight.toFixed(1)}</span>
+                  {' / '}{carryCapacity} lb
+                </span>
+                {encLabel && (
+                  <span className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded', encBadge)}>
+                    {encLabel}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
           {totalWeight > 0 && (
-            <> · <span className="font-bold text-white">{totalWeight.toFixed(1)}</span> lb</>
+            <div className="mt-1.5 h-1 rounded-full bg-slate-700 overflow-hidden max-w-xs">
+              <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${encPct * 100}%` }} />
+            </div>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={() => { setDraftItem({ name: '', quantity: 1, category: 'gear' }); setSuggestions([]); setShowSuggestions(false); setAddOpen(true); }}>

@@ -4,11 +4,12 @@ import { cn } from '../../utils/cn';
 import { getClass } from '../../data/classes';
 import { getSubclass, ALL_SUBCLASSES } from '../../data/subclasses';
 import { getRace } from '../../data/races';
+import { getBackground } from '../../data/backgrounds';
 import {
   abilityMod, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor,
   FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
 } from '../../data/mechanics';
-import { getEligibleFeats } from '../../data/feats';
+import { ALL_FEATS, getEligibleFeats } from '../../data/feats';
 import { ALL_SPELLS } from '../../data/spells';
 import { ALL_INVOCATIONS } from '../../data/invocations';
 import { ALL_PACT_BOONS } from '../../data/pactBoons';
@@ -28,7 +29,7 @@ interface LevelUpDialogProps {
   open: boolean;
   onClose: () => void;
   character: Character;
-  onConfirm: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice) => void;
+  onConfirm: (classId: string, hpGained: number, hpRoll: number, subclassPick?: string, asiChoice?: ASIChoice, expertiseToAdd?: string[]) => void;
 }
 
 type HpMethod = 'average' | 'roll';
@@ -144,19 +145,27 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   const conMod = derived?.mods.con ?? abilityMod(character.baseAbilityScores.con);
   const hitDie = classDef?.hitDie ?? 8;
-  // Some subclasses grant +N HP per class level (e.g. Draconic Bloodline: +1).
-  // We need this before pendingSubclass state but primary?.subclassId covers existing
-  // subclasses; pendingSubclass covers the case where the subclass is picked this level.
+  // Per-level HP bonuses from subclass (e.g. Draconic Bloodline: +1), race (e.g. Hill Dwarf: +1),
+  // and feats already owned (e.g. Tough: +2). The feat being PICKED this level is handled
+  // separately in hpGained below so its retroactive bonus can be applied correctly.
   const subHPBonusPerLevel =
     getSubclass(primary?.subclassId ?? pendingSubclass ?? '')?.hpBonusPerLevel ?? 0;
-  const averagePerLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + subHPBonusPerLevel;
+  const raceHPBonusPerLevel = getRace(character.raceId)?.hpBonusPerLevel ?? 0;
+  const existingFeatHPBonusPerLevel = (character.selectedFeats ?? []).reduce((sum, fid) => {
+    const feat = ALL_FEATS.find(f => f.id === fid);
+    return sum + (feat?.hpBonusPerLevel ?? 0);
+  }, 0);
+  const totalHPBonusPerLevel = subHPBonusPerLevel + raceHPBonusPerLevel + existingFeatHPBonusPerLevel;
+  const averagePerLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + totalHPBonusPerLevel;
 
   const [method, setMethod] = React.useState<HpMethod>('average');
   const [rollResult, setRollResult] = React.useState<number | null>(null);
   const [asiMode, setASIMode] = React.useState<ASIMode>('asi');
   const [asiIncreases, setASIIncreases] = React.useState<Partial<Record<AbilityKey, number>>>({});
   const [selectedFeat, setSelectedFeat] = React.useState<string | undefined>(undefined);
+  const [featASIChoice, setFeatASIChoice] = React.useState<AbilityKey | undefined>(undefined);
   const [featSearch, setFeatSearch] = React.useState('');
+  const [pendingExpertise, setPendingExpertise] = React.useState<string[]>([]);
 
   // Spell / option selection state
   const [pendingCantrips, setPendingCantrips] = React.useState<string[]>([]);
@@ -195,6 +204,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     setPendingManeuvers([]);
     setPendingInfusions([]);
     setPendingOptionalFeatures([]);
+    setPendingExpertise([]);
   }, [selectedClassIdx]);
 
   React.useEffect(() => {
@@ -220,6 +230,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
       setPendingManeuvers([]);
       setPendingInfusions([]);
       setPendingOptionalFeatures([]);
+      setPendingExpertise([]);
     }
   }, [open]);
 
@@ -269,9 +280,20 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // For average, this is always floor(hitDie/2)+1 — never derived from the clamped
   // averagePerLevel, which would inflate the stored value when Con is very negative.
   const hpRoll = method === 'roll' ? (rollResult ?? 0) : Math.floor(hitDie / 2) + 1;
+  // Per-level bonus from the feat chosen THIS level-up (e.g. Tough: +2).
+  const newFeatHPBonus = selectedFeat
+    ? (ALL_FEATS.find(f => f.id === selectedFeat)?.hpBonusPerLevel ?? 0)
+    : 0;
+  // Retroactive one-time HP boost for feats that grant bonus for all past levels (e.g. Tough:
+  // "+2 × your level when you gain this feat"). derived.totalLevel is pre-level-up, so
+  // multiplying by it covers the previous levels; the current level's +2 is already in
+  // newFeatHPBonus. Total Tough benefit = newFeatHPBonus(2) + retroactive(2×T) = 2×(T+1). ✓
+  const newFeatRetroactive = selectedFeat
+    ? (ALL_FEATS.find(f => f.id === selectedFeat)?.hpRetroactiveBonusPerPastLevel ?? 0) * (derived?.totalLevel ?? 1)
+    : 0;
   const hpGained = method === 'roll'
-    ? Math.max(1, (rollResult ?? 0) + conMod) + subHPBonusPerLevel
-    : averagePerLevel;
+    ? Math.max(1, (rollResult ?? 0) + conMod) + totalHPBonusPerLevel + newFeatHPBonus + newFeatRetroactive
+    : averagePerLevel + newFeatHPBonus + newFeatRetroactive;
 
   // Effective scores (base + racial + feat bonuses) for display and cap-checking
   const race = getRace(character.raceId);
@@ -300,15 +322,23 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     f.name.toLowerCase().includes(featSearch.toLowerCase())
   );
 
+  const selectedFeatDef = selectedFeat ? ALL_FEATS.find(f => f.id === selectedFeat) : undefined;
+  const featNeedsASIChoice = !!(selectedFeatDef?.abilityScoreChoice?.length);
+
   const asiChoiceValid = !isASI || (
     asiMode === 'feat'
-      ? selectedFeat != null
+      ? selectedFeat != null && (!featNeedsASIChoice || featASIChoice != null)
       : pointsSpent === 2
   );
 
   function buildASIChoice(): ASIChoice | undefined {
     if (!isASI) return undefined;
-    if (asiMode === 'feat' && selectedFeat) return { type: 'feat', featId: selectedFeat };
+    if (asiMode === 'feat' && selectedFeat) {
+      const abilityIncrease = (featNeedsASIChoice && featASIChoice)
+        ? { [featASIChoice]: 1 } as Partial<Record<AbilityKey, number>>
+        : undefined;
+      return { type: 'feat', featId: selectedFeat, abilityIncrease };
+    }
     if (asiMode === 'asi' && pointsSpent === 2) {
       const increases: Partial<Record<AbilityKey, number>> = {};
       for (const [k, v] of Object.entries(asiIncreases)) {
@@ -346,7 +376,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
       });
     }
 
-    onConfirm(primary.classId, hpGained, hpRoll, pendingSubclass, buildASIChoice());
+    onConfirm(primary.classId, hpGained, hpRoll, pendingSubclass, buildASIChoice(), pendingExpertise.length > 0 ? pendingExpertise : undefined);
     onClose();
   }
 
@@ -484,6 +514,22 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     ] : []),
   ];
 
+  // ── Expertise ────────────────────────────────────────────────────────────
+  // Bard expertise: 2 skills at class level 3, 2 more at class level 10
+  // Rogue expertise: 2 skills at class level 1 (multiclass dip only), 2 more at class level 6
+  const expertiseCount =
+    (classId === 'bard' && (newLevel === 3 || newLevel === 10)) ? 2 :
+    (classId === 'rogue' && (newLevel === 1 || newLevel === 6)) ? 2 : 0;
+  const allProfSkills = React.useMemo(() => {
+    const bgDef = getBackground(character.backgroundId);
+    return new Set<string>([
+      ...character.selectedSkillProficiencies,
+      ...(bgDef?.skillProficiencies ?? []),
+    ]);
+  }, [character.backgroundId, character.selectedSkillProficiencies]);
+  const existingExpertise = new Set<string>(character.expertiseSkills ?? []);
+  const expertiseEligible = Array.from(allProfSkills).filter(s => !existingExpertise.has(s) && !pendingExpertise.includes(s));
+
   const canConfirm =
     (method === 'average' || rollResult != null) &&
     (!needsSubclass || pendingSubclass != null) &&
@@ -491,7 +537,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     (!needsTotemSpirit || pendingTotemSpirit != null) &&
     (!needsAspectTotem || pendingAspectTotem != null) &&
     (!needsTotemicAttunement || pendingTotemicAttunement != null) &&
-    asiChoiceValid;
+    asiChoiceValid &&
+    pendingExpertise.length >= Math.min(expertiseCount, pendingExpertise.length + expertiseEligible.length);
 
   const pactBoonsAvail = needsPactBoon
     ? ALL_PACT_BOONS.filter(p => bookEnabled(p, enabledBooks))
@@ -813,7 +860,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                             }
                           >
                           <button
-                            onClick={() => setSelectedFeat(isSelected ? undefined : feat.id)}
+                            onClick={() => { setSelectedFeat(isSelected ? undefined : feat.id); setFeatASIChoice(undefined); }}
                             className={cn(
                               'p-3 rounded-lg border-2 text-left transition-all w-full',
                               isSelected
@@ -850,10 +897,44 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                         <p className="text-sm text-slate-500 italic col-span-2">No feats match "{featSearch}".</p>
                       )}
                     </div>
-                    {selectedFeat && (
+                    {selectedFeat && featNeedsASIChoice && (
+                      <div className="mt-3 pt-3 border-t border-slate-700">
+                        <p className="text-xs text-amber-300 font-semibold mb-2">
+                          {selectedFeatDef?.name} — choose +1 ability score:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedFeatDef!.abilityScoreChoice!.map(key => {
+                            const score = effectiveScore(key);
+                            const atCap = score >= 20;
+                            const chosen = featASIChoice === key;
+                            return (
+                              <button
+                                key={key}
+                                disabled={atCap}
+                                onClick={() => setFeatASIChoice(chosen ? undefined : key)}
+                                className={cn(
+                                  'px-3 py-1.5 rounded-lg border-2 text-sm font-bold transition-all',
+                                  chosen
+                                    ? 'border-amber-500 bg-amber-950/40 text-amber-200'
+                                    : atCap
+                                      ? 'border-slate-700 bg-slate-800 text-slate-600 cursor-not-allowed'
+                                      : 'border-slate-600 bg-slate-800 text-white hover:border-amber-500/60',
+                                )}
+                              >
+                                {key.toUpperCase()} ({score}{atCap ? ' — max' : chosen ? ' → ' + (score + 1) : ''})
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {selectedFeat && (!featNeedsASIChoice || featASIChoice) && (
                       <p className="text-xs text-green-400 mt-2">
-                        ✓ {eligibleFeats.find(f => f.id === selectedFeat)?.name} selected — confirm to apply.
+                        ✓ {eligibleFeats.find(f => f.id === selectedFeat)?.name} selected{featASIChoice ? ` (+1 ${featASIChoice.toUpperCase()})` : ''} — confirm to apply.
                       </p>
+                    )}
+                    {selectedFeat && featNeedsASIChoice && !featASIChoice && (
+                      <p className="text-xs text-amber-400 mt-2">↑ Choose an ability score to continue.</p>
                     )}
                   </>
                 )}
@@ -1408,6 +1489,56 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                   </HoverCard>
                 );
               })}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Expertise ───────────────────────────────────────────────────── */}
+        {expertiseCount > 0 && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Expertise</h3>
+              <span className={cn('text-xs font-bold', pendingExpertise.length >= expertiseCount ? 'text-green-400' : 'text-amber-300')}>
+                {pendingExpertise.length}/{expertiseCount} chosen
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mb-2">
+              Choose {expertiseCount} skills to gain Expertise in — your proficiency bonus is doubled for those skills.
+            </p>
+            {pendingExpertise.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingExpertise.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setPendingExpertise(prev => prev.filter(x => x !== s))}
+                    className="text-xs bg-emerald-900/40 border border-emerald-700 text-emerald-200 rounded-lg px-2 py-0.5 hover:bg-emerald-800/50 transition-colors"
+                  >
+                    {s} ×
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grid gap-1.5 sm:grid-cols-2 max-h-44 overflow-y-auto scrollbar-thin pr-1">
+              {expertiseEligible.sort().map(skill => {
+                const canAdd = pendingExpertise.length < expertiseCount;
+                return (
+                  <button
+                    key={skill}
+                    onClick={() => { if (canAdd) setPendingExpertise(prev => [...prev, skill]); }}
+                    disabled={!canAdd}
+                    className={cn(
+                      'w-full p-2 rounded-lg border text-left transition-all',
+                      canAdd ? 'border-slate-700 bg-slate-800 hover:border-emerald-500/60 cursor-pointer' : 'border-slate-700 bg-slate-800 opacity-50 cursor-not-allowed',
+                    )}
+                  >
+                    <p className="text-xs font-bold text-white">{skill}</p>
+                    <p className="text-[10px] text-emerald-400 mt-0.5">Expertise</p>
+                  </button>
+                );
+              })}
+              {expertiseEligible.length === 0 && (
+                <p className="text-xs text-slate-500 italic col-span-2">No eligible skills available.</p>
+              )}
             </div>
           </section>
         )}

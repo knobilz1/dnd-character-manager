@@ -5,11 +5,15 @@ import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { ASI_LEVELS } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
+import { getRace } from '../../../data/races';
 import { BOOKS } from '../../../data/books';
 import { bookEnabled } from '../../../utils/bookEnabled';
-import type { Feat, BookId } from '../../../types';
+import type { Feat, BookId, AbilityKey } from '../../../types';
 
 const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
+const ABILITY_LABELS: Record<AbilityKey, string> = {
+  str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA',
+};
 
 export function StepFeats() {
   const { draft, updateDraft } = useCreatorStore();
@@ -23,15 +27,34 @@ export function StepFeats() {
 
   const available = ALL_FEATS.filter(f => bookEnabled(f, draft.enabledBooks));
   const selected = new Set(draft.selectedFeats ?? []);
+  const featChoices: Record<string, AbilityKey> = (draft.featChoices as Record<string, AbilityKey>) ?? {};
+
+  // Effective scores: base + racial (needed for accurate cap check)
+  const baseScores = draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 };
+  const raceDef = draft.raceId ? getRace(draft.raceId) : null;
+  const racialASI = (raceDef?.abilityScoreIncreases ?? {}) as Partial<Record<AbilityKey, number>>;
+  const effectiveScore = (key: AbilityKey) => (baseScores[key] ?? 10) + (racialASI[key] ?? 0);
 
   function toggle(featId: string) {
     const next = new Set(selected);
+    const nextChoices = { ...featChoices };
     if (next.has(featId)) {
       next.delete(featId);
+      delete nextChoices[featId];
     } else if (next.size < asiCount) {
       next.add(featId);
     }
-    updateDraft({ selectedFeats: Array.from(next) });
+    updateDraft({ selectedFeats: Array.from(next), featChoices: nextChoices });
+  }
+
+  function setFeatChoice(featId: string, ability: AbilityKey | undefined) {
+    const nextChoices = { ...featChoices };
+    if (ability) {
+      nextChoices[featId] = ability;
+    } else {
+      delete nextChoices[featId];
+    }
+    updateDraft({ featChoices: nextChoices });
   }
 
   if (asiCount === 0) {
@@ -128,6 +151,47 @@ export function StepFeats() {
           );
         })}
       </div>
+
+      {/* Ability choice pickers for selected feats with abilityScoreChoice */}
+      {Array.from(selected).map(featId => {
+        const feat = ALL_FEATS.find(f => f.id === featId);
+        if (!feat?.abilityScoreChoice?.length) return null;
+        const chosen = featChoices[featId];
+        return (
+          <div key={featId} className="mt-3 p-3 bg-slate-900 border border-amber-700/40 rounded-lg">
+            <p className="text-xs font-bold text-amber-300 mb-2">
+              {feat.name} — choose +1 ability score:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {feat.abilityScoreChoice.map(key => {
+                const score = effectiveScore(key);
+                const atCap = score >= 20;
+                const isChosen = chosen === key;
+                return (
+                  <button
+                    key={key}
+                    disabled={atCap}
+                    onClick={() => setFeatChoice(featId, isChosen ? undefined : key)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg border-2 text-sm font-bold transition-all',
+                      isChosen
+                        ? 'border-amber-500 bg-amber-950/40 text-amber-200'
+                        : atCap
+                          ? 'border-slate-700 bg-slate-800 text-slate-600 cursor-not-allowed'
+                          : 'border-slate-600 bg-slate-800 text-white hover:border-amber-500/60',
+                    )}
+                  >
+                    {ABILITY_LABELS[key]} ({score}{atCap ? ' — max' : isChosen ? ' → ' + (score + 1) : ''})
+                  </button>
+                );
+              })}
+            </div>
+            {!chosen && (
+              <p className="text-xs text-amber-400 mt-2">↑ Choose an ability score to continue.</p>
+            )}
+          </div>
+        );
+      })}
 
       {/* Feat detail dialog */}
       <Dialog open={!!detailFeat} onClose={() => setDetailFeat(null)} title={detailFeat?.name}>

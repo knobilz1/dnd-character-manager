@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus, Sparkles, X, Zap } from 'lucide-react';
 import { ALL_SPELLS, getSpell } from '../../data/spells';
+import { ALL_FEATS } from '../../data/feats';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { SpellDetail } from '../creator/steps/StepSpells';
@@ -25,11 +26,12 @@ interface SpellPanelProps {
   useSpellSlot: (level: SlotLevel) => void;
   usePactSlot: () => void;
   useInnateSpell: (spellId: string) => void;
+  useFeatSpell: (featId: string, spellId: string) => void;
 }
 
 const PREPARED_CASTER_CLASSES = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
 
-export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell }: SpellPanelProps) {
+export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -306,6 +308,76 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                           'shrink-0 text-xs px-2 py-1 rounded border transition-all',
                           isAvailable
                             ? 'border-indigo-600 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50'
+                            : 'border-slate-700 bg-slate-900 text-slate-600 cursor-not-allowed',
+                        )}
+                        title={isAvailable ? `Use (${rechargeLabel} to recharge)` : `Spent — recharges on ${rechargeLabel}`}
+                      >
+                        {isAvailable ? 'Use' : 'Spent'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Feat-Granted Spells */}
+      {(() => {
+        const featSpells: Array<{ featId: string; featName: string; spellId: string; recharge: 'cantrip' | 'long' | 'short'; ability: string }> = [];
+        for (const featId of (character.selectedFeats ?? [])) {
+          const feat = ALL_FEATS.find(f => f.id === featId);
+          if (!feat?.grantedSpells?.length) continue;
+          for (const gs of feat.grantedSpells) {
+            featSpells.push({ featId, featName: feat.name, spellId: gs.spellId, recharge: gs.recharge, ability: gs.ability });
+          }
+        }
+        if (!featSpells.length) return null;
+        return (
+          <div className="bg-slate-800 border border-amber-700/40 rounded-xl overflow-hidden">
+            <div className="px-4 py-2 bg-slate-750 border-b border-slate-700 flex items-center gap-2">
+              <h3 className="font-bold text-amber-300 text-sm">Feat-Granted Spells</h3>
+            </div>
+            <div className="divide-y divide-slate-700/50">
+              {featSpells.map(({ featId, featName, spellId, recharge, ability }) => {
+                const spell = getSpell(spellId);
+                if (!spell) return null;
+                const key = `feat:${featId}:${spellId}`;
+                const isCantrip = recharge === 'cantrip';
+                const used = character.innateSpellUses?.[key] ?? 1;
+                const isAvailable = isCantrip || used > 0;
+                const rechargeLabel = recharge === 'long' ? 'Long rest' : recharge === 'short' ? 'Short rest' : '';
+                return (
+                  <div key={key} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-750/50 group">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <button
+                          className="font-medium text-white text-sm hover:text-red-300 transition-colors text-left"
+                          onClick={() => setDetailSpell(spell)}
+                        >{spell.name}</button>
+                        <Badge color={SCHOOL_COLORS[spell.school] ?? 'slate'} className="text-xs shrink-0">
+                          {spell.level === 0 ? 'C' : `L${spell.level}`}
+                        </Badge>
+                        {spell.concentration && <span className="text-xs text-amber-400 bg-amber-900/30 px-1 rounded">C</span>}
+                        {spell.ritual && <span className="text-xs text-blue-400 bg-blue-900/30 px-1 rounded">R</span>}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {spell.castingTime} · {spell.range} · {ability.toUpperCase()}
+                        {rechargeLabel && <span className="text-slate-600"> · {rechargeLabel}</span>}
+                        <span className="text-slate-600"> · {featName}</span>
+                      </p>
+                    </div>
+                    {isCantrip ? (
+                      <span className="text-xs text-slate-400 shrink-0">At will</span>
+                    ) : (
+                      <button
+                        disabled={!isAvailable}
+                        onClick={() => useFeatSpell(featId, spellId)}
+                        className={cn(
+                          'shrink-0 text-xs px-2 py-1 rounded border transition-all',
+                          isAvailable
+                            ? 'border-amber-600 bg-amber-900/30 text-amber-300 hover:bg-amber-800/50'
                             : 'border-slate-700 bg-slate-900 text-slate-600 cursor-not-allowed',
                         )}
                         title={isAvailable ? `Use (${rechargeLabel} to recharge)` : `Spent — recharges on ${rechargeLabel}`}

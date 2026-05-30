@@ -67,6 +67,7 @@ export const ALL_CLASSES: DClass[] = [
         key: 'bardic_inspiration',
         rechargeOn: 'long',
         maxPerLevel: { 1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3,13:4,14:4,15:4,16:4,17:5,18:5,19:5,20:5 },
+        resourceDie: { 1: 6, 5: 8, 10: 10, 15: 12 },
       },
     ],
     subclassLabel: 'Bard College',

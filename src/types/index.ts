@@ -88,6 +88,7 @@ export interface Race {
   parentRaceId?: string;
   subraces?: Race[];
   innateSpells?: InnateSpell[];
+  hpBonusPerLevel?: number;
 }
 
 export interface ClassFeature {
@@ -102,6 +103,9 @@ export interface ClassResourceDefinition {
   key: string;
   rechargeOn: 'short' | 'long' | 'dawn';
   maxPerLevel: Record<number, number | 'unlimited'>;
+  /** Maps class level to die size for resources with a scaling die (e.g. Bardic Inspiration d6→d12).
+   *  Sparse — the last entry at or below the current level applies. */
+  resourceDie?: Record<number, number>;
 }
 
 export interface DClass {
@@ -203,7 +207,7 @@ export interface FeatPrerequisite {
 }
 
 export type ASIChoice =
-  | { type: 'feat'; featId: string }
+  | { type: 'feat'; featId: string; abilityIncrease?: Partial<Record<AbilityKey, number>> }
   | { type: 'asi'; increases: Partial<Record<AbilityKey, number>> };
 
 export interface Feat {
@@ -215,6 +219,28 @@ export interface Feat {
   abilityScoreIncrease?: Partial<Record<AbilityKey, number>>;
   grantsSpell?: string[];
   grantsProficiency?: string[];
+  /** Extra HP gained each time a level is gained while this feat is held. */
+  hpBonusPerLevel?: number;
+  /** One-time retroactive HP bonus per level already gained when this feat is first taken
+   *  (e.g. Tough: +2×currentLevel immediately). Applied only in LevelUpDialog at the
+   *  moment the feat is picked; the creator store handles it via hpBonusPerLevel×level. */
+  hpRetroactiveBonusPerPastLevel?: number;
+  /** Flat bonus added to initiative (e.g. Alert: +5). */
+  initiativeBonus?: number;
+  /** Flat bonus added to walking speed in feet (e.g. Mobile: +10, Squat Nimbleness: +5). */
+  speedBonus?: number;
+  /** Flat bonus added to passive Perception (e.g. Observant: +5). */
+  passivePerceptionBonus?: number;
+  /** Flat bonus added to passive Investigation (e.g. Observant: +5). */
+  passiveInvestigationBonus?: number;
+  /** Abilities the player can choose +1 from when taking this feat at an ASI level-up.
+   *  Applied to baseAbilityScores via the ASIChoice.abilityIncrease mechanism. */
+  abilityScoreChoice?: AbilityKey[];
+  /** When true, the ability chosen via abilityScoreChoice also grants proficiency in that
+   *  saving throw (e.g. Resilient). Stored in character.featChoices[featId]. */
+  grantsSaveForChosenAbility?: boolean;
+  /** Spells granted by this feat with their use-tracking metadata. */
+  grantedSpells?: Array<{ spellId: string; recharge: 'cantrip' | 'long' | 'short'; ability: AbilityKey }>;
 }
 
 export interface FightingStyle {
@@ -463,6 +489,12 @@ export interface Character {
   activeWildShape?: ActiveWildShape | null;
   armorerMode?: 'guardian' | 'infiltrator';
   pathOfBeastForm?: 'bite' | 'claws' | 'tail' | null;
+  // Expertise (doubled proficiency bonus): skill names where the character has expertise
+  expertiseSkills?: string[];
+  // Per-feat player ability choices (e.g. Resilient: which save to grant proficiency in)
+  featChoices?: Record<string, AbilityKey>;
+  // Knowledge Domain: 2 skills (from Arcana/History/Nature/Religion) that gain proficiency + expertise
+  knowledgeDomainSkills?: string[];
 }
 
 export type WizardStep =
