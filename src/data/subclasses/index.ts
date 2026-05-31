@@ -348,14 +348,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'ancestral-guardian', name: 'Path of the Ancestral Guardian', classId: 'barbarian', sourceBook: 'XGtE', description: 'Some barbarians hail from cultures that revere their ancestors. These tribes teach that the warriors of the past linger in the world as mighty spirits.', features: [
     { name: 'Ancestral Protectors', level: 3, description: 'Spectral warriors appear when you enter your rage. The first creature you hit with an attack on your turn becomes the target of these warriors; the creature has disadvantage on attacks against anyone other than you, and your allies have resistance to damage from it.' },
     { name: 'Spirit Shield', level: 6, description: 'When a creature you can see within 30 feet takes damage, you can use your reaction to reduce that damage by 2d6 (3d6 at 10th, 4d6 at 14th).' },
-    { name: 'Consult the Spirits', level: 10, description: 'You can cast Augury or Clairvoyance through your ancestral spirits, once per short or long rest.' },
+    { name: 'Consult the Spirits', level: 10, description: 'You can cast Augury or Clairvoyance without expending a spell slot or material components, using your ancestral spirits instead of a sensor (for Clairvoyance). Wisdom is your spellcasting ability. Once per short or long rest.' },
     { name: 'Vengeful Ancestors', level: 14, description: 'When you use Spirit Shield, the attacker takes the same amount of force damage you prevented.' },
   ]},
   { id: 'zealot', name: 'Path of the Zealot', classId: 'barbarian', sourceBook: 'XGtE', description: 'Barbarians who follow the Path of the Zealot are warriors who channel divine fury into a martial frenzy. They serve as the avenging instruments of their gods.', features: [
     { name: 'Divine Fury', level: 3, description: 'While raging, the first creature you hit with a weapon attack on each turn takes extra damage equal to 1d6 + half your barbarian level (necrotic or radiant, your choice).' },
     { name: 'Warrior of the Gods', level: 3, description: 'Spells that return you to life don\'t require material components.' },
     { name: 'Fanatical Focus', level: 6, description: 'If you fail a saving throw while raging, you can reroll it. You can only reroll one save per rage.' },
-    { name: 'Zealous Presence', level: 10, description: 'As a bonus action, up to ten creatures of your choice within 60 feet gain advantage on attack rolls and saving throws until the start of your next turn.' },
+    { name: 'Zealous Presence', level: 10, description: 'As a bonus action, up to ten creatures of your choice within 60 feet that can hear you gain advantage on attack rolls and saving throws until the start of your next turn. Once per long rest.' },
     { name: 'Rage Beyond Death', level: 14, description: 'While raging, having 0 HP doesn\'t knock you unconscious. You can still die from failed death saves, but death is delayed until rage ends.' },
   ]},
 
@@ -395,7 +395,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   // ── XGtE: DRUID ──────────────────────────────────────────────────────
   { id: 'circle-of-dreams', name: 'Circle of Dreams', classId: 'druid', sourceBook: 'XGtE', description: 'Druids who are members of the Circle of Dreams hail from regions that have strong ties to the Feywild and its dreamlike realms.', features: [
     { name: 'Balm of the Summer Court', level: 2, description: 'You have a pool of d6s equal to your druid level. As a bonus action, you can choose a creature within 120 feet and spend dice from the pool: heal HP equal to total + grant temp HP.' },
-    { name: 'Hearth of Moonlight and Shadow', level: 6, description: 'When you finish a short or long rest, you can create a 30-foot-radius sphere of magic. Allies inside gain +5 to Stealth and Perception checks, and total cover from outside.' },
+    { name: 'Hearth of Moonlight and Shadow', level: 6, description: 'When you start a short or long rest, you touch a point to create an invisible 30-foot-radius sphere for the rest\'s duration. While inside, you and allies gain +5 to Dexterity (Stealth) and Wisdom (Perception) checks; light from open flames inside is invisible from outside.' },
     { name: 'Hidden Paths', level: 10, description: 'You can use a bonus action to teleport up to 60 feet to an unoccupied space you can see, or teleport a willing creature within 30 feet up to 60 feet. Wis modifier uses per long rest.' },
     { name: 'Walker in Dreams', level: 14, description: 'You can cast Dream, Scrying, or Teleportation Circle as a 1-minute action, once per long rest.' },
   ]},
@@ -431,7 +431,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'cavalier', name: 'Cavalier', classId: 'fighter', sourceBook: 'XGtE', description: 'The archetypal Cavalier excels at mounted combat. Usually born of noble birth, the cavalier embodies the ideals of chivalry.', features: [
     { name: 'Bonus Proficiency', level: 3, description: 'You gain proficiency in one of: Animal Handling, History, Insight, Performance, or Persuasion. Or you can choose to learn one language.' },
-    { name: 'Born to the Saddle', level: 3, description: 'You have advantage on saves to avoid falling off your mount. Mounting/dismounting costs 5 feet of movement.' },
+    { name: 'Born to the Saddle', level: 3, description: 'You have advantage on saves to avoid falling off your mount. If you fall while mounted and are not incapacitated, you descend 10 feet and land on your feet. Mounting/dismounting costs only 5 feet of movement.' },
     { name: 'Unwavering Mark', level: 3, description: 'When you make a melee weapon attack, you can mark the target. While marked, the creature has disadvantage on attacks against anyone other than you. You can also make a bonus action attack against a marked creature that hits an ally.' },
     { name: 'Warding Maneuver', level: 7, description: 'When a creature you can see within 5 feet hits you or an ally with an attack, you can use your reaction to add 1d8 to their AC against that attack and gain resistance to the damage.' },
     { name: 'Hold the Line', level: 10, description: 'Creatures provoke opportunity attacks from you when they move 5 feet or more while in your reach. On hit, the creature\'s speed is 0 until the end of the current turn.' },
@@ -446,7 +446,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     features: [
     { name: 'Bonus Proficiency', level: 3, description: 'You gain proficiency in one of: History, Insight, Performance, or Persuasion. Or you learn one language.' },
     { name: 'Fighting Spirit', level: 3, description: 'As a bonus action, give yourself advantage on weapon attack rolls until the end of your current turn and gain 5 temp HP (10 at 10th level, 15 at 15th level). 3 uses per long rest.' },
-    { name: 'Elegant Courtier', level: 7, description: 'You add your Wisdom modifier to Charisma (Persuasion) checks, and you gain proficiency in Wisdom saves.' },
+    { name: 'Elegant Courtier', level: 7, description: 'You add your Wisdom modifier to Charisma (Persuasion) checks. You gain proficiency in Wisdom saving throws; if already proficient, you instead gain proficiency in Intelligence or Charisma saves (your choice).' },
     { name: 'Tireless Spirit', level: 10, description: 'When you roll initiative and have no Fighting Spirit uses remaining, you regain one use.' },
     { name: 'Rapid Strike', level: 15, description: 'If you have advantage on an attack against a creature, you can forgo that advantage to make one additional attack.' },
     { name: 'Strength Before Death', level: 18, description: 'When you take damage that would reduce you to 0 HP, you can use your reaction to delay falling unconscious and take one extra turn immediately.' },
@@ -482,7 +482,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Invincible Conqueror', level: 20, description: 'As an action, you assume a form of supernatural power for 1 minute: resistance to all damage, extra attack on Attack action, and crit on 19-20.' },
   ], alwaysPreparedSpells: { 3: ['armor-of-agathys', 'command'], 5: ['hold-person', 'spiritual-weapon'], 9: ['bestow-curse', 'fear'], 13: ['dominate-beast', 'stoneskin'], 17: ['cloudkill', 'dominate-person'] }},
   { id: 'oath-of-redemption', name: 'Oath of Redemption', classId: 'paladin', sourceBook: 'XGtE', description: 'The Oath of Redemption sets a paladin on a difficult path, one that requires a holy warrior to use violence only as a last resort.', features: [
-    { name: 'Emissary of Peace', level: 3, description: 'As a bonus action, gain +5 bonus to Cha (Persuasion) checks for 10 minutes. Cha modifier uses per long rest.' },
+    { name: 'Channel Divinity: Emissary of Peace', level: 3, description: 'As a bonus action, you use your Channel Divinity to gain a +5 bonus to Charisma (Persuasion) checks for the next 10 minutes.' },
     { name: 'Rebuke the Violent', level: 3, description: 'When a creature within 30 feet hits another with an attack, you can use your reaction to force a Wisdom save or take radiant damage equal to the damage dealt.' },
     { name: 'Aura of the Guardian', level: 7, description: 'When a creature within 10 feet (30 ft at 18th) takes damage, you can use your reaction to magically take that damage instead.' },
     { name: 'Protective Spirit', level: 15, description: 'You regain HP equal to 1d6 + half your paladin level if you end your turn in combat with fewer than half your HP and aren\'t incapacitated.' },
@@ -492,7 +492,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   // ── XGtE: RANGER ─────────────────────────────────────────────────────
   { id: 'gloom-stalker', name: 'Gloom Stalker', classId: 'ranger', sourceBook: 'XGtE', description: 'Gloom Stalkers are at home in the darkest places: deep under the earth, in gloomy alleyways, in primeval forests, and wherever else the light dims.', features: [
     { name: 'Gloom Stalker Magic', level: 3, description: 'You learn additional spells, starting with Disguise Self.' },
-    { name: 'Dread Ambusher', level: 3, description: 'On your first turn in combat, your speed increases by 10 feet and you can make an additional weapon attack on your Attack action that deals an extra 1d8 damage.' },
+    { name: 'Dread Ambusher', level: 3, description: 'You add your Wisdom modifier to your initiative rolls. On your first turn of each combat, your walking speed increases by 10 feet until end of that turn. If you take the Attack action that turn, you can make one additional weapon attack as part of it; if it hits, the target takes an extra 1d8 damage of the weapon\'s type.' },
     { name: 'Umbral Sight', level: 3, description: 'You gain darkvision 60 feet (or +30 ft if you already have it). While in darkness, you are invisible to creatures relying on darkvision.' },
     { name: 'Iron Mind', level: 7, description: 'You gain proficiency in Wisdom saves (or Int/Cha if already have Wis).' },
     { name: 'Stalker\'s Flurry', level: 11, description: 'If you miss with a weapon attack on your turn, you can make another weapon attack as part of the same action.' },
@@ -519,7 +519,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'inquisitive', name: 'Inquisitive', classId: 'rogue', sourceBook: 'XGtE', description: 'Inquisitives excel at rooting out secrets and unraveling mysteries. They rely on their sharp instincts, eye for detail, and forensic mind.', features: [
     { name: 'Ear for Deceit', level: 3, description: 'When you make a Wisdom (Insight) check to determine whether a creature is lying, treat a roll of 7 or lower as 8.' },
     { name: 'Eye for Detail', level: 3, description: 'You can use a bonus action to make a Wisdom (Perception) check to spot a hidden creature or object or to make an Investigation check to uncover or decipher clues.' },
-    { name: 'Insightful Fighting', level: 3, description: 'As a bonus action, make an Insight check contested by a creature\'s Deception check. On success, you can use Sneak Attack against that creature without needing advantage or an ally adjacent.' },
+    { name: 'Insightful Fighting', level: 3, description: 'As a bonus action, make a Wisdom (Insight) check contested by the target\'s Charisma (Deception) check. On success, you can use Sneak Attack against that target even if you don\'t have advantage, as long as you don\'t have disadvantage on the attack roll. Lasts 1 minute or until you successfully use this against a different target.' },
     { name: 'Steady Eye', level: 9, description: 'You have advantage on Perception and Investigation checks if you move no more than half your speed on the same turn.' },
     { name: 'Unerring Eye', level: 13, description: 'As an action, sense the presence of illusions, shapechangers not in original form, and magical disguises within 30 feet.' },
     { name: 'Eye for Weakness', level: 17, description: 'While using Insightful Fighting against a target, your Sneak Attack damage against that target increases by 3d6.' },
@@ -540,7 +540,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'swashbuckler', name: 'Swashbuckler', classId: 'rogue', sourceBook: 'XGtE', description: 'You focus your training on the art of the blade, relying on speed, elegance, and charm in equal parts.', features: [
     { name: 'Fancy Footwork', level: 3, description: 'When you make a melee attack against a creature, that creature can\'t make opportunity attacks against you for the rest of your turn.' },
-    { name: 'Rakish Audacity', level: 3, description: 'You add your Charisma modifier to your initiative rolls. You can use Sneak Attack without needing advantage if no other creatures within 5 feet are within 5 feet of the target.' },
+    { name: 'Rakish Audacity', level: 3, description: 'You add your Charisma modifier to your initiative rolls. You can use Sneak Attack against a creature if you are within 5 feet of it, no other creatures are within 5 feet of you, and you don\'t have disadvantage on the attack roll.' },
     { name: 'Panache', level: 9, description: 'As an action, make a Cha (Persuasion) check contested by a creature\'s Wis (Insight). On success vs hostile: it has disadvantage on attacks against others until you damage it. Vs non-hostile: it becomes charmed for 1 minute.' },
     { name: 'Elegant Maneuver', level: 13, description: 'As a bonus action, gain advantage on the next Acrobatics or Athletics check this turn.' },
     { name: 'Master Duelist', level: 17, description: 'If you miss with an attack roll, you can roll it again with advantage. Once per short or long rest.' },
@@ -557,7 +557,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'shadow-magic', name: 'Shadow Magic', classId: 'sorcerer', sourceBook: 'XGtE', description: 'You are a creature of shadow, for your innate magic comes from the Shadowfell itself.', features: [
     { name: 'Eyes of the Dark', level: 1, description: 'You gain darkvision 120 feet. You also know Darkness and can cast it by spending 2 sorcery points instead of a spell slot; you can see through the darkness you create.' },
     { name: 'Strength of the Grave', level: 1, description: 'When damage reduces you to 0 HP, make a Charisma save (DC 5 + damage). On success, drop to 1 HP. Once per long rest.' },
-    { name: 'Hound of Ill Omen', level: 6, description: 'Spend 3 sorcery points to summon a hound of shadow to harass a creature within 120 feet. The hound makes attacks and grants advantage on attacks against the target.' },
+    { name: 'Hound of Ill Omen', level: 6, description: 'Spend 3 sorcery points as a bonus action to summon a hound (dire wolf stats, Medium monstrosity) targeting one creature within 120 feet. The hound has temp HP equal to half your sorcerer level, can move through creatures/objects, and automatically tracks the target. While the hound is within 5 feet of the target, the target has disadvantage on saving throws against your spells. Lasts 5 minutes or until you or the target drop to 0 HP.' },
     { name: 'Shadow Walk', level: 14, description: 'While in dim light or darkness, use a bonus action to teleport up to 120 feet to an unoccupied space you can see in dim light or darkness.' },
     { name: 'Umbral Form', level: 18, description: 'Spend 6 sorcery points to become shadow form: resistance to all damage except force/radiant, and you can move through occupied spaces. Lasts 1 minute.' },
   ]},
@@ -578,7 +578,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     ],
     features: [
     { name: 'Hexblade\'s Curse', level: 1, description: 'As a bonus action, curse a creature within 30 feet for 1 minute. You gain a bonus to damage rolls against it equal to your proficiency bonus, your attacks crit on 19-20 against it, and if it dies you regain HP. Use once per short or long rest.' },
-    { name: 'Hex Warrior', level: 1, description: 'You gain proficiency with medium armor, shields, and martial weapons. You can use Charisma in place of Strength or Dexterity for the attack and damage rolls of one weapon you touch at the end of a long rest.' },
+    { name: 'Hex Warrior', level: 1, description: 'You gain proficiency with medium armor, shields, and martial weapons. After each long rest, touch one weapon you are proficient with that lacks the two-handed property — use Charisma for its attack and damage rolls until your next long rest. If you gain Pact of the Blade, this benefit extends to every pact weapon regardless of type.' },
     { name: 'Accursed Specter', level: 6, description: 'When you slay a humanoid, you can cause its spirit to rise as a specter under your control for 1 hour. Once per long rest.' },
     { name: 'Armor of Hexes', level: 10, description: 'When your Hexblade\'s Cursed target hits you with an attack, roll a d6. On 4 or higher, the attack misses you.' },
     { name: 'Master of Hexes', level: 14, description: 'When the target of your Hexblade\'s Curse dies, you can apply the curse to a different creature within 30 feet.' },
@@ -587,7 +587,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Bonus Cantrips', level: 1, description: 'You learn the Light and Sacred Flame cantrips.' },
     { name: 'Healing Light', level: 1, description: 'You have a pool of d6s equal to 1 + warlock level. As a bonus action, choose a creature within 60 feet (including yourself) and spend dice to heal them.' },
     { name: 'Radiant Soul', level: 6, description: 'You gain resistance to radiant damage, and once per turn when you cast a spell that deals radiant or fire damage, you can add your Cha modifier to one damage roll.' },
-    { name: 'Celestial Resilience', level: 10, description: 'At the end of a short or long rest, you and up to five creatures of your choice within 30 feet gain temporary HP.' },
+    { name: 'Celestial Resilience', level: 10, description: 'When you finish a short or long rest, you gain temporary HP equal to your warlock level + your Charisma modifier. Also choose up to 5 creatures you can see — each gains temporary HP equal to half your warlock level + your Charisma modifier.' },
     { name: 'Searing Vengeance', level: 14, description: 'When you must make a death saving throw at the start of your turn, you can instead spring back to your feet — regain HP equal to half your hit point maximum, then stand up. Each creature of your choice within 30 feet takes 2d8 + Charisma modifier radiant damage and is blinded until end of the current turn. Once per long rest.' },
   ], expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }},
 
