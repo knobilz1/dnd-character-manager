@@ -30,7 +30,7 @@ export const TOWN_STORE: StoreSection[] = [
   {
     label: 'Healing & Medicine',
     items: [
-      { name: 'Potion of Healing',  category: 'consumable', weight: 0.5, priceCp: 5000,  priceLabel: '50 gp',  description: 'Restores 2d4+2 hit points. As a bonus action, you can administer it to another creature within reach.' },
+      { name: 'Potion of Healing',  category: 'consumable', weight: 0.5, priceCp: 5000,  priceLabel: '50 gp',  description: 'Restores 2d4+2 hit points. Drinking or administering to another creature takes an action.' },
       { name: "Healer's kit",       category: 'gear',       weight: 3,   priceCp: 500,   priceLabel: '5 gp',   description: '10 uses. As an action, stabilize a dying creature without a Medicine check.' },
       { name: 'Antitoxin (vial)',   category: 'consumable', weight: 0,   priceCp: 5000,  priceLabel: '50 gp',  description: 'Advantage on saving throws against poison for 1 hour.' },
       { name: 'Holy water (flask)', category: 'consumable', weight: 1,   priceCp: 2500,  priceLabel: '25 gp',  description: 'Deals 2d6 radiant damage to fiends and undead on a hit. Action to splash or throw up to 20 ft.' },
@@ -58,7 +58,7 @@ export const TOWN_STORE: StoreSection[] = [
       { name: 'Backpack',               category: 'gear', weight: 5,   priceCp: 200,  priceLabel: '2 gp',   description: 'Holds up to 30 lb. worth of equipment, with a capacity of 1 cubic foot.' },
       { name: 'Mirror, steel',          category: 'gear', weight: 0.5, priceCp: 500,  priceLabel: '5 gp',   description: 'A polished steel mirror, useful for seeing around corners or signaling.' },
       { name: "Thieves' tools",         category: 'tool', weight: 1,   priceCp: 2500, priceLabel: '25 gp',  description: 'Required to pick locks or disarm traps. Proficiency required.' },
-      { name: "Climber's kit",          category: 'gear', weight: 12,  priceCp: 2500, priceLabel: '25 gp',  description: 'Pitons, boot tips, gloves, and harness. Advantage on Athletics checks to climb; prevents falls when anchored.' },
+      { name: "Climber's kit",          category: 'gear', weight: 12,  priceCp: 2500, priceLabel: '25 gp',  description: 'Pitons, boot tips, gloves, and harness. Action to anchor yourself — when anchored, you can\'t fall more than 25 ft from the anchor point or climb more than 25 ft away without undoing it.' },
       { name: 'Piton',                  category: 'gear', weight: 0.25,priceCp: 5,    priceLabel: '5 cp',   description: 'A metal spike hammered into rock or wood as an anchor for climbing.' },
       { name: 'Ink (1-ounce bottle)',   category: 'gear', weight: 0,   priceCp: 1000, priceLabel: '10 gp',  description: 'Black ink suitable for writing.' },
       { name: 'Parchment (one sheet)', category: 'gear', weight: 0,   priceCp: 10,   priceLabel: '1 sp',   description: 'A sheet of treated animal skin suitable for writing and maps.' },
