@@ -78,7 +78,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Grappler',
     sourceBook: 'PHB',
     prerequisite: { ability: { str: 13 } },
-    description: 'You\'ve developed the skills necessary to hold your own in close-quarters grappling. You gain the following benefits:\n• You have advantage on attack rolls against a creature you are grappling.\n• You can use your action to try to pin a creature grappled by you. To do so, make another grapple check. If you succeed, you and the creature are both restrained until the grapple ends.',
+    description: 'You\'ve developed the skills necessary to hold your own in close-quarters grappling. You gain the following benefits:\n• You have advantage on attack rolls against a creature you are grappling.\n• You can use your action to try to pin a creature grappled by you. To do so, make another grapple check. If you succeed, you and the creature are both restrained until the grapple ends.\n• Creatures that are one size larger than you don\'t automatically succeed on checks to escape your grapple.',
   },
   {
     id: 'great-weapon-master',
@@ -532,7 +532,7 @@ export const ALL_FEATS: Feat[] = [
     id: 'poisoner',
     name: 'Poisoner',
     sourceBook: 'TCE',
-    description: 'You can prepare and deliver deadly poisons:\n• When you make a damage roll that deals poison damage, it ignores resistance to poison damage.\n• You can apply poison to a weapon or piece of ammunition as a bonus action, instead of an action.\n• You gain proficiency with the poisoner\'s kit if you don\'t already have it. With one hour of work and 50 gp worth of materials, you can produce a number of doses of potent poison equal to your proficiency bonus. The poison retains potency for 1 hour. When you hit a creature with a weapon coated with this poison, the creature takes an extra 2d8 poison damage and must succeed on a DC 14 Constitution save or be poisoned for 1 minute.',
+    description: 'You can prepare and deliver deadly poisons:\n• When you make a damage roll that deals poison damage, it ignores resistance to poison damage.\n• You can apply poison to a weapon or piece of ammunition as a bonus action, instead of an action.\n• You gain proficiency with the poisoner\'s kit if you don\'t already have it. With one hour of work and 50 gp worth of materials, you can produce a number of doses of potent poison equal to your proficiency bonus. The poison retains potency for 1 hour. When you hit a creature with a weapon coated with this poison, the creature takes an extra 2d8 poison damage and must succeed on a DC 14 Constitution save or be poisoned until the end of your next turn.',
   },
   {
     id: 'slasher',
@@ -561,7 +561,7 @@ export const ALL_FEATS: Feat[] = [
     id: 'gift-of-the-metallic-dragon',
     name: 'Gift of the Metallic Dragon',
     sourceBook: 'FToD',
-    description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. Prof-bonus uses per long rest.',
+    description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
     grantedSpells: [{ spellId: 'cure-wounds', recharge: 'long', ability: 'wis' }],
   },
 
