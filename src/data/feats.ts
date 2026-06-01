@@ -568,10 +568,19 @@ export const ALL_FEATS: Feat[] = [
 
   // ── ERLW FEATS ─────────────────────────────────────────────────────────
   {
+    id: 'erlw-revenant-blade',
+    name: 'Revenant Blade',
+    sourceBook: 'ERLW',
+    prerequisite: { race: 'Elf' },
+    description: 'You are descended from a master of the double-bladed scimitar, and some of that mastery has passed on to you. You gain the following benefits:\n• Increase your Dexterity or Strength score by 1, to a maximum of 20.\n• While you wield a double-bladed scimitar with two hands, you gain a +1 bonus to Armor Class.\n• A double-bladed scimitar has the finesse property when you wield it.',
+    abilityScoreChoice: ['dex', 'str'],
+  },
+  {
     id: 'aberrant-dragonmark',
     name: 'Aberrant Dragonmark',
     sourceBook: 'ERLW',
-    description: 'You have developed a dragonmark born of chaos and wild magic, manifesting unpredictably. You gain the following benefits:\n• Increase your Constitution score by 1, to a maximum of 20.\n• You learn one cantrip of your choice and one 1st-level spell of your choice from the sorcerer spell list. Constitution is your spellcasting ability for these spells.\n• You can cast the 1st-level spell without expending a spell slot. Once you do so, you can\'t cast it this way again until you finish a long rest. You can also cast it using spell slots you have.\n• Each time you cast the 1st-level spell, you can choose to unleash the unstable power of your mark. If you do, roll a d8. On a 1, you take 1d6 psychic damage and the spell fails. On an 8, one creature of your choice within 30 feet regains 1d6 + Constitution modifier hit points. Other results produce varied wild effects at the DM\'s discretion (see Aberrant Dragonmark Wild Surge table, ERLW p. 52).',
+    prerequisite: { other: 'No other dragonmark' },
+    description: 'You have a dragonmark that manifests unpredictably. You gain the following benefits:\n• Increase your Constitution score by 1, to a maximum of 20.\n• You learn one cantrip of your choice and one 1st-level spell of your choice from the sorcerer spell list. Constitution is your spellcasting ability for these spells.\n• You can cast the 1st-level spell without expending a spell slot. Once you do so, you can\'t cast it this way again until you finish a short or long rest. You can also cast it using spell slots you have.\n• When you cast the 1st-level spell using this feat, you must expend one of your Hit Dice and roll it. If the result is an odd number, one random creature within 30 feet of you (not you) takes force damage equal to the result; if there is no other creature in range, you take the damage instead. If the result is an even number, you gain temporary hit points equal to the result.',
     abilityScoreIncrease: { con: 1 },
   },
   {

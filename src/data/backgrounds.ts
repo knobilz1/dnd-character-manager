@@ -436,7 +436,7 @@ export const ALL_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Investigation', 'Persuasion'],
     toolProficiencies: [],
     languages: 0,
-    equipment: ['a set of fine clothes', 'a signet ring of your dragonmarked house', 'a set of identification papers', '15 gp'],
+    equipment: ['a set of fine clothes', 'a signet ring of your dragonmarked house', 'a set of identification papers', '20 gp'],
     feature: {
       name: 'House Connections',
       description: "As an agent of your house, you can secure free lodging and food at any enclave of your house in any city or town. You also have access to your house's communication network (using sending stones or other methods), and the house will provide you with mounts or vehicles when you're on official business. If you need access to expensive alchemical or magical equipment, you can usually borrow it from your house for the duration of a mission, subject to the DM's approval.",
