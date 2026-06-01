@@ -14,7 +14,8 @@ import type { BookId, ClassOptionsState } from '../../../types';
 
 function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' | 'indigo' | 'violet' | 'rose' | 'yellow' | 'cyan' | 'gray' {
   switch (b) {
-    case 'PHB':  return 'red';
+    case 'PHB':    return 'red';
+    case 'PHB2024': return 'red';
     case 'XGtE': return 'amber';
     case 'TCE':  return 'purple';
     case 'MMoM': return 'blue';

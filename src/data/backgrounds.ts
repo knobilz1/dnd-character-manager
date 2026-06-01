@@ -1,4 +1,5 @@
 import type { Background } from '../types';
+import { PHB2024_BACKGROUNDS } from './backgrounds-phb2024';
 
 export const ALL_BACKGROUNDS: Background[] = [
   {
@@ -707,6 +708,8 @@ export const ALL_BACKGROUNDS: Background[] = [
     bonds: ['I will face any challenge to win the approval of my family.', 'My house\'s standing in Waterdeep\'s noble society must be maintained at all costs.', 'Nothing is more important than the other members of my family.', 'I am in love with the heir of a family that my family despises.'],
     flaws: ['I secretly believe that everyone is beneath me.', 'I hide a truly scandalous secret that could ruin my family forever.', 'I too often hear veiled insults and threats in every word addressed to me, and I\'m quick to anger.', 'By my family\'s estimation, I have already shamed them. I will do anything to restore my honor.'],
   },
+  // PHB 2024 Backgrounds
+  ...PHB2024_BACKGROUNDS,
 ];
 
 export function getBackground(id: string): Background | undefined {

@@ -1,5 +1,6 @@
 export type BookId =
   | 'PHB'
+  | 'PHB2024'
   | 'DMG'
   | 'XGtE'
   | 'TCE'
@@ -78,6 +79,9 @@ export interface Race {
   sourceBook: BookId;
   size: 'Tiny' | 'Small' | 'Medium' | 'Large';
   speed: number;
+  swim?: number;
+  fly?: number;
+  climb?: number;
   abilityScoreIncreases: Partial<Record<AbilityKey, number>>;
   traits: Trait[];
   darkvision?: number;
@@ -132,6 +136,10 @@ export interface DClass {
   subclassLevel: number;
   multiclassPrerequisites: Partial<Record<AbilityKey, number>>;
   spellList?: string[];
+  /** Override the class ID used to look up spells & mechanics tables.
+   *  Set this on variant classes (e.g. 'barbarian-2024') to the base
+   *  class id ('barbarian') so existing spell entries still apply. */
+  spellListClassId?: string;
 }
 
 export interface Subclass {

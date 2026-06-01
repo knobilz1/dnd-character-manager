@@ -101,20 +101,24 @@ export function StepSpells() {
     : (classDef.spellcastingType ?? 'none');
 
   // Subclass-based casters (EK, AT) use a different class's spell list.
+  // 2024 classes carry spellListClassId pointing to the base class name used on spell entries.
   const spellListClassId = isSubclassSpellcaster
     ? (subclassDef!.spellListClassId ?? primaryClass!.classId)
-    : primaryClass!.classId;
+    : (classDef.spellListClassId ?? primaryClass!.classId);
+
+  // For mechanics lookups, 2024 classes use their own IDs (which are registered in mechanics tables).
+  const mechClassId = primaryClass!.classId;
 
   // Max spell level the character can cast at their current level
-  const maxSpellLevel = computeMaxSpellLevel(effectiveType, primaryClass!.classId, charLevel);
+  const maxSpellLevel = computeMaxSpellLevel(effectiveType, mechClassId, charLevel);
 
   // Cantrip and spell limits (EK/AT override via subclass level tables)
   const cantripLimit = subclassCantripLimit !== null
     ? subclassCantripLimit
-    : cantripsKnownFor(primaryClass!.classId, charLevel);
+    : cantripsKnownFor(mechClassId, charLevel);
   const knownSpellLimit = subclassSpellLimit !== null
     ? subclassSpellLimit
-    : spellsKnownFor(primaryClass!.classId, charLevel); // >0 for known-casters only
+    : spellsKnownFor(mechClassId, charLevel); // >0 for known-casters only
 
   // For prepared casters: how many spells they can prepare each day (informational)
   const abilityScores = draft.baseAbilityScores ?? {};
@@ -123,6 +127,11 @@ export function StepSpells() {
     wizard: 'int', artificer: 'int',
     bard: 'cha', sorcerer: 'cha', warlock: 'cha',
     ranger: 'wis',
+    // 2024 PHB classes
+    'cleric-2024': 'wis', 'druid-2024': 'wis', 'paladin-2024': 'cha',
+    'wizard-2024': 'int',
+    'bard-2024': 'cha', 'sorcerer-2024': 'cha', 'warlock-2024': 'cha',
+    'ranger-2024': 'wis',
   };
   const spellAbility = spellAbilityMap[primaryClass!.classId] ?? 'wis';
   const spellAbilityScore = (abilityScores as Record<string, number>)[spellAbility] ?? 10;

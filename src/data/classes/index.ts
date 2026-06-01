@@ -1,4 +1,5 @@
 import type { DClass } from '../../types';
+import { PHB2024_CLASSES } from './phb2024';
 
 export const ALL_CLASSES: DClass[] = [
   {
@@ -571,6 +572,8 @@ export const ALL_CLASSES: DClass[] = [
       { name: 'Soul of Artifice', level: 20, description: 'You develop a mystical connection to your magic items, which you can draw on for protection: you gain a +1 bonus to all saving throws per magic item you are currently attuned to. Also, if you would be reduced to 0 hit points, you can use your reaction to end one of your artificer infusions, causing you to drop to 1 hit point instead.' },
     ],
   },
+  // PHB 2024 Classes
+  ...PHB2024_CLASSES,
 ];
 
 export function getClass(id: string): DClass | undefined {

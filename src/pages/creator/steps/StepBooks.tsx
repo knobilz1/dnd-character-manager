@@ -11,25 +11,88 @@ export function StepBooks() {
   const enabled = new Set(draft.enabledBooks);
   const [showModules, setShowModules] = React.useState(false);
 
+  // Determine current PHB edition
+  const phbEdition: '2014' | '2024' = enabled.has('PHB2024') ? '2024' : '2014';
+
+  function selectPhbEdition(edition: '2014' | '2024') {
+    const next = new Set(enabled);
+    if (edition === '2024') {
+      next.delete('PHB');
+      next.add('PHB2024');
+    } else {
+      next.delete('PHB2024');
+      next.add('PHB');
+    }
+    updateDraft({ enabledBooks: Array.from(next) });
+  }
+
   function toggle(id: BookId) {
-    if (id === 'PHB') return;
+    // PHB and PHB2024 are handled by the edition toggle above
+    if (id === 'PHB' || id === 'PHB2024') return;
     const next = new Set(enabled);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     updateDraft({ enabledBooks: Array.from(next) });
   }
 
+  // Separate PHB entries from the rest
+  const otherBooks = BOOKS.filter(b => b.id !== 'PHB' && b.id !== 'PHB2024');
+
   return (
     <div>
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white mb-2">Select Source Books</h2>
-        <p className="text-slate-400">Choose which D&D books to draw content from. Options like races, subclasses, spells, and feats will be filtered based on your selection.</p>
+        <p className="text-slate-400">Choose which D&D books to draw content from. Options like species, subclasses, spells, and feats will be filtered based on your selection.</p>
       </div>
 
+      {/* PHB Edition Selector — always visible, required */}
+      <div className="mb-4 p-4 rounded-xl border-2 border-red-500 bg-slate-800">
+        <div className="flex items-center gap-2 mb-2">
+          <Badge color="red">PHB</Badge>
+          <Badge color="slate">Required</Badge>
+        </div>
+        <h3 className="font-bold text-white mb-1">Player's Handbook</h3>
+        <p className="text-sm text-slate-400 mb-3">The core rulebook. Choose which edition to use — this gates all PHB content throughout the creator.</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => selectPhbEdition('2014')}
+            className={cn(
+              'flex-1 py-2 px-4 rounded-lg border-2 font-semibold text-sm transition-all',
+              phbEdition === '2014'
+                ? 'border-red-500 bg-red-500/20 text-red-300'
+                : 'border-slate-600 bg-slate-700 text-slate-400 hover:border-slate-500',
+            )}
+          >
+            2014 Edition
+          </button>
+          <button
+            onClick={() => selectPhbEdition('2024')}
+            className={cn(
+              'flex-1 py-2 px-4 rounded-lg border-2 font-semibold text-sm transition-all',
+              phbEdition === '2024'
+                ? 'border-red-500 bg-red-500/20 text-red-300'
+                : 'border-slate-600 bg-slate-700 text-slate-400 hover:border-slate-500',
+            )}
+          >
+            2024 Edition
+          </button>
+        </div>
+        {phbEdition === '2024' && (
+          <p className="text-xs text-amber-400 mt-2">
+            ⚡ 2024: 10 species with flexible ASI, revised classes &amp; subclasses, 70 feats, weapon mastery, and updated spells.
+          </p>
+        )}
+        {phbEdition === '2014' && (
+          <p className="text-xs text-slate-500 mt-2">
+            Original 2014 rules: 15 races with fixed ASI, original class features, 42 feats.
+          </p>
+        )}
+      </div>
+
+      {/* Other books */}
       <div className="grid gap-4 sm:grid-cols-2">
-        {BOOKS.map(book => {
+        {otherBooks.map(book => {
           const selected = enabled.has(book.id);
-          const required = book.id === 'PHB';
           return (
             <div
               key={book.id}
@@ -37,14 +100,10 @@ export function StepBooks() {
               className={cn(
                 'p-4 rounded-xl border-2 cursor-pointer transition-all',
                 selected ? 'border-red-500 bg-slate-800' : 'border-slate-700 bg-slate-800 hover:border-slate-500',
-                required && 'cursor-default',
               )}
             >
               <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Badge color={book.color}>{book.shortName}</Badge>
-                  {required && <Badge color="slate">Required</Badge>}
-                </div>
+                <Badge color={book.color}>{book.shortName}</Badge>
                 <div className={cn(
                   'w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0',
                   selected ? 'border-red-500 bg-red-500' : 'border-slate-500',

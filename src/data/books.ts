@@ -10,6 +10,14 @@ export const BOOKS: Book[] = [
     description: 'The core rulebook. 12 base classes, 15 races (including subraces), spells, and rules.',
   },
   {
+    id: 'PHB2024',
+    name: "Player's Handbook (2024)",
+    shortName: 'PHB 2024',
+    color: 'red',
+    year: 2024,
+    description: 'The revised 2024 core rulebook. 12 updated classes, 10 species with flexible ASI, 70 feats, revised spells, and new weapon mastery rules.',
+  },
+  {
     id: 'DMG',
     name: "Dungeon Master's Guide",
     shortName: 'DMG',

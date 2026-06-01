@@ -1,4 +1,5 @@
 import type { Race } from '../../types';
+import { PHB2024_RACES } from './phb2024';
 
 export const ALL_RACES: Race[] = [
   // Human
@@ -333,7 +334,7 @@ export const ALL_RACES: Race[] = [
       { name: 'Celestial Resistance', description: 'You have resistance to necrotic damage and radiant damage.' },
       { name: 'Healing Hands', description: 'As an action, restore hit points equal to your level. Once per long rest.' },
       { name: 'Light Bearer', description: 'You know the Light cantrip.' },
-      { name: 'Radiant Consumption', description: 'Starting at 3rd level, as an action you unleash divine energy for 1 minute. You shed bright light in a 10-foot radius and dim light for an additional 10 feet. At the start of each of your turns, you and each creature within 10 feet of you take radiant damage equal to half your level (rounded up). Additionally, once on each of your turns, you can deal extra radiant damage equal to your level to one target when you deal damage to it with an attack or spell. Once per long rest.' },
+      { name: 'Radiant Consumption', description: 'Starting at 3rd level, as an action you unleash divine energy for 1 minute. You shed bright light in a 10-foot radius and dim light for an additional 10 feet. At the end of each of your turns, you and each creature within 10 feet of you take radiant damage equal to half your level (rounded up). Additionally, once on each of your turns, you can deal extra radiant damage equal to your level to one target when you deal damage to it with an attack or spell. Once per long rest.' },
     ],
     darkvision: 60,
     resistances: ['necrotic', 'radiant'],
@@ -374,7 +375,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: { wis: 2, str: 1 },
     traits: [
       { name: 'Firbolg Magic', description: 'You can cast Detect Magic and Disguise Self with this trait, using Wisdom as your spellcasting ability. Once per short or long rest.' },
-      { name: 'Hidden Step', description: 'As a bonus action, you can magically turn invisible until the start of your next turn or until you attack/cast a spell. Once per short or long rest.' },
+      { name: 'Hidden Step', description: 'As a bonus action, you can magically turn invisible until the start of your next turn or until you attack, make a damage roll, or force a saving throw. Once per short or long rest.' },
       { name: 'Powerful Build', description: 'You count as one size larger when determining your carrying capacity and the weight you can push/drag/lift.' },
       { name: 'Speech of Beast and Leaf', description: 'You have the ability to communicate in a limited manner with beasts and plants.' },
     ],
@@ -396,9 +397,8 @@ export const ALL_RACES: Race[] = [
       { name: 'Natural Athlete', description: 'You have proficiency in the Athletics skill.' },
       { name: 'Stone\'s Endurance', description: 'You can focus to occasionally shrug off injury. As a reaction when you take damage, roll a d12, add your Constitution modifier, and reduce the damage by that total. Once per short or long rest.' },
       { name: 'Powerful Build', description: 'You count as one size larger when determining your carrying capacity.' },
-      { name: 'Mountain Born', description: 'You have resistance to cold damage. You are acclimated to high altitudes including 20,000 feet or higher.' },
+      { name: 'Mountain Born', description: 'You are acclimated to high altitudes, including elevations above 20,000 feet. You are also naturally adapted to cold climates.' },
     ],
-    resistances: ['cold'],
     languages: ['Common', 'Giant'],
     isSubrace: false,
   },
@@ -423,6 +423,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'VGM',
     size: 'Medium',
     speed: 30,
+    swim: 30,
     abilityScoreIncreases: { con: 2, wis: 1 },
     naturalArmor: { base: 13, mod: 'dex' },
     traits: [
@@ -459,6 +460,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'VGM',
     size: 'Medium',
     speed: 30,
+    swim: 30,
     abilityScoreIncreases: { str: 1, con: 1, cha: 1 },
     traits: [
       { name: 'Amphibious', description: 'You can breathe air and water.' },
@@ -1560,10 +1562,8 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: { cha: 2 },
     traits: [
       { name: 'Ability Score Increase', description: '+2 Charisma, +1 to one other ability score of your choice.' },
-      { name: 'Shapechanger', description: 'As an action, you can polymorph your appearance to resemble a Medium or Small humanoid you have seen. You can also alter your voice, height, weight, and facial features. The change lasts until you use this feature again or die. A creature that suspects you are disguised can make an Insight check opposed by your Deception check to see through your disguise.' },
+      { name: 'Shapechanger', description: 'As an action, you can change your appearance and your voice. You determine the specifics of the changes, including your coloration, hair length, and sex. You can also adjust your height and weight, but not so much that your size changes. You can make yourself appear as a member of another race, though none of your game statistics change. You can\'t duplicate the appearance of a creature you\'ve never seen, and you must adopt a form that has the same basic arrangement of limbs that you have. Your clothing and equipment aren\'t changed by this trait. You stay in the new form until you use an action to revert to your true form or until you die.' },
       { name: 'Changeling Instincts', description: 'You gain proficiency with two of the following skills of your choice: Deception, Insight, Intimidation, and Persuasion.' },
-      { name: 'Unsettling Visage', description: 'When a creature you can see makes an attack roll against you, you can use your reaction to impose a -1d4 penalty on the roll. You must use this feature before knowing whether the attack hits or misses. Using this feature reveals your shapeshifting nature to any creature within 30 feet that can see you. Once you use this trait, you can\'t use it again until you finish a short or long rest.' },
-      { name: 'Divergent Persona', description: 'You gain proficiency with one tool of your choice. Define a persona associated with that proficiency: establish the name, race, gender, age, and other details. While you are in the form of this persona, the related proficiency bonus is doubled for any ability check that uses that proficiency.' },
     ],
     languages: ['Common', 'two other languages of your choice'],
     isSubrace: false,
@@ -1576,16 +1576,35 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'ERLW',
     size: 'Medium',
     speed: 30,
-    abilityScoreIncreases: { wis: 1, cha: 1 },
+    abilityScoreIncreases: { wis: 2, cha: 1 },
     traits: [
-      { name: 'Ability Score Increase', description: '+1 Wisdom, +1 Charisma, +1 to one other ability score of your choice.' },
+      { name: 'Ability Score Increase', description: '+2 Wisdom, +1 Charisma.' },
       { name: 'Dual Mind', description: 'You have advantage on all Wisdom saving throws.' },
       { name: 'Mental Discipline', description: 'You have resistance to psychic damage.' },
-      { name: 'Mind Link', description: 'You can speak telepathically to any creature you can see, provided the creature is within 60 feet of you. The communication is one-way — the creature can\'t reply unless it also has this trait. You don\'t need to share a language with the creature for it to understand your messages. You can use this trait to initiate communication only once per turn.' },
-      { name: 'Severed from Dreams', description: 'Kalashtar sleep, but they don\'t connect to the plane of dreams as other creatures do. Instead, their minds draw from the memories of their otherworldly spirit while at rest. This means you are immune to spells and other magical effects that require you to dream, like the dream spell, though the dream spell can still target you. Whenever a magical effect puts you to sleep, you can choose to be unaffected.' },
+      { name: 'Mind Link', description: 'You can speak telepathically to any creature you can see, provided the creature is within a number of feet equal to 10 times your level. You don\'t need to share a language with the creature, but the creature must be able to understand at least one language. As an action, you can give that creature the ability to speak telepathically with you for 1 hour (or until you end this effect as an action). You can give this ability to only one creature at a time.' },
+      { name: 'Severed from Dreams', description: 'Kalashtar sleep, but they don\'t connect to the plane of dreams as other creatures do. You are immune to spells and other magical effects that require you to dream, like the dream spell. You are not immune to spells that put you to sleep.' },
     ],
     resistances: ['psychic'],
     languages: ['Common', 'Quori', 'one other language of your choice'],
+    isSubrace: false,
+  },
+
+  // ── ERLW: ORC ─────────────────────────────────────────────────────────
+  {
+    id: 'erlw-orc',
+    name: 'Orc (Eberron)',
+    sourceBook: 'ERLW',
+    size: 'Medium',
+    speed: 30,
+    abilityScoreIncreases: { str: 2, con: 1 },
+    traits: [
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Aggressive', description: 'As a bonus action, you can move up to your speed toward an enemy of your choice that you can see or hear. You must end this move closer to the enemy than you started.' },
+      { name: 'Powerful Build', description: 'You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.' },
+      { name: 'Primal Intuition', description: 'You have proficiency in two of the following skills of your choice: Animal Handling, Insight, Intimidation, Medicine, Nature, Perception, and Survival.' },
+    ],
+    darkvision: 60,
+    languages: ['Common', 'Orc'],
     isSubrace: false,
   },
 
@@ -1599,9 +1618,9 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: { con: 2 },
     traits: [
       { name: 'Ability Score Increase', description: '+2 Constitution, +1 to one other ability score of your choice.' },
-      { name: 'Constructed Resilience', description: 'You were created to have remarkable fortitude, represented by the following benefits: you have advantage on saving throws against being poisoned, and you have resistance to poison damage; you are immune to disease; you don\'t need to eat, drink, or breathe; you are immune to the effects of extreme heat or cold, and you don\'t need to sleep (though magic can still put you to sleep).' },
+      { name: 'Constructed Resilience', description: 'You were created to have remarkable fortitude, represented by the following benefits: you have advantage on saving throws against being poisoned, and you have resistance to poison damage; you are immune to disease; you don\'t need to eat, drink, or breathe; you don\'t need to sleep, and magic can\'t put you to sleep.' },
       { name: "Sentry's Rest", description: "When you take a long rest, you must spend at least 6 hours in an inactive, motionless state, rather than sleeping. In this state, you appear inert, but it doesn't render you unconscious, and you can see and hear as normal." },
-      { name: 'Integrated Protection', description: "Your body has built-in defensive layers, which determine your armor class. You gain no benefit from wearing armor, but if you are using a shield, you apply its bonus as normal. You can alter your body to enter different defensive modes; each time you finish a long rest, choose one mode: Darkwood Core (AC = 11 + Dex modifier), Composite Plating (AC = 13 + Dex modifier, max 2), or Heavy Plating (AC = 16, disadvantage on Stealth)." },
+      { name: 'Integrated Protection', description: "Your body has built-in defensive layers, which can be enhanced with armor. You gain a +1 bonus to Armor Class. You can don only armor with which you have proficiency. To don armor, you must incorporate it into your body over the course of 1 hour, during which you remain in contact with the armor. To doff armor, you must spend 1 hour removing it. You can rest while donning or doffing armor in this way. While you live, your armor can't be removed from your body against your will." },
       { name: 'Specialized Design', description: 'You gain one skill proficiency and one tool proficiency of your choice.' },
     ],
     resistances: ['poison'],
@@ -1619,7 +1638,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: { dex: 1 },
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
-      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance. This transformation lasts for 1 minute, until you die, or until you revert as a bonus action. When you shift, you gain temporary hit points equal to your level + your Constitution modifier. You can use this trait a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
+      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute, until you die, or until you revert as a bonus action. When you shift, you gain temporary hit points equal to your level + your Constitution modifier (minimum 1). You also gain additional benefits depending on your subrace. Once you shift, you can\'t do so again until you finish a short or long rest.' },
       { name: 'Choose a Subrace', description: 'Shifters have four subraces — Beasthide, Longtooth, Swiftstride, and Wildhunt — each with a unique shifting feature and different ability score bonuses.' },
     ],
     darkvision: 60,
@@ -1636,7 +1655,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Ability Score Increase', description: '+1 Dexterity, +2 Constitution.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
-      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (proficiency bonus uses/LR). When you shift, you gain temporary hit points equal to your level + your Constitution modifier.' },
+      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (once per short or long rest). When you shift, you gain temporary hit points equal to your level + your Constitution modifier (minimum 1).' },
       { name: 'Beasthide Shifting Feature', description: 'While shifted, you gain an additional 1d6 temporary hit points, and your AC increases by 1.' },
       { name: 'Tough', description: 'You have proficiency in the Athletics skill.' },
     ],
@@ -1656,7 +1675,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Ability Score Increase', description: '+1 Dexterity, +2 Strength.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
-      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (proficiency bonus uses/LR). When you shift, you gain temporary hit points equal to your level + your Constitution modifier.' },
+      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (once per short or long rest). When you shift, you gain temporary hit points equal to your level + your Constitution modifier (minimum 1).' },
       { name: 'Longtooth Shifting Feature', description: 'While shifted, you can use your elongated fangs to make an unarmed strike as a bonus action. If you hit with your fangs, you deal piercing damage equal to 1d6 + your Strength modifier instead of the bludgeoning damage normal for an unarmed strike.' },
     ],
     darkvision: 60,
@@ -1674,7 +1693,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Ability Score Increase', description: '+2 Dexterity, +1 Charisma.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
-      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (proficiency bonus uses/LR). When you shift, you gain temporary hit points equal to your level + your Constitution modifier.' },
+      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (once per short or long rest). When you shift, you gain temporary hit points equal to your level + your Constitution modifier (minimum 1).' },
       { name: 'Swiftstride Shifting Feature', description: 'While shifted, your walking speed increases by 10 feet. Additionally, if an enemy ends its turn adjacent to you, you can use your reaction to move up to half your speed without provoking opportunity attacks.' },
       { name: 'Swift Stride', description: 'You have proficiency in the Acrobatics skill.' },
     ],
@@ -1694,7 +1713,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Ability Score Increase', description: '+1 Dexterity, +2 Wisdom.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
-      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (proficiency bonus uses/LR). When you shift, you gain temporary hit points equal to your level + your Constitution modifier.' },
+      { name: 'Shifting', description: 'As a bonus action, you can assume a more bestial appearance for 1 minute (once per short or long rest). When you shift, you gain temporary hit points equal to your level + your Constitution modifier (minimum 1).' },
       { name: 'Wildhunt Shifting Feature', description: 'While shifted, you can\'t be surprised. Additionally, you have advantage on Wisdom checks, and no creature within 30 feet of you can make an attack roll with advantage against you unless you\'re incapacitated.' },
       { name: 'Natural Tracker', description: 'You have proficiency in the Survival skill.' },
     ],
@@ -2212,6 +2231,8 @@ export const ALL_RACES: Race[] = [
     languages: ['Common', 'Infernal'],
     isSubrace: false,
   },
+  // PHB 2024 Species
+  ...PHB2024_RACES,
 ];
 
 export function getRace(id: string): Race | undefined {

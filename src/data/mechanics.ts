@@ -212,10 +212,23 @@ export function emptySlotState(): Record<SlotLevel, number> {
 
 // Spells known by class & level for spontaneous casters (index = level - 1)
 export const SPELLS_KNOWN: Partial<Record<string, number[]>> = {
-  bard:     [4,5,6,7,8,9,10,11,12,14,15,15,16,18,19,19,20,22,22,22],
-  sorcerer: [2,3,4,5,6,7,8,9,10,11,12,12,13,13,14,14,15,15,15,15],
-  warlock:  [2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15],
-  ranger:   [0,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11],
+  bard:            [4,5,6,7,8,9,10,11,12,14,15,15,16,18,19,19,20,22,22,22],
+  sorcerer:        [2,3,4,5,6,7,8,9,10,11,12,12,13,13,14,14,15,15,15,15],
+  warlock:         [2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15],
+  ranger:          [0,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11],
+  // 2024 PHB known casters
+  'sorcerer-2024': [2,4,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22],
+  'warlock-2024':  [2,3,4,5,6,7,8,9,10,10,11,11,12,12,13,13,14,14,15,15],
+};
+
+// Fixed prepared spell counts for 2024 PHB prepared casters (index = level - 1)
+export const PREPARED_SPELLS_2024: Partial<Record<string, number[]>> = {
+  'bard-2024':    [4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22],
+  'cleric-2024':  [4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22],
+  'druid-2024':   [4,5,6,7,9,10,11,12,14,15,16,16,17,17,18,18,19,20,21,22],
+  'paladin-2024': [2,2,4,5,6,6,7,7,9,9,10,10,11,11,12,12,14,14,15,15],
+  'ranger-2024':  [2,3,4,5,6,6,7,7,9,9,10,10,11,11,12,12,14,14,15,15],
+  'wizard-2024':  [4,5,6,7,9,10,11,12,14,15,16,16,17,18,19,21,22,23,24,25],
 };
 
 export function spellsKnownFor(classId: string, level: number): number {
@@ -226,13 +239,20 @@ export function spellsKnownFor(classId: string, level: number): number {
 
 // Cantrips known by class & level (PHB tables, index = level - 1)
 export const CANTRIPS_KNOWN: Record<string, number[]> = {
-  bard:      [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
-  cleric:    [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
-  druid:     [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
-  sorcerer:  [4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6],
-  warlock:   [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
-  wizard:    [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
-  artificer: [2,2,2,2,2,2,2,2,2,3,3,3,3,4,4,4,4,4,4,4],
+  bard:           [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  cleric:         [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
+  druid:          [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  sorcerer:       [4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6],
+  warlock:        [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  wizard:         [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
+  artificer:      [2,2,2,2,2,2,2,2,2,3,3,3,3,4,4,4,4,4,4,4],
+  // 2024 PHB classes — same cantrip progressions
+  'bard-2024':    [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  'cleric-2024':  [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
+  'druid-2024':   [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  'sorcerer-2024':[4,4,4,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6],
+  'warlock-2024': [2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+  'wizard-2024':  [3,3,3,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5,5,5],
 };
 
 export function cantripsKnownFor(classId: string, level: number): number {
@@ -247,6 +267,11 @@ export function maxPreparedSpellsFor(
   level: number,
   spellMod: number,
 ): number | null {
+  // 2024 PHB classes use fixed tables
+  const fixed2024 = PREPARED_SPELLS_2024[classId];
+  if (fixed2024) {
+    return fixed2024[Math.max(0, Math.min(level, 20) - 1)] ?? 1;
+  }
   switch (classId) {
     case 'cleric':
     case 'druid':
