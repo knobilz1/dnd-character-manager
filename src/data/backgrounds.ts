@@ -1,5 +1,6 @@
 import type { Background } from '../types';
 import { PHB2024_BACKGROUNDS } from './backgrounds-phb2024';
+import { GGR_BACKGROUNDS } from './backgrounds-ggr';
 
 export const ALL_BACKGROUNDS: Background[] = [
   {
@@ -710,6 +711,8 @@ export const ALL_BACKGROUNDS: Background[] = [
   },
   // PHB 2024 Backgrounds
   ...PHB2024_BACKGROUNDS,
+  // GGR: Ravnica Guild Backgrounds
+  ...GGR_BACKGROUNDS,
 ];
 
 export function getBackground(id: string): Background | undefined {

@@ -283,14 +283,14 @@ export const ALL_FEATS: Feat[] = [
     name: 'Bountiful Luck',
     sourceBook: 'XGtE',
     prerequisite: { race: 'halfling' },
-    description: 'Your people have extraordinary luck, which you have learned to mystically lend to your companions when you see them falter. You\'re not sure how you do it; you just wish it, and it happens. Surely a sign of fortune\'s favor! When an ally you can see within 30 feet of you rolls a 1 on the d20 for an attack roll, an ability check, or a saving throw, you can use your reaction to let the ally reroll the die. The ally must use the new roll.',
+    description: 'Your people have extraordinary luck, which you have learned to mystically lend to your companions when you see them falter. You\'re not sure how you do it; you just wish it, and it happens. Surely a sign of fortune\'s favor! When an ally you can see within 30 feet of you rolls a 1 on the d20 for an attack roll, an ability check, or a saving throw, you can use your reaction to let the ally reroll the die. The ally must use the new roll. You can\'t use this feature when you yourself are rolling the d20, and you can\'t use your Lucky racial trait before the end of your next turn after using this feature.',
   },
   {
     id: 'dragon-fear',
     name: 'Dragon Fear',
     sourceBook: 'XGtE',
     prerequisite: { race: 'dragonborn' },
-    description: 'When angered, you radiate menace. You gain the following benefits:\n• Increase your Strength, Constitution, or Charisma score by 1, to a maximum of 20.\n• Instead of exhaling destructive energy, you can expend a use of your Breath Weapon trait to roar, forcing each creature of your choice within 30 feet of you to make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier). A target automatically succeeds on the save if it can\'t hear or see you. On a failed save, a target becomes frightened of you for 1 minute.',
+    description: 'When angered, you radiate menace. You gain the following benefits:\n• Increase your Strength, Constitution, or Charisma score by 1, to a maximum of 20.\n• Instead of exhaling destructive energy, you can expend a use of your Breath Weapon trait to roar, forcing each creature of your choice within 30 feet of you to make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier). A target automatically succeeds on the save if it can\'t hear or see you. On a failed save, a target becomes frightened of you for 1 minute. If the frightened target takes any damage, it can repeat the saving throw, ending the effect on itself on a success.',
     abilityScoreChoice: ['str', 'con', 'cha'],
   },
   {
@@ -395,8 +395,8 @@ export const ALL_FEATS: Feat[] = [
     name: 'Dragon Hide',
     sourceBook: 'XGtE',
     prerequisite: { race: 'dragonborn' },
-    description: 'You manifest scales and claws reminiscent of your draconic ancestors:\n• Increase your Strength or Charisma score by 1, to a maximum of 20.\n• Your scales harden. While you aren\'t wearing armor, you can calculate your AC as 13 + your Dexterity modifier. You can use a shield and still gain this benefit.\n• You grow retractable claws from the tips of your fingers. The claws are natural weapons, which you can use to make unarmed strikes. If you hit with them, you deal slashing damage equal to 1d4 + your Strength modifier, instead of the bludgeoning damage normal for an unarmed strike.',
-    abilityScoreChoice: ['str', 'cha'],
+    description: 'You manifest scales and claws reminiscent of your draconic ancestors:\n• Increase your Strength, Constitution, or Charisma score by 1, to a maximum of 20.\n• Your scales harden. While you aren\'t wearing armor, you can calculate your AC as 13 + your Dexterity modifier. You can use a shield and still gain this benefit.\n• You grow retractable claws from the tips of your fingers. The claws are natural weapons, which you can use to make unarmed strikes. If you hit with them, you deal slashing damage equal to 1d4 + your Strength modifier, instead of the bludgeoning damage normal for an unarmed strike.',
+    abilityScoreChoice: ['str', 'con', 'cha'],
   },
   {
     id: 'drow-high-magic',
