@@ -1334,7 +1334,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
       { name: 'Aggressive', description: 'As a bonus action, you can move up to your speed toward a hostile creature that you can see or hear. You must end this move closer to the enemy than you started.' },
-      { name: 'Primal Intuition', description: 'You have proficiency in two skills of your choice from the following list: Animal Handling, Insight, Intimidation, Medicine, Nature, Perception, and Survival.' },
+      { name: 'Primal Intuition', description: 'You have proficiency in two skills of your choice from the following list: Animal Handling, Insight, Intimidation, Medicine, Perception, and Survival.' },
       { name: 'Powerful Build', description: 'You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.' },
     ],
     darkvision: 60,
