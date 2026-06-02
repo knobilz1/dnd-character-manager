@@ -1086,7 +1086,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of the Fly', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Ray of Sickness once per long rest. At 5th level, you can cast Crown of Madness once per long rest.' },
+      { name: 'Legacy of Maladomini', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Ray of Sickness once per long rest. At 5th level, you can cast Crown of Madness once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
@@ -1108,7 +1108,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Dis', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Disguise Self once per long rest. At 5th level, you can cast Detect Thoughts once per long rest.' },
+      { name: 'Legacy of Dis', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Disguise Self once per long rest. At 5th level, you can cast Detect Thoughts once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
@@ -1130,7 +1130,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Phlegethos', description: 'You know the Friends cantrip. At 3rd level, you can cast Charm Person once per long rest. At 5th level, you can cast Suggestion once per long rest.' },
+      { name: 'Legacy of Phlegethos', description: 'You know the Friends cantrip. At 3rd level, you can cast Charm Person once per long rest. At 5th level, you can cast Suggestion once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
@@ -1152,7 +1152,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Malbolge', description: 'You know the Minor Illusion cantrip. At 3rd level, you can cast Disguise Self once per long rest. At 5th level, you can cast Invisibility once per long rest.' },
+      { name: 'Legacy of Malbolge', description: 'You know the Minor Illusion cantrip. At 3rd level, you can cast Disguise Self once per long rest. At 5th level, you can cast Invisibility once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
@@ -1174,7 +1174,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Stygia', description: 'You know the Ray of Frost cantrip. At 3rd level, you can cast Armor of Agathys once per long rest. At 5th level, you can cast Darkness once per long rest.' },
+      { name: 'Legacy of Stygia', description: 'You know the Ray of Frost cantrip. At 3rd level, you can cast Armor of Agathys once per long rest. At 5th level, you can cast Darkness once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
@@ -1196,14 +1196,14 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Minauros', description: 'You know the Mage Hand cantrip. At 3rd level, you can cast Tenser\'s Floating Disk once per long rest. At 5th level, you can cast Arcane Lock once per long rest.' },
+      { name: 'Legacy of Minauros', description: 'You know the Mage Hand cantrip. At 3rd level, you can cast Tenser\'s Floating Disk once per short or long rest. At 5th level, you can cast Arcane Lock once per long rest (no material component required). Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
     languages: ['Common', 'Infernal'],
     innateSpells: [
       { spellId: 'mage-hand', recharge: 'cantrip', ability: 'cha' },
-      { spellId: 'tensers-floating-disk', recharge: 'long', minCharLevel: 3, ability: 'cha' },
+      { spellId: 'tensers-floating-disk', recharge: 'short', minCharLevel: 3, ability: 'cha' },
       { spellId: 'arcane-lock', recharge: 'long', minCharLevel: 5, ability: 'cha' },
     ],
     isSubrace: false,
@@ -1218,7 +1218,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Cania', description: 'You know the Mage Hand cantrip. At 3rd level, you can cast Burning Hands once per long rest. At 5th level, you can cast Flame Blade once per long rest.' },
+      { name: 'Legacy of Cania', description: 'You know the Mage Hand cantrip. At 3rd level, you can cast Burning Hands once per long rest. At 5th level, you can cast Flame Blade once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
@@ -1240,7 +1240,7 @@ export const ALL_RACES: Race[] = [
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
-      { name: 'Legacy of Avernus', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Searing Smite once per long rest. At 5th level, you can cast Branding Smite once per long rest.' },
+      { name: 'Legacy of Avernus', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Searing Smite once per long rest. At 5th level, you can cast Branding Smite once per long rest. Charisma is your spellcasting ability for these spells.' },
     ],
     darkvision: 60,
     resistances: ['fire'],
