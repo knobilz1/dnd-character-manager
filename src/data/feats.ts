@@ -548,13 +548,12 @@ export const ALL_FEATS: Feat[] = [
     id: 'gift-of-the-chromatic-dragon',
     name: 'Gift of the Chromatic Dragon',
     sourceBook: 'FToD',
-    description: 'You have been gifted with the power of chromatic dragons:\n• Chromatic Infusion. As a bonus action, you can touch one simple or martial weapon and infuse it with one of: acid, cold, fire, lightning, or poison. For the next minute, the weapon deals an extra 1d4 damage of the chosen type. After you use this ability, you can\'t use it again until you finish a long rest.\n• Reactive Resistance. When you take acid, cold, fire, lightning, or poison damage, you can use your reaction to give yourself resistance to that instance of damage. After you use this ability, you can\'t use it again until you finish a long rest.',
+    description: 'You have been gifted with the power of chromatic dragons:\n• Chromatic Infusion. As a bonus action, you can touch one simple or martial weapon and infuse it with one of: acid, cold, fire, lightning, or poison. For the next minute, the weapon deals an extra 1d4 damage of the chosen type. Once per long rest.\n• Reactive Resistance. When you take acid, cold, fire, lightning, or poison damage, you can use your reaction to give yourself resistance to that instance of damage. You can use this reaction a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
   },
   {
     id: 'gift-of-the-gem-dragon',
     name: 'Gift of the Gem Dragon',
     sourceBook: 'FToD',
-    prerequisite: { other: '4th level' },
     description: 'You have manifested the power of gem dragons:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Telekinetic Reprisal. When you take damage from a creature within 10 feet of you, you can use your reaction to emanate telekinetic energy. The creature must make a Strength saving throw (DC 8 + your proficiency bonus + the ability modifier of the score increased by this feat). On a failed save, the creature takes 2d8 force damage and is pushed up to 10 feet from you; on a successful save, the creature takes half as much damage and isn\'t pushed. You can use this reaction a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
   },
@@ -562,7 +561,7 @@ export const ALL_FEATS: Feat[] = [
     id: 'gift-of-the-metallic-dragon',
     name: 'Gift of the Metallic Dragon',
     sourceBook: 'FToD',
-    description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot. You regain the ability to cast it this way when you finish a long rest.\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
+    description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot, and you can also cast it using any spell slots you have. You regain the ability to cast it without a slot when you finish a long rest. Your spellcasting ability for this spell is Intelligence, Wisdom, or Charisma (choose when you gain this feat).\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
     grantedSpells: [{ spellId: 'cure-wounds', recharge: 'long', ability: 'wis' }],
   },
 
