@@ -35,8 +35,9 @@ export function StepBooks() {
     updateDraft({ enabledBooks: Array.from(next) });
   }
 
-  // Separate PHB entries from the rest
-  const otherBooks = BOOKS.filter(b => b.id !== 'PHB' && b.id !== 'PHB2024');
+  // Separate PHB entries from the rest; DMG goes in its own DM section
+  const otherBooks = BOOKS.filter(b => b.id !== 'PHB' && b.id !== 'PHB2024' && b.id !== 'DMG');
+  const dmgBook = BOOKS.find(b => b.id === 'DMG')!
 
   return (
     <div>
@@ -118,6 +119,39 @@ export function StepBooks() {
           );
         })}
       </div>
+
+      {/* DM Books — collapsible, off by default */}
+      {dmgBook && (() => {
+        const selected = enabled.has(dmgBook.id);
+        return (
+          <div className="mt-6 pt-5 border-t border-slate-700">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">DM Content</span>
+            </div>
+            <p className="text-xs text-amber-500/80 mb-3">⚠️ Only add these if your Dungeon Master has made this content available to players.</p>
+            <div
+              onClick={() => toggle(dmgBook.id)}
+              className={cn(
+                'p-4 rounded-xl border-2 cursor-pointer transition-all',
+                selected ? 'border-red-500 bg-slate-800' : 'border-slate-700 bg-slate-800 hover:border-slate-500',
+              )}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <Badge color={dmgBook.color}>{dmgBook.shortName}</Badge>
+                <div className={cn(
+                  'w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0',
+                  selected ? 'border-red-500 bg-red-500' : 'border-slate-500',
+                )}>
+                  {selected && <div className="w-2 h-2 bg-white rounded-full" />}
+                </div>
+              </div>
+              <h3 className="font-bold text-white mb-1">{dmgBook.name}</h3>
+              <p className="text-sm text-slate-400">{dmgBook.description}</p>
+              <p className="text-xs text-slate-500 mt-2">{dmgBook.year}</p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modules toggle */}
       <div className="mt-6 pt-5 border-t border-slate-700">

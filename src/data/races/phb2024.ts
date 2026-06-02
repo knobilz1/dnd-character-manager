@@ -24,7 +24,8 @@ export const PHB2024_RACES: Race[] = [
       { name: 'Darkvision', description: 'You have Darkvision with a range of 60 feet.' },
       { name: 'Healing Hands', description: 'As a Magic action, you can touch a creature and roll a number of d4s equal to your Proficiency Bonus. The creature regains a number of Hit Points equal to the total rolled. Once you use this trait, you can\'t use it again until you finish a Long Rest.' },
       { name: 'Light Bearer', description: 'You know the Light cantrip. Charisma is your spellcasting ability for it.' },
-      { name: 'Celestial Revelation (Level 3)', description: 'Starting at level 3, you can use a Bonus Action to transform for 1 minute (once per Long Rest). Choose one form each use: Heavenly Wings (Fly Speed = Speed; extra Radiant damage = Prof Bonus once per turn); Inner Radiance (shed Bright Light 10 ft + Dim 10 ft; creatures within 10 ft take Radiant = Prof Bonus at end of your turns); or Necrotic Shroud (creatures within 10 ft Cha save DC 8+Cha+Prof or Frightened until end of your next turn; +Necrotic damage = Prof Bonus once per turn).' },
+      { name: 'Size Choice', description: 'Your size is Medium (4–7 ft) or Small (2–4 ft), chosen when you select this species.' },
+      { name: 'Celestial Revelation (Level 3)', description: 'Starting at level 3, you can use a Bonus Action to transform for 1 minute (once per Long Rest). Once on each of your turns before the transformation ends, you can deal extra damage = Proficiency Bonus to one target when you deal damage to it with an attack or spell (type matches form). Choose one form: Heavenly Wings (Fly Speed = Speed; extra Radiant); Inner Radiance (shed Bright Light 10 ft + Dim 10 ft; also deal Radiant = Prof Bonus to creatures within 10 ft at end of each of your turns; extra Radiant on attacks/spells too); or Necrotic Shroud (creatures within 10 ft Cha save DC 8+Cha+Prof or Frightened until end of your next turn; extra Necrotic).' },
     ],
   },
 
@@ -201,7 +202,8 @@ export const PHB2024_RACES: Race[] = [
       { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 60 feet.' },
       { name: 'Fiendish Legacy', description: 'Choose one legacy (spellcasting ability: Int/Wis/Cha, chosen at selection): Abyssal — Resistance to Poison; know Poison Spray; level 3: Ray of Sickness; level 5: Hold Person. Chthonic — Resistance to Necrotic; know Chill Touch; level 3: False Life; level 5: Ray of Enfeeblement. Infernal — Resistance to Fire; know Fire Bolt; level 3: Hellish Rebuke; level 5: Darkness. Each level 3/5 spell always prepared, cast once without slot per Long Rest (can use slots).' },
-      { name: 'Otherworldly Presence', description: 'You know the Thaumaturgy cantrip. Charisma is your spellcasting ability for it.' },
+      { name: 'Size Choice', description: 'Your size is Medium (4–7 ft) or Small (3–4 ft), chosen when you select this species.' },
+      { name: 'Otherworldly Presence', description: 'You know the Thaumaturgy cantrip. Your spellcasting ability for it matches your Fiendish Legacy spellcasting ability (Intelligence, Wisdom, or Charisma).' },
     ],
   },
 ];

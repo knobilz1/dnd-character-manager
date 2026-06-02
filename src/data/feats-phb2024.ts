@@ -220,7 +220,7 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Keen Mind',
     sourceBook: 'PHB2024',
     prerequisite: { ability: { int: 13 }, minLevel: 4 },
-    description: 'General feat (Int 13+, level 4+).\n• +1 Intelligence (max 20).\n• Lore Knowledge: gain proficiency or Expertise in Arcana, History, Investigation, Medicine, Nature, or Religion (choose 1).\n• Quick Study: take the Study action as a Bonus Action.',
+    description: 'General feat (Int 13+, level 4+).\n• +1 Intelligence (max 20).\n• Lore Knowledge: gain proficiency or Expertise in Arcana, History, Investigation, Nature, or Religion (choose 1).\n• Quick Study: take the Study action as a Bonus Action.',
     abilityScoreIncrease: { int: 1 },
   },
   {
