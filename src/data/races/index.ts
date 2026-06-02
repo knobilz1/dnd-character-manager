@@ -1558,6 +1558,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: {},
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
+      { name: 'Size', description: 'You are Medium or Small. You choose the size when you select this race.' },
       { name: 'Flight', description: 'Thanks to your wings, you have a flying speed equal to your walking speed. You can\'t use this flying speed if you\'re wearing medium or heavy armor.' },
       { name: 'Darkvision', description: 'You can see in dim light within 120 feet of you as if it were bright light, and in darkness as if it were dim light. You can\'t discern color in darkness, only shades of gray.' },
       { name: 'Silent Feathers', description: 'You have proficiency in the Stealth skill.' },
