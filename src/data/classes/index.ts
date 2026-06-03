@@ -207,7 +207,7 @@ export const ALL_CLASSES: DClass[] = [
     ],
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
-    multiclassPrerequisites: { str: 13, dex: 13 },
+    multiclassPrerequisites: { str: 13 }, // Source: Str 13 OR Dex 13; type can't express OR
     features: [
       { name: 'Fighting Style', level: 1, description: 'You adopt a particular style of fighting as your specialty. Choose one of the following options: Archery (+2 to attack rolls with ranged weapons), Defense (+1 to AC while wearing armor), Dueling (+2 damage with one-handed weapon and no other weapon), Great Weapon Fighting (reroll 1s and 2s on damage dice), Protection (impose disadvantage on attack rolls against others when you have a shield), or Two-Weapon Fighting (add ability modifier to off-hand attacks).' },
       { name: 'Second Wind', level: 1, description: 'You have a limited well of stamina that you can draw on to protect yourself from harm. On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.' },

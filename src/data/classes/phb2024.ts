@@ -200,7 +200,7 @@ export const PHB2024_CLASSES: DClass[] = [
     ],
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
-    multiclassPrerequisites: { str: 13, dex: 13 },
+    multiclassPrerequisites: { str: 13 }, // Source: Str 13 OR Dex 13; type can't express OR
     features: [
       { name: 'Fighting Style', level: 1, description: 'Choose a Fighting Style feat (Archery, Blind Fighting, Defense, Dueling, Great Weapon Fighting, Interception, Protection, Thrown Weapon Fighting, Two-Weapon Fighting, Unarmed Fighting). Can switch on a Long Rest.' },
       { name: 'Second Wind', level: 1, description: 'Bonus Action: regain HP = 1d10 + Fighter level. Uses: 2 at levels 1–4, 3 at 5–9, 4 at 10+; regain all on Short or Long Rest.' },
@@ -416,11 +416,12 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 12, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Subtle Strikes', level: 13, description: 'When attacking a creature you have Disadvantage against: your Sneak Attack still applies (Disadvantage doesn\'t block it) if you otherwise qualify.' },
       { name: 'Devious Strikes', level: 14, description: 'New Cunning Strike options: Daze (2d6: Con save or on its next turn can only Move OR take an action OR take a Bonus Action); Knock Out (6d6: Con save or Unconscious 1 min; ends if any damage or creature is shaken; repeat save end of turns); Obscure (3d6: Dex save or Blinded until end of its next turn).' },
+      { name: 'Slippery Mind', level: 15, description: 'You gain proficiency in Wisdom and Charisma saving throws.' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Subclass Feature', level: 17, description: 'Roguish Archetype feature.' },
       { name: 'Elusive', level: 18, description: 'Attack rolls against you can never have Advantage (unless you are Incapacitated).' },
       { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of the Night Spirit recommended) or another feat.' },
-      { name: 'Stroke of Luck', level: 20, description: 'Turn a miss into a hit. Once per Short or Long Rest.' },
+      { name: 'Stroke of Luck', level: 20, description: 'When you fail a D20 Test: turn the roll into a 20. Once per Short or Long Rest.' },
     ],
   },
 
