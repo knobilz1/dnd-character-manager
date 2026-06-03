@@ -22,6 +22,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Primal Path',
     subclassLevel: 3,
     multiclassPrerequisites: { str: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Martial weapons', 'Shields'],
     features: [
       { name: 'Rage', level: 1, description: 'Bonus Action to enter Rage (lasts 1 min; ends if Incapacitated, no attacks vs. enemies, or no damage taken since last turn; also end as Bonus Action). While raging and not wearing Heavy Armor: Advantage on Str checks and saves; bonus to melee Str damage (+2→+3 at 9→+4 at 16); Resistance to Bludgeoning, Piercing, and Slashing damage. Can\'t concentrate or cast spells while raging.' },
       { name: 'Unarmored Defense', level: 1, description: 'While not wearing armor, your AC equals 10 + Dex modifier + Con modifier. You can use a shield and still gain this benefit.' },
@@ -73,6 +75,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Bard College',
     subclassLevel: 3,
     multiclassPrerequisites: { cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'One skill of your choice', 'One musical instrument of your choice'],
     features: [
       { name: 'Bardic Inspiration', level: 1, description: 'Bonus Action: one creature within 60 ft gains 1 Bardic Inspiration die (one at a time). When that creature fails a D20 Test, it can roll the die and add the result to the d20 (after rolling, before outcome). Uses = Cha mod (min 1); regain all on Long Rest. Die: d6→d8 at 5→d10 at 10→d12 at 15.' },
       { name: 'Spellcasting', level: 1, description: 'Cha-based. Musical Instrument focus. Prepared list (changeable on level-up).' },
@@ -116,6 +120,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Divine Domain',
     subclassLevel: 3,
     multiclassPrerequisites: { wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields'],
     features: [
       { name: 'Spellcasting', level: 1, description: 'Wis-based. Holy Symbol focus. Prepared list (change all on Long Rest).' },
       { name: 'Divine Order', level: 1, description: 'Choose: Protector (Martial weapon proficiency + Heavy armor training); OR Thaumaturge (1 extra cantrip + bonus to Int [Arcana/Religion] = Wis mod, min +1).' },
@@ -157,6 +163,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Druid Circle',
     subclassLevel: 3,
     multiclassPrerequisites: { wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Shields'],
     features: [
       { name: 'Spellcasting', level: 1, description: 'Wis-based. Druidic Focus. Prepared list (change all on Long Rest). Always have Speak with Animals prepared.' },
       { name: 'Druidic', level: 1, description: 'Know Druidic secret language. Can leave/find Druidic hidden messages.' },
@@ -201,6 +209,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { str: 13 }, // Source: Str 13 OR Dex 13; type can't express OR
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Martial weapons', 'Light armor', 'Medium armor', 'Shields'],
     features: [
       { name: 'Fighting Style', level: 1, description: 'Choose a Fighting Style feat (Archery, Blind Fighting, Defense, Dueling, Great Weapon Fighting, Interception, Protection, Thrown Weapon Fighting, Two-Weapon Fighting, Unarmed Fighting). Can switch on a Long Rest.' },
       { name: 'Second Wind', level: 1, description: 'Bonus Action: regain HP = 1d10 + Fighter level. Uses: 2 at levels 1–4, 3 at 5–9, 4 at 10+; regain all on Short or Long Rest.' },
@@ -249,6 +259,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Monk Tradition',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13, wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: [], // none
     features: [
       { name: 'Martial Arts', level: 1, description: 'While not wearing armor or shield: use Dex for Str-based monk weapon attacks; Unarmed Strike die = Martial Arts die (d6 at 1→d8 at 5→d10 at 11→d12 at 17); when using Attack action with Monk weapon or Unarmed Strike, one Bonus Action Unarmed Strike. Unarmed Strikes use Dex or Str.' },
       { name: 'Unarmored Defense', level: 1, description: 'While not wearing armor, AC = 10 + Dex mod + Wis mod.' },
@@ -305,6 +317,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Sacred Oath',
     subclassLevel: 3,
     multiclassPrerequisites: { str: 13, cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Martial weapons', 'Light armor', 'Medium armor', 'Shields'],
     features: [
       { name: 'Lay on Hands', level: 1, description: 'Pool = 5× Paladin level; regain on Long Rest. Bonus Action: touch creature → restore HP from pool. Or: expend 5 HP from pool to remove Poisoned condition (no HP restored).' },
       { name: 'Spellcasting', level: 1, description: 'Cha-based. Holy Symbol focus. Prepared list (change 1 on Long Rest). Always have Divine Smite prepared; cast once without slot per Long Rest (Paladin\'s Smite at level 2).' },
@@ -351,6 +365,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Ranger Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13, wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Martial weapons', 'One skill from Ranger list', 'Light armor', 'Medium armor', 'Shields'],
     features: [
       { name: 'Spellcasting', level: 1, description: 'Wis-based. Druidic Focus. Prepared list (change 1 on Long Rest).' },
       { name: 'Favored Enemy', level: 1, description: 'Always have Hunter\'s Mark prepared; cast it without a slot (uses per table: 2 at level 1, 3 at 5, 4 at 9, 5 at 13, 6 at 17); regain all on Long Rest. You also have Advantage on Wis (Survival) checks to track creatures.' },
@@ -396,6 +412,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Roguish Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'One skill from Rogue list', 'Thieves' tools'],
     features: [
       { name: 'Expertise', level: 1, description: 'Double proficiency bonus on 2 skill proficiencies. Gain 2 more at level 6.' },
       { name: 'Sneak Attack', level: 1, description: 'Once per turn when attacking with a Finesse or Ranged weapon and you have Advantage OR an ally is within 5 ft of target (no Disadvantage): +1d6 per Sneak Attack die. Grows every odd level: 1d6→2d6 at 3→3d6 at 5...→10d6 at 20.' },
@@ -446,6 +464,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Sorcerous Origin',
     subclassLevel: 3,
     multiclassPrerequisites: { cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: [], // none
     features: [
       { name: 'Spellcasting', level: 1, description: 'Cha-based. Arcane Focus. Known spells (see table; change 1 on level-up). Known caster.' },
       { name: 'Innate Sorcery', level: 1, description: 'Bonus Action: unleash innate magic for 1 minute. While active: your spell save DC increases by 1; you have Advantage on Sorcerer spell attack rolls. 2 uses; regain all on Long Rest.' },
@@ -490,6 +510,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Otherworldly Patron',
     subclassLevel: 3,
     multiclassPrerequisites: { cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor'],
     features: [
       { name: 'Eldritch Invocations', level: 1, description: 'Gain 1 Eldritch Invocation; more per table. Can replace 1 on level-up (can\'t replace a prerequisite for another you have).' },
       { name: 'Pact Magic', level: 1, description: 'Cha-based. Arcane Focus. All Pact Magic slots same level (per table); regain all on Short or Long Rest. Prepared list (change 1 on level-up; max level = slot level).' },
@@ -529,6 +551,8 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLabel: 'Arcane Tradition',
     subclassLevel: 3,
     multiclassPrerequisites: { int: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: [], // none
     features: [
       { name: 'Spellcasting', level: 1, description: 'Int-based. Arcane Focus or spellbook. Spellbook: starts with 6 level 1 spells; gain 2 Wizard spells per level (any level for which you have slots). Prepared list from spellbook; change all on Long Rest. Copying: 2 hrs + 50 gp per level; own book: 1 hr + 10 gp per level.' },
       { name: 'Ritual Adept', level: 1, description: 'Cast spells in your spellbook with the Ritual tag as Rituals (don\'t need prepared; must read from book).' },

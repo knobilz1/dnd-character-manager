@@ -135,6 +135,10 @@ export interface DClass {
   subclassLabel: string;
   subclassLevel: number;
   multiclassPrerequisites: Partial<Record<AbilityKey, number>>;
+  /** Proficiencies gained when this is your SECOND (multiclass) entry — not granted at 1st-level start.
+   *  Source: PHB p.163 multiclassing table (2014); PHB 2024 per-class "As a Multiclass Character" section.
+   *  Empty array = no additional proficiencies (Sorcerer, Wizard, Monk 2024). */
+  multiclassGains?: string[];
   spellList?: string[];
   /** Override the class ID used to look up spells & mechanics tables.
    *  Set this on variant classes (e.g. 'barbarian-2024') to the base

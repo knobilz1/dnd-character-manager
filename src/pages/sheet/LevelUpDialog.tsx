@@ -593,8 +593,31 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     .filter(f => f.minLevel === newLevel);
 
   return (
-    <Dialog open={open} onClose={onClose} title={`Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
+    <Dialog open={open} onClose={onClose} title={currentLevel === 0 && character.classes.length > 1 ? `New Class: ${classDef.name}` : `Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
       <div className="space-y-5">
+        {/* Multiclass proficiency gains — only shown when taking first level in a new class */}
+        {currentLevel === 0 && character.classes.length > 1 && (
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+              Multiclass Proficiency Gains
+            </h3>
+            <div className="bg-slate-900 rounded-lg p-3">
+              <p className="text-xs text-slate-500 mb-2">
+                Your first level in {classDef.name} grants these additional proficiencies (plus all level 1 class features below):
+              </p>
+              {classDef.multiclassGains && classDef.multiclassGains.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {classDef.multiclassGains.map((gain, i) => (
+                    <Badge key={i} color="blue">{gain}</Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 italic">No additional proficiencies — only the level 1 class features below.</p>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Class selector — only shown for multiclass characters */}
         {character.classes.length > 1 && (
           <section>

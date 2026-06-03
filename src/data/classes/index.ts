@@ -28,6 +28,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Primal Path',
     subclassLevel: 3,
     multiclassPrerequisites: { str: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Shields', 'Simple weapons', 'Martial weapons'],
     features: [
       { name: 'Rage', level: 1, description: 'On your turn, you can enter a rage as a bonus action. While raging and not wearing heavy armor, you have advantage on Strength checks and Strength saving throws, you gain a bonus to melee weapon damage rolls using Strength (+2 at 1st, +3 at 9th, +4 at 16th), and you have resistance to bludgeoning, piercing, and slashing damage. You can\'t cast or concentrate on spells while raging. Your rage lasts for 1 minute and ends early if you are knocked unconscious, or if your turn ends and you haven\'t attacked a hostile creature or taken damage since your last turn. You can also end your rage as a bonus action.' },
       { name: 'Unarmored Defense', level: 1, description: 'While you are not wearing any armor, your Armor Class equals 10 + your Dexterity modifier + your Constitution modifier. You can use a shield and still gain this benefit.' },
@@ -74,6 +76,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Bard College',
     subclassLevel: 3,
     multiclassPrerequisites: { cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'One skill of your choice', 'One musical instrument of your choice'],
     features: [
       { name: 'Spellcasting', level: 1, description: 'You have learned to untangle and reshape the fabric of reality in harmony with your wishes and music. Your spells are part of your vast repertoire, magic that you can tune to different situations.' },
       { name: 'Bardic Inspiration', level: 1, description: 'As a bonus action, you can give one creature other than yourself within 60 feet that can hear you a Bardic Inspiration die (d6, increasing to d8 at 5th, d10 at 10th, d12 at 15th). Within the next 10 minutes, the creature can roll the die and add the number rolled to one ability check, attack roll, or saving throw. It can wait until after it rolls the d20 before deciding to use the die, but must decide before the DM says whether the roll succeeds or fails. Only one Bardic Inspiration die at a time. You can use this feature a number of times equal to your Charisma modifier (minimum once). You regain all expended uses when you finish a long rest.' },
@@ -119,6 +123,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Divine Domain',
     subclassLevel: 1,
     multiclassPrerequisites: { wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields'],
     features: [
       { name: 'Spellcasting', level: 1, description: 'As a conduit for divine power, you can cast cleric spells.' },
       { name: 'Divine Domain', level: 1, description: 'Choose one domain related to your deity. Your choice grants you domain spells and other features when you choose it at 1st level.' },
@@ -158,6 +164,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Druid Circle',
     subclassLevel: 2,
     multiclassPrerequisites: { wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields (not metal armor or shields)'],
     features: [
       { name: 'Druidic', level: 1, description: 'You know Druidic, the secret language of druids.' },
       { name: 'Spellcasting', level: 1, description: 'Drawing on the divine essence of nature itself, you can cast druid spells.' },
@@ -208,6 +216,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { str: 13 }, // Source: Str 13 OR Dex 13; type can't express OR
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields', 'Simple weapons', 'Martial weapons'],
     features: [
       { name: 'Fighting Style', level: 1, description: 'You adopt a particular style of fighting as your specialty. Choose one of the following options: Archery (+2 to attack rolls with ranged weapons), Defense (+1 to AC while wearing armor), Dueling (+2 damage with one-handed weapon and no other weapon), Great Weapon Fighting (reroll 1s and 2s on damage dice), Protection (impose disadvantage on attack rolls against others when you have a shield), or Two-Weapon Fighting (add ability modifier to off-hand attacks).' },
       { name: 'Second Wind', level: 1, description: 'You have a limited well of stamina that you can draw on to protect yourself from harm. On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.' },
@@ -249,6 +259,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Monastic Tradition',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13, wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Simple weapons', 'Shortswords'],
     features: [
       { name: 'Unarmored Defense', level: 1, description: 'Beginning at 1st level, while you are wearing no armor and not wielding a shield, your AC equals 10 + your Dexterity modifier + your Wisdom modifier.' },
       { name: 'Martial Arts', level: 1, description: 'Your practice of martial arts gives you mastery of combat styles that use unarmed strikes and monk weapons. You gain the following benefits while unarmed or wielding only monk weapons and you aren\'t wearing armor or wielding a shield: You can use Dexterity instead of Strength for the attack and damage rolls of your unarmed strikes and monk weapons. You can roll a d4 in place of the normal damage of your unarmed strike or monk weapon (this die changes as you gain monk levels). When you use the Attack action with an unarmed strike or a monk weapon on your turn, you can make one unarmed strike as a bonus action.' },
@@ -308,6 +320,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Sacred Oath',
     subclassLevel: 3,
     multiclassPrerequisites: { str: 13, cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields', 'Simple weapons', 'Martial weapons'],
     features: [
       { name: 'Divine Sense', level: 1, description: 'As an action, you can open your awareness to detect such forces. Until the end of your next turn, you know the location of any celestial, fiend, or undead within 60 feet of you that isn\'t behind total cover. You know the type (celestial, fiend, or undead) of any being whose presence you sense, but not its identity. Within the same radius, you also detect the presence of any place or object that has been consecrated or desecrated, as with the hallow spell. You can use this feature a number of times equal to 1 + your Charisma modifier. When you finish a long rest, you regain all expended uses.' },
       { name: 'Lay on Hands', level: 1, description: 'Your blessed touch can heal wounds. You have a pool of healing power that replenishes when you take a long rest. With that pool, you can restore a total number of hit points equal to your paladin level × 5. As an action, you can touch a creature and draw power from the pool to restore a number of hit points to that creature, up to the maximum amount remaining in your pool. Alternatively, you can expend 5 hit points from your pool of healing to cure the target of one disease or neutralize one poison affecting it. This feature has no effect on undead and constructs.' },
@@ -348,6 +362,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Ranger Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13, wis: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields', 'Simple weapons', 'Martial weapons', 'One skill from class list'],
     features: [
       { name: 'Favored Enemy', level: 1, description: 'Beginning at 1st level, you have significant experience studying, tracking, hunting, and even talking to a certain type of enemy. Choose a type of favored enemy: aberrations, beasts, celestials, constructs, dragons, elementals, fey, fiends, giants, monstrosities, oozes, plants, or undead. Alternatively, you can select two races of humanoid (such as gnolls and orcs) as favored enemies. You have advantage on Wisdom (Survival) checks to track your favored enemies, as well as on Intelligence checks to recall information about them.' },
       { name: 'Natural Explorer', level: 1, description: 'You are particularly familiar with one type of natural environment and are adept at traveling and surviving in such regions. Choose one type of favored terrain: arctic, coast, desert, forest, grassland, mountain, swamp, or the Underdark.' },
@@ -388,6 +404,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Roguish Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'One skill from class list', 'Thieves' tools'],
     features: [
       { name: 'Expertise', level: 1, description: 'At 1st level, choose two of your skill proficiencies, or one of your skill proficiencies and your proficiency with thieves\' tools. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies.' },
       { name: 'Sneak Attack', level: 1, description: 'Beginning at 1st level, you know how to strike subtly and exploit a foe\'s distraction. Once per turn, you can deal an extra 1d6 damage to one creature you hit with an attack if you have advantage on the attack roll. The attack must use a finesse or a ranged weapon. You don\'t need advantage on the attack roll if another enemy of the target is within 5 feet of it, that enemy isn\'t incapacitated, and you don\'t have disadvantage on the attack roll. The amount of the extra damage increases as you gain levels in this class.' },
@@ -434,6 +452,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Sorcerous Origin',
     subclassLevel: 1,
     multiclassPrerequisites: { cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: [], // none
     features: [
       { name: 'Spellcasting', level: 1, description: 'An event in your past, or in the life of a parent or ancestor, left an indelible mark on you, infusing you with arcane magic.' },
       { name: 'Sorcerous Origin', level: 1, description: 'Choose a sorcerous origin, which describes the source of your innate magical power.' },
@@ -466,6 +486,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Otherworldly Patron',
     subclassLevel: 1,
     multiclassPrerequisites: { cha: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Simple weapons'],
     features: [
       { name: 'Otherworldly Patron', level: 1, description: 'At 1st level, you have struck a bargain with an otherworldly being of your choice.' },
       { name: 'Pact Magic', level: 1, description: 'Your arcane research and the magic bestowed on you by your patron have given you facility with spells. You regain all expended Pact Magic spell slots when you finish a short or long rest.' },
@@ -508,6 +530,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Arcane Tradition',
     subclassLevel: 2,
     multiclassPrerequisites: { int: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: [], // none
     features: [
       { name: 'Spellcasting', level: 1, description: 'As a student of arcane magic, you have a spellbook containing spells that show the first glimmerings of your true power.' },
       { name: 'Arcane Recovery', level: 1, description: 'You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover. The spell slots can have a combined level that is equal to or less than half your wizard level (rounded up), and none of the slots can be 6th level or higher.' },
@@ -552,6 +576,8 @@ export const ALL_CLASSES: DClass[] = [
     subclassLabel: 'Artificer Specialist',
     subclassLevel: 3,
     multiclassPrerequisites: { int: 13 },
+    // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields', 'Thieves' tools', 'Tinker's tools'],
     features: [
       { name: 'Magical Tinkering', level: 1, description: 'You\'ve learned how to invest a spark of magic into mundane objects. As an action, you touch a Tiny nonmagical object and give it one of these properties: shed bright light in 5-foot radius, record a message of up to 6 seconds, sound recorded effects, picture or text appears on it. You can have a number of objects equal to your Intelligence modifier infused at once.' },
       { name: 'Spellcasting', level: 1, description: 'You can cast artificer spells. Intelligence is your spellcasting ability. You use various tools as your spellcasting focus, providing the material components for spells.' },
