@@ -58,6 +58,27 @@ function sorcererMetamagicCount(level: number): number {
   return 0;
 }
 
+// PHB 2024 Sorcerer: Metamagic starts at level 2 (not 3)
+function sorcererMetamagicCount2024(level: number): number {
+  if (level >= 17) return 4;
+  if (level >= 10) return 3;
+  if (level >= 2) return 2;
+  return 0;
+}
+
+// PHB 2024 Warlock: different invocation counts than 2014
+function warlockInvocationCount2024(level: number): number {
+  if (level >= 18) return 10;
+  if (level >= 15) return 9;
+  if (level >= 12) return 8;
+  if (level >= 9) return 7;
+  if (level >= 7) return 6;
+  if (level >= 5) return 5;
+  if (level >= 2) return 3;
+  if (level >= 1) return 1;
+  return 0;
+}
+
 function battleMasterManeuverCount(level: number): number {
   if (level >= 15) return 9;
   if (level >= 10) return 7;
@@ -381,7 +402,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   }
 
   // ── Spell slot changes ───────────────────────────────────────────────────
-  const isWarlock = classId === 'warlock';
+  const isWarlock = classId === 'warlock' || classId === 'warlock-2024';
 
   // Eldritch Knight and Arcane Trickster have spellcastingType: 'third' on
   // their subclass, not on the Fighter/Rogue class def (which stays 'none').
@@ -431,8 +452,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const hasSpellcasting = classDef.spellcastingType !== 'none' || isSubclassSpellcaster;
   // EK/AT are known casters with their own per-class-level spell table.
   const isSubclassKnownCaster = isSubclassSpellcaster && !!sub?.spellsKnownByClassLevel;
-  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger'].includes(classId) || isSubclassKnownCaster;
-  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'].includes(classId);
+  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger', 'bard-2024', 'sorcerer-2024', 'warlock-2024', 'ranger-2024'].includes(classId) || isSubclassKnownCaster;
+  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer', 'cleric-2024', 'druid-2024', 'paladin-2024', 'wizard-2024'].includes(classId);
 
   const spellsKnownGained = isSubclassKnownCaster
     ? Math.max(0, (sub!.spellsKnownByClassLevel![newLevel - 1] ?? 0) - (sub!.spellsKnownByClassLevel![currentLevel - 1] ?? 0))
@@ -473,7 +494,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const _rawOpts = character.classOptions as Partial<typeof character.classOptions>;
   const classOpts = { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [], ..._rawOpts };
 
-  const needsPactBoon = isWarlock && newLevel >= 3 && !classOpts.pactBoon;
+  // PHB 2024 Warlock: Pact of the Blade/Chain/Tome are Eldritch Invocations — no separate pact boon pick
+  const needsPactBoon = classId === 'warlock' && newLevel >= 3 && !classOpts.pactBoon;
 
   // ── Totem Warrior checks ──────────────────────────────────────────────────
   const isTotemWarrior = classId === 'barbarian' && (
@@ -519,7 +541,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // Rogue expertise: 2 skills at class level 1 (multiclass dip only), 2 more at class level 6
   const expertiseCount =
     (classId === 'bard' && (newLevel === 3 || newLevel === 10)) ? 2 :
-    (classId === 'rogue' && (newLevel === 1 || newLevel === 6)) ? 2 : 0;
+    (classId === 'bard-2024' && (newLevel === 2 || newLevel === 9)) ? 2 :
+    ((classId === 'rogue' || classId === 'rogue-2024') && (newLevel === 1 || newLevel === 6)) ? 2 : 0;
   const allProfSkills = React.useMemo(() => {
     const bgDef = getBackground(character.backgroundId);
     return new Set<string>([
@@ -548,16 +571,21 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // NOT the difference against what's stored. Using stored length was wrong: if options were
   // set during the wizard they'd be counted as "already leveled-up", showing 0 new picks at
   // levels that do grant new ones.
-  const totalNewInvocations = isWarlock ? Math.max(0, warlockInvocationCount(newLevel) - warlockInvocationCount(currentLevel)) : 0;
+  const invocCountFn = classId === 'warlock-2024' ? warlockInvocationCount2024 : warlockInvocationCount;
+  const totalNewInvocations = isWarlock ? Math.max(0, invocCountFn(newLevel) - invocCountFn(currentLevel)) : 0;
   const invocationsRemaining = Math.max(0, totalNewInvocations - pendingInvocations.length);
   const allPickedInvocations = [...classOpts.invocations, ...pendingInvocations];
 
-  const isSorcerer = classId === 'sorcerer';
-  const totalNewMetamagic = isSorcerer ? Math.max(0, sorcererMetamagicCount(newLevel) - sorcererMetamagicCount(currentLevel)) : 0;
+  const isSorcerer = classId === 'sorcerer' || classId === 'sorcerer-2024';
+  const metaCountFn = classId === 'sorcerer-2024' ? sorcererMetamagicCount2024 : sorcererMetamagicCount;
+  const totalNewMetamagic = isSorcerer ? Math.max(0, metaCountFn(newLevel) - metaCountFn(currentLevel)) : 0;
   const metamagicRemaining = Math.max(0, totalNewMetamagic - pendingMetamagic.length);
   const allPickedMetamagic = [...classOpts.metamagic, ...pendingMetamagic];
 
-  const isBattleMaster = classId === 'fighter' && (primary?.subclassId === 'battle-master' || pendingSubclass === 'battle-master');
+  const isBattleMaster = (classId === 'fighter' || classId === 'fighter-2024') && (
+    primary?.subclassId === 'battle-master' || pendingSubclass === 'battle-master' ||
+    primary?.subclassId === 'battle-master-2024' || pendingSubclass === 'battle-master-2024'
+  );
   const totalNewManeuvers = isBattleMaster ? Math.max(0, battleMasterManeuverCount(newLevel) - battleMasterManeuverCount(currentLevel)) : 0;
   const maneuversRemaining = Math.max(0, totalNewManeuvers - pendingManeuvers.length);
   const allPickedManeuvers = [...classOpts.maneuvers, ...pendingManeuvers];

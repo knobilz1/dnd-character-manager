@@ -1,5 +1,6 @@
 import type { DClass } from '../../types';
 
+// LOOP-CHOICE-AUDIT-CHECKPOINT: last audited = LevelUpDialog PHB2024 spellcasting/invocations/expertise/metamagic/maneuvers
 export const PHB2024_CLASSES: DClass[] = [
   // ─── Barbarian 2024 ────────────────────────────────────────────────────────
   {
@@ -416,6 +417,7 @@ export const PHB2024_CLASSES: DClass[] = [
     multiclassGains: ['Light armor', 'One skill from Rogue list', 'Thieves' tools'],
     features: [
       { name: 'Expertise', level: 1, description: 'Double proficiency bonus on 2 skill proficiencies. Gain 2 more at level 6.' },
+      { name: 'Expertise', level: 6, description: 'Gain Expertise in 2 more skill proficiencies.' },
       { name: 'Sneak Attack', level: 1, description: 'Once per turn when attacking with a Finesse or Ranged weapon and you have Advantage OR an ally is within 5 ft of target (no Disadvantage): +1d6 per Sneak Attack die. Grows every odd level: 1d6→2d6 at 3→3d6 at 5...→10d6 at 20.' },
       { name: 'Thieves\' Cant', level: 1, description: 'Know Thieves\' Cant and 1 additional language of your choice. Communicate hidden messages in normal speech using Thieves\' Cant.' },
       { name: 'Weapon Mastery', level: 1, description: 'Use mastery property of 2 Finesse or Ranged weapons. Change on Long Rest.' },
