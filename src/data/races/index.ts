@@ -817,7 +817,7 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: {},
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid (gith).' },
-      { name: 'Astral Knowledge', description: 'After finishing a long rest, gain proficiency in one skill or weapon of your choice.' },
+      { name: 'Astral Knowledge', description: 'After finishing a long rest, gain proficiency in one skill of your choice AND one weapon or tool of your choice (from the Player\'s Handbook). These proficiencies last until the end of your next long rest.' },
       { name: 'Githyanki Psionics', description: 'You know Mage Hand (invisible). At 3rd, cast Jump; at 5th, Misty Step. Once each per long rest.' },
       { name: 'Psychic Resilience', description: 'Resistance to psychic damage.' },
     ],
@@ -1962,11 +1962,12 @@ export const ALL_RACES: Race[] = [
     abilityScoreIncreases: { cha: 2, dex: 1 },
     traits: [
       { name: 'Ability Score Increase', description: '+2 Charisma, +1 Dexterity (replaces standard Half-Elf ASI).' },
-      { name: "Windwright's Intuition", description: 'When you make a Dexterity (Acrobatics) check or any ability check to operate or maintain a water or air vehicle, you can roll a d4 and add the number rolled to the ability check.' },
+      { name: "Windwright's Intuition", description: 'When you make a Dexterity (Acrobatics) check or any ability check involving navigator\'s tools, you can roll a d4 and add the number rolled to the ability check.' },
       { name: "Storm's Boon", description: 'You have resistance to lightning damage.' },
       { name: 'Headwinds', description: "You know the gust cantrip (Xanathar's Guide to Everything). Starting at 3rd level, you can cast the gust of wind spell once with this trait, and you regain the ability to do so when you finish a long rest. Charisma is your spellcasting ability for these spells." },
       { name: 'Spells of the Mark', description: 'If you have the Spellcasting or Pact Magic class feature, the spells on the Mark of Storm Spells table are added to the spell list of your spellcasting class.' },
     ],
+    resistances: ['lightning'],
     languages: ['Common', 'Elvish'],
     innateSpells: [
       { spellId: 'gust', recharge: 'cantrip', ability: 'cha' },
