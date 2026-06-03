@@ -90,6 +90,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Know Your Enemy', level: 7, description: 'If you spend at least 1 minute observing or interacting with another creature outside combat, you can learn certain information about its capabilities compared to your own.' },
     { name: 'Improved Combat Superiority', level: 10, description: 'At 10th level, your superiority dice turn into d10s. At 18th level, they turn into d12s.' },
     { name: 'Relentless', level: 15, description: 'Starting at 15th level, when you roll initiative and have no superiority dice remaining, you regain 1 superiority die.' },
+    { name: 'Improved Combat Superiority', level: 18, description: 'At 18th level, your superiority dice turn into d12s.' },
   ]},
   { id: 'eldritch-knight', name: 'Eldritch Knight', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypical Eldritch Knight combines the martial mastery common to all fighters with a careful study of magic.', spellcastingType: 'third', spellListClassId: 'wizard',
     // PHB EK spellcasting table, indexed by fighter level (index = level-1)
@@ -447,10 +448,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     ],
     features: [
     { name: 'Bonus Proficiency', level: 3, description: 'You gain proficiency in one of: History, Insight, Performance, or Persuasion. Or you learn one language.' },
-    { name: 'Fighting Spirit', level: 3, description: 'As a bonus action, give yourself advantage on weapon attack rolls until the end of your current turn and gain 5 temp HP (10 at 10th level, 15 at 15th level). 3 uses per long rest.' },
+    { name: 'Fighting Spirit', level: 3, description: 'As a bonus action, give yourself advantage on weapon attack rolls until the end of your current turn and gain 5 temporary hit points. 3 uses per long rest.' },
     { name: 'Elegant Courtier', level: 7, description: 'You add your Wisdom modifier to Charisma (Persuasion) checks. You gain proficiency in Wisdom saving throws; if already proficient, you instead gain proficiency in Intelligence or Charisma saves (your choice).' },
     { name: 'Tireless Spirit', level: 10, description: 'When you roll initiative and have no Fighting Spirit uses remaining, you regain one use.' },
+    { name: 'Fighting Spirit Improvement', level: 10, description: 'At 10th level, the temporary hit points you gain from Fighting Spirit increase to 10.' },
     { name: 'Rapid Strike', level: 15, description: 'If you have advantage on an attack against a creature, you can forgo that advantage to make one additional attack.' },
+    { name: 'Fighting Spirit Improvement', level: 15, description: 'At 15th level, the temporary hit points you gain from Fighting Spirit increase to 15.' },
     { name: 'Strength Before Death', level: 18, description: 'When you take damage that would reduce you to 0 HP, you can use your reaction to delay falling unconscious and take one extra turn immediately.' },
   ]},
 
@@ -479,15 +482,17 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'oath-of-conquest', name: 'Oath of Conquest', classId: 'paladin', sourceBook: 'XGtE', description: 'The Oath of Conquest calls to paladins who seek glory in battle and the subjugation of their enemies.', features: [
     { name: 'Channel Divinity: Conquering Presence', level: 3, description: 'Each creature of your choice in 30 feet must succeed on a Wisdom save or be frightened of you for 1 minute.' },
     { name: 'Channel Divinity: Guided Strike', level: 3, description: 'When you or a creature within 30 feet makes an attack roll, gain a +10 bonus to the roll.' },
-    { name: 'Aura of Conquest', level: 7, description: 'Frightened creatures within 10 feet (30 ft at 18th) have speed 0 and take psychic damage equal to half your paladin level at the start of their turn.' },
+    { name: 'Aura of Conquest', level: 7, description: 'Frightened creatures within 10 feet have speed 0 and take psychic damage equal to half your paladin level at the start of their turn.' },
     { name: 'Scornful Rebuke', level: 15, description: 'When a creature hits you with an attack, it takes psychic damage equal to your Charisma modifier (if positive).' },
+    { name: 'Aura of Conquest Improvement', level: 18, description: 'At 18th level, the range of your Aura of Conquest increases to 30 feet.' },
     { name: 'Invincible Conqueror', level: 20, description: 'As an action, you assume a form of supernatural power for 1 minute: resistance to all damage, extra attack on Attack action, and crit on 19-20.' },
   ], alwaysPreparedSpells: { 3: ['armor-of-agathys', 'command'], 5: ['hold-person', 'spiritual-weapon'], 9: ['bestow-curse', 'fear'], 13: ['dominate-beast', 'stoneskin'], 17: ['cloudkill', 'dominate-person'] }},
   { id: 'oath-of-redemption', name: 'Oath of Redemption', classId: 'paladin', sourceBook: 'XGtE', description: 'The Oath of Redemption sets a paladin on a difficult path, one that requires a holy warrior to use violence only as a last resort.', features: [
     { name: 'Channel Divinity: Emissary of Peace', level: 3, description: 'As a bonus action, you use your Channel Divinity to gain a +5 bonus to Charisma (Persuasion) checks for the next 10 minutes.' },
     { name: 'Rebuke the Violent', level: 3, description: 'When a creature within 30 feet hits another with an attack, you can use your reaction to force a Wisdom save or take radiant damage equal to the damage dealt.' },
-    { name: 'Aura of the Guardian', level: 7, description: 'When a creature within 10 feet (30 ft at 18th) takes damage, you can use your reaction to magically take that damage instead.' },
+    { name: 'Aura of the Guardian', level: 7, description: 'When a creature within 10 feet takes damage, you can use your reaction to magically take that damage instead.' },
     { name: 'Protective Spirit', level: 15, description: 'You regain HP equal to 1d6 + half your paladin level if you end your turn in combat with fewer than half your HP and aren\'t incapacitated.' },
+    { name: 'Aura of the Guardian Improvement', level: 18, description: 'At 18th level, the range of your Aura of the Guardian increases to 30 feet.' },
     { name: 'Emissary of Redemption', level: 20, description: 'You have resistance to all damage dealt by other creatures (attacks, spells, and other effects). Whenever a creature hits you with an attack, it takes radiant damage equal to half the damage you take from that attack. Both benefits stop working against a creature until your next long rest if you attack it, cast a spell on it, or deal it damage.' },
   ], alwaysPreparedSpells: { 3: ['sanctuary', 'sleep'], 5: ['calm-emotions', 'hold-person'], 9: ['counterspell', 'hypnotic-pattern'], 13: ['otilukes-resilient-sphere', 'stoneskin'], 17: ['hold-monster', 'wall-of-force'] }},
 
@@ -503,9 +508,10 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'horizon-walker', name: 'Horizon Walker', classId: 'ranger', sourceBook: 'XGtE', description: 'Horizon Walkers guard the world against threats that originate from other planes or that seek to ravage the mortal realm with extraplanar magic.', features: [
     { name: 'Horizon Walker Magic', level: 3, description: 'You learn additional spells, starting with Protection from Evil and Good.' },
     { name: 'Detect Portal', level: 3, description: 'As an action, detect the distance and direction to the closest planar portal within 1 mile. Use once per short or long rest.' },
-    { name: 'Planar Warrior', level: 3, description: 'As a bonus action, choose a creature within 30 feet. The next time you hit it on this turn, it takes an extra 1d8 force damage (2d8 at 11th level), and the original damage becomes force damage.' },
+    { name: 'Planar Warrior', level: 3, description: 'As a bonus action, choose a creature within 30 feet. The next time you hit it on this turn, it takes an extra 1d8 force damage, and the original damage becomes force damage.' },
     { name: 'Ethereal Step', level: 7, description: 'As a bonus action, cast Etherealness affecting only you and lasting 1 turn. Once per short or long rest.' },
     { name: 'Distant Strike', level: 11, description: 'When you take the Attack action, you can teleport up to 10 feet between attacks. If you attack at least two different creatures, you can make a third attack against a third creature.' },
+    { name: 'Planar Warrior Improvement', level: 11, description: 'At 11th level, the extra force damage from your Planar Warrior feature increases to 2d8.' },
     { name: 'Spectral Defense', level: 15, description: 'When you take damage from an attack, you can use your reaction to gain resistance against the attack\'s damage.' },
   ]},
   { id: 'monster-slayer', name: 'Monster Slayer', classId: 'ranger', sourceBook: 'XGtE', description: 'Monster Slayers seek out vampires, dragons, evil fey, fiends, and other magical threats.', features: [
@@ -557,8 +563,9 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Unearthly Recovery', level: 18, description: 'As a bonus action when below half HP, regain HP equal to half your max. Once per long rest.' },
   ]},
   { id: 'shadow-magic', name: 'Shadow Magic', classId: 'sorcerer', sourceBook: 'XGtE', description: 'You are a creature of shadow, for your innate magic comes from the Shadowfell itself.', features: [
-    { name: 'Eyes of the Dark', level: 1, description: 'You gain darkvision 120 feet. You also know Darkness and can cast it by spending 2 sorcery points instead of a spell slot; you can see through the darkness you create.' },
+    { name: 'Eyes of the Dark', level: 1, description: 'You gain darkvision 120 feet.' },
     { name: 'Strength of the Grave', level: 1, description: 'When damage reduces you to 0 HP, make a Charisma save (DC 5 + damage). On success, drop to 1 HP. Once per long rest.' },
+    { name: 'Eyes of the Dark: Darkness Spell', level: 3, description: 'At 3rd level, you learn the darkness spell. You can cast it by spending 2 sorcery points instead of a spell slot, and when you cast it with sorcery points, you can see through the magical darkness it creates.' },
     { name: 'Hound of Ill Omen', level: 6, description: 'Spend 3 sorcery points as a bonus action to summon a hound (dire wolf stats, Medium monstrosity) targeting one creature within 120 feet. The hound has temp HP equal to half your sorcerer level, can move through creatures/objects, and automatically tracks the target. While the hound is within 5 feet of the target, the target has disadvantage on saving throws against your spells. Lasts 5 minutes or until you or the target drop to 0 HP.' },
     { name: 'Shadow Walk', level: 14, description: 'While in dim light or darkness, use a bonus action to teleport up to 120 feet to an unoccupied space you can see in dim light or darkness.' },
     { name: 'Umbral Form', level: 18, description: 'Spend 6 sorcery points to become shadow form: resistance to all damage except force/radiant, and you can move through occupied spaces. Lasts 1 minute.' },
@@ -720,15 +727,17 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'oath-of-glory', name: 'Oath of Glory', classId: 'paladin', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Paladins who take the Oath of Glory believe they are destined — and divinely fated — for great deeds.', features: [
     { name: 'Channel Divinity: Peerless Athlete', level: 3, description: 'As a bonus action, gain advantage on Str (Athletics) and Dex (Acrobatics) checks for 10 minutes. Carrying capacity doubles.' },
     { name: 'Channel Divinity: Inspiring Smite', level: 3, description: 'Right after using Divine Smite, use a bonus action to grant temp HP (2d8 + paladin level) to creatures of your choice within 30 feet.' },
-    { name: 'Aura of Alacrity', level: 7, description: 'Your walking speed increases by 10 feet. Allies within 5 feet (10 ft at 18th) also gain +10 ft speed.' },
+    { name: 'Aura of Alacrity', level: 7, description: 'Your walking speed increases by 10 feet. Allies within 5 feet who start their turn there also gain +10 ft walking speed until end of that turn.' },
     { name: 'Glorious Defense', level: 15, description: 'When you or an ally within 10 feet are hit by an attack, use your reaction to grant +Cha-mod AC against that attack. If the attack misses, make one weapon attack against the attacker. Cha-mod uses per long rest.' },
+    { name: 'Aura of Alacrity Improvement', level: 18, description: 'At 18th level, the range of your Aura of Alacrity increases to 10 feet.' },
     { name: 'Living Legend', level: 20, description: 'As a bonus action for 1 minute: advantage on all Charisma checks; once per turn when you miss with a weapon attack, that attack hits instead; reaction when you fail a saving throw to reroll it (must use new roll). Once per long rest; can use again by expending a 5th-level spell slot.' },
   ], alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-watchers', name: 'Oath of the Watchers', classId: 'paladin', sourceBook: 'TCE', description: 'The Oath of the Watchers binds paladins to protect mortals from the dangers posed by extraplanar entities.', features: [
     { name: 'Channel Divinity: Watcher\'s Will', level: 3, description: 'As an action, choose up to Cha-mod creatures within 30 feet. They gain advantage on Int, Wis, and Cha saves for 1 minute.' },
     { name: 'Channel Divinity: Abjure the Extraplanar', level: 3, description: 'Each aberration, celestial, elemental, fey, or fiend within 30 feet must make a Wis save or be turned for 1 minute.' },
-    { name: 'Aura of the Sentinel', level: 7, description: 'While you are not incapacitated, you and any creatures of your choice within 10 feet of you gain a bonus to initiative rolls equal to your proficiency bonus. At 18th level, the range of this aura increases to 30 feet.' },
+    { name: 'Aura of the Sentinel', level: 7, description: 'While you are not incapacitated, you and any creatures of your choice within 10 feet of you gain a bonus to initiative rolls equal to your proficiency bonus.' },
     { name: 'Vigilant Rebuke', level: 15, description: 'When you or a creature within 30 feet succeeds on an Int, Wis, or Cha save, use your reaction to deal 2d8 + Cha mod force damage to the source.' },
+    { name: 'Aura of the Sentinel Improvement', level: 18, description: 'At 18th level, the range of your Aura of the Sentinel increases to 30 feet.' },
     { name: 'Mortal Bulwark', level: 20, description: 'As a bonus action for 1 minute: truesight 120 ft, advantage on attacks vs aberrations/celestials/elementals/fey/fiends, and banish them on a hit (Cha save). Once per long rest.' },
   ], alwaysPreparedSpells: { 3: ['alarm', 'detect-magic'], 5: ['moonbeam', 'see-invisibility'], 9: ['counterspell', 'nondetection'], 13: ['aura-of-purity', 'banishment'], 17: ['hold-monster', 'scrying'] }},
 
