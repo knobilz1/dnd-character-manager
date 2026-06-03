@@ -129,7 +129,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     features: [
       { name: 'War Priest', level: 3, description: 'Bonus Action after taking the Attack action: make one weapon attack. Uses = Wis mod (min 1); regain on Long Rest.' },
       { name: 'Guided Strike', level: 3, description: 'Channel Divinity + Reaction when a creature misses an attack roll: add +10 to that roll, potentially turning the miss into a hit.' },
-      { name: 'War God\'s Blessing', level: 6, description: 'When another creature within 30 ft makes an attack roll: Reaction + Channel Divinity: add +10 to that roll.' },
+      { name: 'War God\'s Blessing', level: 6, description: 'Expend Channel Divinity to cast Shield of Faith or Spiritual Weapon without a spell slot. The spell requires no Concentration and lasts 1 minute (ends if cast again, you are Incapacitated, or you die).' },
       { name: 'Avatar of Battle', level: 17, description: 'Resistance to Bludgeoning, Piercing, and Slashing damage from nonmagical attacks.' },
     ],
     alwaysPreparedSpells: { 3: ['guiding-bolt', 'magic-weapon', 'shield-of-faith', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['fire-shield', 'freedom-of-movement'], 9: ['hold-monster', 'steel-wind-strike'] },
@@ -160,10 +160,10 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
   { id: 'circle-of-the-sea', name: 'Circle of the Sea', classId: 'druid-2024', sourceBook: 'PHB2024',
     description: 'Command the power of stormy waves and the deep ocean.',
     features: [
-      { name: 'Wrath of the Sea', level: 3, description: 'Magic action: expend Wild Shape — 5-ft Emanation for 10 min. While active: Wrath Strike (each turn when dealing damage to creature within aura: Con save or pushed 15 ft away + knocked Prone + 1d6 Cold); Tidal Surge (can BA to move emanation 60 ft).' },
-      { name: 'Gift of the Sea', level: 6, description: 'Swim Speed = Speed. Breathe air and water. Can cast Water Breathing without a slot = Wis mod (min 1) times per Long Rest.' },
-      { name: 'Aquatic Affinity', level: 10, description: 'Advantage on Str (Athletics) checks involving swimming. While submerged, you can see through up to 30 ft of water (even murky). Allies within 30 ft can also breathe water while you concentrate (same as Water Breathing).' },
-      { name: 'Stormborn', level: 14, description: 'Fly Speed = Swim Speed while outdoors (weather: no effect from storms). Immunity to Lightning and Thunder damage. Magic action: expend Wild Shape — call lightning (as per Call Lightning spell, no Concentration; duration 10 min; uses = Wis mod).' },
+      { name: 'Wrath of the Sea', level: 3, description: 'Bonus Action + Wild Shape use: create a 5-ft Emanation of ocean spray around yourself for 10 min (or dismissed, re-manifested, or Incapacitated). On manifestation and as a Bonus Action on subsequent turns: choose a creature in the Emanation → Con save (spell save DC) or take Cold damage = Wis mod (min 1) d6s; if Large-or-smaller, also pushed up to 15 ft away.' },
+      { name: 'Aquatic Affinity', level: 6, description: 'Your Wrath of the Sea Emanation expands to 10 ft. You also gain a Swim Speed equal to your Speed.' },
+      { name: 'Stormborn', level: 10, description: 'While your Wrath of the Sea Emanation is active: you gain a Fly Speed equal to your Speed, and Resistance to Cold, Lightning, and Thunder damage.' },
+      { name: 'Oceanic Gift', level: 14, description: 'You can manifest your Wrath of the Sea Emanation around a willing creature within 60 ft of you instead of yourself (using your spell save DC and Wis mod). You can manifest it around both yourself and another creature by expending 2 Wild Shape uses.' },
     ],
   },
 
@@ -186,7 +186,9 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
       { name: 'Combat Superiority', level: 3, description: 'Superiority Dice: 4d8 (→5d8 at 7, →6d8 at 15). Regain all on Short/Long Rest. Die increases: d10 at 10, d12 at 18. Know 3 maneuvers at level 3 (+1 at 7, 10, 15, 18). Save DC = 8+Prof+Str or Dex (higher). Choose from: Commander\'s Strike, Disarming Attack, Distracting Strike, Evasive Footwork, Feinting Attack, Goading Attack, Lunging Attack, Maneuvering Attack, Menacing Attack, Parry, Precision Attack, Pushing Attack, Rally, Riposte, Sweeping Attack, Tactical Assessment, Trip Attack.' },
       { name: 'Student of War', level: 3, description: 'Proficiency with one type of Artisan\'s Tools and one skill from the Fighter skill list.' },
       { name: 'Know Your Enemy', level: 7, description: 'Bonus Action: discern the Immunities, Resistances, and Vulnerabilities of one creature within 30 ft. Once per Long Rest; restore with 1 Superiority Die (no action).' },
-      { name: 'Relentless', level: 15, description: 'When rolling Initiative with no Superiority Dice remaining, regain 1 die.' },
+      { name: 'Improved Combat Superiority', level: 10, description: 'Your Superiority Dice become d10s.' },
+      { name: 'Relentless', level: 15, description: 'Once per turn when you use a maneuver, you can roll 1d8 instead of expending a Superiority Die (doesn\'t cost a die; add the roll to the effect as normal).' },
+      { name: 'Ultimate Combat Superiority', level: 18, description: 'Your Superiority Dice become d12s.' },
     ],
   },
 
@@ -372,7 +374,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     features: [
       { name: 'Spellcasting', level: 3, description: 'Int-based third-caster. Arcane Focus. Learn 3 spells at level 3 (Enchantment/Illusion only, except 1 from any school). Known caster. Cantrips: 2 (Mage Hand + one Enchantment/Illusion cantrip).' },
       { name: 'Mage Hand Legerdemain', level: 3, description: 'Mage Hand is invisible. As Bonus Action: control the hand + use it to stow/retrieve/use thieves\' tools or pick a lock or pocket (Sleight of Hand vs. Perception).' },
-      { name: 'Magical Ambush', level: 7, description: 'When hidden: creatures targeted by your spells have Disadvantage on their first save against the spell this turn.' },
+      { name: 'Magical Ambush', level: 9, description: 'When you have the Invisible condition when you cast a spell, each creature you target with the spell has Disadvantage on any saving throw it makes against the spell on the same turn.' },
       { name: 'Versatile Trickster', level: 13, description: 'When you use the Trip Cunning Strike option on a creature, you can also use Trip on a second creature within 5 ft of your spectral Mage Hand.' },
       { name: 'Spell Thief', level: 17, description: 'Reaction after a creature casts a spell targeting you: steal the spell. That spell has no effect; you learn it for 8 hours and can cast it once using Pact Magic / spell slot. Once per Long Rest.' },
     ],
