@@ -1408,6 +1408,41 @@ function Character3DCard() {
   const show3DCharacter = useSettingsStore((s) => s.show3DCharacter);
   const setShow3DCharacter = useSettingsStore((s) => s.setShow3DCharacter);
 
+  // Subscribe to HP + conditions for the animation state machine.
+  const currentHP     = useCharacterStore((s) => s.character?.currentHP ?? 0);
+  const maxHP         = useCharacterStore((s) => s.character?.maxHP ?? 1);
+  const exhaustion    = useCharacterStore((s) => s.character?.exhaustionLevel ?? 0);
+  const conditions    = useCharacterStore((s) => s.character?.conditions ?? []);
+
+  const effectiveMax  = exhaustion >= 4 ? Math.floor(maxHP / 2) : maxHP;
+  const isDown        = currentHP === 0 || conditions.includes('Unconscious');
+
+  // 'idle' | 'hurt' | 'down'
+  const [animState, setAnimState] = React.useState<'idle' | 'hurt' | 'down'>('idle');
+  const prevHP = React.useRef(currentHP);
+
+  React.useEffect(() => {
+    const tookDamage = currentHP < prevHP.current;
+    prevHP.current = currentHP;
+
+    if (isDown) {
+      setAnimState('down');
+      return;
+    }
+    if (tookDamage) {
+      setAnimState('hurt');
+      // Hit_A clip is ~0.7 s; after it finishes, return to idle.
+      const t = setTimeout(() => setAnimState('idle'), 750);
+      return () => clearTimeout(t);
+    }
+    // Healed / HP raised: snap back to idle (e.g. revived from 0).
+    setAnimState('idle');
+  }, [currentHP, isDown]);
+
+  // Tint the canvas border red at low HP (≤ 25 %).
+  const hpPct = effectiveMax > 0 ? currentHP / effectiveMax : 1;
+  const lowHP = hpPct <= 0.25 && !isDown;
+
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5">
@@ -1428,7 +1463,12 @@ function Character3DCard() {
         </button>
       </div>
       {show3DCharacter && (
-        <div className="h-[340px] bg-gradient-to-b from-slate-900 to-slate-950 border-t border-slate-700">
+        <div className={cn(
+          'h-[340px] bg-gradient-to-b from-slate-900 to-slate-950 border-t transition-colors',
+          isDown  ? 'border-slate-600'   :
+          lowHP   ? 'border-red-700/60'  :
+                    'border-slate-700'
+        )}>
           <React.Suspense
             fallback={
               <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
@@ -1436,7 +1476,7 @@ function Character3DCard() {
               </div>
             }
           >
-            <CharacterViewport className="w-full h-full" />
+            <CharacterViewport animationState={animState} className="w-full h-full" />
           </React.Suspense>
         </div>
       )}
