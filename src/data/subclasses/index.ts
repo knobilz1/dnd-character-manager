@@ -85,7 +85,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
       },
     ],
     features: [
-    { name: 'Combat Superiority', level: 3, description: 'When you choose this archetype at 3rd level, you learn maneuvers that are fueled by special dice called superiority dice (d8, upgrading to d10 at 10th level and d12 at 18th level). You learn three maneuvers of your choice. You have four superiority dice. You regain all of your expended superiority dice when you finish a short or long rest.' },
+    { name: 'Combat Superiority', level: 3, description: 'When you choose this archetype at 3rd level, you learn maneuvers that are fueled by special dice called superiority dice (d8, upgrading to d10 at 10th level and d12 at 18th level). You learn 3 maneuvers of your choice at 3rd level (+2 at 7th, 10th, and 15th; 9 total). You have four superiority dice (+1 die at 7th, six total at 15th). You can replace one maneuver whenever you learn a new one. Maneuver save DC = 8 + proficiency bonus + Strength or Dexterity modifier. You regain all of your expended superiority dice when you finish a short or long rest.' },
     { name: 'Student of War', level: 3, description: 'At 3rd level, you gain proficiency with one type of artisan\'s tools of your choice.' },
     { name: 'Know Your Enemy', level: 7, description: 'If you spend at least 1 minute observing or interacting with another creature outside combat, you can learn certain information about its capabilities compared to your own.' },
     { name: 'Improved Combat Superiority', level: 10, description: 'At 10th level, your superiority dice turn into d10s. At 18th level, they turn into d12s.' },
@@ -164,7 +164,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'arcane-trickster', name: 'Arcane Trickster', classId: 'rogue', sourceBook: 'PHB', description: 'Some rogues enhance their fine-honed skills of stealth and agility with magic, learning tricks of enchantment and illusion.', spellcastingType: 'third', spellListClassId: 'wizard',
     // PHB AT spellcasting table, indexed by rogue level (index = level-1)
-    cantripsKnownByClassLevel: [0,0,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+    cantripsKnownByClassLevel: [0,0,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
     spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
     restrictedSchools: ['Enchantment', 'Illusion'],
     freePickLevels: [8, 14, 20],
@@ -286,7 +286,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'circle-of-the-moon', name: 'Circle of the Moon', classId: 'druid', sourceBook: 'PHB', description: 'Druids of the Circle of the Moon are fierce guardians of the wilds. Their order gathers under the full moon to share news and trade warnings.', features: [
     { name: 'Combat Wild Shape', level: 2, description: 'You can use Wild Shape on your turn as a bonus action, rather than as an action. Additionally, you can expend a spell slot as a bonus action while transformed to regain 1d8 HP per level of the slot.' },
-    { name: 'Circle Forms', level: 2, description: 'You can transform into a beast with a CR as high as 1 (improves at higher levels).' },
+    { name: 'Circle Forms', level: 2, description: 'You can transform into a beast with a CR as high as 1. Starting at 6th level, the CR limit becomes your druid level ÷ 3 (rounded down).' },
     { name: 'Primal Strike', level: 6, description: 'Your attacks in beast form count as magical for overcoming resistance to nonmagical attacks.' },
     { name: 'Elemental Wild Shape', level: 10, description: 'You can expend two uses of Wild Shape to transform into an air, earth, fire, or water elemental.' },
     { name: 'Thousand Forms', level: 14, description: 'You can cast Alter Self at will.' },
