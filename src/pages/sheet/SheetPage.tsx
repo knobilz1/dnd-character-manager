@@ -22,12 +22,17 @@ import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { getClass } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
 import type { RollDie } from '../../store/useDiceStore';
 import { lookupWeapon, damageLine } from '../../data/weapons';
+
+// Lazy-loaded so the three/R3F bundle is a separate chunk — only fetched when the
+// experimental 3D character viewport is enabled (Phase 0 spike).
+const CharacterViewport = React.lazy(() => import('./CharacterViewport'));
 import { getRace } from '../../data/races';
 import { ALL_METAMAGIC } from '../../data/metamagic';
 import { ALL_FEATS } from '../../data/feats';
@@ -1399,6 +1404,50 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
   );
 }
 
+// Step B: drop a CC0 GLB in `public/models/` and set this to e.g. '/models/adventurer.glb'
+// to render a real animated model instead of the procedural placeholder.
+const CHARACTER_MODEL_URL: string | undefined = undefined;
+
+function Character3DCard() {
+  const show3DCharacter = useSettingsStore((s) => s.show3DCharacter);
+  const setShow3DCharacter = useSettingsStore((s) => s.setShow3DCharacter);
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 uppercase tracking-wide font-semibold">Character</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/50 text-violet-300 font-medium">3D · beta</span>
+        </div>
+        <button
+          onClick={() => setShow3DCharacter(!show3DCharacter)}
+          className={cn(
+            'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+            show3DCharacter
+              ? 'bg-violet-700 hover:bg-violet-600 text-white'
+              : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+          )}
+        >
+          {show3DCharacter ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      {show3DCharacter && (
+        <div className="h-[340px] bg-gradient-to-b from-slate-900 to-slate-950 border-t border-slate-700">
+          <React.Suspense
+            fallback={
+              <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+                Loading 3D…
+              </div>
+            }
+          >
+            <CharacterViewport modelUrl={CHARACTER_MODEL_URL} className="w-full h-full" />
+          </React.Suspense>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput, applyHP,
   setCurrentHP, setTempHP, setMaxHP, addDeathSuccess, addDeathFailure, resetDeathSaves,
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
@@ -1442,6 +1491,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
   return (
     <div className="space-y-4">
+      {/* Experimental 3D character viewport (Phase 0 spike). The heavy three/R3F
+          chunk only loads when the toggle is on. */}
+      <Character3DCard />
+
       {/* Round counter */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">

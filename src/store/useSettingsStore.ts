@@ -1,0 +1,24 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+/**
+ * App-wide UI/feature settings (persisted to localStorage).
+ *
+ * `show3DCharacter` gates the experimental 3D character viewport (Phase 0 spike).
+ * Default OFF so existing users are unaffected and the heavy three/R3F chunk is
+ * never loaded unless explicitly enabled.
+ */
+interface SettingsState {
+  show3DCharacter: boolean;
+  setShow3DCharacter: (v: boolean) => void;
+}
+
+export const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set) => ({
+      show3DCharacter: false,
+      setShow3DCharacter: (v) => set({ show3DCharacter: v }),
+    }),
+    { name: 'tavern-sheet-settings' }
+  )
+);
