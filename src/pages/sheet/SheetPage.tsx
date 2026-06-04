@@ -1404,10 +1404,6 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
   );
 }
 
-// Step B: drop a CC0 GLB in `public/models/` and set this to e.g. '/models/adventurer.glb'
-// to render a real animated model instead of the procedural placeholder.
-const CHARACTER_MODEL_URL: string | undefined = undefined;
-
 function Character3DCard() {
   const show3DCharacter = useSettingsStore((s) => s.show3DCharacter);
   const setShow3DCharacter = useSettingsStore((s) => s.setShow3DCharacter);
@@ -1440,7 +1436,7 @@ function Character3DCard() {
               </div>
             }
           >
-            <CharacterViewport modelUrl={CHARACTER_MODEL_URL} className="w-full h-full" />
+            <CharacterViewport className="w-full h-full" />
           </React.Suspense>
         </div>
       )}
