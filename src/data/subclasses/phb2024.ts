@@ -210,6 +210,9 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     description: 'Combine martial skill with Abjuration and Evocation magic.',
     spellcastingType: 'third',
     spellListClassId: 'wizard',
+    // PHB 2024 EK: cantrips 2→3 at lv10→4 at lv14; no school restriction; same prepared table as PHB 2014 EK
+    cantripsKnownByClassLevel: [0,0,2,2,2,2,2,2,2,3,3,3,3,4,4,4,4,4,4,4],
+    spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
     features: [
       { name: 'Spellcasting', level: 3, description: 'Int-based third-caster. Arcane Focus. Use the Eldritch Knight prepared spells table. Spells are prepared (can change on level-up; no restriction on spell school). Cantrips: 2 (gain 1 more at levels 10 and 14).' },
       { name: 'War Bond', level: 3, description: '1-hour ritual bonds 1 weapon (can\'t be disarmed; Bonus Action to summon to hand). Can have up to 2 weapons bonded; bonding a third breaks an existing bond.' },
@@ -373,6 +376,9 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     description: 'Enhance your roguery with Enchantment and Illusion magic.',
     spellcastingType: 'third',
     spellListClassId: 'wizard',
+    // PHB 2024 AT: cantrips 3→4 at lv10; no school restriction; same prepared table as PHB 2014 AT
+    cantripsKnownByClassLevel: [0,0,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
+    spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
     features: [
       { name: 'Spellcasting', level: 3, description: 'Int-based third-caster. Arcane Focus. Prepared caster (change 1 spell on level-up; no school restriction). Cantrips: 3 (Mage Hand always + 2 Wizard cantrips). Gain 1 more cantrip at level 10.' },
       { name: 'Mage Hand Legerdemain', level: 3, description: 'Cast Mage Hand as Bonus Action; the hand is Invisible. Control the hand as Bonus Action; make Dex (Sleight of Hand) checks through it.' },
