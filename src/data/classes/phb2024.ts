@@ -416,7 +416,7 @@ export const PHB2024_CLASSES: DClass[] = [
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
     // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
-    multiclassGains: ['Light armor', 'One skill from Rogue list', 'Thieves' tools'],
+    multiclassGains: ['Light armor', 'One skill from Rogue list', "Thieves' tools"],
     features: [
       { name: 'Expertise', level: 1, description: 'Double proficiency bonus on 2 skill proficiencies. Gain 2 more at level 6.' },
       { name: 'Expertise', level: 6, description: 'Gain Expertise in 2 more skill proficiencies.' },

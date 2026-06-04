@@ -597,7 +597,7 @@ export const ALL_CLASSES: DClass[] = [
     subclassLevel: 3,
     multiclassPrerequisites: { int: 13 },
     // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
-    multiclassGains: ['Light armor', 'Medium armor', 'Shields', 'Thieves' tools', 'Tinker's tools'],
+    multiclassGains: ['Light armor', 'Medium armor', 'Shields', "Thieves' tools", "Tinker's tools"],
     features: [
       { name: 'Magical Tinkering', level: 1, description: 'You\'ve learned how to invest a spark of magic into mundane objects. As an action, you touch a Tiny nonmagical object and give it one of these properties: shed bright light in 5-foot radius, record a message of up to 6 seconds, sound recorded effects, picture or text appears on it. You can have a number of objects equal to your Intelligence modifier infused at once.' },
       { name: 'Spellcasting', level: 1, description: 'You can cast artificer spells. Intelligence is your spellcasting ability. You use various tools as your spellcasting focus, providing the material components for spells.' },
