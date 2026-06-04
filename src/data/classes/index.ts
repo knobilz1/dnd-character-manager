@@ -425,7 +425,7 @@ export const ALL_CLASSES: DClass[] = [
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
     // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
-    multiclassGains: ['Light armor', 'One skill from class list', 'Thieves' tools'],
+    multiclassGains: ['Light armor', 'One skill from class list', "Thieves' tools"],
     features: [
       { name: 'Expertise', level: 1, description: 'At 1st level, choose two of your skill proficiencies, or one of your skill proficiencies and your proficiency with thieves\' tools. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies.' },
       { name: 'Sneak Attack', level: 1, description: 'Beginning at 1st level, you know how to strike subtly and exploit a foe\'s distraction. Once per turn, you can deal an extra 1d6 damage to one creature you hit with an attack if you have advantage on the attack roll. The attack must use a finesse or a ranged weapon. You don\'t need advantage on the attack roll if another enemy of the target is within 5 feet of it, that enemy isn\'t incapacitated, and you don\'t have disadvantage on the attack roll. The amount of the extra damage increases as you gain levels in this class.' },
