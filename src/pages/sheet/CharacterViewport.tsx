@@ -1,194 +1,154 @@
 import * as React from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, ContactShadows, useGLTF, useAnimations } from '@react-three/drei';
+import { Canvas, useLoader, useFrame } from '@react-three/fiber';
+import { OrbitControls, ContactShadows } from '@react-three/drei';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import * as THREE from 'three';
 
-/**
- * Phase 0 spike — 3D character viewport.
- *
- * KayKit Adventurers pack structure:
- *   - Characters/gltf/*.glb  → mesh + skeleton, NO embedded animations
- *   - Animations/gltf/Rig_Medium/Rig_Medium_General.glb → animation clips
- *     (Idle_A, Idle_B, Hit_A, Hit_B, Death_A, Death_B, …)
- *
- * Both share the same bone names, so we load the character for its mesh and the
- * animation rig for its clips, then retarget the clips onto the character's root.
- *
- * `animationState` prop is wired now — Phase 1 (HP-reactive) will drive it without
- * needing a rewrite.
- */
 export type AnimationState = 'idle' | 'hurt' | 'down';
 
 interface CharacterViewportProps {
-  characterUrl?: string;   // e.g. '/models/Knight.glb'
-  animUrl?: string;        // e.g. '/models/Rig_Medium_General.glb'
   animationState?: AnimationState;
   className?: string;
 }
 
-// Preload both GLBs so they're ready before the canvas mounts.
-useGLTF.preload('/models/Knight.glb');
-useGLTF.preload('/models/Rig_Medium_General.glb');
-
-/** Step A — procedural humanoid placeholder (zero asset dependency). */
-function PlaceholderCharacter() {
-  const group = React.useRef<THREE.Group>(null);
-  useFrame((state) => {
-    if (!group.current) return;
-    const t = state.clock.elapsedTime;
-    group.current.position.y = Math.sin(t * 1.5) * 0.04;
-    group.current.rotation.y = Math.sin(t * 0.4) * 0.15;
-  });
-  const skin = '#c9a17a';
-  const tunic = '#5b6b8c';
-  return (
-    <group ref={group}>
-      <mesh position={[0, 1.5, 0]} castShadow>
-        <boxGeometry args={[0.42, 0.42, 0.42]} />
-        <meshStandardMaterial color={skin} />
-      </mesh>
-      <mesh position={[0, 1.0, 0]} castShadow>
-        <boxGeometry args={[0.6, 0.7, 0.35]} />
-        <meshStandardMaterial color={tunic} />
-      </mesh>
-      <mesh position={[-0.42, 1.0, 0]} castShadow>
-        <boxGeometry args={[0.18, 0.65, 0.22]} />
-        <meshStandardMaterial color={tunic} />
-      </mesh>
-      <mesh position={[0.42, 1.0, 0]} castShadow>
-        <boxGeometry args={[0.18, 0.65, 0.22]} />
-        <meshStandardMaterial color={tunic} />
-      </mesh>
-      <mesh position={[-0.16, 0.35, 0]} castShadow>
-        <boxGeometry args={[0.2, 0.7, 0.24]} />
-        <meshStandardMaterial color="#3a3f4b" />
-      </mesh>
-      <mesh position={[0.16, 0.35, 0]} castShadow>
-        <boxGeometry args={[0.2, 0.7, 0.24]} />
-        <meshStandardMaterial color="#3a3f4b" />
-      </mesh>
-    </group>
-  );
-}
+const IDLE_URLS = [
+  '/models/Human_Badass_Idle.fbx',
+  '/models/Human_Walk_Relaxed.fbx',
+];
+const HIT_URL = '/models/Human_White_Punched.fbx';
 
 /**
- * KayKit character: loads mesh from characterUrl, animations from animUrl.
- * The rig GLB has clips named Idle_A, Hit_A, Hit_B, Death_A, Death_B, etc.
- * `animationState` drives which clip plays.
+ * 3D character built from AccuRig-rigged FBX exports (mesh + skeleton +
+ * animation, all sharing one 118-bone skeleton).
+ *
+ * Lessons baked in:
+ *  - Render the RAW loaded FBX. SkeletonUtils.clone() broke the skinning here
+ *    (invisible mesh), so we do not clone — one viewport, one instance.
+ *  - AccuRig bundles a "0_Open A_UE5" calibration A-pose clip in every file;
+ *    the real motion is the OTHER clip. We pick the non-calibration clip.
+ *  - All three FBX share identical bone names, so the walk/hit clips retarget
+ *    onto the displayed mesh's skeleton by name.
+ *  - The Mixamo/AccuRig FBX lost its embedded texture; we render a clean solid
+ *    sculpted material until a matching texture is re-exported.
+ *  - FBX is in cm → scale 0.01.
  */
-function KayKitCharacter({
-  characterUrl,
-  animUrl,
-  animationState,
-}: {
-  characterUrl: string;
-  animUrl: string;
-  animationState: AnimationState;
-}) {
-  const group = React.useRef<THREE.Group>(null);
+function FBXCharacter({ animationState }: { animationState: AnimationState }) {
+  const idle0 = useLoader(FBXLoader, IDLE_URLS[0]);
+  const idle1 = useLoader(FBXLoader, IDLE_URLS[1]);
+  const hit = useLoader(FBXLoader, HIT_URL);
 
-  // Load character mesh (no embedded animations).
-  const { scene: charScene } = useGLTF(characterUrl);
-  // Load animation rig (has all the clips).
-  const { animations } = useGLTF(animUrl);
-
-  // Bind the rig's clips to our character group root.
-  const { actions } = useAnimations(animations, group);
-
-  // Map state → clip name. Prefer _A variants; fall back gracefully.
-  const clipFor = React.useCallback((state: AnimationState): string => {
-    switch (state) {
-      case 'hurt': return 'Hit_A';
-      case 'down': return 'Death_A';
-      case 'idle':
-      default:     return 'Idle_A';
-    }
-  }, []);
-
-  const prevClip = React.useRef<string | null>(null);
-
+  // Apply a clean sculpted material once.
   React.useEffect(() => {
-    const target = clipFor(animationState);
-    const action = actions[target];
-    if (!action) return;
+    idle0.traverse((o) => {
+      o.frustumCulled = false;
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.material = new THREE.MeshStandardMaterial({
+          color: '#b9a78f',
+          roughness: 0.65,
+          metalness: 0.05,
+        });
+      }
+    });
+  }, [idle0]);
 
-    // Fade out the previous clip, fade in the new one.
-    if (prevClip.current && prevClip.current !== target) {
-      actions[prevClip.current]?.fadeOut(0.3);
+  // Build mixer + actions from the real (non-calibration) clip of each file.
+  const { mixer, actions, idleKeys } = React.useMemo(() => {
+    const mixer = new THREE.AnimationMixer(idle0);
+    const actions: Record<string, THREE.AnimationAction> = {};
+    const realClip = (o: THREE.Group) =>
+      o.animations.find((a) => !/open a|_ue5/i.test(a.name)) ??
+      o.animations[o.animations.length - 1] ??
+      o.animations[0];
+    const add = (clip: THREE.AnimationClip | undefined, name: string) => {
+      if (!clip) return;
+      const c = clip.clone();
+      c.name = name;
+      actions[name] = mixer.clipAction(c);
+    };
+    add(realClip(idle0), 'idle');
+    add(realClip(idle1), 'idle2');
+    add(realClip(hit), 'hurt');
+    const idleKeys = ['idle', 'idle2'].filter((k) => actions[k]);
+    return { mixer, actions, idleKeys };
+  }, [idle0, idle1, hit]);
+
+  useFrame((_, delta) => mixer.update(delta));
+
+  const prev = React.useRef<string>('');
+  const curIdle = React.useRef(0);
+
+  const play = React.useCallback((key: string, loop: boolean, fade = 0.3) => {
+    const a = actions[key];
+    if (!a) return;
+    if (prev.current && prev.current !== key) actions[prev.current]?.fadeOut(fade);
+    a.reset().fadeIn(fade);
+    a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    a.clampWhenFinished = !loop;
+    a.play();
+    prev.current = key;
+  }, [actions]);
+
+  const playRandomIdle = React.useCallback((fade = 0.5) => {
+    if (!idleKeys.length) return;
+    let n = curIdle.current;
+    if (idleKeys.length > 1) {
+      do { n = Math.floor(Math.random() * idleKeys.length); } while (n === curIdle.current);
     }
+    curIdle.current = n;
+    play(idleKeys[n], true, fade);
+  }, [idleKeys, play]);
 
-    const isOneShot = animationState !== 'idle';
-    action.reset().fadeIn(0.3);
-    if (isOneShot) {
-      // Hit/Death play once then return to idle.
-      action.setLoop(THREE.LoopOnce, 1);
-      action.clampWhenFinished = true;
-    } else {
-      action.setLoop(THREE.LoopRepeat, Infinity);
-    }
-    action.play();
-    prevClip.current = target;
+  // Kick off first idle once.
+  const started = React.useRef(false);
+  React.useEffect(() => {
+    if (started.current || !idleKeys.length) return;
+    started.current = true;
+    play(idleKeys[0], true, 0);
+  }, [idleKeys, play]);
 
-    // After a hit, automatically return to idle.
-    if (animationState === 'hurt') {
-      const dur = (action.getClip().duration * 1000) + 100;
-      const t = setTimeout(() => {
-        action.fadeOut(0.3);
-        const idle = actions['Idle_A'];
-        idle?.reset().fadeIn(0.3).setLoop(THREE.LoopRepeat, Infinity).play();
-        prevClip.current = 'Idle_A';
-      }, dur);
+  // Looping clips never emit 'finished', so cycle idles on a timer for variety.
+  React.useEffect(() => {
+    if (animationState !== 'idle' || idleKeys.length < 2) return;
+    const id = setInterval(() => playRandomIdle(0.8), 7000);
+    return () => clearInterval(id);
+  }, [animationState, idleKeys, playRandomIdle]);
+
+  // React to HP-driven state changes.
+  React.useEffect(() => {
+    if (animationState === 'hurt' && actions.hurt) {
+      play('hurt', false, 0.12);
+      const dur = (actions.hurt.getClip().duration ?? 1) * 1000 + 150;
+      const t = setTimeout(() => playRandomIdle(0.4), dur);
       return () => clearTimeout(t);
     }
-  }, [animationState, actions, clipFor]);
+    if (animationState === 'down' && actions.hurt) {
+      play('hurt', false, 0.12); // no death clip yet → hold reaction pose
+      return;
+    }
+    playRandomIdle(0.3);
+  }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scale the character up slightly — KayKit models are in ~1m units.
-  return (
-    <group ref={group} scale={1.0}>
-      <primitive object={charScene} />
-    </group>
-  );
+  return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
 }
 
 export default function CharacterViewport({
-  characterUrl = '/models/Knight.glb',
-  animUrl = '/models/Rig_Medium_General.glb',
   animationState = 'idle',
   className,
 }: CharacterViewportProps) {
-  const hasAssets = !!characterUrl && !!animUrl;
-
   return (
     <div className={className} style={{ width: '100%', height: '100%' }}>
-      <Canvas
-        shadows
-        dpr={[1, 2]}
-        camera={{ position: [0, 1.1, 3.0], fov: 38 }}
-      >
-        <ambientLight intensity={0.7} />
-        <directionalLight
-          position={[3, 5, 2]}
-          intensity={1.2}
-          castShadow
-          shadow-mapSize={[1024, 1024]}
-        />
+      <Canvas shadows dpr={[1, 2]} camera={{ position: [0, 0.95, 2.2], fov: 42 }}>
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[3, 5, 2]} intensity={1.4} castShadow shadow-mapSize={[1024, 1024]} />
+        <directionalLight position={[-3, 2, -2]} intensity={0.5} />
         <React.Suspense fallback={null}>
-          {hasAssets
-            ? <KayKitCharacter
-                characterUrl={characterUrl}
-                animUrl={animUrl}
-                animationState={animationState}
-              />
-            : <PlaceholderCharacter />
-          }
+          <FBXCharacter animationState={animationState} />
         </React.Suspense>
-        <ContactShadows position={[0, 0, 0]} opacity={0.45} scale={5} blur={2} far={3} />
-        <OrbitControls
-          enablePan={false}
-          minDistance={1.5}
-          maxDistance={5}
-          target={[0, 0.9, 0]}
-        />
+        <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
+        <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
       </Canvas>
     </div>
   );
