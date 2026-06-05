@@ -5,18 +5,23 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 
-export type AnimationState = 'idle' | 'hurt' | 'down';
+export type AnimationState =
+  | 'idle'
+  | 'hurt-light'   // small hit  (< 25 % of max HP in one blow)  → quick flinch
+  | 'hurt-heavy'   // large hit  (≥ 25 % of max HP in one blow)  → full stagger
+  | 'down';        // 0 HP / unconscious
 
 interface CharacterViewportProps {
   animationState?: AnimationState;
   className?: string;
 }
 
-const IDLE_FBX_URL = '/models/Human_Idle_Textured.fbx'; // mesh + texture + idle animation
-// Walk and hit are mesh-stripped GLBs (animation data only, ~13MB vs 22MB FBX).
+const IDLE_FBX_URL       = '/models/Human_Idle_Textured.fbx'; // mesh + texture + idle anim
+// All animation-only files are mesh-stripped GLBs (~12-13 MB vs ~22 MB with mesh).
 // Bone names are identical to the idle FBX skeleton so retargeting works.
-const WALK_GLB_URL = '/models/Human_Walk_Relaxed.glb';
-const HIT_GLB_URL  = '/models/Human_White_Punched.glb';
+const WALK_GLB_URL       = '/models/Human_Walk_Relaxed.glb';
+const HIT_LIGHT_GLB_URL  = '/models/Human_Hit_Light.glb';   // quick flinch  (<25% max HP)
+const HIT_HEAVY_GLB_URL  = '/models/Human_White_Punched.glb'; // full stagger (≥25% max HP)
 
 /**
  * 3D character built from AccuRig-rigged FBX exports (mesh + skeleton +
@@ -36,9 +41,10 @@ const HIT_GLB_URL  = '/models/Human_White_Punched.glb';
  *  - FBX is in cm → scale 0.01.
  */
 function FBXCharacter({ animationState }: { animationState: AnimationState }) {
-  const idle0 = useLoader(FBXLoader, IDLE_FBX_URL);
-  const walkGltf = useLoader(GLTFLoader, WALK_GLB_URL);
-  const hitGltf  = useLoader(GLTFLoader, HIT_GLB_URL);
+  const idle0        = useLoader(FBXLoader,  IDLE_FBX_URL);
+  const walkGltf     = useLoader(GLTFLoader, WALK_GLB_URL);
+  const hitLightGltf = useLoader(GLTFLoader, HIT_LIGHT_GLB_URL);
+  const hitHeavyGltf = useLoader(GLTFLoader, HIT_HEAVY_GLB_URL);
 
   // Load the diffuse texture directly — bypasses FBX material weirdness entirely.
   // FBXLoader's MeshPhongMaterial picks up the correct texture file path but can
@@ -88,13 +94,14 @@ function FBXCharacter({ animationState }: { animationState: AnimationState }) {
       actions[name] = mixer.clipAction(c);
     };
 
-    add(realClip(idle0.animations),          'idle');
-    add(realClip(walkGltf.animations ?? []),  'idle2');
-    add(realClip(hitGltf.animations  ?? []),  'hurt');
+    add(realClip(idle0.animations),               'idle');
+    add(realClip(walkGltf.animations     ?? []),   'idle2');
+    add(realClip(hitLightGltf.animations ?? []),   'hurt-light');
+    add(realClip(hitHeavyGltf.animations ?? []),   'hurt-heavy');
 
     const idleKeys = ['idle', 'idle2'].filter((k) => actions[k]);
     return { mixer, actions, idleKeys };
-  }, [idle0, walkGltf, hitGltf]);
+  }, [idle0, walkGltf, hitLightGltf, hitHeavyGltf]);
 
   useFrame((_, delta) => mixer.update(delta));
 
@@ -133,20 +140,27 @@ function FBXCharacter({ animationState }: { animationState: AnimationState }) {
   // Looping clips never emit 'finished', so cycle idles on a timer for variety.
   React.useEffect(() => {
     if (animationState !== 'idle' || idleKeys.length < 2) return;
+
     const id = setInterval(() => playRandomIdle(0.8), 7000);
     return () => clearInterval(id);
   }, [animationState, idleKeys, playRandomIdle]);
 
   // React to HP-driven state changes.
   React.useEffect(() => {
-    if (animationState === 'hurt' && actions.hurt) {
-      play('hurt', false, 0.12);
-      const dur = (actions.hurt.getClip().duration ?? 1) * 1000 + 150;
+    const hurtKey = animationState === 'hurt-heavy' ? 'hurt-heavy'
+                  : animationState === 'hurt-light'  ? 'hurt-light'
+                  : null;
+
+    if (hurtKey && actions[hurtKey]) {
+      play(hurtKey, false, 0.10);
+      const dur = (actions[hurtKey].getClip().duration ?? 1) * 1000 + 150;
       const t = setTimeout(() => playRandomIdle(0.4), dur);
       return () => clearTimeout(t);
     }
-    if (animationState === 'down' && actions.hurt) {
-      play('hurt', false, 0.12); // no death clip yet → hold reaction pose
+    if (animationState === 'down') {
+      // No dedicated death clip yet — play heavy hit and hold the pose.
+      const fallback = actions['hurt-heavy'] ?? actions['hurt-light'];
+      if (fallback) play(fallback.getClip().name, false, 0.12);
       return;
     }
     playRandomIdle(0.3);

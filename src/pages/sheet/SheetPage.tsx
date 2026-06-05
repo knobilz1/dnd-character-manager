@@ -1417,27 +1417,30 @@ function Character3DCard() {
   const effectiveMax  = exhaustion >= 4 ? Math.floor(maxHP / 2) : maxHP;
   const isDown        = currentHP === 0 || conditions.includes('Unconscious');
 
-  // 'idle' | 'hurt' | 'down'
-  const [animState, setAnimState] = React.useState<'idle' | 'hurt' | 'down'>('idle');
+  const [animState, setAnimState] = React.useState<import('./CharacterViewport').AnimationState>('idle');
   const prevHP = React.useRef(currentHP);
 
   React.useEffect(() => {
-    const tookDamage = currentHP < prevHP.current;
+    const damage = prevHP.current - currentHP; // positive = took damage
     prevHP.current = currentHP;
 
     if (isDown) {
       setAnimState('down');
       return;
     }
-    if (tookDamage) {
-      setAnimState('hurt');
-      // Hit_A clip is ~0.7 s; after it finishes, return to idle.
-      const t = setTimeout(() => setAnimState('idle'), 750);
+    if (damage > 0) {
+      // ≥ 25% of max HP in one blow → heavy stagger; otherwise quick flinch.
+      const ratio = effectiveMax > 0 ? damage / effectiveMax : 0;
+      const state = ratio >= 0.25 ? 'hurt-heavy' : 'hurt-light';
+      setAnimState(state);
+      // Return to idle after clip finishes (~0.7 s light, ~1.2 s heavy).
+      const dur = state === 'hurt-heavy' ? 1400 : 800;
+      const t = setTimeout(() => setAnimState('idle'), dur);
       return () => clearTimeout(t);
     }
     // Healed / HP raised: snap back to idle (e.g. revived from 0).
     setAnimState('idle');
-  }, [currentHP, isDown]);
+  }, [currentHP, isDown, effectiveMax]);
 
   // Tint the canvas border red at low HP (≤ 25 %).
   const hpPct = effectiveMax > 0 ? currentHP / effectiveMax : 1;
