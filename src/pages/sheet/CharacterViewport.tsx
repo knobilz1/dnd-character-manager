@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Canvas, useLoader, useFrame } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 
 export type AnimationState = 'idle' | 'hurt' | 'down';
@@ -11,11 +12,11 @@ interface CharacterViewportProps {
   className?: string;
 }
 
-const IDLE_URLS = [
-  '/models/Human_Idle_Textured.fbx', // textured mesh — this is the rendered object
-  '/models/Human_Walk_Relaxed.fbx',  // animation clips only (no texture needed)
-];
-const HIT_URL = '/models/Human_White_Punched.fbx';
+const IDLE_FBX_URL = '/models/Human_Idle_Textured.fbx'; // mesh + texture + idle animation
+// Walk and hit are mesh-stripped GLBs (animation data only, ~13MB vs 22MB FBX).
+// Bone names are identical to the idle FBX skeleton so retargeting works.
+const WALK_GLB_URL = '/models/Human_Walk_Relaxed.glb';
+const HIT_GLB_URL  = '/models/Human_White_Punched.glb';
 
 /**
  * 3D character built from AccuRig-rigged FBX exports (mesh + skeleton +
@@ -35,9 +36,9 @@ const HIT_URL = '/models/Human_White_Punched.fbx';
  *  - FBX is in cm → scale 0.01.
  */
 function FBXCharacter({ animationState }: { animationState: AnimationState }) {
-  const idle0 = useLoader(FBXLoader, IDLE_URLS[0]);
-  const idle1 = useLoader(FBXLoader, IDLE_URLS[1]);
-  const hit = useLoader(FBXLoader, HIT_URL);
+  const idle0 = useLoader(FBXLoader, IDLE_FBX_URL);
+  const walkGltf = useLoader(GLTFLoader, WALK_GLB_URL);
+  const hitGltf  = useLoader(GLTFLoader, HIT_GLB_URL);
 
   // Load the diffuse texture directly — bypasses FBX material weirdness entirely.
   // FBXLoader's MeshPhongMaterial picks up the correct texture file path but can
@@ -69,26 +70,31 @@ function FBXCharacter({ animationState }: { animationState: AnimationState }) {
     });
   }, [idle0, diffuseTex]);
 
-  // Build mixer + actions from the real (non-calibration) clip of each file.
+  // Build mixer + actions. FBX groups have .animations[]; GLTF returns { animations }.
+  // Filter out the AccuRig calibration clip (named "0_Open A_UE5") in every source.
   const { mixer, actions, idleKeys } = React.useMemo(() => {
     const mixer = new THREE.AnimationMixer(idle0);
     const actions: Record<string, THREE.AnimationAction> = {};
-    const realClip = (o: THREE.Group) =>
-      o.animations.find((a) => !/open a|_ue5/i.test(a.name)) ??
-      o.animations[o.animations.length - 1] ??
-      o.animations[0];
+
+    const realClip = (clips: THREE.AnimationClip[]) =>
+      clips.find((a) => !/open a|_ue5/i.test(a.name)) ??
+      clips[clips.length - 1] ??
+      clips[0];
+
     const add = (clip: THREE.AnimationClip | undefined, name: string) => {
       if (!clip) return;
       const c = clip.clone();
       c.name = name;
       actions[name] = mixer.clipAction(c);
     };
-    add(realClip(idle0), 'idle');
-    add(realClip(idle1), 'idle2');
-    add(realClip(hit), 'hurt');
+
+    add(realClip(idle0.animations),          'idle');
+    add(realClip(walkGltf.animations ?? []),  'idle2');
+    add(realClip(hitGltf.animations  ?? []),  'hurt');
+
     const idleKeys = ['idle', 'idle2'].filter((k) => actions[k]);
     return { mixer, actions, idleKeys };
-  }, [idle0, idle1, hit]);
+  }, [idle0, walkGltf, hitGltf]);
 
   useFrame((_, delta) => mixer.update(delta));
 
