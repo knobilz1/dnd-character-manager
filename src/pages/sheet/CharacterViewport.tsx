@@ -107,11 +107,33 @@ function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
  * Compute scale + Y offset so the character stands with feet at y=0
  * and fills the viewport at a consistent height regardless of source units.
  * Target height: 1.8 Three.js units (≈ 1.8 m realistic human scale).
+ *
+ * IMPORTANT: we measure the bounding box from each mesh's *geometry* (bind pose)
+ * rather than `Box3.setFromObject(scene)`. For a SkinnedMesh, setFromObject calls
+ * `SkinnedMesh.computeBoundingBox()`, which depends on the skeleton being bound and
+ * posed — but this runs during render, BEFORE the <primitive> mounts and binds the
+ * skeleton, so it returns an empty box → bogus fallback scale → invisible character.
+ * Geometry bounds are always available and correct.
  */
 function fitToViewport(scene: THREE.Object3D, targetHeight = 1.8): { scale: number; yOffset: number } {
-  const box = new THREE.Box3().setFromObject(scene);
+  scene.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  const tmp = new THREE.Box3();
+  let found = false;
+  scene.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && mesh.geometry) {
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const gb = mesh.geometry.boundingBox;
+      if (!gb) return;
+      tmp.copy(gb).applyMatrix4(mesh.matrixWorld);
+      box.union(tmp);
+      found = true;
+    }
+  });
+  if (!found) return { scale: 0.01, yOffset: 0 };
   const height = box.max.y - box.min.y;
-  if (height < 0.001) return { scale: 0.01, yOffset: 0 }; // fallback
+  if (height < 0.001 || !isFinite(height)) return { scale: 0.01, yOffset: 0 };
   const scale   = targetHeight / height;
   const yOffset = -box.min.y * scale; // shift feet to y = 0
   return { scale, yOffset };
@@ -125,7 +147,10 @@ function CharacterModelMinimal({ assets, onLoaded }: { assets: AssetSet; onLoade
   const scene = idleGltf.scene;
 
   React.useEffect(() => { applyTexture(scene, diffuseTex); }, [scene, diffuseTex]);
-  React.useEffect(() => { onLoaded?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-fire whenever a NEW scene resolves (race/gender switch reuses this same
+  // component instance, so empty-deps would only fire on the very first mount
+  // and leave the loading overlay stuck forever on subsequent asset changes).
+  React.useEffect(() => { onLoaded?.(); }, [scene, onLoaded]);
 
   const { scale, yOffset } = React.useMemo(() => fitToViewport(scene), [scene]);
 
@@ -158,7 +183,8 @@ function CharacterModel({ assets, animationState, onLoaded }: {
   const scene = idleGltf.scene;
 
   React.useEffect(() => { applyTexture(scene, diffuseTex); }, [scene, diffuseTex]);
-  React.useEffect(() => { onLoaded?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-fire whenever a NEW scene resolves (see note in CharacterModelMinimal).
+  React.useEffect(() => { onLoaded?.(); }, [scene, onLoaded]);
 
   const { scale, yOffset } = React.useMemo(() => fitToViewport(scene), [scene]);
 

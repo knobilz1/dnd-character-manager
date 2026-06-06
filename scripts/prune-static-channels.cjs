@@ -41,6 +41,23 @@ const binStart = 20 + jsonLen;
 const binLen   = buf.readUInt32LE(binStart);
 const binData  = buf.slice(binStart + 8, binStart + 8 + binLen);
 
+// ── Strip morph targets (facial blendshapes) ─────────────────────────────────
+// AccuRig/Tripo exports ship ~90 facial morph targets. We never drive them
+// (expression changes are planned via bone channels, not morphs), and each
+// target stores per-vertex deltas — on a 60k-vert mesh that's tens of MB.
+// Removing them here lets the accessor GC below reclaim all that BIN space.
+let morphTargetsStripped = 0;
+for (const mesh of (json.meshes || [])) {
+  for (const prim of (mesh.primitives || [])) {
+    if (prim.targets) { morphTargetsStripped += prim.targets.length; delete prim.targets; }
+  }
+  delete mesh.weights;
+  if (mesh.extras) delete mesh.extras.targetNames;
+}
+for (const node of (json.nodes || [])) {
+  delete node.weights;
+}
+
 // ── Read all values for one accessor ─────────────────────────────────────────
 function readAccessor(accIdx) {
   const acc = json.accessors[accIdx];
@@ -97,8 +114,29 @@ for (const anim of (json.animations || [])) {
   anim.samplers = newSamplers;
 }
 
-// ── Rebuild accessors (keep only those still referenced by animations) ────────
+// ── Rebuild accessors (drop ONLY animation accessors no longer referenced) ────
+// CRITICAL: we must keep every accessor still used by ANYTHING — mesh geometry
+// (POSITION/NORMAL/JOINTS/WEIGHTS/indices), morph targets, and skin inverse-bind
+// matrices — not just animation samplers. Keeping only animation accessors would
+// strip the mesh entirely and leave mesh primitives pointing at the wrong
+// accessors (e.g. POSITION resolving to an animation time-input ramp).
 const usedAccessors = new Set();
+
+// Mesh geometry + morph targets
+for (const mesh of (json.meshes || [])) {
+  for (const prim of (mesh.primitives || [])) {
+    if (prim.indices != null) usedAccessors.add(prim.indices);
+    for (const k in (prim.attributes || {})) usedAccessors.add(prim.attributes[k]);
+    for (const target of (prim.targets || [])) {
+      for (const k in target) usedAccessors.add(target[k]);
+    }
+  }
+}
+// Skin inverse-bind matrices
+for (const skin of (json.skins || [])) {
+  if (skin.inverseBindMatrices != null) usedAccessors.add(skin.inverseBindMatrices);
+}
+// Animation samplers (only the channels we kept above)
 for (const anim of (json.animations || [])) {
   for (const s of (anim.samplers || [])) {
     usedAccessors.add(s.input);
@@ -114,11 +152,25 @@ oldAccs.forEach((a, i) => {
   if (ni >= 0) accRemap[i] = ni;
 });
 json.accessors = newAccs;
+const remapAcc = (i) => (i == null ? i : (accRemap[i] ?? i));
 
+// Remap EVERY accessor reference, not just animation samplers
+for (const mesh of (json.meshes || [])) {
+  for (const prim of (mesh.primitives || [])) {
+    if (prim.indices != null) prim.indices = remapAcc(prim.indices);
+    for (const k in (prim.attributes || {})) prim.attributes[k] = remapAcc(prim.attributes[k]);
+    for (const target of (prim.targets || [])) {
+      for (const k in target) target[k] = remapAcc(target[k]);
+    }
+  }
+}
+for (const skin of (json.skins || [])) {
+  if (skin.inverseBindMatrices != null) skin.inverseBindMatrices = remapAcc(skin.inverseBindMatrices);
+}
 for (const anim of (json.animations || [])) {
   for (const s of (anim.samplers || [])) {
-    s.input  = accRemap[s.input]  ?? s.input;
-    s.output = accRemap[s.output] ?? s.output;
+    s.input  = remapAcc(s.input);
+    s.output = remapAcc(s.output);
   }
 }
 
@@ -175,4 +227,5 @@ const pct   = (100 * (1 - out.length / fs.statSync(path.resolve(inputGlb)).size)
 
 console.log(`Pruned: ${inMB}MB → ${outMB}MB  (−${pct}%)`);
 console.log(`Channels: ${totalKept} kept, ${totalRemoved} removed`);
+if (morphTargetsStripped) console.log(`Morph targets stripped: ${morphTargetsStripped}`);
 console.log(`Output: ${path.resolve(outputGlb)}`);
