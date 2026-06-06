@@ -42,6 +42,11 @@ const F_LIMP1_URL      = '/models/Human_Female_Limp_Lv1.glb';
 const F_LIMP2_URL      = '/models/Human_Female_Limp_Lv2.glb';
 const F_LIMP3_URL      = '/models/Human_Female_Limp_Lv3.glb';
 const F_DYING_URL      = '/models/Human_Female_Dying.glb';
+const F_HIT_HARD_URL   = '/models/Human_Female_Hit_Hard.glb';
+const F_HIT_EXTREME_URL= '/models/Human_Female_Hit_Extreme.glb';
+const F_WALK_START_URL = '/models/Human_Female_Walk_Start.glb';
+const F_WALK_LOOP_URL  = '/models/Human_Female_Walk_Loop.glb';
+const F_WALK_END_URL   = '/models/Human_Female_Walk_End.glb';
 const F_DIFFUSE_URL    = '/models/tripo_mat_db0ac1f6_Diffuse.png';
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -149,16 +154,21 @@ function MaleCharacter({ animationState }: { animationState: AnimationState }) {
 
 // ── Female character ─────────────────────────────────────────────────────────
 function FemaleCharacter({ animationState }: { animationState: AnimationState }) {
-  const idle0     = useLoader(FBXLoader,  F_IDLE_URL);
-  const limp1Gltf = useLoader(GLTFLoader, F_LIMP1_URL);
-  const limp2Gltf = useLoader(GLTFLoader, F_LIMP2_URL);
-  const limp3Gltf = useLoader(GLTFLoader, F_LIMP3_URL);
-  const dyingGltf = useLoader(GLTFLoader, F_DYING_URL);
-  const diffuseTex = useLoader(THREE.TextureLoader, F_DIFFUSE_URL);
+  const idle0        = useLoader(FBXLoader,  F_IDLE_URL);
+  const limp1Gltf    = useLoader(GLTFLoader, F_LIMP1_URL);
+  const limp2Gltf    = useLoader(GLTFLoader, F_LIMP2_URL);
+  const limp3Gltf    = useLoader(GLTFLoader, F_LIMP3_URL);
+  const dyingGltf    = useLoader(GLTFLoader, F_DYING_URL);
+  const hitHardGltf  = useLoader(GLTFLoader, F_HIT_HARD_URL);
+  const hitExtrGltf  = useLoader(GLTFLoader, F_HIT_EXTREME_URL);
+  const walkStGltf   = useLoader(GLTFLoader, F_WALK_START_URL);
+  const walkLoGltf   = useLoader(GLTFLoader, F_WALK_LOOP_URL);
+  const walkEndGltf  = useLoader(GLTFLoader, F_WALK_END_URL);
+  const diffuseTex   = useLoader(THREE.TextureLoader, F_DIFFUSE_URL);
 
   React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
 
-  const { mixer, actions } = React.useMemo(() => {
+  const { mixer, actions, idleKeys } = React.useMemo(() => {
     const mixer   = new THREE.AnimationMixer(idle0);
     const actions: Record<string, THREE.AnimationAction> = {};
     const add = (clip: THREE.AnimationClip | undefined, name: string) => {
@@ -166,17 +176,24 @@ function FemaleCharacter({ animationState }: { animationState: AnimationState })
       const c = clip.clone(); c.name = name;
       actions[name] = mixer.clipAction(c);
     };
-    add(realClip(idle0.animations),           'idle');
-    add(realClip(limp1Gltf.animations ?? []), 'limp-lv1');
-    add(realClip(limp2Gltf.animations ?? []), 'limp-lv2');
-    add(realClip(limp3Gltf.animations ?? []), 'limp-lv3');
-    add(realClip(dyingGltf.animations ?? []), 'down');
-    return { mixer, actions };
-  }, [idle0, limp1Gltf, limp2Gltf, limp3Gltf, dyingGltf]);
+    add(realClip(idle0.animations),            'idle');
+    add(realClip(walkLoGltf.animations ?? []), 'idle2');   // walk loop as alt idle
+    add(realClip(walkStGltf.animations ?? []), 'walk-start');
+    add(realClip(walkEndGltf.animations ?? []),'walk-end');
+    add(realClip(limp1Gltf.animations  ?? []), 'limp-lv1');
+    add(realClip(limp2Gltf.animations  ?? []), 'limp-lv2');
+    add(realClip(limp3Gltf.animations  ?? []), 'limp-lv3');
+    add(realClip(hitHardGltf.animations ?? []),'hurt-light');
+    add(realClip(hitExtrGltf.animations ?? []),'hurt-heavy');
+    add(realClip(dyingGltf.animations  ?? []), 'down');
+    const idleKeys = ['idle', 'idle2'].filter(k => actions[k]);
+    return { mixer, actions, idleKeys };
+  }, [idle0, limp1Gltf, limp2Gltf, limp3Gltf, dyingGltf, hitHardGltf, hitExtrGltf, walkStGltf, walkLoGltf, walkEndGltf]);
 
   useFrame((_, delta) => mixer.update(delta));
 
-  const prev = React.useRef('');
+  const prev    = React.useRef('');
+  const curIdle = React.useRef(0);
 
   const play = React.useCallback((key: string, loop: boolean, fade = 0.3) => {
     const a = actions[key]; if (!a) return;
@@ -188,41 +205,54 @@ function FemaleCharacter({ animationState }: { animationState: AnimationState })
     prev.current = key;
   }, [actions]);
 
+  const playRandomIdle = React.useCallback((fade = 0.5) => {
+    if (!idleKeys.length) return;
+    let n = curIdle.current;
+    if (idleKeys.length > 1) do { n = Math.floor(Math.random() * idleKeys.length); } while (n === curIdle.current);
+    curIdle.current = n;
+    play(idleKeys[n], true, fade);
+  }, [idleKeys, play]);
+
   // Start idle on mount
   const started = React.useRef(false);
   React.useEffect(() => {
-    if (started.current) return;
+    if (started.current || !idleKeys.length) return;
     started.current = true;
-    play('idle', true, 0);
-  }, [play]);
+    play(idleKeys[0], true, 0);
+  }, [idleKeys, play]);
+
+  // Cycle idle ↔ walk loop every 7s when at full health
+  React.useEffect(() => {
+    if (!isBaseState(animationState) || animationState !== 'idle' || idleKeys.length < 2) return;
+    const id = setInterval(() => playRandomIdle(0.8), 7000);
+    return () => clearInterval(id);
+  }, [animationState, idleKeys, playRandomIdle]);
 
   // Main state machine
   React.useEffect(() => {
     if (animationState === 'down') {
-      // Play dying animation once and hold on last frame
       play('down', false, 0.3);
       return;
     }
 
-    // Hurt reactions (transient) — use limp levels as reactions if available, else idle
     if (animationState === 'hurt-light' || animationState === 'hurt-heavy') {
-      // For female we don't have dedicated hit clips yet — just briefly speed up the
-      // current limp then return. We'll treat it as a quick replay of lv1.
-      const reactKey = actions['limp-lv1'] ? 'limp-lv1' : 'idle';
-      play(reactKey, false, 0.08);
-      const dur = Math.min((actions[reactKey]?.getClip().duration ?? 1) * 500, 1000);
-      const t = setTimeout(() => {
-        // Return to whatever base state the caller will set next tick
-        play(animationState === 'hurt-heavy' ? (actions['limp-lv1'] ? 'limp-lv1' : 'idle') : 'idle', true, 0.4);
-      }, dur);
+      const key = animationState; // now wired to real hit clips
+      if (!actions[key]) { playRandomIdle(0.3); return; }
+      play(key, false, 0.10);
+      const dur = (actions[key].getClip().duration ?? 1) * 1000 + 150;
+      const t = setTimeout(() => playRandomIdle(0.4), dur);
       return () => clearTimeout(t);
     }
 
-    // Base looping states
-    const key = isBaseState(animationState) && actions[animationState]
-      ? animationState
-      : 'idle';
-    play(key, true, 0.5);
+    // Base looping states (limp levels loop; idle cycles via interval above)
+    if (isBaseState(animationState) && animationState !== 'idle') {
+      const key = actions[animationState] ? animationState : 'idle';
+      play(key, true, 0.5);
+      return;
+    }
+
+    // 'idle' — play first idle key; interval handles cycling
+    play(idleKeys[0] ?? 'idle', true, 0.5);
   }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
