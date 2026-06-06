@@ -44,7 +44,7 @@ export function StepAppearance() {
                 Loading character…
               </div>
             }>
-              <CharacterViewport animationState="idle" className="w-full h-full" />
+              <CharacterViewport animationState="idle" gender={gender} className="w-full h-full" />
             </React.Suspense>
           </div>
 
