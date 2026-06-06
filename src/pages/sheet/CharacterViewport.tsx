@@ -26,6 +26,8 @@ interface CharacterViewportProps {
   animationState?: AnimationState;
   gender?: CharacterGender;
   className?: string;
+  /** Minimal mode: only loads the idle FBX (no merged anims GLB). Use in creator. */
+  minimal?: boolean;
 }
 
 // ── Asset sets ───────────────────────────────────────────────────────────────
@@ -71,7 +73,30 @@ function applyTexture(fbx: THREE.Group, tex: THREE.Texture) {
   });
 }
 
-// ── Unified character model (2 files: idle FBX + merged anims GLB) ───────────
+// ── Minimal character model (creator only — idle FBX + texture, no anims GLB) ─
+function CharacterModelMinimal({ assets }: { assets: typeof MALE_ASSETS }) {
+  const idle0      = useLoader(FBXLoader, assets.idle);
+  const diffuseTex = useLoader(THREE.TextureLoader, assets.diffuse);
+
+  React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
+
+  const mixer = React.useMemo(() => {
+    const m = new THREE.AnimationMixer(idle0);
+    const idleClip = realClip(idle0.animations);
+    if (idleClip) {
+      const a = m.clipAction(idleClip);
+      a.setLoop(THREE.LoopRepeat, Infinity);
+      a.play();
+    }
+    return m;
+  }, [idle0]);
+
+  useFrame((_, delta) => mixer.update(delta));
+
+  return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
+}
+
+// ── Full character model (sheet — idle FBX + merged anims GLB) ───────────────
 type AssetSet = typeof MALE_ASSETS;
 
 function CharacterModel({ assets, animationState }: { assets: AssetSet; animationState: AnimationState }) {
@@ -171,6 +196,7 @@ export default function CharacterViewport({
   animationState = 'idle',
   gender = 'male',
   className,
+  minimal = false,
 }: CharacterViewportProps) {
   const assets = gender === 'female' ? FEMALE_ASSETS : MALE_ASSETS;
 
@@ -191,7 +217,9 @@ export default function CharacterViewport({
         <directionalLight position={[-2, 2, -1]} intensity={0.9} color="#c8d8ff" />
         <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
         <React.Suspense fallback={null}>
-          <CharacterModel assets={assets} animationState={animationState} />
+          {minimal
+            ? <CharacterModelMinimal assets={assets} />
+            : <CharacterModel assets={assets} animationState={animationState} />}
         </React.Suspense>
         <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
         <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
