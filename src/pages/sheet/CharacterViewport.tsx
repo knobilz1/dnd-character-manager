@@ -301,6 +301,25 @@ function ViewportLoader() {
   );
 }
 
+// ── Error boundary ────────────────────────────────────────────────────────────
+// A WebGL failure (context loss, driver crash, bad GPU state) throws inside the
+// R3F <Canvas>. Without a boundary that error bubbles to the app root and
+// unmounts the ENTIRE character sheet — the screen goes grey. This boundary
+// confines the failure to the 3D viewport: the sheet keeps working, the viewport
+// just shows its background.
+class ViewportErrorBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: unknown, info: unknown) {
+    // eslint-disable-next-line no-console
+    console.error('[CharacterViewport] 3D viewport crashed; sheet stays up:', error, info);
+  }
+  render() { return this.state.hasError ? this.props.fallback : this.props.children; }
+}
+
 // ── Canvas wrapper ────────────────────────────────────────────────────────────
 export default function CharacterViewport({
   animationState = 'idle',
@@ -330,25 +349,32 @@ export default function CharacterViewport({
         </div>
       )}
 
-      <Canvas
-        shadows
-        dpr={[1, 2]}
-        camera={{ position: [0, 0.95, 2.2], fov: 42 }}
-        gl={{ toneMapping: 4 /* ACESFilmicToneMapping */, toneMappingExposure: 1.1, alpha: true }}
-        style={{ background: 'transparent' }}
-      >
-        <ambientLight intensity={1.6} color="#ffffff" />
-        <directionalLight position={[2, 4, 3]} intensity={2.4} castShadow shadow-mapSize={[1024, 1024]} color="#fff8f0" />
-        <directionalLight position={[-2, 2, -1]} intensity={0.9} color="#c8d8ff" />
-        <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
-        <React.Suspense fallback={null}>
-          {minimal
-            ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} />
-            : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} />}
-        </React.Suspense>
-        <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
-        <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
-      </Canvas>
+      <ViewportErrorBoundary fallback={null}>
+        <Canvas
+          shadows
+          dpr={[1, 2]}
+          camera={{ position: [0, 0.95, 2.2], fov: 42 }}
+          gl={{ toneMapping: 4 /* ACESFilmicToneMapping */, toneMappingExposure: 1.1, alpha: true, powerPreference: 'high-performance' }}
+          style={{ background: 'transparent' }}
+          onCreated={({ gl }) => {
+            // Let the browser try to restore a lost context instead of giving up
+            // (default behaviour permanently kills the canvas).
+            gl.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);
+          }}
+        >
+          <ambientLight intensity={1.6} color="#ffffff" />
+          <directionalLight position={[2, 4, 3]} intensity={2.4} castShadow shadow-mapSize={[1024, 1024]} color="#fff8f0" />
+          <directionalLight position={[-2, 2, -1]} intensity={0.9} color="#c8d8ff" />
+          <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
+          <React.Suspense fallback={null}>
+            {minimal
+              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} />
+              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} />}
+          </React.Suspense>
+          <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
+          <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
+        </Canvas>
+      </ViewportErrorBoundary>
     </div>
   );
 }

@@ -44,11 +44,23 @@ console.log(`Merging ${files.length} GLB(s)…`);
 
 // Take skeleton/scene structure from file[0]
 const base = files[0].json;
+// Strip skin/mesh references from every node. These merged GLBs are
+// animation-ONLY (the mesh + skin live in the idle GLB), so a leftover
+// node.skin pointing at a skins array we don't emit makes GLTFLoader call
+// loadSkin → json.skins[i] is undefined → "Cannot read properties of
+// undefined (reading '0')" → the whole anims GLB fails to load → the 3D
+// viewport throws → grey character sheet. We only consume the AnimationClips
+// from this file, and TRS animation tracks target nodes by index without
+// needing skin/mesh, so dropping these is safe.
+const cleanNodes = (base.nodes ?? []).map((n) => {
+  const { skin, mesh, ...rest } = n; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return rest;
+});
 const result = {
   asset: base.asset ?? { version: '2.0' },
   scene: base.scene ?? 0,
   scenes: base.scenes ?? [{ nodes: [] }],
-  nodes: base.nodes ?? [],
+  nodes: cleanNodes,
   accessors: [],
   bufferViews: [],
   animations: [],
