@@ -32,3 +32,4 @@ dist-ssr
 *.sw?
 public/models/Human_Male_Anims.glb
 public/models/Human_Female_Anims.glb
+public/models/Elf_Male_Anims.glb

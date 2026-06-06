@@ -44,4 +44,16 @@ run(path.join(models, 'Human_Male_Anims.glb'), [
   path.join(models, 'Human_White_Punched.glb'),
 ]);
 
+run(path.join(models, 'Elf_Male_Anims.glb'), [
+  path.join(models, 'Elf_Male_Limp_Lv1.glb'),
+  path.join(models, 'Elf_Male_Limp_Lv2.glb'),
+  path.join(models, 'Elf_Male_Limp_Lv3.glb'),
+  path.join(models, 'Elf_Male_Dying.glb'),
+  path.join(models, 'Elf_Male_Hit_Hard.glb'),
+  path.join(models, 'Elf_Male_Hit_Extreme.glb'),
+  path.join(models, 'Elf_Male_Walk_Start.glb'),
+  path.join(models, 'Elf_Male_Walk_Loop.glb'),
+  path.join(models, 'Elf_Male_Walk_End.glb'),
+]);
+
 console.log('\nDone — merged animation GLBs ready.\n');

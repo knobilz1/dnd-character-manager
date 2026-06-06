@@ -118,7 +118,7 @@ export function StepRace() {
                 Loading character…
               </div>
             }>
-              <CharacterViewport animationState="idle" gender={gender} minimal className="w-full h-full" />
+              <CharacterViewport animationState="idle" gender={gender} raceId={draft.raceId} minimal className="w-full h-full" />
             </React.Suspense>
 
             {/* Race label overlay */}

@@ -25,22 +25,48 @@ export type CharacterGender = 'male' | 'female' | 'nonbinary';
 interface CharacterViewportProps {
   animationState?: AnimationState;
   gender?: CharacterGender;
+  /** raceId from the character (e.g. 'elf-high', 'human', 'dwarf-hill').
+   *  Used to pick the correct 3D model. Unmapped races fall back to human. */
+  raceId?: string;
   className?: string;
   /** Minimal mode: only loads the idle FBX (no merged anims GLB). Use in creator. */
   minimal?: boolean;
 }
 
 // ── Asset sets ───────────────────────────────────────────────────────────────
-const MALE_ASSETS = {
+const HUMAN_MALE_ASSETS = {
   idle:    '/models/Human_Idle_Textured.fbx',
   anims:   '/models/Human_Male_Anims.glb',
   diffuse: '/models/tripo_mat_a9e3ea13_Diffuse.png',
 };
-const FEMALE_ASSETS = {
+const HUMAN_FEMALE_ASSETS = {
   idle:    '/models/Human_Female_Idle_Textured.fbx',
   anims:   '/models/Human_Female_Anims.glb',
   diffuse: '/models/tripo_mat_a51440ff_Diffuse.png',
 };
+const ELF_MALE_ASSETS = {
+  idle:    '/models/Elf_Male_Idle_Textured.fbx',
+  anims:   '/models/Elf_Male_Anims.glb',
+  diffuse: '/models/tripo_mat_9d8dcc38_Diffuse.png',
+};
+
+type AssetSet = typeof HUMAN_MALE_ASSETS;
+
+/** Map a raceId string to a canonical model-race key. Unmapped → 'human'. */
+function modelRace(raceId?: string): 'human' | 'elf' {
+  if (!raceId) return 'human';
+  const id = raceId.toLowerCase();
+  if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
+  return 'human';
+}
+
+/** Pick the best available asset set for a given race + gender combo.
+ *  Falls back gracefully when a gender-specific model doesn't exist yet. */
+function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
+  const race = modelRace(raceId);
+  if (race === 'elf') return ELF_MALE_ASSETS; // only male elf exists; use for all elf genders until female added
+  return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
+}
 
 // ── Clip name → action key (same for both genders) ──────────────────────────
 const CLIP_TO_KEY: Record<string, string> = {
@@ -73,15 +99,16 @@ function applyTexture(fbx: THREE.Group, tex: THREE.Texture) {
   });
 }
 
-// Kick off background loads for both genders as soon as this module is imported.
-// By the time the user hits the gender toggle in the creator, assets are cached.
-useLoader.preload(FBXLoader, MALE_ASSETS.idle);
-useLoader.preload(FBXLoader, FEMALE_ASSETS.idle);
-useLoader.preload(THREE.TextureLoader, MALE_ASSETS.diffuse);
-useLoader.preload(THREE.TextureLoader, FEMALE_ASSETS.diffuse);
+// Kick off background loads for all known asset sets as soon as this module imports.
+useLoader.preload(FBXLoader, HUMAN_MALE_ASSETS.idle);
+useLoader.preload(FBXLoader, HUMAN_FEMALE_ASSETS.idle);
+useLoader.preload(FBXLoader, ELF_MALE_ASSETS.idle);
+useLoader.preload(THREE.TextureLoader, HUMAN_MALE_ASSETS.diffuse);
+useLoader.preload(THREE.TextureLoader, HUMAN_FEMALE_ASSETS.diffuse);
+useLoader.preload(THREE.TextureLoader, ELF_MALE_ASSETS.diffuse);
 
 // ── Minimal character model (creator only — idle FBX + texture, no anims GLB) ─
-function CharacterModelMinimal({ assets, onLoaded }: { assets: typeof MALE_ASSETS; onLoaded?: () => void }) {
+function CharacterModelMinimal({ assets, onLoaded }: { assets: AssetSet; onLoaded?: () => void }) {
   const idle0      = useLoader(FBXLoader, assets.idle);
   const diffuseTex = useLoader(THREE.TextureLoader, assets.diffuse);
 
@@ -106,8 +133,6 @@ function CharacterModelMinimal({ assets, onLoaded }: { assets: typeof MALE_ASSET
 }
 
 // ── Full character model (sheet — idle FBX + merged anims GLB) ───────────────
-type AssetSet = typeof MALE_ASSETS;
-
 function CharacterModel({ assets, animationState, onLoaded }: { assets: AssetSet; animationState: AnimationState; onLoaded?: () => void }) {
   const idle0      = useLoader(FBXLoader,  assets.idle);
   const animsGltf  = useLoader(GLTFLoader, assets.anims);
@@ -233,14 +258,15 @@ function ViewportLoader() {
 export default function CharacterViewport({
   animationState = 'idle',
   gender = 'male',
+  raceId,
   className,
   minimal = false,
 }: CharacterViewportProps) {
-  const assets = gender === 'female' ? FEMALE_ASSETS : MALE_ASSETS;
+  const assets = getAssets(raceId, gender);
   const [loading, setLoading] = React.useState(true);
 
-  // Reset loading state when gender changes (new asset set needs to load)
-  React.useEffect(() => { setLoading(true); }, [gender]);
+  // Reset loading overlay whenever the resolved asset set changes (race or gender swap)
+  React.useEffect(() => { setLoading(true); }, [assets.idle]);
 
   return (
     <div
