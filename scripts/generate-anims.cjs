@@ -14,12 +14,29 @@ const path = require('path');
 const root   = path.join(__dirname, '..');
 const models = path.join(root, 'public', 'models');
 const merge  = path.join(__dirname, 'merge-animations-glb.cjs');
+const convertIdle = path.join(__dirname, 'convert-idle-to-glb.cjs');
+const prune  = path.join(__dirname, 'prune-static-channels.cjs');
 
 function run(output, inputs) {
   console.log(`\nGenerating ${path.basename(output)}…`);
   execFileSync('node', [merge, output, ...inputs], { stdio: 'inherit' });
 }
 
+/** Convert an idle FBX → compact GLB (mesh-stripped textures, static channels pruned). */
+function buildIdleGlb(inputFbx, outputGlb) {
+  console.log(`\nBuilding idle GLB: ${path.basename(outputGlb)}…`);
+  const tmp = outputGlb.replace(/\.glb$/, '_raw.glb');
+  execFileSync('node', [convertIdle, inputFbx, tmp], { stdio: 'inherit' });
+  execFileSync('node', [prune, tmp, outputGlb], { stdio: 'inherit' });
+  require('fs').unlinkSync(tmp);
+}
+
+// ── Idle GLBs (FBX → GLB, static channels pruned) ────────────────────────────
+buildIdleGlb(path.join(models, 'Human_Idle_Textured.fbx'),        path.join(models, 'Human_Male_Idle.glb'));
+buildIdleGlb(path.join(models, 'Human_Female_Idle_Textured.fbx'), path.join(models, 'Human_Female_Idle.glb'));
+buildIdleGlb(path.join(models, 'Elf_Male_Idle_Textured.fbx'),     path.join(models, 'Elf_Male_Idle.glb'));
+
+// ── Merged animation GLBs ─────────────────────────────────────────────────────
 run(path.join(models, 'Human_Female_Anims.glb'), [
   path.join(models, 'Human_Female_Limp_Lv1.glb'),
   path.join(models, 'Human_Female_Limp_Lv2.glb'),

@@ -33,3 +33,6 @@ dist-ssr
 public/models/Human_Male_Anims.glb
 public/models/Human_Female_Anims.glb
 public/models/Elf_Male_Anims.glb
+public/models/Human_Male_Idle.glb
+public/models/Human_Female_Idle.glb
+public/models/Elf_Male_Idle.glb
