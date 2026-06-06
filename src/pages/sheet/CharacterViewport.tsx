@@ -28,39 +28,34 @@ interface CharacterViewportProps {
   className?: string;
 }
 
-// ── Asset URLs ───────────────────────────────────────────────────────────────
-// Male assets
-const M_IDLE_URL        = '/models/Human_Idle_Textured.fbx';
-const M_WALK_URL        = '/models/Human_Walk_Relaxed.glb';
-const M_HIT_LIGHT_URL   = '/models/Human_Hit_Light.glb';
-const M_HIT_HEAVY_URL   = '/models/Human_White_Punched.glb';
-const M_LIMP1_URL       = '/models/Human_Male_Limp_Lv1.glb';
-const M_LIMP2_URL       = '/models/Human_Male_Limp_Lv2.glb';
-const M_LIMP3_URL       = '/models/Human_Male_Limp_Lv3.glb';
-const M_DYING_URL       = '/models/Human_Male_Dying.glb';
-const M_WALK_START_URL  = '/models/Human_Male_Walk_Start.glb';
-const M_WALK_LOOP_URL   = '/models/Human_Male_Walk_Loop.glb';
-const M_WALK_END_URL    = '/models/Human_Male_Walk_End.glb';
-const M_DIFFUSE_URL     = '/models/tripo_mat_a9e3ea13_Diffuse.png';
+// ── Asset sets ───────────────────────────────────────────────────────────────
+const MALE_ASSETS = {
+  idle:    '/models/Human_Idle_Textured.fbx',
+  anims:   '/models/Human_Male_Anims.glb',
+  diffuse: '/models/tripo_mat_a9e3ea13_Diffuse.png',
+};
+const FEMALE_ASSETS = {
+  idle:    '/models/Human_Female_Idle_Textured.fbx',
+  anims:   '/models/Human_Female_Anims.glb',
+  diffuse: '/models/tripo_mat_db0ac1f6_Diffuse.png',
+};
 
-// Female assets
-const F_IDLE_URL       = '/models/Human_Female_Idle_Textured.fbx';
-const F_LIMP1_URL      = '/models/Human_Female_Limp_Lv1.glb';
-const F_LIMP2_URL      = '/models/Human_Female_Limp_Lv2.glb';
-const F_LIMP3_URL      = '/models/Human_Female_Limp_Lv3.glb';
-const F_DYING_URL      = '/models/Human_Female_Dying.glb';
-const F_HIT_HARD_URL   = '/models/Human_Female_Hit_Hard.glb';
-const F_HIT_EXTREME_URL= '/models/Human_Female_Hit_Extreme.glb';
-const F_WALK_START_URL = '/models/Human_Female_Walk_Start.glb';
-const F_WALK_LOOP_URL  = '/models/Human_Female_Walk_Loop.glb';
-const F_WALK_END_URL   = '/models/Human_Female_Walk_End.glb';
-const F_DIFFUSE_URL    = '/models/tripo_mat_db0ac1f6_Diffuse.png';
+// ── Clip name → action key (same for both genders) ──────────────────────────
+const CLIP_TO_KEY: Record<string, string> = {
+  '14-limping-walk-1':           'limp-lv1',
+  'lame-walk-m':                 'limp-lv2',
+  'fall-down-m':                 'limp-lv3',
+  'sos-lie-down-m':              'down',
+  'hit-heavy-460344':            'hurt-light',
+  'being-heavily-attacked':      'hurt-heavy',
+  'walk-relaxed-1start-379003':  'walk-start',
+  'walk-relaxed-2loop-378986':   'idle2',
+  'walk-relaxed-3end-378968':    'walk-end',
+};
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 const realClip = (clips: THREE.AnimationClip[]) =>
-  clips.find((a) => !/open a|_ue5/i.test(a.name)) ??
-  clips[clips.length - 1] ??
-  clips[0];
+  clips.find((a) => !/open a|_ue5/i.test(a.name)) ?? clips[clips.length - 1] ?? clips[0];
 
 function applyTexture(fbx: THREE.Group, tex: THREE.Texture) {
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -76,144 +71,37 @@ function applyTexture(fbx: THREE.Group, tex: THREE.Texture) {
   });
 }
 
-// ── Male character ───────────────────────────────────────────────────────────
-function MaleCharacter({ animationState }: { animationState: AnimationState }) {
-  const idle0         = useLoader(FBXLoader,  M_IDLE_URL);
-  const walkGltf      = useLoader(GLTFLoader, M_WALK_URL);
-  const hitLightGltf  = useLoader(GLTFLoader, M_HIT_LIGHT_URL);
-  const hitHeavyGltf  = useLoader(GLTFLoader, M_HIT_HEAVY_URL);
-  const limp1Gltf     = useLoader(GLTFLoader, M_LIMP1_URL);
-  const limp2Gltf     = useLoader(GLTFLoader, M_LIMP2_URL);
-  const limp3Gltf     = useLoader(GLTFLoader, M_LIMP3_URL);
-  const dyingGltf     = useLoader(GLTFLoader, M_DYING_URL);
-  const walkStGltf    = useLoader(GLTFLoader, M_WALK_START_URL);
-  const walkLoGltf    = useLoader(GLTFLoader, M_WALK_LOOP_URL);
-  const walkEndGltf   = useLoader(GLTFLoader, M_WALK_END_URL);
-  const diffuseTex    = useLoader(THREE.TextureLoader, M_DIFFUSE_URL);
+// ── Unified character model (2 files: idle FBX + merged anims GLB) ───────────
+type AssetSet = typeof MALE_ASSETS;
+
+function CharacterModel({ assets, animationState }: { assets: AssetSet; animationState: AnimationState }) {
+  const idle0      = useLoader(FBXLoader,  assets.idle);
+  const animsGltf  = useLoader(GLTFLoader, assets.anims);
+  const diffuseTex = useLoader(THREE.TextureLoader, assets.diffuse);
 
   React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
 
   const { mixer, actions, idleKeys } = React.useMemo(() => {
     const mixer   = new THREE.AnimationMixer(idle0);
     const actions: Record<string, THREE.AnimationAction> = {};
-    const add = (clip: THREE.AnimationClip | undefined, name: string) => {
-      if (!clip) return;
+    const add = (clip: THREE.AnimationClip, name: string) => {
       const c = clip.clone(); c.name = name;
       actions[name] = mixer.clipAction(c);
     };
-    add(realClip(idle0.animations),             'idle');
-    add(realClip(walkLoGltf.animations  ?? []), 'idle2');       // walk loop as alt idle
-    add(realClip(walkStGltf.animations  ?? []), 'walk-start');
-    add(realClip(walkEndGltf.animations ?? []), 'walk-end');
-    add(realClip(walkGltf.animations    ?? []), 'walk-relaxed'); // original walk kept
-    add(realClip(limp1Gltf.animations   ?? []), 'limp-lv1');
-    add(realClip(limp2Gltf.animations   ?? []), 'limp-lv2');
-    add(realClip(limp3Gltf.animations   ?? []), 'limp-lv3');
-    add(realClip(hitLightGltf.animations ?? []),'hurt-light');
-    add(realClip(hitHeavyGltf.animations ?? []),'hurt-heavy');
-    add(realClip(dyingGltf.animations   ?? []), 'down');
+
+    // Idle animation comes from the FBX (also the mesh source)
+    const idleClip = realClip(idle0.animations);
+    if (idleClip) add(idleClip, 'idle');
+
+    // All other animations from the merged GLB (calibration clips already stripped)
+    for (const clip of (animsGltf.animations ?? [])) {
+      const key = CLIP_TO_KEY[clip.name];
+      if (key) add(clip, key);
+    }
+
     const idleKeys = ['idle', 'idle2'].filter(k => actions[k]);
     return { mixer, actions, idleKeys };
-  }, [idle0, walkGltf, hitLightGltf, hitHeavyGltf, limp1Gltf, limp2Gltf, limp3Gltf, dyingGltf, walkStGltf, walkLoGltf, walkEndGltf]);
-
-  useFrame((_, delta) => mixer.update(delta));
-
-  const prev    = React.useRef('');
-  const curIdle = React.useRef(0);
-
-  const play = React.useCallback((key: string, loop: boolean, fade = 0.3) => {
-    const a = actions[key]; if (!a) return;
-    if (prev.current && prev.current !== key) actions[prev.current]?.fadeOut(fade);
-    a.reset().fadeIn(fade);
-    a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
-    a.clampWhenFinished = !loop;
-    a.play();
-    prev.current = key;
-  }, [actions]);
-
-  const playRandomIdle = React.useCallback((fade = 0.5) => {
-    if (!idleKeys.length) return;
-    let n = curIdle.current;
-    if (idleKeys.length > 1) do { n = Math.floor(Math.random() * idleKeys.length); } while (n === curIdle.current);
-    curIdle.current = n;
-    play(idleKeys[n], true, fade);
-  }, [idleKeys, play]);
-
-  const started = React.useRef(false);
-  React.useEffect(() => {
-    if (started.current || !idleKeys.length) return;
-    started.current = true;
-    play(idleKeys[0], true, 0);
-  }, [idleKeys, play]);
-
-  // Cycle idle ↔ walk loop every 7s at full health
-  React.useEffect(() => {
-    if (!isBaseState(animationState) || animationState !== 'idle' || idleKeys.length < 2) return;
-    const id = setInterval(() => playRandomIdle(0.8), 7000);
-    return () => clearInterval(id);
-  }, [animationState, idleKeys, playRandomIdle]);
-
-  React.useEffect(() => {
-    if (animationState === 'down') {
-      play('down', false, 0.3);
-      return;
-    }
-    if (animationState === 'hurt-heavy' || animationState === 'hurt-light') {
-      const key = animationState;
-      if (!actions[key]) { playRandomIdle(0.3); return; }
-      play(key, false, 0.10);
-      const dur = (actions[key].getClip().duration ?? 1) * 1000 + 150;
-      const t = setTimeout(() => playRandomIdle(0.4), dur);
-      return () => clearTimeout(t);
-    }
-    if (isBaseState(animationState) && animationState !== 'idle') {
-      const key = actions[animationState] ? animationState : 'idle';
-      play(key, true, 0.5);
-      return;
-    }
-    play(idleKeys[0] ?? 'idle', true, 0.5);
-  }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
-}
-
-// ── Female character ─────────────────────────────────────────────────────────
-function FemaleCharacter({ animationState }: { animationState: AnimationState }) {
-  const idle0        = useLoader(FBXLoader,  F_IDLE_URL);
-  const limp1Gltf    = useLoader(GLTFLoader, F_LIMP1_URL);
-  const limp2Gltf    = useLoader(GLTFLoader, F_LIMP2_URL);
-  const limp3Gltf    = useLoader(GLTFLoader, F_LIMP3_URL);
-  const dyingGltf    = useLoader(GLTFLoader, F_DYING_URL);
-  const hitHardGltf  = useLoader(GLTFLoader, F_HIT_HARD_URL);
-  const hitExtrGltf  = useLoader(GLTFLoader, F_HIT_EXTREME_URL);
-  const walkStGltf   = useLoader(GLTFLoader, F_WALK_START_URL);
-  const walkLoGltf   = useLoader(GLTFLoader, F_WALK_LOOP_URL);
-  const walkEndGltf  = useLoader(GLTFLoader, F_WALK_END_URL);
-  const diffuseTex   = useLoader(THREE.TextureLoader, F_DIFFUSE_URL);
-
-  React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
-
-  const { mixer, actions, idleKeys } = React.useMemo(() => {
-    const mixer   = new THREE.AnimationMixer(idle0);
-    const actions: Record<string, THREE.AnimationAction> = {};
-    const add = (clip: THREE.AnimationClip | undefined, name: string) => {
-      if (!clip) return;
-      const c = clip.clone(); c.name = name;
-      actions[name] = mixer.clipAction(c);
-    };
-    add(realClip(idle0.animations),            'idle');
-    add(realClip(walkLoGltf.animations ?? []), 'idle2');   // walk loop as alt idle
-    add(realClip(walkStGltf.animations ?? []), 'walk-start');
-    add(realClip(walkEndGltf.animations ?? []),'walk-end');
-    add(realClip(limp1Gltf.animations  ?? []), 'limp-lv1');
-    add(realClip(limp2Gltf.animations  ?? []), 'limp-lv2');
-    add(realClip(limp3Gltf.animations  ?? []), 'limp-lv3');
-    add(realClip(hitHardGltf.animations ?? []),'hurt-light');
-    add(realClip(hitExtrGltf.animations ?? []),'hurt-heavy');
-    add(realClip(dyingGltf.animations  ?? []), 'down');
-    const idleKeys = ['idle', 'idle2'].filter(k => actions[k]);
-    return { mixer, actions, idleKeys };
-  }, [idle0, limp1Gltf, limp2Gltf, limp3Gltf, dyingGltf, hitHardGltf, hitExtrGltf, walkStGltf, walkLoGltf, walkEndGltf]);
+  }, [idle0, animsGltf]);
 
   useFrame((_, delta) => mixer.update(delta));
 
@@ -246,9 +134,9 @@ function FemaleCharacter({ animationState }: { animationState: AnimationState })
     play(idleKeys[0], true, 0);
   }, [idleKeys, play]);
 
-  // Cycle idle ↔ walk loop every 7s when at full health
+  // Cycle idle ↔ walk loop every 7s at full health
   React.useEffect(() => {
-    if (!isBaseState(animationState) || animationState !== 'idle' || idleKeys.length < 2) return;
+    if (animationState !== 'idle' || idleKeys.length < 2) return;
     const id = setInterval(() => playRandomIdle(0.8), 7000);
     return () => clearInterval(id);
   }, [animationState, idleKeys, playRandomIdle]);
@@ -259,24 +147,19 @@ function FemaleCharacter({ animationState }: { animationState: AnimationState })
       play('down', false, 0.3);
       return;
     }
-
     if (animationState === 'hurt-light' || animationState === 'hurt-heavy') {
-      const key = animationState; // now wired to real hit clips
+      const key = animationState;
       if (!actions[key]) { playRandomIdle(0.3); return; }
       play(key, false, 0.10);
       const dur = (actions[key].getClip().duration ?? 1) * 1000 + 150;
       const t = setTimeout(() => playRandomIdle(0.4), dur);
       return () => clearTimeout(t);
     }
-
-    // Base looping states (limp levels loop; idle cycles via interval above)
     if (isBaseState(animationState) && animationState !== 'idle') {
-      const key = actions[animationState] ? animationState : 'idle';
-      play(key, true, 0.5);
+      play(actions[animationState] ? animationState : 'idle', true, 0.5);
       return;
     }
-
-    // 'idle' — play first idle key; interval handles cycling
+    // 'idle' — start first idle key; interval handles cycling
     play(idleKeys[0] ?? 'idle', true, 0.5);
   }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -289,6 +172,8 @@ export default function CharacterViewport({
   gender = 'male',
   className,
 }: CharacterViewportProps) {
+  const assets = gender === 'female' ? FEMALE_ASSETS : MALE_ASSETS;
+
   return (
     <div
       className={className}
@@ -306,9 +191,7 @@ export default function CharacterViewport({
         <directionalLight position={[-2, 2, -1]} intensity={0.9} color="#c8d8ff" />
         <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
         <React.Suspense fallback={null}>
-          {gender === 'female'
-            ? <FemaleCharacter animationState={animationState} />
-            : <MaleCharacter   animationState={animationState} />}
+          <CharacterModel assets={assets} animationState={animationState} />
         </React.Suspense>
         <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
         <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />

@@ -16,6 +16,7 @@ import type { Character } from '../types';
 import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useThemeStore } from '../store/useThemeStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 
 async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
@@ -34,6 +35,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const characters = allCharacters.filter(c => !c.inGraveyard);
   const graveyardCount = allCharacters.filter(c => c.inGraveyard).length;
   const { theme, toggleTheme } = useThemeStore();
+  const { show3DCharacter, setShow3DCharacter } = useSettingsStore();
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
@@ -164,6 +166,18 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             <p className="text-slate-400 mt-1">Unofficial 5e character manager · fan project</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShow3DCharacter(!show3DCharacter)}
+              title={show3DCharacter ? 'Disable 3D character' : 'Enable 3D character'}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors ${
+                show3DCharacter
+                  ? 'bg-red-900/40 border-red-700 text-red-300 hover:bg-red-900/60'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+              }`}
+            >
+              <span>🧍</span>
+              <span className="text-xs font-medium">3D</span>
+            </button>
             <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
             <DriveSyncButton />
             {graveyardCount > 0 && (

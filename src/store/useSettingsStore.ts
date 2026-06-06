@@ -16,7 +16,7 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      show3DCharacter: false,
+      show3DCharacter: true,
       setShow3DCharacter: (v) => set({ show3DCharacter: v }),
     }),
     { name: 'tavern-sheet-settings' }

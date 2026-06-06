@@ -30,3 +30,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+public/models/Human_Male_Anims.glb
+public/models/Human_Female_Anims.glb
