@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, BookId, AbilityKey, WizardStep, ClassLevel, PreparedSpell } from '../types';
+import type { Character, BookId, AbilityKey, WizardStep, ClassLevel, PreparedSpell, CharacterAppearance } from '../types';
 import { WIZARD_STEPS } from '../types';
 import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
 import { getClass } from '../data/classes';
@@ -42,6 +42,7 @@ type Draft = Partial<Character> & {
   enabledBooks: BookId[];
   equipmentChoices?: Record<number, number>;  // class-choice index → option index
   equipmentTakeGold?: boolean;                // alternative: take starting gold instead of items
+  appearance?: CharacterAppearance;
 };
 
 const INITIAL_DRAFT: Draft = {
@@ -49,6 +50,7 @@ const INITIAL_DRAFT: Draft = {
   playerName: '',
   alignment: 'True Neutral',
   enabledBooks: ['PHB'],
+  appearance: { gender: 'male' },
   classes: [],
   selectedSkillProficiencies: [],
   selectedFeats: [],
@@ -313,6 +315,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       expertiseSkills: (draft.expertiseSkills as string[] | undefined) ?? [],
       featChoices: draftFeatChoices,
       knowledgeDomainSkills: (draft.knowledgeDomainSkills as string[] | undefined) ?? [],
+      appearance: draft.appearance ?? { gender: 'male' },
     };
 
     return character;

@@ -19,6 +19,7 @@ import { StepFeats } from './steps/StepFeats';
 import { StepSpells } from './steps/StepSpells';
 import { StepEquipment } from './steps/StepEquipment';
 import { StepReview } from './steps/StepReview';
+import { StepAppearance } from './steps/StepAppearance';
 
 const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
   'books': StepBooks,
@@ -26,6 +27,7 @@ const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
   'class': StepClass,
   'subclass': StepSubclass,
   'class-options': StepClassOptions,
+  'appearance': StepAppearance,
   'background': StepBackground,
   'ability-scores': StepAbilityScores,
   'skills': StepSkills,

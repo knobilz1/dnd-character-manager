@@ -4,13 +4,23 @@ import { ALL_RACES } from '../../../data/races';
 import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
-import type { Race } from '../../../types';
+import type { Race, CharacterGender } from '../../../types';
+
+const CharacterViewport = React.lazy(() => import('../../sheet/CharacterViewport'));
+
+const GENDERS: { value: CharacterGender; label: string; icon: string }[] = [
+  { value: 'male',      label: 'Male',      icon: '♂' },
+  { value: 'female',    label: 'Female',    icon: '♀' },
+  { value: 'nonbinary', label: 'Non-binary', icon: '⚧' },
+];
 
 export function StepRace() {
   const { draft, updateDraft } = useCreatorStore();
   const [selected, setSelected] = React.useState<Race | null>(
     draft.raceId ? ALL_RACES.find(r => r.id === draft.raceId) ?? null : null
   );
+
+  const gender = draft.appearance?.gender ?? 'male';
 
   const availableRaces = ALL_RACES.filter(r =>
     bookEnabled(r, draft.enabledBooks) && !r.isSubrace
@@ -19,7 +29,6 @@ export function StepRace() {
     bookEnabled(r, draft.enabledBooks) && r.isSubrace
   );
 
-  // Group subraces by parentRaceId — no parent entry required in ALL_RACES
   const subGroupIds = [...new Set(
     subraceRaces.map(r => r.parentRaceId).filter((id): id is string => !!id)
   )];
@@ -27,12 +36,15 @@ export function StepRace() {
     const parent = ALL_RACES.find(r => r.id === parentId);
     return parent ? parent.name : parentId.charAt(0).toUpperCase() + parentId.slice(1);
   }
-  // Non-subrace races that aren't acting as a subrace group header
   const racesWithoutSubs = availableRaces.filter(r => !subGroupIds.includes(r.id));
 
   function selectRace(race: Race) {
     setSelected(race);
     updateDraft({ raceId: race.id });
+  }
+
+  function setGender(g: CharacterGender) {
+    updateDraft({ appearance: { ...(draft.appearance ?? { gender: 'male' }), gender: g } });
   }
 
   function abilityStr(inc: Record<string, number>) {
@@ -62,6 +74,7 @@ export function StepRace() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Left: race picker */}
       <div>
         <h2 className="text-2xl font-bold text-white mb-2">Choose Your Race</h2>
         <p className="text-slate-400 mb-4">Your race determines your ability score bonuses, speed, size, languages, and racial traits.</p>
@@ -83,7 +96,7 @@ export function StepRace() {
           </div>
         )}
 
-        {/* No-subrace races */}
+        {/* Non-subrace races */}
         {racesWithoutSubs.length > 0 && (
           <div>
             <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Races</h3>
@@ -94,8 +107,59 @@ export function StepRace() {
         )}
       </div>
 
-      {/* Race detail */}
-      <div className="lg:sticky lg:top-0 lg:self-start">
+      {/* Right: 3D viewport + race details */}
+      <div className="lg:sticky lg:top-0 lg:self-start space-y-4">
+        {/* 3D character preview */}
+        <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
+          {/* Viewport */}
+          <div className="h-72 relative">
+            <React.Suspense fallback={
+              <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+                Loading character…
+              </div>
+            }>
+              <CharacterViewport animationState="idle" className="w-full h-full" />
+            </React.Suspense>
+
+            {/* Race label overlay */}
+            {selected && (
+              <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1">
+                <span className="text-white text-xs font-bold">{selected.name}</span>
+              </div>
+            )}
+
+            {/* "More models coming soon" badge for non-human */}
+            {selected && selected.id !== 'human' && (
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 text-center">
+                <span className="text-slate-400 text-xs">More race models coming soon</span>
+              </div>
+            )}
+          </div>
+
+          {/* Gender toggle */}
+          <div className="border-t border-slate-700 p-3">
+            <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-2">Gender</p>
+            <div className="flex gap-2">
+              {GENDERS.map(g => (
+                <button
+                  key={g.value}
+                  onClick={() => setGender(g.value)}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-sm font-medium transition-all border',
+                    gender === g.value
+                      ? 'bg-red-700 border-red-600 text-white'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white',
+                  )}
+                >
+                  <span className="text-base leading-none">{g.icon}</span>
+                  <span className="text-xs">{g.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Race details */}
         {selected ? (
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
             <h3 className="text-xl font-bold text-white mb-1">{selected.name}</h3>
@@ -138,7 +202,7 @@ export function StepRace() {
             </div>
           </div>
         ) : (
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 text-center text-slate-500">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 text-center text-slate-500 text-sm">
             Select a race to see details
           </div>
         )}

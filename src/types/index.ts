@@ -461,6 +461,14 @@ export interface PactMagicState {
 
 export type SlotLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
+// ── Character Appearance ──────────────────────────────────────────────────────
+export type CharacterGender = 'male' | 'female' | 'nonbinary';
+
+export interface CharacterAppearance {
+  gender: CharacterGender;
+  // Future: skinTone, hairStyle, hairColor, eyeColor, cosmetics (helmet/cloak/boots/gloves)
+}
+
 export interface Character {
   id: string;
   createdAt: number;
@@ -512,15 +520,17 @@ export interface Character {
   featChoices?: Record<string, AbilityKey>;
   // Knowledge Domain: 2 skills (from Arcana/History/Nature/Religion) that gain proficiency + expertise
   knowledgeDomainSkills?: string[];
+  // 3D character appearance choices made in the creator
+  appearance?: CharacterAppearance;
 }
 
 export type WizardStep =
-  | 'books' | 'race' | 'class' | 'subclass' | 'class-options'
+  | 'books' | 'race' | 'class' | 'subclass' | 'class-options' | 'appearance'
   | 'background' | 'ability-scores' | 'skills'
   | 'feats' | 'spells' | 'equipment' | 'review';
 
 export const WIZARD_STEPS: WizardStep[] = [
-  'books', 'race', 'class', 'subclass', 'class-options',
+  'books', 'race', 'class', 'subclass', 'class-options', 'appearance',
   'background', 'ability-scores', 'skills',
   'feats', 'spells', 'equipment', 'review',
 ];
@@ -531,6 +541,7 @@ export const STEP_LABELS: Record<WizardStep, string> = {
   'class': 'Class',
   'subclass': 'Subclass',
   'class-options': 'Options',
+  'appearance': 'Appearance',
   'background': 'Background',
   'ability-scores': 'Abilities',
   'skills': 'Skills',
