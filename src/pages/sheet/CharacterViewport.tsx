@@ -278,9 +278,14 @@ export default function CharacterViewport({
   minimal = false,
 }: CharacterViewportProps) {
   const assets = getAssets(raceId, gender);
-  const [loading, setLoading] = React.useState(true);
 
-  React.useEffect(() => { setLoading(true); }, [assets.idle]);
+  // Track which asset URL has been confirmed loaded. Loading shows whenever the
+  // current asset hasn't been confirmed yet. This avoids the bottom-up effect
+  // ordering bug where the parent's setLoading(true) fires AFTER the child's
+  // onLoaded(), keeping the spinner up forever.
+  const [loadedAsset, setLoadedAsset] = React.useState<string | null>(null);
+  const loading = loadedAsset !== assets.idle;
+  const handleLoaded = React.useCallback(() => setLoadedAsset(assets.idle), [assets.idle]);
 
   return (
     <div
@@ -306,8 +311,8 @@ export default function CharacterViewport({
         <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
         <React.Suspense fallback={null}>
           {minimal
-            ? <CharacterModelMinimal assets={assets} onLoaded={() => setLoading(false)} />
-            : <CharacterModel assets={assets} animationState={animationState} onLoaded={() => setLoading(false)} />}
+            ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} />
+            : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} />}
         </React.Suspense>
         <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
         <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
