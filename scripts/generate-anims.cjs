@@ -22,8 +22,18 @@ function run(output, inputs) {
   execFileSync('node', [merge, output, ...inputs], { stdio: 'inherit' });
 }
 
-/** Convert an idle FBX → compact GLB (mesh-stripped textures, static channels pruned). */
+/** Check whether assimp CLI is available. */
+function assimpAvailable() {
+  try { execFileSync('assimp', ['version'], { stdio: 'pipe' }); return true; } catch { return false; }
+}
+
+/** Convert an idle FBX → compact GLB (mesh-stripped textures, static channels pruned).
+ *  Skipped automatically if assimp is not installed (CI uses pre-built committed GLBs). */
 function buildIdleGlb(inputFbx, outputGlb) {
+  if (!assimpAvailable()) {
+    console.log(`  Skipping ${path.basename(outputGlb)} — assimp not found (using committed GLB)`);
+    return;
+  }
   console.log(`\nBuilding idle GLB: ${path.basename(outputGlb)}…`);
   const tmp = outputGlb.replace(/\.glb$/, '_raw.glb');
   execFileSync('node', [convertIdle, inputFbx, tmp], { stdio: 'inherit' });
