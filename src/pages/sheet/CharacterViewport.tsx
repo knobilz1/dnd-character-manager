@@ -39,7 +39,7 @@ const MALE_ASSETS = {
 const FEMALE_ASSETS = {
   idle:    '/models/Human_Female_Idle_Textured.fbx',
   anims:   '/models/Human_Female_Anims.glb',
-  diffuse: '/models/tripo_mat_db0ac1f6_Diffuse.png',
+  diffuse: '/models/tripo_mat_a51440ff_Diffuse.png',
 };
 
 // ── Clip name → action key (same for both genders) ──────────────────────────
