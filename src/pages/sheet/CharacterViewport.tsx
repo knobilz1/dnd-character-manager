@@ -5,112 +5,98 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 
+// ── Animation state ──────────────────────────────────────────────────────────
 export type AnimationState =
-  | 'idle'
-  | 'hurt-light'   // small hit  (< 25 % of max HP in one blow)  → quick flinch
-  | 'hurt-heavy'   // large hit  (≥ 25 % of max HP in one blow)  → full stagger
-  | 'down';        // 0 HP / unconscious
+  | 'idle'        // full HP   — normal idle / walk cycle
+  | 'limp-lv1'   // ≤ 75 % HP — slight limp  (looping)
+  | 'limp-lv2'   // ≤ 50 % HP — bad limp     (looping)
+  | 'limp-lv3'   // ≤ 25 % HP — severe limp  (looping)
+  | 'hurt-light' // damage reaction < 25 % max HP in one hit (transient)
+  | 'hurt-heavy' // damage reaction ≥ 25 % max HP in one hit (transient)
+  | 'down';      // 0 HP / Unconscious — dying animation, holds last frame
+
+/** Returns true for looping "base" states (as opposed to transient reactions). */
+function isBaseState(s: AnimationState) {
+  return s === 'idle' || s === 'limp-lv1' || s === 'limp-lv2' || s === 'limp-lv3';
+}
+
+export type CharacterGender = 'male' | 'female' | 'nonbinary';
 
 interface CharacterViewportProps {
   animationState?: AnimationState;
+  gender?: CharacterGender;
   className?: string;
 }
 
-const IDLE_FBX_URL       = '/models/Human_Idle_Textured.fbx'; // mesh + texture + idle anim
-// All animation-only files are mesh-stripped GLBs (~12-13 MB vs ~22 MB with mesh).
-// Bone names are identical to the idle FBX skeleton so retargeting works.
-const WALK_GLB_URL       = '/models/Human_Walk_Relaxed.glb';
-const HIT_LIGHT_GLB_URL  = '/models/Human_Hit_Light.glb';   // quick flinch  (<25% max HP)
-const HIT_HEAVY_GLB_URL  = '/models/Human_White_Punched.glb'; // full stagger (≥25% max HP)
+// ── Asset URLs ───────────────────────────────────────────────────────────────
+// Male (original) assets
+const M_IDLE_URL       = '/models/Human_Idle_Textured.fbx';
+const M_WALK_URL       = '/models/Human_Walk_Relaxed.glb';
+const M_HIT_LIGHT_URL  = '/models/Human_Hit_Light.glb';
+const M_HIT_HEAVY_URL  = '/models/Human_White_Punched.glb';
+const M_DIFFUSE_URL    = '/models/tripo_mat_a9e3ea13_Diffuse.png';
 
-/**
- * 3D character built from AccuRig-rigged FBX exports (mesh + skeleton +
- * animation, all sharing one 118-bone skeleton).
- *
- * Lessons baked in:
- *  - Render the RAW loaded FBX. SkeletonUtils.clone() broke the skinning here
- *    (invisible mesh), so we do not clone — one viewport, one instance.
- *  - AccuRig bundles a "0_Open A_UE5" calibration A-pose clip in every file;
- *    the real motion is the OTHER clip. We pick the non-calibration clip.
- *  - All three FBX share identical bone names, so the walk/hit clips retarget
- *    onto the displayed mesh's skeleton by name.
- *  - Texture: loaded separately via TextureLoader (not from FBX material) because
- *    FBXLoader's MeshPhongMaterial inherits a green base-color tint from the FBX
- *    material block that tints the diffuse even when color=0xffffff. Bypassing it
- *    with a fresh MeshStandardMaterial + TextureLoader gives true colors.
- *  - FBX is in cm → scale 0.01.
- */
-function FBXCharacter({ animationState }: { animationState: AnimationState }) {
-  const idle0        = useLoader(FBXLoader,  IDLE_FBX_URL);
-  const walkGltf     = useLoader(GLTFLoader, WALK_GLB_URL);
-  const hitLightGltf = useLoader(GLTFLoader, HIT_LIGHT_GLB_URL);
-  const hitHeavyGltf = useLoader(GLTFLoader, HIT_HEAVY_GLB_URL);
+// Female assets
+const F_IDLE_URL       = '/models/Human_Female_Idle_Textured.fbx';
+const F_LIMP1_URL      = '/models/Human_Female_Limp_Lv1.glb';
+const F_LIMP2_URL      = '/models/Human_Female_Limp_Lv2.glb';
+const F_LIMP3_URL      = '/models/Human_Female_Limp_Lv3.glb';
+const F_DYING_URL      = '/models/Human_Female_Dying.glb';
+const F_DIFFUSE_URL    = '/models/tripo_mat_db0ac1f6_Diffuse.png';
 
-  // Load the diffuse texture directly — bypasses FBX material weirdness entirely.
-  // FBXLoader's MeshPhongMaterial picks up the correct texture file path but can
-  // still inherit a tinted base color or other per-channel quirks from the FBX
-  // material block. Loading via TextureLoader gives us a clean, unmodified image.
-  const diffuseTex = useLoader(THREE.TextureLoader, '/models/tripo_mat_a9e3ea13_Diffuse.png');
+// ── Shared helpers ───────────────────────────────────────────────────────────
+const realClip = (clips: THREE.AnimationClip[]) =>
+  clips.find((a) => !/open a|_ue5/i.test(a.name)) ??
+  clips[clips.length - 1] ??
+  clips[0];
 
-  // Prepare mesh: disable frustum culling, enable shadows, replace the FBX
-  // material with a clean PBR material using the directly-loaded texture.
-  React.useEffect(() => {
-    // Mark texture as sRGB (colour textures must be in sRGB space for correct rendering).
-    diffuseTex.colorSpace = THREE.SRGBColorSpace;
-    diffuseTex.needsUpdate = true;
+function applyTexture(fbx: THREE.Group, tex: THREE.Texture) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.0 });
+  fbx.traverse((o) => {
+    o.frustumCulled = false;
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow    = true;
+    mesh.receiveShadow = true;
+    mesh.material      = mat;
+  });
+}
 
-    // Build one shared material for all sub-meshes.
-    const mat = new THREE.MeshStandardMaterial({
-      map: diffuseTex,
-      roughness: 0.75,
-      metalness: 0.0,
-    });
+// ── Male character ───────────────────────────────────────────────────────────
+function MaleCharacter({ animationState }: { animationState: AnimationState }) {
+  const idle0        = useLoader(FBXLoader,  M_IDLE_URL);
+  const walkGltf     = useLoader(GLTFLoader, M_WALK_URL);
+  const hitLightGltf = useLoader(GLTFLoader, M_HIT_LIGHT_URL);
+  const hitHeavyGltf = useLoader(GLTFLoader, M_HIT_HEAVY_URL);
+  const diffuseTex   = useLoader(THREE.TextureLoader, M_DIFFUSE_URL);
 
-    idle0.traverse((o) => {
-      o.frustumCulled = false;
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.material = mat;
-    });
-  }, [idle0, diffuseTex]);
+  React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
 
-  // Build mixer + actions. FBX groups have .animations[]; GLTF returns { animations }.
-  // Filter out the AccuRig calibration clip (named "0_Open A_UE5") in every source.
   const { mixer, actions, idleKeys } = React.useMemo(() => {
-    const mixer = new THREE.AnimationMixer(idle0);
+    const mixer   = new THREE.AnimationMixer(idle0);
     const actions: Record<string, THREE.AnimationAction> = {};
-
-    const realClip = (clips: THREE.AnimationClip[]) =>
-      clips.find((a) => !/open a|_ue5/i.test(a.name)) ??
-      clips[clips.length - 1] ??
-      clips[0];
-
     const add = (clip: THREE.AnimationClip | undefined, name: string) => {
       if (!clip) return;
-      const c = clip.clone();
-      c.name = name;
+      const c = clip.clone(); c.name = name;
       actions[name] = mixer.clipAction(c);
     };
-
     add(realClip(idle0.animations),               'idle');
     add(realClip(walkGltf.animations     ?? []),   'idle2');
     add(realClip(hitLightGltf.animations ?? []),   'hurt-light');
     add(realClip(hitHeavyGltf.animations ?? []),   'hurt-heavy');
-
-    const idleKeys = ['idle', 'idle2'].filter((k) => actions[k]);
+    const idleKeys = ['idle', 'idle2'].filter(k => actions[k]);
     return { mixer, actions, idleKeys };
   }, [idle0, walkGltf, hitLightGltf, hitHeavyGltf]);
 
   useFrame((_, delta) => mixer.update(delta));
 
-  const prev = React.useRef<string>('');
+  const prev    = React.useRef('');
   const curIdle = React.useRef(0);
 
   const play = React.useCallback((key: string, loop: boolean, fade = 0.3) => {
-    const a = actions[key];
-    if (!a) return;
+    const a = actions[key]; if (!a) return;
     if (prev.current && prev.current !== key) actions[prev.current]?.fadeOut(fade);
     a.reset().fadeIn(fade);
     a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
@@ -122,14 +108,11 @@ function FBXCharacter({ animationState }: { animationState: AnimationState }) {
   const playRandomIdle = React.useCallback((fade = 0.5) => {
     if (!idleKeys.length) return;
     let n = curIdle.current;
-    if (idleKeys.length > 1) {
-      do { n = Math.floor(Math.random() * idleKeys.length); } while (n === curIdle.current);
-    }
+    if (idleKeys.length > 1) do { n = Math.floor(Math.random() * idleKeys.length); } while (n === curIdle.current);
     curIdle.current = n;
     play(idleKeys[n], true, fade);
   }, [idleKeys, play]);
 
-  // Kick off first idle once.
   const started = React.useRef(false);
   React.useEffect(() => {
     if (started.current || !idleKeys.length) return;
@@ -137,53 +120,140 @@ function FBXCharacter({ animationState }: { animationState: AnimationState }) {
     play(idleKeys[0], true, 0);
   }, [idleKeys, play]);
 
-  // Looping clips never emit 'finished', so cycle idles on a timer for variety.
   React.useEffect(() => {
-    if (animationState !== 'idle' || idleKeys.length < 2) return;
-
+    if (!isBaseState(animationState) || idleKeys.length < 2) return;
     const id = setInterval(() => playRandomIdle(0.8), 7000);
     return () => clearInterval(id);
   }, [animationState, idleKeys, playRandomIdle]);
 
-  // React to HP-driven state changes.
   React.useEffect(() => {
-    const hurtKey = animationState === 'hurt-heavy' ? 'hurt-heavy'
-                  : animationState === 'hurt-light'  ? 'hurt-light'
-                  : null;
-
-    if (hurtKey && actions[hurtKey]) {
-      play(hurtKey, false, 0.10);
-      const dur = (actions[hurtKey].getClip().duration ?? 1) * 1000 + 150;
+    if (animationState === 'hurt-heavy' || animationState === 'hurt-light') {
+      const key = animationState;
+      if (!actions[key]) { playRandomIdle(0.3); return; }
+      play(key, false, 0.10);
+      const dur = (actions[key].getClip().duration ?? 1) * 1000 + 150;
       const t = setTimeout(() => playRandomIdle(0.4), dur);
       return () => clearTimeout(t);
     }
     if (animationState === 'down') {
-      // No dedicated death clip yet — play heavy hit and hold the pose.
       const fallback = actions['hurt-heavy'] ?? actions['hurt-light'];
       if (fallback) play(fallback.getClip().name, false, 0.12);
       return;
     }
+    // Male has no limp animations yet — fall back to idle for all limp levels
     playRandomIdle(0.3);
   }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
 }
 
+// ── Female character ─────────────────────────────────────────────────────────
+function FemaleCharacter({ animationState }: { animationState: AnimationState }) {
+  const idle0     = useLoader(FBXLoader,  F_IDLE_URL);
+  const limp1Gltf = useLoader(GLTFLoader, F_LIMP1_URL);
+  const limp2Gltf = useLoader(GLTFLoader, F_LIMP2_URL);
+  const limp3Gltf = useLoader(GLTFLoader, F_LIMP3_URL);
+  const dyingGltf = useLoader(GLTFLoader, F_DYING_URL);
+  const diffuseTex = useLoader(THREE.TextureLoader, F_DIFFUSE_URL);
+
+  React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
+
+  const { mixer, actions } = React.useMemo(() => {
+    const mixer   = new THREE.AnimationMixer(idle0);
+    const actions: Record<string, THREE.AnimationAction> = {};
+    const add = (clip: THREE.AnimationClip | undefined, name: string) => {
+      if (!clip) return;
+      const c = clip.clone(); c.name = name;
+      actions[name] = mixer.clipAction(c);
+    };
+    add(realClip(idle0.animations),           'idle');
+    add(realClip(limp1Gltf.animations ?? []), 'limp-lv1');
+    add(realClip(limp2Gltf.animations ?? []), 'limp-lv2');
+    add(realClip(limp3Gltf.animations ?? []), 'limp-lv3');
+    add(realClip(dyingGltf.animations ?? []), 'down');
+    return { mixer, actions };
+  }, [idle0, limp1Gltf, limp2Gltf, limp3Gltf, dyingGltf]);
+
+  useFrame((_, delta) => mixer.update(delta));
+
+  const prev = React.useRef('');
+
+  const play = React.useCallback((key: string, loop: boolean, fade = 0.3) => {
+    const a = actions[key]; if (!a) return;
+    if (prev.current && prev.current !== key) actions[prev.current]?.fadeOut(fade);
+    a.reset().fadeIn(fade);
+    a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    a.clampWhenFinished = !loop;
+    a.play();
+    prev.current = key;
+  }, [actions]);
+
+  // Start idle on mount
+  const started = React.useRef(false);
+  React.useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    play('idle', true, 0);
+  }, [play]);
+
+  // Main state machine
+  React.useEffect(() => {
+    if (animationState === 'down') {
+      // Play dying animation once and hold on last frame
+      play('down', false, 0.3);
+      return;
+    }
+
+    // Hurt reactions (transient) — use limp levels as reactions if available, else idle
+    if (animationState === 'hurt-light' || animationState === 'hurt-heavy') {
+      // For female we don't have dedicated hit clips yet — just briefly speed up the
+      // current limp then return. We'll treat it as a quick replay of lv1.
+      const reactKey = actions['limp-lv1'] ? 'limp-lv1' : 'idle';
+      play(reactKey, false, 0.08);
+      const dur = Math.min((actions[reactKey]?.getClip().duration ?? 1) * 500, 1000);
+      const t = setTimeout(() => {
+        // Return to whatever base state the caller will set next tick
+        play(animationState === 'hurt-heavy' ? (actions['limp-lv1'] ? 'limp-lv1' : 'idle') : 'idle', true, 0.4);
+      }, dur);
+      return () => clearTimeout(t);
+    }
+
+    // Base looping states
+    const key = isBaseState(animationState) && actions[animationState]
+      ? animationState
+      : 'idle';
+    play(key, true, 0.5);
+  }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
+}
+
+// ── Canvas wrapper ───────────────────────────────────────────────────────────
 export default function CharacterViewport({
   animationState = 'idle',
+  gender = 'male',
   className,
 }: CharacterViewportProps) {
   return (
-    <div className={className} style={{ width: '100%', height: '100%', background: 'radial-gradient(ellipse at 50% 100%, #1e2a3a 0%, #0f1520 100%)' }}>
-      <Canvas shadows dpr={[1, 2]} camera={{ position: [0, 0.95, 2.2], fov: 42 }}
+    <div
+      className={className}
+      style={{ width: '100%', height: '100%', background: 'radial-gradient(ellipse at 50% 100%, #1e2a3a 0%, #0f1520 100%)' }}
+    >
+      <Canvas
+        shadows
+        dpr={[1, 2]}
+        camera={{ position: [0, 0.95, 2.2], fov: 42 }}
         gl={{ toneMapping: 4 /* ACESFilmicToneMapping */, toneMappingExposure: 1.1, alpha: true }}
-        style={{ background: 'transparent' }}>
+        style={{ background: 'transparent' }}
+      >
         <ambientLight intensity={1.6} color="#ffffff" />
         <directionalLight position={[2, 4, 3]} intensity={2.4} castShadow shadow-mapSize={[1024, 1024]} color="#fff8f0" />
         <directionalLight position={[-2, 2, -1]} intensity={0.9} color="#c8d8ff" />
         <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
         <React.Suspense fallback={null}>
-          <FBXCharacter animationState={animationState} />
+          {gender === 'female'
+            ? <FemaleCharacter animationState={animationState} />
+            : <MaleCharacter   animationState={animationState} />}
         </React.Suspense>
         <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
         <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />

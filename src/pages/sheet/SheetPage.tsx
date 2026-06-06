@@ -1413,11 +1413,24 @@ function Character3DCard() {
   const maxHP         = useCharacterStore((s) => s.character?.maxHP ?? 1);
   const exhaustion    = useCharacterStore((s) => s.character?.exhaustionLevel ?? 0);
   const conditions    = useCharacterStore((s) => s.character?.conditions ?? []);
+  const gender        = useCharacterStore((s) => s.character?.appearance?.gender ?? 'male');
 
   const effectiveMax  = exhaustion >= 4 ? Math.floor(maxHP / 2) : maxHP;
   const isDown        = currentHP === 0 || conditions.includes('Unconscious');
 
-  const [animState, setAnimState] = React.useState<import('./CharacterViewport').AnimationState>('idle');
+  /** Derive the looping base state from current HP percentage. */
+  function baseStateForHP(hp: number, max: number): import('./CharacterViewport').AnimationState {
+    if (hp <= 0 || max <= 0) return 'down';
+    const pct = hp / max;
+    if (pct <= 0.25) return 'limp-lv3';
+    if (pct <= 0.50) return 'limp-lv2';
+    if (pct <= 0.75) return 'limp-lv1';
+    return 'idle';
+  }
+
+  const [animState, setAnimState] = React.useState<import('./CharacterViewport').AnimationState>(
+    () => baseStateForHP(currentHP, effectiveMax)
+  );
   const prevHP = React.useRef(currentHP);
 
   React.useEffect(() => {
@@ -1428,18 +1441,21 @@ function Character3DCard() {
       setAnimState('down');
       return;
     }
+
+    const base = baseStateForHP(currentHP, effectiveMax);
+
     if (damage > 0) {
       // ≥ 25% of max HP in one blow → heavy stagger; otherwise quick flinch.
       const ratio = effectiveMax > 0 ? damage / effectiveMax : 0;
-      const state = ratio >= 0.25 ? 'hurt-heavy' : 'hurt-light';
-      setAnimState(state);
-      // Return to idle after clip finishes (~0.7 s light, ~1.2 s heavy).
-      const dur = state === 'hurt-heavy' ? 1400 : 800;
-      const t = setTimeout(() => setAnimState('idle'), dur);
+      const hurtState = ratio >= 0.25 ? 'hurt-heavy' : 'hurt-light';
+      setAnimState(hurtState);
+      // After the hurt clip finishes, return to the correct limp level.
+      const dur = hurtState === 'hurt-heavy' ? 1400 : 800;
+      const t = setTimeout(() => setAnimState(base), dur);
       return () => clearTimeout(t);
     }
-    // Healed / HP raised: snap back to idle (e.g. revived from 0).
-    setAnimState('idle');
+    // HP changed but not damage (heal / revive) — snap to correct base state.
+    setAnimState(base);
   }, [currentHP, isDown, effectiveMax]);
 
   // Tint the canvas border red at low HP (≤ 25 %).
@@ -1479,7 +1495,7 @@ function Character3DCard() {
               </div>
             }
           >
-            <CharacterViewport animationState={animState} className="w-full h-full" />
+            <CharacterViewport animationState={animState} gender={gender} className="w-full h-full" />
           </React.Suspense>
         </div>
       )}
