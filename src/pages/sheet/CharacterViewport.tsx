@@ -81,11 +81,13 @@ useLoader.preload(THREE.TextureLoader, MALE_ASSETS.diffuse);
 useLoader.preload(THREE.TextureLoader, FEMALE_ASSETS.diffuse);
 
 // ── Minimal character model (creator only — idle FBX + texture, no anims GLB) ─
-function CharacterModelMinimal({ assets }: { assets: typeof MALE_ASSETS }) {
+function CharacterModelMinimal({ assets, onLoaded }: { assets: typeof MALE_ASSETS; onLoaded?: () => void }) {
   const idle0      = useLoader(FBXLoader, assets.idle);
   const diffuseTex = useLoader(THREE.TextureLoader, assets.diffuse);
 
   React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
+  // Fires once assets resolve (component only renders after suspension ends)
+  React.useEffect(() => { onLoaded?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mixer = React.useMemo(() => {
     const m = new THREE.AnimationMixer(idle0);
@@ -106,12 +108,13 @@ function CharacterModelMinimal({ assets }: { assets: typeof MALE_ASSETS }) {
 // ── Full character model (sheet — idle FBX + merged anims GLB) ───────────────
 type AssetSet = typeof MALE_ASSETS;
 
-function CharacterModel({ assets, animationState }: { assets: AssetSet; animationState: AnimationState }) {
+function CharacterModel({ assets, animationState, onLoaded }: { assets: AssetSet; animationState: AnimationState; onLoaded?: () => void }) {
   const idle0      = useLoader(FBXLoader,  assets.idle);
   const animsGltf  = useLoader(GLTFLoader, assets.anims);
   const diffuseTex = useLoader(THREE.TextureLoader, assets.diffuse);
 
   React.useEffect(() => { applyTexture(idle0, diffuseTex); }, [idle0, diffuseTex]);
+  React.useEffect(() => { onLoaded?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { mixer, actions, idleKeys } = React.useMemo(() => {
     const mixer   = new THREE.AnimationMixer(idle0);
@@ -198,6 +201,34 @@ function CharacterModel({ assets, animationState }: { assets: AssetSet; animatio
   return <primitive object={idle0} scale={0.01} position={[0, 0, 0]} />;
 }
 
+// ── Loading skeleton shown while assets are parsing ──────────────────────────
+function ViewportLoader() {
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center gap-3"
+         style={{ background: 'radial-gradient(ellipse at 50% 100%, #1e2a3a 0%, #0f1520 100%)' }}>
+      {/* Silhouette skeleton */}
+      <div className="flex flex-col items-center gap-1 opacity-20">
+        {/* Head */}
+        <div className="w-8 h-8 rounded-full bg-slate-400 animate-pulse" />
+        {/* Torso */}
+        <div className="w-12 h-16 rounded-lg bg-slate-400 animate-pulse" style={{ animationDelay: '0.1s' }} />
+        {/* Arms */}
+        <div className="flex gap-1 -mt-14">
+          <div className="w-3 h-14 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: '0.15s' }} />
+          <div className="w-16" /> {/* spacer */}
+          <div className="w-3 h-14 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: '0.2s' }} />
+        </div>
+        {/* Legs */}
+        <div className="flex gap-2 mt-2">
+          <div className="w-4 h-16 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: '0.25s' }} />
+          <div className="w-4 h-16 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
+        </div>
+      </div>
+      <p className="text-slate-600 text-xs tracking-widest uppercase">Loading…</p>
+    </div>
+  );
+}
+
 // ── Canvas wrapper ───────────────────────────────────────────────────────────
 export default function CharacterViewport({
   animationState = 'idle',
@@ -206,12 +237,23 @@ export default function CharacterViewport({
   minimal = false,
 }: CharacterViewportProps) {
   const assets = gender === 'female' ? FEMALE_ASSETS : MALE_ASSETS;
+  const [loading, setLoading] = React.useState(true);
+
+  // Reset loading state when gender changes (new asset set needs to load)
+  React.useEffect(() => { setLoading(true); }, [gender]);
 
   return (
     <div
       className={className}
-      style={{ width: '100%', height: '100%', background: 'radial-gradient(ellipse at 50% 100%, #1e2a3a 0%, #0f1520 100%)' }}
+      style={{ position: 'relative', width: '100%', height: '100%', background: 'radial-gradient(ellipse at 50% 100%, #1e2a3a 0%, #0f1520 100%)' }}
     >
+      {/* DOM loading overlay — sits on top of canvas while assets parse */}
+      {loading && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
+          <ViewportLoader />
+        </div>
+      )}
+
       <Canvas
         shadows
         dpr={[1, 2]}
@@ -225,8 +267,8 @@ export default function CharacterViewport({
         <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
         <React.Suspense fallback={null}>
           {minimal
-            ? <CharacterModelMinimal assets={assets} />
-            : <CharacterModel assets={assets} animationState={animationState} />}
+            ? <CharacterModelMinimal assets={assets} onLoaded={() => setLoading(false)} />
+            : <CharacterModel assets={assets} animationState={animationState} onLoaded={() => setLoading(false)} />}
         </React.Suspense>
         <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
         <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
