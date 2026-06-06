@@ -91,6 +91,12 @@ const realClip = (clips: THREE.AnimationClip[]) =>
 
 function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
   tex.colorSpace = THREE.SRGBColorSpace;
+  // The mesh comes from a GLB (assimp export) whose UVs use the glTF convention
+  // (V origin top-left). THREE.TextureLoader defaults to flipY=true (OpenGL
+  // bottom-left), which double-flips V and scrambles every UV island across the
+  // packed atlas → "camo" look. GLTFLoader sets flipY=false for glTF meshes;
+  // we must match that since we apply the texture manually.
+  tex.flipY = false;
   tex.needsUpdate = true;
   const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.0 });
   root.traverse((o) => {
