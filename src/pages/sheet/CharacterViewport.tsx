@@ -73,6 +73,13 @@ function applyTexture(fbx: THREE.Group, tex: THREE.Texture) {
   });
 }
 
+// Kick off background loads for both genders as soon as this module is imported.
+// By the time the user hits the gender toggle in the creator, assets are cached.
+useLoader.preload(FBXLoader, MALE_ASSETS.idle);
+useLoader.preload(FBXLoader, FEMALE_ASSETS.idle);
+useLoader.preload(THREE.TextureLoader, MALE_ASSETS.diffuse);
+useLoader.preload(THREE.TextureLoader, FEMALE_ASSETS.diffuse);
+
 // ── Minimal character model (creator only — idle FBX + texture, no anims GLB) ─
 function CharacterModelMinimal({ assets }: { assets: typeof MALE_ASSETS }) {
   const idle0      = useLoader(FBXLoader, assets.idle);
