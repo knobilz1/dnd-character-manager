@@ -2,8 +2,16 @@ import * as React from 'react';
 import { Canvas, useLoader, useFrame } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import * as THREE from 'three';
 import { modelUrl, initModelUrls, NEEDS_TAURI_MODEL_INIT } from '../../utils/modelUrl';
+
+// The merged *_Anims.glb files are compressed with EXT_meshopt_compression
+// (see scripts/compress-glb.cjs) — the loader needs the meshopt decoder to read
+// them. Stable module-level fn so useLoader's cache key stays consistent.
+// Harmless on uncompressed GLBs (idle/armor): only kicks in when the extension
+// is present.
+export const withMeshopt = (loader: GLTFLoader) => loader.setMeshoptDecoder(MeshoptDecoder);
 
 // ── Animation state ──────────────────────────────────────────────────────────
 export type AnimationState =
@@ -252,7 +260,7 @@ function saveHelmetFit(race: string, fit: HelmetFit) {
  *  own — it imperatively parents the (cloned, static) mesh onto the bone so it
  *  rides every animation for free. */
 function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: HelmetFit }) {
-  const gltf = useLoader(GLTFLoader, modelUrl(HELMET_URL));
+  const gltf = useLoader(GLTFLoader, modelUrl(HELMET_URL), withMeshopt);
   const fitGroupRef = React.useRef<THREE.Group | null>(null);
 
   React.useEffect(() => {
@@ -307,7 +315,7 @@ function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: HelmetFi
 function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit }: {
   assets: AssetSet; onLoaded?: () => void; showArmor?: boolean; helmetFit?: HelmetFit;
 }) {
-  const idleGltf  = useLoader(GLTFLoader, modelUrl(assets.idle));
+  const idleGltf  = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
   const diffuseTex = useLoader(THREE.TextureLoader, modelUrl(assets.diffuse));
 
   const scene = idleGltf.scene;
@@ -353,8 +361,8 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit
   showArmor?: boolean;
   helmetFit?: HelmetFit;
 }) {
-  const idleGltf   = useLoader(GLTFLoader, modelUrl(assets.idle));
-  const animsGltf  = useLoader(GLTFLoader, modelUrl(assets.anims));
+  const idleGltf   = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
+  const animsGltf  = useLoader(GLTFLoader, modelUrl(assets.anims), withMeshopt);
   const diffuseTex = useLoader(THREE.TextureLoader, modelUrl(assets.diffuse));
 
   const scene = idleGltf.scene;

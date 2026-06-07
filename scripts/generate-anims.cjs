@@ -16,10 +16,16 @@ const models = path.join(root, 'public', 'models');
 const merge  = path.join(__dirname, 'merge-animations-glb.cjs');
 const convertIdle = path.join(__dirname, 'convert-idle-to-glb.cjs');
 const prune  = path.join(__dirname, 'prune-static-channels.cjs');
+const compress = path.join(__dirname, 'compress-glb.cjs');
 
 function run(output, inputs) {
   console.log(`\nGenerating ${path.basename(output)}…`);
   execFileSync('node', [merge, output, ...inputs], { stdio: 'inherit' });
+  // Compress the merged anims GLB in-place: resample (collapse constant tracks)
+  // + meshopt encode. ~78–113MB → ~1.5MB, no visible quality loss. Decoded at
+  // runtime via MeshoptDecoder (registered in CharacterViewport). Mesh-free
+  // anims only — never run on *_Idle.glb (holds the skeleton + armor sockets).
+  execFileSync('node', [compress, output], { stdio: 'inherit' });
 }
 
 /** Check whether assimp CLI is available. */
