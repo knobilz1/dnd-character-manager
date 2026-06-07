@@ -50,11 +50,16 @@ const ELF_MALE_ASSETS = {
   anims:   '/models/Elf_Male_Anims.glb',
   diffuse: '/models/tripo_mat_9d8dcc38_Diffuse.png',
 };
+const ELF_FEMALE_ASSETS = {
+  idle:    '/models/Elf_Female_Idle.glb',
+  anims:   '/models/Elf_Female_Anims.glb',
+  diffuse: '/models/tripo_mat_a4c82834_Diffuse.png',
+};
 
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
 /** All known asset sets — used for bulk preloading at app startup. */
-export const ALL_ASSET_SETS: AssetSet[] = [HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS, ELF_MALE_ASSETS];
+export const ALL_ASSET_SETS: AssetSet[] = [HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS, ELF_MALE_ASSETS, ELF_FEMALE_ASSETS];
 
 /** Map a raceId string to a canonical model-race key. Unmapped → 'human'. */
 function modelRace(raceId?: string): 'human' | 'elf' {
@@ -68,7 +73,7 @@ function modelRace(raceId?: string): 'human' | 'elf' {
  *  Falls back gracefully when a gender-specific model doesn't exist yet. */
 function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
   const race = modelRace(raceId);
-  if (race === 'elf') return ELF_MALE_ASSETS;
+  if (race === 'elf') return gender === 'female' ? ELF_FEMALE_ASSETS : ELF_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 
