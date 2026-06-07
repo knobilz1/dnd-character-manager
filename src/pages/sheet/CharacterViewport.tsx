@@ -343,15 +343,44 @@ export default function CharacterViewport({
   const loading = loadedAsset !== assets.idle;
   const handleLoaded = React.useCallback(() => setLoadedAsset(assets.idle), [assets.idle]);
 
+  // OrbitControls ref so we can snap the camera back to its framed default.
+  const controlsRef = React.useRef<React.ElementRef<typeof OrbitControls>>(null);
+  const resetCamera = React.useCallback(() => {
+    // reset() restores the position0/target0/zoom0 captured at construction —
+    // i.e. the framed default the camera/target props below define.
+    controlsRef.current?.reset();
+  }, []);
+
   return (
     <div
       className={className}
       style={{ position: 'relative', width: '100%', height: '100%', background: 'radial-gradient(ellipse at 50% 100%, #1e2a3a 0%, #0f1520 100%)' }}
+      onDoubleClick={resetCamera}
     >
       {loading && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
           <ViewportLoader />
         </div>
+      )}
+
+      {/* Reset-view button — escape hatch if the orbit ends up in a bad spot. */}
+      {!loading && (
+        <button
+          type="button"
+          onClick={resetCamera}
+          title="Reset view"
+          aria-label="Reset camera view"
+          style={{
+            position: 'absolute', bottom: 8, right: 8, zIndex: 11,
+            width: 28, height: 28, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(15,21,32,0.6)', color: '#cbd5e1',
+            border: '1px solid rgba(203,213,225,0.25)', cursor: 'pointer',
+            fontSize: 14, lineHeight: 1, backdropFilter: 'blur(4px)',
+          }}
+        >
+          ⟲
+        </button>
       )}
 
       <ViewportErrorBoundary fallback={null}>
@@ -377,7 +406,19 @@ export default function CharacterViewport({
               : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} />}
           </React.Suspense>
           <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
-          <OrbitControls enablePan={false} minDistance={1.2} maxDistance={5} target={[0, 0.7, 0]} />
+          <OrbitControls
+            ref={controlsRef}
+            makeDefault
+            enablePan={false}
+            minDistance={1.2}
+            maxDistance={5}
+            // Clamp the vertical orbit so the camera can never swing *under* the
+            // model and get stuck looking up at the feet (the random "zoomed on
+            // the foot, can't back out" bug). ~18°–100° keeps it head-to-floor.
+            minPolarAngle={Math.PI * 0.1}
+            maxPolarAngle={Math.PI * 0.56}
+            target={[0, 0.7, 0]}
+          />
         </Canvas>
       </ViewportErrorBoundary>
     </div>
