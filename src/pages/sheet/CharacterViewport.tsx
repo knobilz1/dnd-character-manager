@@ -125,11 +125,24 @@ function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
  * posed — but this runs during render, BEFORE the <primitive> mounts and binds the
  * skeleton, so it returns an empty box → bogus fallback scale → invisible character.
  * Geometry bounds are always available and correct.
+ *
+ * CRITICAL: we measure each mesh in the scene root's *local* frame (root transform
+ * cancelled via invRoot), NOT absolute world space. `useLoader` caches the GLTF
+ * scene object by URL and `<primitive object={scene} scale=…>` applies our scale by
+ * MUTATING that shared cached object. If we measured absolute world matrices we'd
+ * re-include the scale a *previous* mount already left on the root, so the result
+ * would oscillate every remount (mount 1 → correct, mount 2 → 170× too big → only a
+ * foot fills the frame, mount 3 → correct, …). That's the "zoomed on the foot,
+ * camera reset doesn't help" bug — the model is giant, not the camera. Cancelling
+ * the root transform makes the measurement depend only on the rig's bind pose, so
+ * the returned scale is identical on every mount regardless of leftover state.
  */
 function fitToViewport(scene: THREE.Object3D, targetHeight = 1.8): { scale: number; yOffset: number } {
   scene.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(scene.matrixWorld).invert();
   const box = new THREE.Box3();
   const tmp = new THREE.Box3();
+  const local = new THREE.Matrix4();
   let found = false;
   scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -137,7 +150,9 @@ function fitToViewport(scene: THREE.Object3D, targetHeight = 1.8): { scale: numb
       if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
       const gb = mesh.geometry.boundingBox;
       if (!gb) return;
-      tmp.copy(gb).applyMatrix4(mesh.matrixWorld);
+      // mesh transform relative to the scene root (root scale/pos removed)
+      local.multiplyMatrices(invRoot, mesh.matrixWorld);
+      tmp.copy(gb).applyMatrix4(local);
       box.union(tmp);
       found = true;
     }
