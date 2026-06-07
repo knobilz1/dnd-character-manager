@@ -60,18 +60,59 @@ const DWARF_MALE_ASSETS = {
   anims:   '/models/Dwarf_Male_Anims.glb',
   diffuse: '/models/tripo_mat_406d53e6_Diffuse.png',
 };
+const HALF_ORC_MALE_ASSETS = {
+  idle:    '/models/Half_Orc_Male_Idle.glb',
+  anims:   '/models/Half_Orc_Male_Anims.glb',
+  diffuse: '/models/tripo_mat_98033856_Diffuse.png',
+};
+const HALF_ORC_FEMALE_ASSETS = {
+  idle:    '/models/Half_Orc_Female_Idle.glb',
+  anims:   '/models/Half_Orc_Female_Anims.glb',
+  diffuse: '/models/tripo_mat_87964b1f_Diffuse.png',
+};
+// Halfling + Tiefling: own idle GLBs, borrowed human anims until dedicated clips exist.
+const HALFLING_MALE_ASSETS = {
+  idle:    '/models/Halfling_Male_Idle.glb',
+  anims:   '/models/Human_Male_Anims.glb',
+  diffuse: '/models/Halfling_Male_Diffuse.png',
+};
+const HALFLING_FEMALE_ASSETS = {
+  idle:    '/models/Halfling_Female_Idle.glb',
+  anims:   '/models/Human_Female_Anims.glb',
+  diffuse: '/models/Halfling_Female_Diffuse.png',
+};
+const TIEFLING_MALE_ASSETS = {
+  idle:    '/models/Tiefling_Male_Idle.glb',
+  anims:   '/models/Human_Male_Anims.glb',
+  diffuse: '/models/Tiefling_Male_Diffuse.png',
+};
+const TIEFLING_FEMALE_ASSETS = {
+  idle:    '/models/Tiefling_Female_Idle.glb',
+  anims:   '/models/Human_Female_Anims.glb',
+  diffuse: '/models/Tiefling_Female_Diffuse.png',
+};
 
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
 /** All known asset sets — used for bulk preloading at app startup. */
-export const ALL_ASSET_SETS: AssetSet[] = [HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS, ELF_MALE_ASSETS, ELF_FEMALE_ASSETS, DWARF_MALE_ASSETS];
+export const ALL_ASSET_SETS: AssetSet[] = [
+  HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS,
+  ELF_MALE_ASSETS, ELF_FEMALE_ASSETS,
+  DWARF_MALE_ASSETS,
+  HALF_ORC_MALE_ASSETS, HALF_ORC_FEMALE_ASSETS,
+  HALFLING_MALE_ASSETS, HALFLING_FEMALE_ASSETS,
+  TIEFLING_MALE_ASSETS, TIEFLING_FEMALE_ASSETS,
+];
 
 /** Map a raceId string to a canonical model-race key. Unmapped → 'human'. */
-function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' {
+function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' {
   if (!raceId) return 'human';
   const id = raceId.toLowerCase();
   if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
   if (id.startsWith('dwarf') || id.includes('duergar')) return 'dwarf';
+  if (id.includes('orc')) return 'halforc';           // half-orc, orc-2024
+  if (id.startsWith('halfling')) return 'halfling';
+  if (id.startsWith('tiefling')) return 'tiefling';
   return 'human';
 }
 
@@ -79,8 +120,11 @@ function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' {
  *  Falls back gracefully when a gender-specific model doesn't exist yet. */
 function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
   const race = modelRace(raceId);
-  if (race === 'elf') return gender === 'female' ? ELF_FEMALE_ASSETS : ELF_MALE_ASSETS;
-  if (race === 'dwarf') return DWARF_MALE_ASSETS; // no female dwarf model yet
+  if (race === 'elf')      return gender === 'female' ? ELF_FEMALE_ASSETS      : ELF_MALE_ASSETS;
+  if (race === 'dwarf')    return DWARF_MALE_ASSETS;   // no female dwarf model yet
+  if (race === 'halforc')  return gender === 'female' ? HALF_ORC_FEMALE_ASSETS  : HALF_ORC_MALE_ASSETS;
+  if (race === 'halfling') return gender === 'female' ? HALFLING_FEMALE_ASSETS  : HALFLING_MALE_ASSETS;
+  if (race === 'tiefling') return gender === 'female' ? TIEFLING_FEMALE_ASSETS  : TIEFLING_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 
@@ -112,9 +156,12 @@ function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
   tex.needsUpdate = true;
   const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.0 });
   root.traverse((o) => {
-    o.frustumCulled = false;
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
+    // Attached armor lives under a bone INSIDE this scene; it keeps its own glTF
+    // material (loaded by GLTFLoader) — never overwrite it with the body diffuse.
+    if (mesh.userData?.isArmor) return;
+    o.frustumCulled = false;
     mesh.castShadow    = true;
     mesh.receiveShadow = true;
     mesh.material      = mat;
@@ -172,8 +219,88 @@ function fitToViewport(scene: THREE.Object3D, targetHeight = 1.8): { scale: numb
   return { scale, yOffset };
 }
 
+// ── Armor: bone-socket attachment ────────────────────────────────────────────
+// Rigid armor pieces hang on a named skeleton bone and inherit its animated
+// transform (no skinning needed). Helmet → `head` bone. The piece is normalized
+// to a unit cube and the head bone's world scale is cancelled, so the fit
+// transform below reads in intuitive ~world-meter units regardless of the
+// character's overall fit scale. Fits are persisted per model-race in localStorage.
+const HELMET_URL = '/models/armor/helmet.glb';
+
+export type HelmetFit = { s: number; px: number; py: number; pz: number; rx: number; ry: number; rz: number };
+const DEFAULT_HELMET_FIT: HelmetFit = { s: 0.28, px: 0, py: 0.1, pz: 0, rx: 0, ry: 0, rz: 0 };
+const HELMET_FIT_PREFIX = 'armorFit:helmet:';
+
+export function loadHelmetFit(race: string): HelmetFit {
+  try {
+    const raw = localStorage.getItem(HELMET_FIT_PREFIX + race);
+    if (raw) return { ...DEFAULT_HELMET_FIT, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...DEFAULT_HELMET_FIT };
+}
+function saveHelmetFit(race: string, fit: HelmetFit) {
+  try { localStorage.setItem(HELMET_FIT_PREFIX + race, JSON.stringify(fit)); } catch { /* ignore */ }
+}
+
+/** Attaches the helmet GLB to the character's `head` bone. Renders nothing of its
+ *  own — it imperatively parents the (cloned, static) mesh onto the bone so it
+ *  rides every animation for free. */
+function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: HelmetFit }) {
+  const gltf = useLoader(GLTFLoader, HELMET_URL);
+  const fitGroupRef = React.useRef<THREE.Group | null>(null);
+
+  React.useEffect(() => {
+    const head = scene.getObjectByName('head');
+    // eslint-disable-next-line no-console
+    if (!head) { console.warn('[armor] "head" bone not found on character skeleton'); return; }
+
+    // Static prop → safe to clone (the SkeletonUtils skinning caveat does not
+    // apply; no skin here). Normalize to 1 unit tall, centered at its origin.
+    const helmet = gltf.scene.clone(true);
+    helmet.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(helmet);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    helmet.position.sub(center);
+    helmet.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) { m.castShadow = true; m.frustumCulled = false; m.userData.isArmor = true; }
+    });
+    const inner = new THREE.Group();
+    inner.add(helmet);
+    inner.scale.setScalar(1 / (size.y || 1));
+
+    // Cancel the bone's world scale so `fit` is in world-meter units, not the
+    // character's tiny rig-scale space.
+    const headWorldScale = new THREE.Vector3();
+    head.getWorldScale(headWorldScale);
+    const wrapper = new THREE.Group();
+    wrapper.scale.set(1 / (headWorldScale.x || 1), 1 / (headWorldScale.y || 1), 1 / (headWorldScale.z || 1));
+    const fitGroup = new THREE.Group();
+    fitGroup.add(inner);
+    wrapper.add(fitGroup);
+    head.add(wrapper);
+    fitGroupRef.current = fitGroup;
+
+    return () => { head.remove(wrapper); fitGroupRef.current = null; };
+  }, [scene, gltf]);
+
+  // Apply the live-adjustable fit every render (cheap — keeps the helmet in sync
+  // while the slider panel is dragged).
+  React.useEffect(() => {
+    const g = fitGroupRef.current; if (!g) return;
+    g.position.set(fit.px, fit.py, fit.pz);
+    g.rotation.set(fit.rx, fit.ry, fit.rz);
+    g.scale.setScalar(fit.s);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
 // ── Minimal character model (creator — idle GLB only, no merged anims) ────────
-function CharacterModelMinimal({ assets, onLoaded }: { assets: AssetSet; onLoaded?: () => void }) {
+function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit }: {
+  assets: AssetSet; onLoaded?: () => void; showArmor?: boolean; helmetFit?: HelmetFit;
+}) {
   const idleGltf  = useLoader(GLTFLoader, assets.idle);
   const diffuseTex = useLoader(THREE.TextureLoader, assets.diffuse);
 
@@ -200,14 +327,25 @@ function CharacterModelMinimal({ assets, onLoaded }: { assets: AssetSet; onLoade
 
   useFrame((_, delta) => mixer.update(delta));
 
-  return <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />;
+  return (
+    <>
+      <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />
+      {showArmor && (
+        <React.Suspense fallback={null}>
+          <HelmetAttachment scene={scene} fit={helmetFit ?? DEFAULT_HELMET_FIT} />
+        </React.Suspense>
+      )}
+    </>
+  );
 }
 
 // ── Full character model (sheet — idle GLB + merged anims GLB) ────────────────
-function CharacterModel({ assets, animationState, onLoaded }: {
+function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit }: {
   assets: AssetSet;
   animationState: AnimationState;
   onLoaded?: () => void;
+  showArmor?: boolean;
+  helmetFit?: HelmetFit;
 }) {
   const idleGltf   = useLoader(GLTFLoader, assets.idle);
   const animsGltf  = useLoader(GLTFLoader, assets.anims);
@@ -302,7 +440,16 @@ function CharacterModel({ assets, animationState, onLoaded }: {
     play(idleKeys[0] ?? 'idle', true, 0.5);
   }, [animationState]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />;
+  return (
+    <>
+      <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />
+      {showArmor && (
+        <React.Suspense fallback={null}>
+          <HelmetAttachment scene={scene} fit={helmetFit ?? DEFAULT_HELMET_FIT} />
+        </React.Suspense>
+      )}
+    </>
+  );
 }
 
 // ── Loading skeleton shown while assets are parsing ───────────────────────────
@@ -324,6 +471,48 @@ function ViewportLoader() {
         </div>
       </div>
       <p className="text-slate-600 text-xs tracking-widest uppercase">Loading…</p>
+    </div>
+  );
+}
+
+// ── Armor fit panel (dev tool — slider-tune a piece onto a body, persists) ────
+function ArmorFitPanel({ race, fit, onChange, onReset }: {
+  race: string; fit: HelmetFit; onChange: (f: HelmetFit) => void; onReset: () => void;
+}) {
+  const row = (label: string, key: keyof HelmetFit, min: number, max: number, step: number) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#cbd5e1' }}>
+      <span style={{ width: 16 }}>{label}</span>
+      <input
+        type="range" min={min} max={max} step={step} value={fit[key]}
+        onChange={(e) => onChange({ ...fit, [key]: parseFloat(e.target.value) })}
+        style={{ flex: 1 }}
+      />
+      <span style={{ width: 44, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fit[key].toFixed(3)}</span>
+    </label>
+  );
+  return (
+    <div style={{
+      position: 'absolute', top: 8, left: 8, zIndex: 12, width: 230, padding: 8,
+      background: 'rgba(15,21,32,0.88)', border: '1px solid rgba(203,213,225,0.2)',
+      borderRadius: 8, backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 4,
+    }}>
+      <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>
+        Helmet fit · {race}
+      </div>
+      {row('S', 's', 0.02, 1, 0.005)}
+      {row('X', 'px', -0.5, 0.5, 0.005)}
+      {row('Y', 'py', -0.5, 0.5, 0.005)}
+      {row('Z', 'pz', -0.5, 0.5, 0.005)}
+      {row('rX', 'rx', -3.15, 3.15, 0.02)}
+      {row('rY', 'ry', -3.15, 3.15, 0.02)}
+      {row('rZ', 'rz', -3.15, 3.15, 0.02)}
+      <button
+        type="button" onClick={onReset}
+        style={{
+          marginTop: 4, fontSize: 10, color: '#cbd5e1', background: 'rgba(203,213,225,0.1)',
+          border: '1px solid rgba(203,213,225,0.2)', borderRadius: 4, padding: '3px 6px', cursor: 'pointer',
+        }}
+      >Reset helmet fit</button>
     </div>
   );
 }
@@ -356,6 +545,15 @@ export default function CharacterViewport({
   minimal = false,
 }: CharacterViewportProps) {
   const assets = getAssets(raceId, gender);
+  const race = modelRace(raceId);
+
+  // Armor fitting (dev tool). Off by default — zero impact on normal users; the
+  // helmet GLB only loads when toggled on. Fit offsets persist per model-race.
+  const [showArmor, setShowArmor] = React.useState(false);
+  const [helmetFit, setHelmetFit] = React.useState<HelmetFit>(() => loadHelmetFit(race));
+  React.useEffect(() => { setHelmetFit(loadHelmetFit(race)); }, [race]);
+  const updateFit = React.useCallback((f: HelmetFit) => { setHelmetFit(f); saveHelmetFit(race, f); }, [race]);
+  const resetFit  = React.useCallback(() => updateFit({ ...DEFAULT_HELMET_FIT }), [updateFit]);
 
   // Track which asset URL has been confirmed loaded. Loading shows whenever the
   // current asset hasn't been confirmed yet. This avoids the bottom-up effect
@@ -405,6 +603,30 @@ export default function CharacterViewport({
         </button>
       )}
 
+      {/* Armor-fit toggle (dev). Highlights when on; reveals the slider panel. */}
+      {!loading && (
+        <button
+          type="button"
+          onClick={() => setShowArmor((s) => !s)}
+          title="Toggle armor / fit helmet"
+          aria-label="Toggle armor fitting"
+          style={{
+            position: 'absolute', bottom: 8, right: 42, zIndex: 11,
+            width: 28, height: 28, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: showArmor ? 'rgba(80,120,200,0.65)' : 'rgba(15,21,32,0.6)', color: '#cbd5e1',
+            border: '1px solid rgba(203,213,225,0.25)', cursor: 'pointer',
+            fontSize: 14, lineHeight: 1, backdropFilter: 'blur(4px)',
+          }}
+        >
+          ⛑
+        </button>
+      )}
+
+      {!loading && showArmor && (
+        <ArmorFitPanel race={race} fit={helmetFit} onChange={updateFit} onReset={resetFit} />
+      )}
+
       <ViewportErrorBoundary fallback={null}>
         <Canvas
           shadows
@@ -424,8 +646,8 @@ export default function CharacterViewport({
           <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
           <React.Suspense fallback={null}>
             {minimal
-              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} />
-              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} />}
+              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit} />
+              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit} />}
           </React.Suspense>
           <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
           <OrbitControls

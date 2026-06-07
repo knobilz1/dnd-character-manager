@@ -42,6 +42,9 @@ function buildIdleGlb(inputFbx, outputGlb) {
 }
 
 // ── Idle GLBs (FBX → GLB, static channels pruned) ────────────────────────────
+// Only entries where the source FBX is committed to the repo.
+// All other idle GLBs (Elf Female, Dwarf Male, Half Orc, Halfling, Tiefling, …)
+// are committed as pre-built GLBs and skipped here — CI uses them directly.
 buildIdleGlb(path.join(models, 'Human_Idle_Textured.fbx'),        path.join(models, 'Human_Male_Idle.glb'));
 buildIdleGlb(path.join(models, 'Human_Female_Idle_Textured.fbx'), path.join(models, 'Human_Female_Idle.glb'));
 buildIdleGlb(path.join(models, 'Elf_Male_Idle_Textured.fbx'),     path.join(models, 'Elf_Male_Idle.glb'));
@@ -106,5 +109,32 @@ run(path.join(models, 'Dwarf_Male_Anims.glb'), [
   path.join(models, 'Dwarf_Male_Walk_Loop.glb'),
   path.join(models, 'Dwarf_Male_Walk_End.glb'),
 ]);
+
+run(path.join(models, 'Half_Orc_Male_Anims.glb'), [
+  path.join(models, 'Half_Orc_Male_Limp_Lv1.glb'),
+  path.join(models, 'Half_Orc_Male_Limp_Lv2.glb'),
+  path.join(models, 'Half_Orc_Male_Limp_Lv3.glb'),
+  path.join(models, 'Half_Orc_Male_Dying.glb'),
+  path.join(models, 'Half_Orc_Male_Hit_Hard.glb'),
+  path.join(models, 'Half_Orc_Male_Hit_Extreme.glb'),
+  path.join(models, 'Half_Orc_Male_Walk_Start.glb'),
+  path.join(models, 'Half_Orc_Male_Walk_Loop.glb'),
+  path.join(models, 'Half_Orc_Male_Walk_End.glb'),
+]);
+
+run(path.join(models, 'Half_Orc_Female_Anims.glb'), [
+  path.join(models, 'Half_Orc_Female_Limp_Lv1.glb'),
+  path.join(models, 'Half_Orc_Female_Limp_Lv2.glb'),
+  path.join(models, 'Half_Orc_Female_Limp_Lv3.glb'),
+  path.join(models, 'Half_Orc_Female_Dying.glb'),
+  path.join(models, 'Half_Orc_Female_Hit_Hard.glb'),
+  path.join(models, 'Half_Orc_Female_Hit_Extreme.glb'),
+  path.join(models, 'Half_Orc_Female_Walk_Start.glb'),
+  path.join(models, 'Half_Orc_Female_Walk_Loop.glb'),
+  path.join(models, 'Half_Orc_Female_Walk_End.glb'),
+]);
+
+// Halfling + Tiefling: no dedicated animation clips yet — they borrow human anims at runtime.
+// Merged GLBs will be added here once Nabil uploads their animation sets.
 
 console.log('\nDone — merged animation GLBs ready.\n');
