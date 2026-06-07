@@ -402,7 +402,7 @@ export default function CharacterViewport({
         <Canvas
           shadows
           dpr={[1, 2]}
-          camera={{ position: [0, 0.95, 2.2], fov: 42 }}
+          camera={{ position: [0, 1.15, 2.8], fov: 42 }}
           gl={{ toneMapping: 4 /* ACESFilmicToneMapping */, toneMappingExposure: 1.1, alpha: true, powerPreference: 'high-performance' }}
           style={{ background: 'transparent' }}
           onCreated={({ gl }) => {
@@ -432,7 +432,7 @@ export default function CharacterViewport({
             // the foot, can't back out" bug). ~18°–100° keeps it head-to-floor.
             minPolarAngle={Math.PI * 0.1}
             maxPolarAngle={Math.PI * 0.56}
-            target={[0, 0.7, 0]}
+            target={[0, 0.95, 0]}
           />
         </Canvas>
       </ViewportErrorBoundary>
