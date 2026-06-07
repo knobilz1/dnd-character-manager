@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Tavern Sheet",
-  "version": "0.21.0",
+  "version": "0.21.2",
   "identifier": "com.nabil.dndsheet",
   "build": {
     "frontendDist": "../dist",
@@ -22,7 +22,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$RESOURCE/**"]
+      }
     }
   },
   "bundle": {
@@ -36,7 +40,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "knobilz1"
+    "publisher": "knobilz1",
+    "resources": {
+      "../public/models/**": "models/"
+    }
   },
   "plugins": {
     "updater": {
