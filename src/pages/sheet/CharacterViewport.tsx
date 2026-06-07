@@ -55,17 +55,23 @@ const ELF_FEMALE_ASSETS = {
   anims:   '/models/Elf_Female_Anims.glb',
   diffuse: '/models/tripo_mat_a4c82834_Diffuse.png',
 };
+const DWARF_MALE_ASSETS = {
+  idle:    '/models/Dwarf_Male_Idle.glb',
+  anims:   '/models/Dwarf_Male_Anims.glb',
+  diffuse: '/models/tripo_mat_406d53e6_Diffuse.png',
+};
 
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
 /** All known asset sets — used for bulk preloading at app startup. */
-export const ALL_ASSET_SETS: AssetSet[] = [HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS, ELF_MALE_ASSETS, ELF_FEMALE_ASSETS];
+export const ALL_ASSET_SETS: AssetSet[] = [HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS, ELF_MALE_ASSETS, ELF_FEMALE_ASSETS, DWARF_MALE_ASSETS];
 
 /** Map a raceId string to a canonical model-race key. Unmapped → 'human'. */
-function modelRace(raceId?: string): 'human' | 'elf' {
+function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' {
   if (!raceId) return 'human';
   const id = raceId.toLowerCase();
   if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
+  if (id.startsWith('dwarf') || id.includes('duergar')) return 'dwarf';
   return 'human';
 }
 
@@ -74,6 +80,7 @@ function modelRace(raceId?: string): 'human' | 'elf' {
 function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
   const race = modelRace(raceId);
   if (race === 'elf') return gender === 'female' ? ELF_FEMALE_ASSETS : ELF_MALE_ASSETS;
+  if (race === 'dwarf') return DWARF_MALE_ASSETS; // no female dwarf model yet
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 
