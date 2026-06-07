@@ -60,6 +60,11 @@ const DWARF_MALE_ASSETS = {
   anims:   '/models/Dwarf_Male_Anims.glb',
   diffuse: '/models/tripo_mat_406d53e6_Diffuse.png',
 };
+const DWARF_FEMALE_ASSETS = {
+  idle:    '/models/Dwarf_Female_Idle.glb',
+  anims:   '/models/Dwarf_Female_Anims.glb',
+  diffuse: '/models/Dwarf_Female_Diffuse.png',
+};
 const HALF_ORC_MALE_ASSETS = {
   idle:    '/models/Half_Orc_Male_Idle.glb',
   anims:   '/models/Half_Orc_Male_Anims.glb',
@@ -98,7 +103,7 @@ export type AssetSet = typeof HUMAN_MALE_ASSETS;
 export const ALL_ASSET_SETS: AssetSet[] = [
   HUMAN_MALE_ASSETS, HUMAN_FEMALE_ASSETS,
   ELF_MALE_ASSETS, ELF_FEMALE_ASSETS,
-  DWARF_MALE_ASSETS,
+  DWARF_MALE_ASSETS, DWARF_FEMALE_ASSETS,
   HALF_ORC_MALE_ASSETS, HALF_ORC_FEMALE_ASSETS,
   HALFLING_MALE_ASSETS, HALFLING_FEMALE_ASSETS,
   TIEFLING_MALE_ASSETS, TIEFLING_FEMALE_ASSETS,
@@ -121,7 +126,7 @@ function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'ha
 function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
   const race = modelRace(raceId);
   if (race === 'elf')      return gender === 'female' ? ELF_FEMALE_ASSETS      : ELF_MALE_ASSETS;
-  if (race === 'dwarf')    return DWARF_MALE_ASSETS;   // no female dwarf model yet
+  if (race === 'dwarf')    return gender === 'female' ? DWARF_FEMALE_ASSETS : DWARF_MALE_ASSETS;
   if (race === 'halforc')  return gender === 'female' ? HALF_ORC_FEMALE_ASSETS  : HALF_ORC_MALE_ASSETS;
   if (race === 'halfling') return gender === 'female' ? HALFLING_FEMALE_ASSETS  : HALFLING_MALE_ASSETS;
   if (race === 'tiefling') return gender === 'female' ? TIEFLING_FEMALE_ASSETS  : TIEFLING_MALE_ASSETS;
