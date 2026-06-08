@@ -558,9 +558,11 @@ function ViewportLoader() {
 }
 
 // ── Fit panel (dev tool — slider-tune a bone-attached piece onto a body) ──────
-function FitPanel({ title, race, fit, onChange, onReset, top = 8 }: {
+// Anchored to a BOTTOM corner (over the legs) so it never covers the head, which
+// is the part you're usually trying to see while fitting a helmet/hair.
+function FitPanel({ title, race, fit, onChange, onReset, side = 'left' }: {
   title: string; race: string; fit: AttachmentFit;
-  onChange: (f: AttachmentFit) => void; onReset: () => void; top?: number;
+  onChange: (f: AttachmentFit) => void; onReset: () => void; side?: 'left' | 'right';
 }) {
   const row = (label: string, key: keyof AttachmentFit, min: number, max: number, step: number) => (
     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#cbd5e1' }}>
@@ -575,7 +577,8 @@ function FitPanel({ title, race, fit, onChange, onReset, top = 8 }: {
   );
   return (
     <div style={{
-      position: 'absolute', top, left: 8, zIndex: 12, width: 230, padding: 8,
+      position: 'absolute', bottom: 44, ...(side === 'left' ? { left: 8 } : { right: 8 }), zIndex: 12, width: 210, padding: 8,
+      maxHeight: 'calc(100% - 52px)', overflowY: 'auto',
       background: 'rgba(15,21,32,0.88)', border: '1px solid rgba(203,213,225,0.2)',
       borderRadius: 8, backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 4,
     }}>
@@ -759,11 +762,10 @@ export default function CharacterViewport({
       )}
 
       {!loading && showArmor && (
-        <FitPanel title="Helmet fit" race={race} fit={helmetFit} onChange={updateFit} onReset={resetFit} top={8} />
+        <FitPanel title="Helmet fit" race={race} fit={helmetFit} onChange={updateFit} onReset={resetFit} side="left" />
       )}
       {!loading && showHairTune && hairStyle && hairStyle.id !== 'none' && (
-        <FitPanel title="Hair fit" race={race} fit={hairFit} onChange={updateHairFit} onReset={resetHairFit}
-                  top={showArmor ? 236 : 8} />
+        <FitPanel title="Hair fit" race={race} fit={hairFit} onChange={updateHairFit} onReset={resetHairFit} side="right" />
       )}
 
       {urlsReady && <ViewportErrorBoundary fallback={null}>
