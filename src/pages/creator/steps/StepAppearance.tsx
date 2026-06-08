@@ -2,6 +2,7 @@ import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { cn } from '../../../utils/cn';
 import type { CharacterGender } from '../../../types';
+import { getHairStyle, hairStylesFor, modelRace } from '../../../data/hair';
 
 const CharacterViewport = React.lazy(() => import('../../sheet/CharacterViewport'));
 
@@ -10,6 +11,10 @@ const GENDERS: { value: CharacterGender; label: string; icon: string }[] = [
   { value: 'female',    label: 'Female',    icon: '♀' },
   { value: 'nonbinary', label: 'Non-binary', icon: '⚧' },
 ];
+
+// Quick hair-color swatches (custom color still available via the picker).
+const HAIR_SWATCHES = ['#1c1410', '#3b2a1a', '#6b4423', '#a8742f', '#c9a227', '#d6cfc4', '#8a8a8a', '#b03b2e'];
+const DEFAULT_HAIR_COLOR = '#3b2a1a';
 
 // Placeholder option card — for future customisation options
 function ComingSoonCard({ label, icon }: { label: string; icon: string }) {
@@ -24,10 +29,17 @@ function ComingSoonCard({ label, icon }: { label: string; icon: string }) {
 
 export function StepAppearance() {
   const { draft, updateDraft } = useCreatorStore();
-  const gender = draft.appearance?.gender ?? 'male';
+  const appearance = draft.appearance ?? { gender: 'male' as CharacterGender };
+  const gender = appearance.gender ?? 'male';
+  const hairId = appearance.hairId ?? 'none';
+  const hairColor = appearance.hairColor ?? DEFAULT_HAIR_COLOR;
 
-  function setGender(g: CharacterGender) {
-    updateDraft({ appearance: { ...(draft.appearance ?? { gender: 'male' }), gender: g } });
+  const styles = hairStylesFor(modelRace(draft.raceId), gender);
+  const activeStyle = getHairStyle(hairId);
+  const tintable = !!activeStyle && activeStyle.id !== 'none' && activeStyle.tintable !== false;
+
+  function patch(p: Partial<typeof appearance>) {
+    updateDraft({ appearance: { ...appearance, ...p } });
   }
 
   return (
@@ -44,7 +56,15 @@ export function StepAppearance() {
                 Loading character…
               </div>
             }>
-              <CharacterViewport animationState="idle" gender={gender} raceId={draft.raceId} minimal className="w-full h-full" />
+              <CharacterViewport
+                animationState="idle"
+                gender={gender}
+                raceId={draft.raceId}
+                hairId={hairId}
+                hairColor={tintable ? hairColor : undefined}
+                minimal
+                className="w-full h-full"
+              />
             </React.Suspense>
           </div>
 
@@ -55,7 +75,7 @@ export function StepAppearance() {
               {GENDERS.map(g => (
                 <button
                   key={g.value}
-                  onClick={() => setGender(g.value)}
+                  onClick={() => patch({ gender: g.value })}
                   className={cn(
                     'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all border',
                     gender === g.value
@@ -87,18 +107,69 @@ export function StepAppearance() {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-400">Hair</span>
-                <span className="text-slate-600 italic">Default</span>
+                <span className="text-white font-medium flex items-center gap-2">
+                  {activeStyle?.label ?? 'Default'}
+                  {tintable && <span className="w-3.5 h-3.5 rounded-full border border-slate-500" style={{ background: hairColor }} />}
+                </span>
               </div>
             </div>
           </div>
 
+          {/* Hair style picker */}
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Hair Style</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {styles.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => patch({ hairId: s.id })}
+                  className={cn(
+                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm font-medium transition-all border',
+                    hairId === s.id
+                      ? 'bg-red-700 border-red-600 text-white'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white',
+                  )}
+                >
+                  <span className="text-base leading-none">{s.id === 'none' ? '🚫' : '💇'}</span>
+                  <span className="text-xs">{s.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Hair colour */}
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Hair Colour</h3>
+            <div className={cn('flex items-center gap-2 flex-wrap', !tintable && 'opacity-40 pointer-events-none')}>
+              {HAIR_SWATCHES.map(c => (
+                <button
+                  key={c}
+                  onClick={() => patch({ hairColor: c })}
+                  title={c}
+                  className={cn(
+                    'w-7 h-7 rounded-full border-2 transition-transform hover:scale-110',
+                    hairColor.toLowerCase() === c.toLowerCase() ? 'border-white' : 'border-slate-600',
+                  )}
+                  style={{ background: c }}
+                />
+              ))}
+              <label className="w-7 h-7 rounded-full border-2 border-slate-600 overflow-hidden cursor-pointer relative" title="Custom colour">
+                <input
+                  type="color"
+                  value={hairColor}
+                  onChange={(e) => patch({ hairColor: e.target.value })}
+                  className="absolute inset-0 w-[150%] h-[150%] -left-1/4 -top-1/4 cursor-pointer"
+                />
+              </label>
+            </div>
+            {!tintable && <p className="text-xs text-slate-600 mt-2">Colour applies once a hairstyle is selected.</p>}
+          </div>
+
           {/* Future options — shown as coming-soon placeholders */}
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Customisation</h3>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">More Customisation</h3>
             <div className="grid grid-cols-2 gap-3">
               <ComingSoonCard label="Skin Tone" icon="🎨" />
-              <ComingSoonCard label="Hair Style" icon="💇" />
-              <ComingSoonCard label="Hair Colour" icon="🎭" />
               <ComingSoonCard label="Eye Colour" icon="👁️" />
             </div>
           </div>

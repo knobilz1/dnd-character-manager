@@ -1414,6 +1414,8 @@ function Character3DCard() {
   const exhaustion    = useCharacterStore((s) => s.character?.exhaustionLevel ?? 0);
   const conditions    = useCharacterStore((s) => s.character?.conditions ?? []);
   const gender        = useCharacterStore((s) => s.character?.appearance?.gender ?? 'male');
+  const hairId        = useCharacterStore((s) => s.character?.appearance?.hairId);
+  const hairColor     = useCharacterStore((s) => s.character?.appearance?.hairColor);
   const raceId        = useCharacterStore((s) => s.character?.raceId ?? '');
 
   const effectiveMax  = exhaustion >= 4 ? Math.floor(maxHP / 2) : maxHP;
@@ -1496,7 +1498,7 @@ function Character3DCard() {
               </div>
             }
           >
-            <CharacterViewport animationState={animState} gender={gender} raceId={raceId} className="w-full h-full" />
+            <CharacterViewport animationState={animState} gender={gender} raceId={raceId} hairId={hairId} hairColor={hairColor} className="w-full h-full" />
           </React.Suspense>
         </div>
       )}

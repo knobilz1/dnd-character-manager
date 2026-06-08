@@ -466,7 +466,13 @@ export type CharacterGender = 'male' | 'female' | 'nonbinary';
 
 export interface CharacterAppearance {
   gender: CharacterGender;
-  // Future: skinTone, hairStyle, hairColor, eyeColor, cosmetics (helmet/cloak/boots/gloves)
+  /** Selected hairstyle id from HAIR_STYLES (src/data/hair.ts). Undefined → the
+   *  race/gender default style. 'none' → bald. */
+  hairId?: string;
+  /** Hex color (e.g. '#3b2a1a') applied as a runtime tint to the hair mesh.
+   *  Undefined → the hair's native texture color. Ignored if the style isn't tintable. */
+  hairColor?: string;
+  // Future: skinTone, eyeColor, cosmetics (cloak/boots/gloves)
 }
 
 export interface Character {

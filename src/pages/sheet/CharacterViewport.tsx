@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import * as THREE from 'three';
 import { modelUrl, initModelUrls, NEEDS_TAURI_MODEL_INIT } from '../../utils/modelUrl';
+import { getHairStyle, hairUrlFor, modelRace } from '../../data/hair';
 
 // The merged *_Anims.glb files are compressed with EXT_meshopt_compression
 // (see scripts/compress-glb.cjs) — the loader needs the meshopt decoder to read
@@ -39,6 +40,10 @@ interface CharacterViewportProps {
   className?: string;
   /** Minimal mode: only loads the idle GLB (no merged anims GLB). Use in creator. */
   minimal?: boolean;
+  /** Selected hairstyle id (HAIR_STYLES). Undefined/'none' → no hair attachment. */
+  hairId?: string;
+  /** Hex color tint for the hair mesh (e.g. '#3b2a1a'). */
+  hairColor?: string;
 }
 
 // ── Asset sets ───────────────────────────────────────────────────────────────
@@ -130,18 +135,8 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   GNOME_MALE_ASSETS, GNOME_FEMALE_ASSETS,
 ];
 
-/** Map a raceId string to a canonical model-race key. Unmapped → 'human'. */
-function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' | 'gnome' {
-  if (!raceId) return 'human';
-  const id = raceId.toLowerCase();
-  if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
-  if (id.startsWith('dwarf') || id.includes('duergar')) return 'dwarf';
-  if (id.includes('orc')) return 'halforc';           // half-orc, orc-2024
-  if (id.startsWith('halfling')) return 'halfling';
-  if (id.startsWith('tiefling')) return 'tiefling';
-  if (id.startsWith('gnome') || id.includes('svirfneblin')) return 'gnome';
-  return 'human';
-}
+// modelRace + ModelRace now live in src/data/hair.ts (a lightweight leaf module)
+// so non-3D UI can map races without importing this heavy three.js file.
 
 /** Pick the best available asset set for a given race + gender combo.
  *  Falls back gracefully when a gender-specific model doesn't exist yet. */
@@ -186,9 +181,9 @@ function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    // Attached armor lives under a bone INSIDE this scene; it keeps its own glTF
-    // material (loaded by GLTFLoader) — never overwrite it with the body diffuse.
-    if (mesh.userData?.isArmor) return;
+    // Attached props (armor, hair) live under a bone INSIDE this scene; they keep
+    // their own glTF material — never overwrite it with the body diffuse.
+    if (mesh.userData?.isArmor || mesh.userData?.isHair) return;
     o.frustumCulled = false;
     mesh.castShadow    = true;
     mesh.receiveShadow = true;
@@ -247,73 +242,100 @@ function fitToViewport(scene: THREE.Object3D, targetHeight = 1.8): { scale: numb
   return { scale, yOffset };
 }
 
-// ── Armor: bone-socket attachment ────────────────────────────────────────────
-// Rigid armor pieces hang on a named skeleton bone and inherit its animated
-// transform (no skinning needed). Helmet → `head` bone. The piece is normalized
-// to a unit cube and the head bone's world scale is cancelled, so the fit
-// transform below reads in intuitive ~world-meter units regardless of the
-// character's overall fit scale. Fits are persisted per model-race in localStorage.
+// ── Bone-socket attachments (armor + hair) ───────────────────────────────────
+// Rigid props hang on a named skeleton bone and inherit its animated transform
+// (no skinning needed). Helmet & hair → `head` bone. The piece is normalized to a
+// unit cube and the bone's world scale is cancelled, so the fit transform reads in
+// intuitive ~world-meter units regardless of the character's overall fit scale.
+// Fits are persisted per model-race (and per hair style) in localStorage.
 const HELMET_URL = 'armor/helmet.glb';
 
-export type HelmetFit = { s: number; px: number; py: number; pz: number; rx: number; ry: number; rz: number };
-const DEFAULT_HELMET_FIT: HelmetFit = { s: 0.28, px: 0, py: 0.1, pz: 0, rx: 0, ry: 0, rz: 0 };
-const HELMET_FIT_PREFIX = 'armorFit:helmet:';
+/** Scale + position + rotation offsets for a bone-attached prop. */
+export type AttachmentFit = { s: number; px: number; py: number; pz: number; rx: number; ry: number; rz: number };
+/** @deprecated alias kept for back-compat — use AttachmentFit. */
+export type HelmetFit = AttachmentFit;
 
-export function loadHelmetFit(race: string): HelmetFit {
+const DEFAULT_HELMET_FIT: AttachmentFit = { s: 0.28, px: 0, py: 0.1, pz: 0, rx: 0, ry: 0, rz: 0 };
+/** Base hair default — overridable per race via HairStyle.defaultFitByRace. */
+export const DEFAULT_HAIR_FIT: AttachmentFit = { s: 0.30, px: 0, py: 0.12, pz: 0, rx: 0, ry: 0, rz: 0 };
+
+/** Generic per-race(+variant) fit persistence. */
+export function loadFit(prefix: string, race: string, fallback: AttachmentFit): AttachmentFit {
   try {
-    const raw = localStorage.getItem(HELMET_FIT_PREFIX + race);
-    if (raw) return { ...DEFAULT_HELMET_FIT, ...JSON.parse(raw) };
+    const raw = localStorage.getItem(prefix + race);
+    if (raw) return { ...fallback, ...JSON.parse(raw) };
   } catch { /* ignore */ }
-  return { ...DEFAULT_HELMET_FIT };
+  return { ...fallback };
 }
-function saveHelmetFit(race: string, fit: HelmetFit) {
-  try { localStorage.setItem(HELMET_FIT_PREFIX + race, JSON.stringify(fit)); } catch { /* ignore */ }
+function saveFit(prefix: string, race: string, fit: AttachmentFit) {
+  try { localStorage.setItem(prefix + race, JSON.stringify(fit)); } catch { /* ignore */ }
 }
 
-/** Attaches the helmet GLB to the character's `head` bone. Renders nothing of its
- *  own — it imperatively parents the (cloned, static) mesh onto the bone so it
- *  rides every animation for free. */
-function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: HelmetFit }) {
-  const gltf = useLoader(GLTFLoader, modelUrl(HELMET_URL), withMeshopt);
+export const loadHelmetFit = (race: string) => loadFit('armorFit:helmet:', race, DEFAULT_HELMET_FIT);
+const saveHelmetFit = (race: string, fit: AttachmentFit) => saveFit('armorFit:helmet:', race, fit);
+export const loadHairFit = (race: string, styleId: string, fallback = DEFAULT_HAIR_FIT) =>
+  loadFit(`hairFit:${styleId}:`, race, fallback);
+const saveHairFit = (race: string, styleId: string, fit: AttachmentFit) =>
+  saveFit(`hairFit:${styleId}:`, race, fit);
+
+/** Attaches a rigid GLB prop to a named bone on the character. Renders nothing of
+ *  its own — it imperatively parents the (cloned, static) mesh onto the bone so it
+ *  rides every animation for free. `tint` recolors the prop's materials live
+ *  (used for hair color); `tag` marks the meshes so applyTexture skips them. */
+function BoneAttachment({ scene, url, boneName, fit, tint, tag }: {
+  scene: THREE.Object3D; url: string; boneName: string; fit: AttachmentFit;
+  tint?: string; tag: 'isArmor' | 'isHair';
+}) {
+  const gltf = useLoader(GLTFLoader, modelUrl(url), withMeshopt);
   const fitGroupRef = React.useRef<THREE.Group | null>(null);
+  const matsRef = React.useRef<THREE.MeshStandardMaterial[]>([]);
 
   React.useEffect(() => {
-    const head = scene.getObjectByName('head');
+    const bone = scene.getObjectByName(boneName);
     // eslint-disable-next-line no-console
-    if (!head) { console.warn('[armor] "head" bone not found on character skeleton'); return; }
+    if (!bone) { console.warn(`[attach] "${boneName}" bone not found on character skeleton`); return; }
 
     // Static prop → safe to clone (the SkeletonUtils skinning caveat does not
     // apply; no skin here). Normalize to 1 unit tall, centered at its origin.
-    const helmet = gltf.scene.clone(true);
-    helmet.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(helmet);
+    const prop = gltf.scene.clone(true);
+    prop.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(prop);
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
-    helmet.position.sub(center);
-    helmet.traverse((o) => {
+    prop.position.sub(center);
+    const mats: THREE.MeshStandardMaterial[] = [];
+    prop.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh) { m.castShadow = true; m.frustumCulled = false; m.userData.isArmor = true; }
+      if (!m.isMesh) return;
+      m.castShadow = true; m.frustumCulled = false; m.userData[tag] = true;
+      // Clone material so a runtime tint never mutates the shared cached GLTF
+      // material (other characters / the cache would inherit the color).
+      if (tint) {
+        const cloned = (m.material as THREE.Material).clone() as THREE.MeshStandardMaterial;
+        m.material = cloned; mats.push(cloned);
+      }
     });
+    matsRef.current = mats;
     const inner = new THREE.Group();
-    inner.add(helmet);
+    inner.add(prop);
     inner.scale.setScalar(1 / (size.y || 1));
 
     // Cancel the bone's world scale so `fit` is in world-meter units, not the
     // character's tiny rig-scale space.
-    const headWorldScale = new THREE.Vector3();
-    head.getWorldScale(headWorldScale);
+    const boneWorldScale = new THREE.Vector3();
+    bone.getWorldScale(boneWorldScale);
     const wrapper = new THREE.Group();
-    wrapper.scale.set(1 / (headWorldScale.x || 1), 1 / (headWorldScale.y || 1), 1 / (headWorldScale.z || 1));
+    wrapper.scale.set(1 / (boneWorldScale.x || 1), 1 / (boneWorldScale.y || 1), 1 / (boneWorldScale.z || 1));
     const fitGroup = new THREE.Group();
     fitGroup.add(inner);
     wrapper.add(fitGroup);
-    head.add(wrapper);
+    bone.add(wrapper);
     fitGroupRef.current = fitGroup;
 
-    return () => { head.remove(wrapper); fitGroupRef.current = null; };
-  }, [scene, gltf]);
+    return () => { bone.remove(wrapper); fitGroupRef.current = null; matsRef.current = []; };
+  }, [scene, gltf, boneName, tag, tint]);
 
-  // Apply the live-adjustable fit every render (cheap — keeps the helmet in sync
+  // Apply the live-adjustable fit every render (cheap — keeps the prop in sync
   // while the slider panel is dragged).
   React.useEffect(() => {
     const g = fitGroupRef.current; if (!g) return;
@@ -322,12 +344,31 @@ function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: HelmetFi
     g.scale.setScalar(fit.s);
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Re-apply tint when it changes.
+  React.useEffect(() => {
+    if (!tint) return;
+    for (const m of matsRef.current) m.color.set(tint);
+  }, [tint]);
+
   return null;
 }
 
+/** Helmet on the `head` bone — thin wrapper over BoneAttachment. */
+function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: AttachmentFit }) {
+  return <BoneAttachment scene={scene} url={HELMET_URL} boneName="head" fit={fit} tag="isArmor" />;
+}
+
+/** Hair on the `head` bone — thin wrapper over BoneAttachment with color tint. */
+function HairAttachment({ scene, url, fit, tint }: {
+  scene: THREE.Object3D; url: string; fit: AttachmentFit; tint?: string;
+}) {
+  return <BoneAttachment scene={scene} url={url} boneName="head" fit={fit} tint={tint} tag="isHair" />;
+}
+
 // ── Minimal character model (creator — idle GLB only, no merged anims) ────────
-function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit }: {
-  assets: AssetSet; onLoaded?: () => void; showArmor?: boolean; helmetFit?: HelmetFit;
+function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit, hairUrl, hairFit, hairColor }: {
+  assets: AssetSet; onLoaded?: () => void; showArmor?: boolean; helmetFit?: AttachmentFit;
+  hairUrl?: string; hairFit?: AttachmentFit; hairColor?: string;
 }) {
   const idleGltf  = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
   const diffuseTex = useLoader(THREE.TextureLoader, modelUrl(assets.diffuse));
@@ -358,6 +399,11 @@ function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit }: {
   return (
     <>
       <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />
+      {hairUrl && (
+        <React.Suspense fallback={null}>
+          <HairAttachment scene={scene} url={hairUrl} fit={hairFit ?? DEFAULT_HAIR_FIT} tint={hairColor} />
+        </React.Suspense>
+      )}
       {showArmor && (
         <React.Suspense fallback={null}>
           <HelmetAttachment scene={scene} fit={helmetFit ?? DEFAULT_HELMET_FIT} />
@@ -368,12 +414,15 @@ function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit }: {
 }
 
 // ── Full character model (sheet — idle GLB + merged anims GLB) ────────────────
-function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit }: {
+function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit, hairUrl, hairFit, hairColor }: {
   assets: AssetSet;
   animationState: AnimationState;
   onLoaded?: () => void;
   showArmor?: boolean;
-  helmetFit?: HelmetFit;
+  helmetFit?: AttachmentFit;
+  hairUrl?: string;
+  hairFit?: AttachmentFit;
+  hairColor?: string;
 }) {
   const idleGltf   = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
   const animsGltf  = useLoader(GLTFLoader, modelUrl(assets.anims), withMeshopt);
@@ -471,6 +520,11 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit
   return (
     <>
       <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />
+      {hairUrl && (
+        <React.Suspense fallback={null}>
+          <HairAttachment scene={scene} url={hairUrl} fit={hairFit ?? DEFAULT_HAIR_FIT} tint={hairColor} />
+        </React.Suspense>
+      )}
       {showArmor && (
         <React.Suspense fallback={null}>
           <HelmetAttachment scene={scene} fit={helmetFit ?? DEFAULT_HELMET_FIT} />
@@ -503,11 +557,12 @@ function ViewportLoader() {
   );
 }
 
-// ── Armor fit panel (dev tool — slider-tune a piece onto a body, persists) ────
-function ArmorFitPanel({ race, fit, onChange, onReset }: {
-  race: string; fit: HelmetFit; onChange: (f: HelmetFit) => void; onReset: () => void;
+// ── Fit panel (dev tool — slider-tune a bone-attached piece onto a body) ──────
+function FitPanel({ title, race, fit, onChange, onReset, top = 8 }: {
+  title: string; race: string; fit: AttachmentFit;
+  onChange: (f: AttachmentFit) => void; onReset: () => void; top?: number;
 }) {
-  const row = (label: string, key: keyof HelmetFit, min: number, max: number, step: number) => (
+  const row = (label: string, key: keyof AttachmentFit, min: number, max: number, step: number) => (
     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#cbd5e1' }}>
       <span style={{ width: 16 }}>{label}</span>
       <input
@@ -520,12 +575,12 @@ function ArmorFitPanel({ race, fit, onChange, onReset }: {
   );
   return (
     <div style={{
-      position: 'absolute', top: 8, left: 8, zIndex: 12, width: 230, padding: 8,
+      position: 'absolute', top, left: 8, zIndex: 12, width: 230, padding: 8,
       background: 'rgba(15,21,32,0.88)', border: '1px solid rgba(203,213,225,0.2)',
       borderRadius: 8, backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 4,
     }}>
       <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1 }}>
-        Helmet fit · {race}
+        {title} · {race}
       </div>
       {row('S', 's', 0.02, 1, 0.005)}
       {row('X', 'px', -0.5, 0.5, 0.005)}
@@ -540,7 +595,7 @@ function ArmorFitPanel({ race, fit, onChange, onReset }: {
           marginTop: 4, fontSize: 10, color: '#cbd5e1', background: 'rgba(203,213,225,0.1)',
           border: '1px solid rgba(203,213,225,0.2)', borderRadius: 4, padding: '3px 6px', cursor: 'pointer',
         }}
-      >Reset helmet fit</button>
+      >Reset fit</button>
     </div>
   );
 }
@@ -571,6 +626,8 @@ export default function CharacterViewport({
   raceId,
   className,
   minimal = false,
+  hairId,
+  hairColor,
 }: CharacterViewportProps) {
   const assets = getAssets(raceId, gender);
   const race = modelRace(raceId);
@@ -587,10 +644,30 @@ export default function CharacterViewport({
   // Armor fitting (dev tool). Off by default — zero impact on normal users; the
   // helmet GLB only loads when toggled on. Fit offsets persist per model-race.
   const [showArmor, setShowArmor] = React.useState(false);
-  const [helmetFit, setHelmetFit] = React.useState<HelmetFit>(() => loadHelmetFit(race));
+  const [helmetFit, setHelmetFit] = React.useState<AttachmentFit>(() => loadHelmetFit(race));
   React.useEffect(() => { setHelmetFit(loadHelmetFit(race)); }, [race]);
-  const updateFit = React.useCallback((f: HelmetFit) => { setHelmetFit(f); saveHelmetFit(race, f); }, [race]);
+  const updateFit = React.useCallback((f: AttachmentFit) => { setHelmetFit(f); saveHelmetFit(race, f); }, [race]);
   const resetFit  = React.useCallback(() => updateFit({ ...DEFAULT_HELMET_FIT }), [updateFit]);
+
+  // Hair. The selected style renders normally (driven by props); the 💇 dev
+  // toggle forces the placeholder 'test' style so per-race hair fit can be tuned
+  // even when no hair is otherwise selected.
+  const [showHairTune, setShowHairTune] = React.useState(false);
+  const activeHairId = hairId ?? (showHairTune ? 'test' : undefined);
+  const hairStyle = getHairStyle(activeHairId);
+  const hairBaseFit = (hairStyle?.defaultFitByRace?.[race]) ?? DEFAULT_HAIR_FIT;
+  const [hairFit, setHairFit] = React.useState<AttachmentFit>(() => loadHairFit(race, activeHairId ?? '', hairBaseFit));
+  React.useEffect(() => { setHairFit(loadHairFit(race, activeHairId ?? '', hairBaseFit)); },
+    [race, activeHairId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const updateHairFit = React.useCallback((f: AttachmentFit) => {
+    setHairFit(f); if (activeHairId) saveHairFit(race, activeHairId, f);
+  }, [race, activeHairId]);
+  const resetHairFit = React.useCallback(() => updateHairFit({ ...hairBaseFit }), [updateHairFit, hairBaseFit]);
+
+  // Resolve the hair mesh URL (per-race override wins). 'none'/unset → no hair.
+  // A closed helmet hides the hair entirely (avoids clipping through the helm).
+  const hairUrl = hairStyle && hairStyle.id !== 'none' ? hairUrlFor(hairStyle, race) : undefined;
+  const effectiveHairUrl = showArmor ? undefined : hairUrl;
 
   // Track which asset URL has been confirmed loaded. Loading shows whenever the
   // current asset hasn't been confirmed yet. This avoids the bottom-up effect
@@ -660,8 +737,33 @@ export default function CharacterViewport({
         </button>
       )}
 
+      {/* Hair-fit toggle (dev). Forces the placeholder hair so per-race hair fit
+          can be tuned; reveals the hair slider panel. */}
+      {!loading && (
+        <button
+          type="button"
+          onClick={() => setShowHairTune((s) => !s)}
+          title="Toggle hair fitting (dev)"
+          aria-label="Toggle hair fitting"
+          style={{
+            position: 'absolute', bottom: 8, right: 76, zIndex: 11,
+            width: 28, height: 28, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: showHairTune ? 'rgba(80,120,200,0.65)' : 'rgba(15,21,32,0.6)', color: '#cbd5e1',
+            border: '1px solid rgba(203,213,225,0.25)', cursor: 'pointer',
+            fontSize: 14, lineHeight: 1, backdropFilter: 'blur(4px)',
+          }}
+        >
+          💇
+        </button>
+      )}
+
       {!loading && showArmor && (
-        <ArmorFitPanel race={race} fit={helmetFit} onChange={updateFit} onReset={resetFit} />
+        <FitPanel title="Helmet fit" race={race} fit={helmetFit} onChange={updateFit} onReset={resetFit} top={8} />
+      )}
+      {!loading && showHairTune && hairStyle && hairStyle.id !== 'none' && (
+        <FitPanel title="Hair fit" race={race} fit={hairFit} onChange={updateHairFit} onReset={resetHairFit}
+                  top={showArmor ? 236 : 8} />
       )}
 
       {urlsReady && <ViewportErrorBoundary fallback={null}>
@@ -683,8 +785,10 @@ export default function CharacterViewport({
           <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
           <React.Suspense fallback={null}>
             {minimal
-              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit} />
-              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit} />}
+              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit}
+                  hairUrl={effectiveHairUrl} hairFit={hairFit} hairColor={hairColor} />
+              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit}
+                  hairUrl={effectiveHairUrl} hairFit={hairFit} hairColor={hairColor} />}
           </React.Suspense>
           <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
           <OrbitControls
