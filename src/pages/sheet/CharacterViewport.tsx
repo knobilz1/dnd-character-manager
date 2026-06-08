@@ -105,6 +105,17 @@ const TIEFLING_FEMALE_ASSETS = {
   anims:   'Human_Female_Anims.glb',
   diffuse: 'Tiefling_Female_Diffuse.png',
 };
+// Gnome: AccuRig'd idle GLBs, borrows human anims until dedicated clips exist.
+const GNOME_MALE_ASSETS = {
+  idle:    'Gnome_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Gnome_Male_Diffuse.png',
+};
+const GNOME_FEMALE_ASSETS = {
+  idle:    'Gnome_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Gnome_Female_Diffuse.png',
+};
 
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
@@ -116,10 +127,11 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   HALF_ORC_MALE_ASSETS, HALF_ORC_FEMALE_ASSETS,
   HALFLING_MALE_ASSETS, HALFLING_FEMALE_ASSETS,
   TIEFLING_MALE_ASSETS, TIEFLING_FEMALE_ASSETS,
+  GNOME_MALE_ASSETS, GNOME_FEMALE_ASSETS,
 ];
 
 /** Map a raceId string to a canonical model-race key. Unmapped → 'human'. */
-function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' {
+function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' | 'gnome' {
   if (!raceId) return 'human';
   const id = raceId.toLowerCase();
   if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
@@ -127,6 +139,7 @@ function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'ha
   if (id.includes('orc')) return 'halforc';           // half-orc, orc-2024
   if (id.startsWith('halfling')) return 'halfling';
   if (id.startsWith('tiefling')) return 'tiefling';
+  if (id.startsWith('gnome') || id.includes('svirfneblin')) return 'gnome';
   return 'human';
 }
 
@@ -135,10 +148,11 @@ function modelRace(raceId?: string): 'human' | 'elf' | 'dwarf' | 'halforc' | 'ha
 function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
   const race = modelRace(raceId);
   if (race === 'elf')      return gender === 'female' ? ELF_FEMALE_ASSETS      : ELF_MALE_ASSETS;
-  if (race === 'dwarf')    return gender === 'female' ? DWARF_FEMALE_ASSETS : DWARF_MALE_ASSETS;
+  if (race === 'dwarf')    return gender === 'female' ? DWARF_FEMALE_ASSETS    : DWARF_MALE_ASSETS;
   if (race === 'halforc')  return gender === 'female' ? HALF_ORC_FEMALE_ASSETS  : HALF_ORC_MALE_ASSETS;
   if (race === 'halfling') return gender === 'female' ? HALFLING_FEMALE_ASSETS  : HALFLING_MALE_ASSETS;
   if (race === 'tiefling') return gender === 'female' ? TIEFLING_FEMALE_ASSETS  : TIEFLING_MALE_ASSETS;
+  if (race === 'gnome')    return gender === 'female' ? GNOME_FEMALE_ASSETS     : GNOME_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 
