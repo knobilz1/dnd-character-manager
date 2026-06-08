@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Tavern Sheet",
-  "version": "0.21.5",
+  "version": "0.21.6",
   "identifier": "com.nabil.dndsheet",
   "build": {
     "frontendDist": "../dist",
@@ -44,7 +44,8 @@
     "resources": {
       "../public/models/*_Idle.glb": "models/",
       "../public/models/*_Anims.glb": "models/",
-      "../public/models/*.png": "models/"
+      "../public/models/*.png": "models/",
+      "../public/models/armor/*.glb": "models/armor/"
     }
   },
   "plugins": {
