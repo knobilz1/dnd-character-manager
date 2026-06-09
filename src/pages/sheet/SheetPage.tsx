@@ -1465,6 +1465,10 @@ function Character3DCard() {
   const hpPct = effectiveMax > 0 ? currentHP / effectiveMax : 1;
   const lowHP = hpPct <= 0.25 && !isDown;
 
+  // 3D disabled (via this card's Hide button or the home-page toggle) → render
+  // nothing at all. No leftover header/pane; re-enable from the home page.
+  if (!show3DCharacter) return null;
+
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5">
@@ -1484,24 +1488,22 @@ function Character3DCard() {
           {show3DCharacter ? 'Hide' : 'Show'}
         </button>
       </div>
-      {show3DCharacter && (
-        <div className={cn(
-          'h-[340px] bg-gradient-to-b from-slate-900 to-slate-950 border-t transition-colors',
-          isDown  ? 'border-slate-600'   :
-          lowHP   ? 'border-red-700/60'  :
-                    'border-slate-700'
-        )}>
-          <React.Suspense
-            fallback={
-              <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
-                Loading 3D…
-              </div>
-            }
-          >
-            <CharacterViewport animationState={animState} gender={gender} raceId={raceId} hairId={hairId} hairColor={hairColor} className="w-full h-full" />
-          </React.Suspense>
-        </div>
-      )}
+      <div className={cn(
+        'h-[340px] bg-gradient-to-b from-slate-900 to-slate-950 border-t transition-colors',
+        isDown  ? 'border-slate-600'   :
+        lowHP   ? 'border-red-700/60'  :
+                  'border-slate-700'
+      )}>
+        <React.Suspense
+          fallback={
+            <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+              Loading 3D…
+            </div>
+          }
+        >
+          <CharacterViewport animationState={animState} gender={gender} raceId={raceId} hairId={hairId} hairColor={hairColor} className="w-full h-full" />
+        </React.Suspense>
+      </div>
     </div>
   );
 }
