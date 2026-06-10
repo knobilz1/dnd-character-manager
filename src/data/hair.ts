@@ -59,9 +59,11 @@ export interface HairStyle {
 
 export const HAIR_STYLES: HairStyle[] = [
   { id: 'none', label: 'Bald' },
-  { id: 'short_crop', label: 'Short Crop', url: 'hair/short_crop.glb', tintable: true },
   // ── Framework spike placeholder ──────────────────────────────────────────
-  // Remove once enough real hair GLBs exist.
+  // Reuses the helmet GLB as a stand-in "hair" so the full loop (picker →
+  // attachment → tint → hide-under-helmet → per-race fit) is testable before
+  // real hair art exists. Replace with real entries once hair GLBs land in
+  // public/models/hair/.
   { id: 'test', label: 'Test (placeholder)', url: 'armor/helmet.glb', tintable: true },
 ];
 
