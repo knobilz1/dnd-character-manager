@@ -138,7 +138,10 @@ export function StepSpells() {
   const spellAbilityMod = Math.floor((spellAbilityScore - 10) / 2);
   const preparedLimit = maxPreparedSpellsFor(primaryClass!.classId, charLevel, spellAbilityMod);
   const isPreparedCaster = preparedLimit !== null;
-  const isKnownCaster = knownSpellLimit > 0;
+  // Wizard starts with 6 spells in their spellbook at level 1 (PHB p.114).
+  const isSpellbookCaster = ['wizard', 'wizard-2024'].includes(primaryClass!.classId);
+  const spellbookStartLimit = isSpellbookCaster ? 6 : 0;
+  const isKnownCaster = knownSpellLimit > 0 || isSpellbookCaster;
 
   // Build set of expanded spell IDs from the subclass (e.g. Warlock patron spells).
   const expandedSpellIds = React.useMemo(() => {
@@ -180,8 +183,9 @@ export function StepSpells() {
     }
     // Enforce cantrip limit
     if (spell.level === 0 && cantripLimit > 0 && selectedCantrips >= cantripLimit) return;
-    // Enforce known-spell limit for spontaneous casters
-    if (spell.level > 0 && isKnownCaster && selectedNonCantrips >= knownSpellLimit) return;
+    // Enforce known-spell limit for spontaneous casters and spellbook casters (wizard: 6)
+    const effectiveSpellLimit = isSpellbookCaster ? spellbookStartLimit : knownSpellLimit;
+    if (spell.level > 0 && isKnownCaster && selectedNonCantrips >= effectiveSpellLimit) return;
     updateDraft({ spellbook: [...current, { spellId: spell.id, isPrepared: true, isAlwaysPrepared: false }] });
   }
 
@@ -214,11 +218,11 @@ export function StepSpells() {
         )}
         {isKnownCaster && (
           <p className="text-sm text-slate-300">
-            <span className="font-semibold text-white">Spells Known:</span>{' '}
-            <span className={selectedNonCantrips >= knownSpellLimit ? 'text-green-400 font-bold' : 'text-amber-300'}>
-              {selectedNonCantrips} / {knownSpellLimit}
+            <span className="font-semibold text-white">{isSpellbookCaster ? 'Spellbook:' : 'Spells Known:'}</span>{' '}
+            <span className={selectedNonCantrips >= (isSpellbookCaster ? spellbookStartLimit : knownSpellLimit) ? 'text-green-400 font-bold' : 'text-amber-300'}>
+              {selectedNonCantrips} / {isSpellbookCaster ? spellbookStartLimit : knownSpellLimit}
             </span>
-            {selectedNonCantrips >= knownSpellLimit && <span className="text-slate-400 ml-1">(full)</span>}
+            {selectedNonCantrips >= (isSpellbookCaster ? spellbookStartLimit : knownSpellLimit) && <span className="text-slate-400 ml-1">(full)</span>}
           </p>
         )}
         {isPreparedCaster && !isKnownCaster && (

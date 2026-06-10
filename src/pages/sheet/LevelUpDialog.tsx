@@ -453,12 +453,15 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // EK/AT are known casters with their own per-class-level spell table.
   const isSubclassKnownCaster = isSubclassSpellcaster && !!sub?.spellsKnownByClassLevel;
   const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger', 'bard-2024', 'sorcerer-2024', 'warlock-2024', 'ranger-2024'].includes(classId) || isSubclassKnownCaster;
+  // Wizard/Artificer: prepared casters but with a spellbook — gain exactly 2 free picks per level-up
+  const isSpellbookCaster = ['wizard', 'wizard-2024'].includes(classId);
   const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer', 'cleric-2024', 'druid-2024', 'paladin-2024', 'wizard-2024'].includes(classId);
 
   const spellsKnownGained = isSubclassKnownCaster
     ? Math.max(0, (sub!.spellsKnownByClassLevel![newLevel - 1] ?? 0) - (sub!.spellsKnownByClassLevel![currentLevel - 1] ?? 0))
     : isKnownCaster
       ? Math.max(0, spellsKnownFor(classId, newLevel) - spellsKnownFor(classId, currentLevel))
+      : isSpellbookCaster ? 2
       : 0;
 
   const spellcastingAbility = classDef.spellcastingAbility as AbilityKey | undefined;
@@ -1087,29 +1090,31 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
             <div className="flex items-baseline justify-between mb-1">
               <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Spells</h3>
               <span className="text-xs text-slate-400">
-                {isKnownCaster && spellsKnownGained > 0 && (
+                {(isKnownCaster || isSpellbookCaster) && spellsKnownGained > 0 && (
                   <span className={cn('font-bold', pendingSpells.length >= spellsKnownGained ? 'text-green-400' : 'text-amber-300')}>
                     {pendingSpells.length}/{spellsKnownGained} learned
                   </span>
                 )}
-                {isPreparedCaster && newMaxPrepared > oldMaxPrepared && (
+                {isPreparedCaster && !isSpellbookCaster && newMaxPrepared > oldMaxPrepared && (
                   <span className="text-white font-bold">
                     Prepared limit: {oldMaxPrepared} → {newMaxPrepared}
                   </span>
                 )}
-                {isPreparedCaster && newMaxPrepared === oldMaxPrepared && (
+                {isPreparedCaster && !isSpellbookCaster && newMaxPrepared === oldMaxPrepared && (
                   <span className="text-slate-500">
                     Prepared limit: {newMaxPrepared}
                   </span>
                 )}
               </span>
             </div>
-            {isKnownCaster && spellsKnownGained > 0 && (
+            {(isKnownCaster || isSpellbookCaster) && spellsKnownGained > 0 && (
               <p className="text-xs text-slate-400 mb-2">
-                You learn {spellsKnownGained} new spell{spellsKnownGained > 1 ? 's' : ''}. Pick from the list below.
+                {isSpellbookCaster
+                  ? `Add ${spellsKnownGained} spells to your spellbook. You can pick any level you have slots for.`
+                  : `You learn ${spellsKnownGained} new spell${spellsKnownGained > 1 ? 's' : ''}. Pick from the list below.`}
               </p>
             )}
-            {isPreparedCaster && (
+            {isPreparedCaster && !isSpellbookCaster && (
               <p className="text-xs text-slate-400 mb-2">
                 Add spells to your spellbook — you can choose which to prepare each day.
               </p>
@@ -1167,7 +1172,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
             <div className="grid gap-1.5 sm:grid-cols-2 max-h-52 overflow-y-auto scrollbar-thin pr-1">
               {availableSpells.map(sp => {
-                const canAdd = isPreparedCaster || (isKnownCaster && pendingSpells.length < spellsKnownGained);
+                const canAdd = (isPreparedCaster && !isSpellbookCaster) || ((isKnownCaster || isSpellbookCaster) && pendingSpells.length < spellsKnownGained);
                 return (
                   <HoverCard key={sp.id} content={
                     <div>

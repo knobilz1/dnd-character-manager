@@ -1441,6 +1441,15 @@ function Character3DCard() {
     prevHP.current = currentHP;
 
     if (isDown) {
+      if (damage > 0) {
+        // Took lethal damage — play hurt clip first, then collapse.
+        const ratio = effectiveMax > 0 ? damage / effectiveMax : 1;
+        const hurtState = ratio >= 0.25 ? 'hurt-heavy' : 'hurt-light';
+        setAnimState(hurtState);
+        const dur = hurtState === 'hurt-heavy' ? 1400 : 800;
+        const t = setTimeout(() => setAnimState('down'), dur);
+        return () => clearTimeout(t);
+      }
       setAnimState('down');
       return;
     }
