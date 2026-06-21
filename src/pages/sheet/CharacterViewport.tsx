@@ -571,20 +571,51 @@ function FitPanel({ title, race, fit, onChange, onReset, side = 'left' }: {
   title: string; race: string; fit: AttachmentFit;
   onChange: (f: AttachmentFit) => void; onReset: () => void; side?: 'left' | 'right';
 }) {
-  const row = (label: string, key: keyof AttachmentFit, min: number, max: number, step: number) => (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#cbd5e1' }}>
-      <span style={{ width: 16 }}>{label}</span>
-      <input
-        type="range" min={min} max={max} step={step} value={fit[key]}
-        onChange={(e) => onChange({ ...fit, [key]: parseFloat(e.target.value) })}
-        style={{ flex: 1 }}
-      />
-      <span style={{ width: 44, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fit[key].toFixed(3)}</span>
-    </label>
-  );
+  // Local draft text per field so typing doesn't clobber mid-entry
+  const [drafts, setDrafts] = React.useState<Partial<Record<keyof AttachmentFit, string>>>({});
+
+  const row = (label: string, key: keyof AttachmentFit, min: number, max: number, step: number) => {
+    const draft = drafts[key];
+    const displayVal = draft ?? fit[key].toFixed(3);
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#cbd5e1' }}>
+        <span style={{ width: 16 }}>{label}</span>
+        <input
+          type="range" min={min} max={max} step={step} value={fit[key]}
+          onChange={(e) => { setDrafts((d) => ({ ...d, [key]: undefined })); onChange({ ...fit, [key]: parseFloat(e.target.value) }); }}
+          style={{ flex: 1 }}
+        />
+        <input
+          type="text" inputMode="decimal" value={displayVal}
+          onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+          onBlur={(e) => {
+            const v = parseFloat(e.target.value);
+            setDrafts((d) => ({ ...d, [key]: undefined }));
+            if (!isNaN(v)) onChange({ ...fit, [key]: v });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              const delta = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? step * 10 : step);
+              const next = Math.round((fit[key] + delta) * 1000) / 1000;
+              setDrafts((d) => ({ ...d, [key]: undefined }));
+              onChange({ ...fit, [key]: next });
+            }
+          }}
+          style={{
+            width: 52, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+            background: 'rgba(203,213,225,0.08)', border: '1px solid rgba(203,213,225,0.2)',
+            borderRadius: 3, color: '#e2e8f0', fontSize: 10, padding: '1px 3px',
+          }}
+        />
+      </div>
+    );
+  };
+
   return (
     <div style={{
-      position: 'absolute', bottom: 44, ...(side === 'left' ? { left: 8 } : { right: 8 }), zIndex: 12, width: 210, padding: 8,
+      position: 'absolute', bottom: 44, ...(side === 'left' ? { left: 8 } : { right: 8 }), zIndex: 12, width: 230, padding: 8,
       maxHeight: 'calc(100% - 52px)', overflowY: 'auto',
       background: 'rgba(15,21,32,0.88)', border: '1px solid rgba(203,213,225,0.2)',
       borderRadius: 8, backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: 4,
@@ -600,7 +631,7 @@ function FitPanel({ title, race, fit, onChange, onReset, side = 'left' }: {
       {row('rY', 'ry', -3.15, 3.15, 0.02)}
       {row('rZ', 'rz', -3.15, 3.15, 0.02)}
       <button
-        type="button" onClick={onReset}
+        type="button" onClick={() => { setDrafts({}); onReset(); }}
         style={{
           marginTop: 4, fontSize: 10, color: '#cbd5e1', background: 'rgba(203,213,225,0.1)',
           border: '1px solid rgba(203,213,225,0.2)', borderRadius: 4, padding: '3px 6px', cursor: 'pointer',
