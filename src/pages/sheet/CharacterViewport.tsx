@@ -263,44 +263,118 @@ const DEFAULT_HELMET_FIT_BY_RACE_GENDER: Partial<Record<ModelRace, Partial<Recor
 /** Base hair default — overridable per race via HairStyle.defaultFitByRace. */
 export const DEFAULT_HAIR_FIT: AttachmentFit = { s: 0.30, px: 0, py: 0.12, pz: 0, rx: 0, ry: 0, rz: 0 };
 
-/** Generic per-race(+variant) fit persistence. */
-export function loadFit(prefix: string, race: string, fallback: AttachmentFit): AttachmentFit {
-  try {
-    const raw = localStorage.getItem(prefix + race);
-    if (raw) return { ...fallback, ...JSON.parse(raw) };
-  } catch { /* ignore */ }
-  return { ...fallback };
+/** Body key for per-character fit/override storage. */
+export const bodyKeyOf = (race: string, gender: CharacterGender) => `${race}:${gender}`;
+
+const HELMET_OVERRIDE_PREFIX = 'armorFit:helmet:';
+const hairOverridePrefix = (styleId: string) => `hairFit:${styleId}:`;
+
+/** Read a saved per-body fit override (null = none saved → use baked seed/auto). */
+function loadFitRaw(prefix: string, key: string): AttachmentFit | null {
+  try { const raw = localStorage.getItem(prefix + key); if (raw) return JSON.parse(raw); } catch { /* ignore */ }
+  return null;
 }
-function saveFit(prefix: string, race: string, fit: AttachmentFit) {
-  try { localStorage.setItem(prefix + race, JSON.stringify(fit)); } catch { /* ignore */ }
+function saveFitRaw(prefix: string, key: string, fit: AttachmentFit) {
+  try { localStorage.setItem(prefix + key, JSON.stringify(fit)); } catch { /* ignore */ }
+}
+function removeFitRaw(prefix: string, key: string) {
+  try { localStorage.removeItem(prefix + key); } catch { /* ignore */ }
 }
 
-export const loadHelmetFit = (race: string, gender?: CharacterGender) => loadFit('armorFit:helmet:', race,
-  (gender ? DEFAULT_HELMET_FIT_BY_RACE_GENDER[race as ModelRace]?.[gender] : undefined)
-  ?? DEFAULT_HELMET_FIT_BY_RACE[race as ModelRace]
-  ?? DEFAULT_HELMET_FIT);
-const saveHelmetFit = (race: string, fit: AttachmentFit) => saveFit('armorFit:helmet:', race, fit);
-export const loadHairFit = (race: string, styleId: string, fallback = DEFAULT_HAIR_FIT) =>
-  loadFit(`hairFit:${styleId}:`, race, fallback);
-const saveHairFit = (race: string, styleId: string, fit: AttachmentFit) =>
-  saveFit(`hairFit:${styleId}:`, race, fit);
+/** The hand-tuned (or saved) fit for a SPECIFIC body, or null if none exists. */
+function helmetOverrideFor(race: ModelRace, gender: CharacterGender): AttachmentFit | null {
+  return loadFitRaw(HELMET_OVERRIDE_PREFIX, bodyKeyOf(race, gender))
+    ?? DEFAULT_HELMET_FIT_BY_RACE_GENDER[race]?.[gender]
+    ?? DEFAULT_HELMET_FIT_BY_RACE[race]
+    ?? null;
+}
+function hairOverrideFor(style: { id: string; defaultFitByRaceGender?: Partial<Record<ModelRace, Partial<Record<CharacterGender, AttachmentFit>>>>; defaultFitByRace?: Partial<Record<ModelRace, AttachmentFit>> }, race: ModelRace, gender: CharacterGender): AttachmentFit | null {
+  return loadFitRaw(hairOverridePrefix(style.id), bodyKeyOf(race, gender))
+    ?? style.defaultFitByRaceGender?.[race]?.[gender]
+    ?? style.defaultFitByRace?.[race]
+    ?? null;
+}
+
+// ── Auto-fit calibration ──────────────────────────────────────────────────────
+// Every body is normalized to the same world height (fitToViewport → 1.8), so a
+// character's head height in world meters is directly comparable across races and
+// genders, and the fit transform lives in that same world-meter space (the bone's
+// world scale is cancelled). So a prop only needs ONE hand-tuned fit: store it as
+// fractions of the reference head height (a "calibration"), then for every other
+// body measure its head height and scale the fit by those fractions. Rotation is
+// identical for all bodies (shared AccuRig rig), so it carries over unchanged.
+// Net result: tune one body per prop and every race/gender auto-fits.
+type AutoCalib = { sK: number; xK: number; yK: number; zK: number; rx: number; ry: number; rz: number };
+/** Approx head height (world m) of a 1.8-tall humanoid — seeds the baked-in
+ *  calibrations and is the fallback before a body has actually been measured. */
+const REF_HEAD_H = 0.23;
+const calibFromFit = (f: AttachmentFit, headH: number): AutoCalib =>
+  ({ sK: f.s / headH, xK: f.px / headH, yK: f.py / headH, zK: f.pz / headH, rx: f.rx, ry: f.ry, rz: f.rz });
+const fitFromCalib = (c: AutoCalib, headH: number): AttachmentFit =>
+  ({ s: c.sK * headH, px: c.xK * headH, py: c.yK * headH, pz: c.zK * headH, rx: c.rx, ry: c.ry, rz: c.rz });
+
+/** Baked seed calibrations (hand-tuned elf fits ÷ REF_HEAD_H). A per-user saved
+ *  calibration (from tuning any body) overrides these. */
+const AUTO_CALIB_SEED: Record<string, AutoCalib> = {
+  helmet: calibFromFit({ s: 0.470, px: 0.055, py: -0.010, pz: 0.000, rx: -1.550, ry: -3.090, rz: 1.630 }, REF_HEAD_H),
+  'hair:short_crop': calibFromFit({ s: 0.190, px: 0.105, py: -0.015, pz: 0.005, rx: 1.070, ry: -0.430, rz: -1.170 }, REF_HEAD_H),
+  'hair:long_straight': calibFromFit({ s: 0.600, px: -0.050, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 }, REF_HEAD_H),
+};
+
+const loadCalib = (key: string): AutoCalib | null => {
+  try { const raw = localStorage.getItem(`autofit:${key}`); if (raw) return JSON.parse(raw); } catch { /* ignore */ }
+  return null;
+};
+const saveCalib = (key: string, c: AutoCalib) => {
+  try { localStorage.setItem(`autofit:${key}`, JSON.stringify(c)); } catch { /* ignore */ }
+};
+/** Effective calibration: a user-saved one wins over the baked seed. */
+const resolveCalib = (key: string): AutoCalib | null => loadCalib(key) ?? AUTO_CALIB_SEED[key] ?? null;
+
+/** Measured head heights (world m) per body key — filled as bodies render so an
+ *  edit in the dev panel can be converted to a calibration. */
+const headHeightCache = new Map<string, number>();
+
+/** Head height (world m) = top of the model bbox − the head bone's world Y. Both
+ *  are in the same world space (post fitToViewport) and the same units as the fit
+ *  transform, so calibrations transfer cleanly between bodies. */
+function measureHeadHeight(scene: THREE.Object3D, bone: THREE.Object3D): number {
+  scene.updateMatrixWorld(true);
+  const bonePos = new THREE.Vector3(); bone.getWorldPosition(bonePos);
+  const box = new THREE.Box3().setFromObject(scene);
+  return box.max.y - bonePos.y;
+}
 
 /** Attaches a rigid GLB prop to a named bone on the character. Renders nothing of
  *  its own — it imperatively parents the (cloned, static) mesh onto the bone so it
  *  rides every animation for free. `tint` recolors the prop's materials live
- *  (used for hair color); `tag` marks the meshes so applyTexture skips them. */
-function BoneAttachment({ scene, url, boneName, fit, tint, tag }: {
-  scene: THREE.Object3D; url: string; boneName: string; fit: AttachmentFit;
+ *  (used for hair color); `tag` marks the meshes so applyTexture skips them.
+ *
+ *  Fit: if `manualFit` is given (a hand-tuned / saved fit for THIS body) it's used
+ *  verbatim. Otherwise the fit is auto-derived from the prop's calibration scaled
+ *  by this body's measured head height (see "Auto-fit calibration"). The effective
+ *  fit is reported up via `onEffectiveFit` so the dev panel can display it. */
+function BoneAttachment({ scene, url, boneName, manualFit, defaultFit, calibKey, bodyKey, tint, tag, onEffectiveFit }: {
+  scene: THREE.Object3D; url: string; boneName: string;
+  manualFit: AttachmentFit | null; defaultFit: AttachmentFit;
+  calibKey: string; bodyKey: string;
   tint?: string; tag: 'isArmor' | 'isHair';
+  onEffectiveFit?: (fit: AttachmentFit) => void;
 }) {
   const gltf = useLoader(GLTFLoader, modelUrl(url), withMeshopt);
   const fitGroupRef = React.useRef<THREE.Group | null>(null);
   const matsRef = React.useRef<THREE.MeshStandardMaterial[]>([]);
+  const [headH, setHeadH] = React.useState<number | null>(() => headHeightCache.get(bodyKey) ?? null);
 
   React.useEffect(() => {
     const bone = scene.getObjectByName(boneName);
     // eslint-disable-next-line no-console
     if (!bone) { console.warn(`[attach] "${boneName}" bone not found on character skeleton`); return; }
+
+    // Measure the head BEFORE attaching the prop (so the prop doesn't pollute the
+    // body bbox). Feeds the auto-fit and the dev-panel calibration.
+    const h = measureHeadHeight(scene, bone);
+    if (isFinite(h) && h > 0) { headHeightCache.set(bodyKey, h); setHeadH(h); }
 
     // Static prop → safe to clone (the SkeletonUtils skinning caveat does not
     // apply; no skin here). Normalize to 1 unit tall, centered at its origin.
@@ -340,15 +414,36 @@ function BoneAttachment({ scene, url, boneName, fit, tint, tag }: {
     fitGroupRef.current = fitGroup;
 
     return () => { bone.remove(wrapper); fitGroupRef.current = null; matsRef.current = []; };
-  }, [scene, gltf, boneName, tag, tint]);
+  }, [scene, gltf, boneName, tag, tint, bodyKey]);
 
-  // Apply the live-adjustable fit every render (cheap — keeps the prop in sync
-  // while the slider panel is dragged).
+  // The fit actually applied: a hand-tuned/saved override wins; otherwise auto-
+  // derive from the calibration scaled by this body's head height.
+  const effective = React.useMemo<AttachmentFit>(() => {
+    if (manualFit) return manualFit;
+    const c = resolveCalib(calibKey);
+    return c ? fitFromCalib(c, headH ?? REF_HEAD_H) : defaultFit;
+  }, [manualFit, calibKey, headH, defaultFit]);
+
+  // Bootstrap the stored calibration from the first body that has a real fit, so
+  // every other body auto-fits from it (only if the user hasn't saved one yet).
+  React.useEffect(() => {
+    if (manualFit && headH && !loadCalib(calibKey)) saveCalib(calibKey, calibFromFit(manualFit, headH));
+  }, [manualFit, headH, calibKey]);
+
+  // Report the effective fit up to the dev panel (guarded against re-fire loops).
+  const lastReported = React.useRef('');
+  React.useEffect(() => {
+    const key = JSON.stringify(effective);
+    if (key !== lastReported.current) { lastReported.current = key; onEffectiveFit?.(effective); }
+  }, [effective, onEffectiveFit]);
+
+  // Apply the effective fit every render (cheap — keeps the prop in sync while the
+  // slider panel is dragged, and re-applies once the head measurement resolves).
   React.useEffect(() => {
     const g = fitGroupRef.current; if (!g) return;
-    g.position.set(fit.px, fit.py, fit.pz);
-    g.rotation.set(fit.rx, fit.ry, fit.rz);
-    g.scale.setScalar(fit.s);
+    g.position.set(effective.px, effective.py, effective.pz);
+    g.rotation.set(effective.rx, effective.ry, effective.rz);
+    g.scale.setScalar(effective.s);
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-apply tint when it changes.
@@ -361,21 +456,27 @@ function BoneAttachment({ scene, url, boneName, fit, tint, tag }: {
 }
 
 /** Helmet on the `head` bone — thin wrapper over BoneAttachment. */
-function HelmetAttachment({ scene, fit }: { scene: THREE.Object3D; fit: AttachmentFit }) {
-  return <BoneAttachment scene={scene} url={HELMET_URL} boneName="head" fit={fit} tag="isArmor" />;
+function HelmetAttachment({ scene, manualFit, bodyKey, onEffectiveFit }: {
+  scene: THREE.Object3D; manualFit: AttachmentFit | null; bodyKey: string;
+  onEffectiveFit?: (fit: AttachmentFit) => void;
+}) {
+  return <BoneAttachment scene={scene} url={HELMET_URL} boneName="head" manualFit={manualFit}
+    defaultFit={DEFAULT_HELMET_FIT} calibKey="helmet" bodyKey={bodyKey} tag="isArmor" onEffectiveFit={onEffectiveFit} />;
 }
 
 /** Hair on the `head` bone — thin wrapper over BoneAttachment with color tint. */
-function HairAttachment({ scene, url, fit, tint }: {
-  scene: THREE.Object3D; url: string; fit: AttachmentFit; tint?: string;
+function HairAttachment({ scene, url, styleId, manualFit, bodyKey, tint, onEffectiveFit }: {
+  scene: THREE.Object3D; url: string; styleId: string;
+  manualFit: AttachmentFit | null; bodyKey: string; tint?: string;
+  onEffectiveFit?: (fit: AttachmentFit) => void;
 }) {
-  return <BoneAttachment scene={scene} url={url} boneName="head" fit={fit} tint={tint} tag="isHair" />;
+  return <BoneAttachment scene={scene} url={url} boneName="head" manualFit={manualFit}
+    defaultFit={DEFAULT_HAIR_FIT} calibKey={`hair:${styleId}`} bodyKey={bodyKey} tint={tint} tag="isHair" onEffectiveFit={onEffectiveFit} />;
 }
 
 // ── Minimal character model (creator — idle GLB only, no merged anims) ────────
-function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit, hairUrl, hairFit, hairColor }: {
-  assets: AssetSet; onLoaded?: () => void; showArmor?: boolean; helmetFit?: AttachmentFit;
-  hairUrl?: string; hairFit?: AttachmentFit; hairColor?: string;
+function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetManual, hairUrl, hairStyleId, hairManual, hairColor, bodyKey, onHelmetEffective, onHairEffective }: ModelAttachmentProps & {
+  assets: AssetSet; onLoaded?: () => void;
 }) {
   const idleGltf  = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
   const diffuseTex = useLoader(THREE.TextureLoader, modelUrl(assets.diffuse));
@@ -406,30 +507,39 @@ function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetFit, hairUrl
   return (
     <>
       <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />
-      {hairUrl && (
+      {hairUrl && hairStyleId && (
         <React.Suspense fallback={null}>
-          <HairAttachment scene={scene} url={hairUrl} fit={hairFit ?? DEFAULT_HAIR_FIT} tint={hairColor} />
+          <HairAttachment scene={scene} url={hairUrl} styleId={hairStyleId} manualFit={hairManual}
+            bodyKey={bodyKey} tint={hairColor} onEffectiveFit={onHairEffective} />
         </React.Suspense>
       )}
       {showArmor && (
         <React.Suspense fallback={null}>
-          <HelmetAttachment scene={scene} fit={helmetFit ?? DEFAULT_HELMET_FIT} />
+          <HelmetAttachment scene={scene} manualFit={helmetManual} bodyKey={bodyKey} onEffectiveFit={onHelmetEffective} />
         </React.Suspense>
       )}
     </>
   );
 }
 
+/** Attachment props shared by both model components (helmet + hair wiring). */
+type ModelAttachmentProps = {
+  showArmor?: boolean;
+  helmetManual: AttachmentFit | null;
+  hairUrl?: string;
+  hairStyleId?: string;
+  hairManual: AttachmentFit | null;
+  hairColor?: string;
+  bodyKey: string;
+  onHelmetEffective?: (fit: AttachmentFit) => void;
+  onHairEffective?: (fit: AttachmentFit) => void;
+};
+
 // ── Full character model (sheet — idle GLB + merged anims GLB) ────────────────
-function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit, hairUrl, hairFit, hairColor }: {
+function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetManual, hairUrl, hairStyleId, hairManual, hairColor, bodyKey, onHelmetEffective, onHairEffective }: ModelAttachmentProps & {
   assets: AssetSet;
   animationState: AnimationState;
   onLoaded?: () => void;
-  showArmor?: boolean;
-  helmetFit?: AttachmentFit;
-  hairUrl?: string;
-  hairFit?: AttachmentFit;
-  hairColor?: string;
 }) {
   const idleGltf   = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
   const animsGltf  = useLoader(GLTFLoader, modelUrl(assets.anims), withMeshopt);
@@ -527,14 +637,15 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetFit
   return (
     <>
       <primitive object={scene} scale={scale} position={[0, yOffset, 0]} />
-      {hairUrl && (
+      {hairUrl && hairStyleId && (
         <React.Suspense fallback={null}>
-          <HairAttachment scene={scene} url={hairUrl} fit={hairFit ?? DEFAULT_HAIR_FIT} tint={hairColor} />
+          <HairAttachment scene={scene} url={hairUrl} styleId={hairStyleId} manualFit={hairManual}
+            bodyKey={bodyKey} tint={hairColor} onEffectiveFit={onHairEffective} />
         </React.Suspense>
       )}
       {showArmor && (
         <React.Suspense fallback={null}>
-          <HelmetAttachment scene={scene} fit={helmetFit ?? DEFAULT_HELMET_FIT} />
+          <HelmetAttachment scene={scene} manualFit={helmetManual} bodyKey={bodyKey} onEffectiveFit={onHelmetEffective} />
         </React.Suspense>
       )}
     </>
@@ -682,30 +793,51 @@ export default function CharacterViewport({
     initModelUrls().then(() => setUrlsReady(true));
   }, []);
 
-  // Armor fitting (dev tool). Off by default — zero impact on normal users; the
-  // helmet GLB only loads when toggled on. Fit offsets persist per model-race.
+  const bodyKey = bodyKeyOf(race, gender);
+
+  // Armor fitting (dev tool). Off by default — the helmet GLB only loads when
+  // toggled on. A per-body override (saved in the panel, or baked in code) wins;
+  // otherwise the helmet AUTO-FITS from the calibration (see "Auto-fit
+  // calibration"): you tune one body and every race/gender derives from it.
   const [showArmor, setShowArmor] = React.useState(false);
-  const [helmetFit, setHelmetFit] = React.useState<AttachmentFit>(() => loadHelmetFit(race, gender));
-  React.useEffect(() => { setHelmetFit(loadHelmetFit(race, gender)); }, [race, gender]);
-  const updateFit = React.useCallback((f: AttachmentFit) => { setHelmetFit(f); saveHelmetFit(race, f); }, [race]);
-  const resetFit  = React.useCallback(() => updateFit({ ...DEFAULT_HELMET_FIT }), [updateFit]);
+  const [helmetOverride, setHelmetOverride] = React.useState<AttachmentFit | null>(() => helmetOverrideFor(race, gender));
+  const [helmetEffective, setHelmetEffective] = React.useState<AttachmentFit | null>(null);
+  React.useEffect(() => { setHelmetOverride(helmetOverrideFor(race, gender)); setHelmetEffective(null); }, [race, gender]);
+  const helmetPanelFit = helmetOverride ?? helmetEffective ?? DEFAULT_HELMET_FIT;
+  const updateFit = React.useCallback((f: AttachmentFit) => {
+    setHelmetOverride(f);
+    saveFitRaw(HELMET_OVERRIDE_PREFIX, bodyKey, f);
+    // Tuning a body also re-calibrates so every other (un-overridden) body follows.
+    const h = headHeightCache.get(bodyKey); if (h) saveCalib('helmet', calibFromFit(f, h));
+  }, [bodyKey]);
+  const resetFit = React.useCallback(() => {
+    removeFitRaw(HELMET_OVERRIDE_PREFIX, bodyKey);
+    setHelmetOverride(DEFAULT_HELMET_FIT_BY_RACE_GENDER[race]?.[gender] ?? DEFAULT_HELMET_FIT_BY_RACE[race] ?? null);
+  }, [bodyKey, race, gender]);
 
   // Hair. The selected style renders normally (driven by props); the 💇 dev
-  // toggle forces the placeholder 'test' style so per-race hair fit can be tuned
-  // even when no hair is otherwise selected.
+  // toggle forces the placeholder 'test' style so hair fit can be tuned even when
+  // no hair is otherwise selected. Same override-wins-else-auto-fit model.
   const [showHairTune, setShowHairTune] = React.useState(false);
   const activeHairId = hairId ?? (showHairTune ? 'test' : undefined);
   const hairStyle = getHairStyle(activeHairId);
-  const hairBaseFit = hairStyle?.defaultFitByRaceGender?.[race]?.[gender]
-    ?? hairStyle?.defaultFitByRace?.[race]
-    ?? DEFAULT_HAIR_FIT;
-  const [hairFit, setHairFit] = React.useState<AttachmentFit>(() => loadHairFit(race, activeHairId ?? '', hairBaseFit));
-  React.useEffect(() => { setHairFit(loadHairFit(race, activeHairId ?? '', hairBaseFit)); },
-    [race, activeHairId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [hairOverride, setHairOverride] = React.useState<AttachmentFit | null>(() => hairStyle ? hairOverrideFor(hairStyle, race, gender) : null);
+  const [hairEffective, setHairEffective] = React.useState<AttachmentFit | null>(null);
+  React.useEffect(() => {
+    setHairOverride(hairStyle ? hairOverrideFor(hairStyle, race, gender) : null); setHairEffective(null);
+  }, [race, gender, activeHairId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hairPanelFit = hairOverride ?? hairEffective ?? DEFAULT_HAIR_FIT;
   const updateHairFit = React.useCallback((f: AttachmentFit) => {
-    setHairFit(f); if (activeHairId) saveHairFit(race, activeHairId, f);
-  }, [race, activeHairId]);
-  const resetHairFit = React.useCallback(() => updateHairFit({ ...hairBaseFit }), [updateHairFit, hairBaseFit]);
+    if (!activeHairId) return;
+    setHairOverride(f);
+    saveFitRaw(hairOverridePrefix(activeHairId), bodyKey, f);
+    const h = headHeightCache.get(bodyKey); if (h) saveCalib(`hair:${activeHairId}`, calibFromFit(f, h));
+  }, [bodyKey, activeHairId]);
+  const resetHairFit = React.useCallback(() => {
+    if (!activeHairId) return;
+    removeFitRaw(hairOverridePrefix(activeHairId), bodyKey);
+    setHairOverride(hairStyle ? (hairStyle.defaultFitByRaceGender?.[race]?.[gender] ?? hairStyle.defaultFitByRace?.[race] ?? null) : null);
+  }, [bodyKey, activeHairId, race, gender, hairStyle]);
 
   // Resolve the hair mesh URL (per-race override wins). 'none'/unset → no hair.
   // A closed helmet hides the hair entirely (avoids clipping through the helm).
@@ -838,10 +970,10 @@ export default function CharacterViewport({
       )}
 
       {!loading && showArmor && (
-        <FitPanel title="Helmet fit" race={race} fit={helmetFit} onChange={updateFit} onReset={resetFit} side="left" />
+        <FitPanel title="Helmet fit" race={bodyKey} fit={helmetPanelFit} onChange={updateFit} onReset={resetFit} side="left" />
       )}
       {!loading && showHairTune && hairStyle && hairStyle.id !== 'none' && (
-        <FitPanel title="Hair fit" race={race} fit={hairFit} onChange={updateHairFit} onReset={resetHairFit} side="right" />
+        <FitPanel title="Hair fit" race={bodyKey} fit={hairPanelFit} onChange={updateHairFit} onReset={resetHairFit} side="right" />
       )}
 
       {urlsReady && <ViewportErrorBoundary fallback={null}>
@@ -863,10 +995,14 @@ export default function CharacterViewport({
           <directionalLight position={[0, -1, 3]} intensity={0.4} color="#ffffff" />
           <React.Suspense fallback={null}>
             {minimal
-              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit}
-                  hairUrl={effectiveHairUrl} hairFit={hairFit} hairColor={hairColor} />
-              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} showArmor={showArmor} helmetFit={helmetFit}
-                  hairUrl={effectiveHairUrl} hairFit={hairFit} hairColor={hairColor} />}
+              ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} showArmor={showArmor}
+                  helmetManual={helmetOverride} hairUrl={effectiveHairUrl} hairStyleId={activeHairId}
+                  hairManual={hairOverride} hairColor={hairColor} bodyKey={bodyKey}
+                  onHelmetEffective={setHelmetEffective} onHairEffective={setHairEffective} />
+              : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} showArmor={showArmor}
+                  helmetManual={helmetOverride} hairUrl={effectiveHairUrl} hairStyleId={activeHairId}
+                  hairManual={hairOverride} hairColor={hairColor} bodyKey={bodyKey}
+                  onHelmetEffective={setHelmetEffective} onHairEffective={setHairEffective} />}
           </React.Suspense>
           <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
           <OrbitControls
