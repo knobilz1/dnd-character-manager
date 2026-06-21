@@ -686,9 +686,21 @@ export default function CharacterViewport({
   // OrbitControls ref so we can snap the camera back to its framed default.
   const controlsRef = React.useRef<React.ElementRef<typeof OrbitControls>>(null);
   const resetCamera = React.useCallback(() => {
-    // reset() restores the position0/target0/zoom0 captured at construction —
-    // i.e. the framed default the camera/target props below define.
     controlsRef.current?.reset();
+  }, []);
+
+  const CAMERA_PRESETS = {
+    body: { pos: [0, 0.95, 3.0] as [number, number, number], target: [0, 0.9, 0] as [number, number, number] },
+    head: { pos: [0, 1.68, 1.3] as [number, number, number], target: [0, 1.65, 0] as [number, number, number] },
+    feet: { pos: [0, 0.25, 1.4] as [number, number, number], target: [0, 0.15, 0] as [number, number, number] },
+  } as const;
+  const snapCamera = React.useCallback((preset: keyof typeof CAMERA_PRESETS) => {
+    const c = controlsRef.current;
+    if (!c) return;
+    const { pos, target } = CAMERA_PRESETS[preset];
+    c.object.position.set(...pos);
+    c.target.set(...target);
+    c.update();
   }, []);
 
   return (
@@ -700,6 +712,30 @@ export default function CharacterViewport({
       {loading && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 10 }}>
           <ViewportLoader />
+        </div>
+      )}
+
+      {/* Camera preset buttons — quick snap to Body / Head / Feet views. */}
+      {!loading && (
+        <div style={{ position: 'absolute', bottom: 44, left: 8, zIndex: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {(['body', 'head', 'feet'] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => snapCamera(p)}
+              title={`View: ${p}`}
+              style={{
+                height: 22, padding: '0 7px', borderRadius: 4,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(15,21,32,0.65)', color: '#94a3b8',
+                border: '1px solid rgba(203,213,225,0.2)', cursor: 'pointer',
+                fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                textTransform: 'uppercase', backdropFilter: 'blur(4px)',
+              }}
+            >
+              {p}
+            </button>
+          ))}
         </div>
       )}
 
@@ -799,14 +835,12 @@ export default function CharacterViewport({
           <OrbitControls
             ref={controlsRef}
             makeDefault
-            enablePan={false}
-            minDistance={1.2}
+            enablePan
+            screenSpacePanning
+            minDistance={0.5}
             maxDistance={5}
-            // Clamp the vertical orbit so the camera can never swing *under* the
-            // model and get stuck looking up at the feet (the random "zoomed on
-            // the foot, can't back out" bug). ~18°–100° keeps it head-to-floor.
-            minPolarAngle={Math.PI * 0.1}
-            maxPolarAngle={Math.PI * 0.56}
+            minPolarAngle={Math.PI * 0.02}
+            maxPolarAngle={Math.PI * 0.78}
             target={[0, 0.95, 0]}
           />
         </Canvas>
