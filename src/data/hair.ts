@@ -59,7 +59,11 @@ export interface HairStyle {
 
 export const HAIR_STYLES: HairStyle[] = [
   { id: 'none', label: 'Bald' },
-  { id: 'short_crop', label: 'Short Crop', url: 'hair/short_crop.glb', tintable: true },
+  { id: 'short_crop', label: 'Short Crop', url: 'hair/short_crop.glb', tintable: true,
+    defaultFitByRace: {
+      elf: { s: 0.190, px: 0.105, py: -0.015, pz: 0.005, rx: 1.070, ry: -0.430, rz: -1.170 },
+    },
+  },
   { id: 'long_straight', label: 'Long Straight', url: 'hair/long_straight.glb', tintable: true },
   // ── Framework spike placeholder ──────────────────────────────────────────
   // Remove once enough real hair GLBs exist.
