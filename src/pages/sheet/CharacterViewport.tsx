@@ -661,7 +661,9 @@ export default function CharacterViewport({
   const [showHairTune, setShowHairTune] = React.useState(false);
   const activeHairId = hairId ?? (showHairTune ? 'test' : undefined);
   const hairStyle = getHairStyle(activeHairId);
-  const hairBaseFit = (hairStyle?.defaultFitByRace?.[race]) ?? DEFAULT_HAIR_FIT;
+  const hairBaseFit = hairStyle?.defaultFitByRaceGender?.[race]?.[gender]
+    ?? hairStyle?.defaultFitByRace?.[race]
+    ?? DEFAULT_HAIR_FIT;
   const [hairFit, setHairFit] = React.useState<AttachmentFit>(() => loadHairFit(race, activeHairId ?? '', hairBaseFit));
   React.useEffect(() => { setHairFit(loadHairFit(race, activeHairId ?? '', hairBaseFit)); },
     [race, activeHairId]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -53,6 +53,8 @@ export interface HairStyle {
   perRaceUrl?: Partial<Record<ModelRace, string>>;
   /** Per-race fit offsets; falls back to DEFAULT_HAIR_FIT when unset. */
   defaultFitByRace?: Partial<Record<ModelRace, AttachmentFit>>;
+  /** Per-race-per-gender fit; wins over defaultFitByRace when both exist. */
+  defaultFitByRaceGender?: Partial<Record<ModelRace, Partial<Record<CharacterGender, AttachmentFit>>>>;
   /** Whether runtime color tint applies (default true). */
   tintable?: boolean;
 }
@@ -60,11 +62,15 @@ export interface HairStyle {
 export const HAIR_STYLES: HairStyle[] = [
   { id: 'none', label: 'Bald' },
   { id: 'short_crop', label: 'Short Crop', url: 'hair/short_crop.glb', tintable: true,
-    defaultFitByRace: {
-      elf: { s: 0.190, px: 0.105, py: -0.015, pz: 0.005, rx: 1.070, ry: -0.430, rz: -1.170 },
+    defaultFitByRaceGender: {
+      elf: { male: { s: 0.190, px: 0.105, py: -0.015, pz: 0.005, rx: 1.070, ry: -0.430, rz: -1.170 } },
     },
   },
-  { id: 'long_straight', label: 'Long Straight', url: 'hair/long_straight.glb', tintable: true },
+  { id: 'long_straight', label: 'Long Straight', url: 'hair/long_straight.glb', tintable: true,
+    defaultFitByRaceGender: {
+      elf: { female: { s: 0.600, px: -0.050, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 } },
+    },
+  },
   // ── Framework spike placeholder ──────────────────────────────────────────
   // Remove once enough real hair GLBs exist.
   { id: 'test', label: 'Test (placeholder)', url: 'armor/helmet.glb', tintable: true },
