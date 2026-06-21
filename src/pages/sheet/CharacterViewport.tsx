@@ -256,8 +256,9 @@ export type AttachmentFit = { s: number; px: number; py: number; pz: number; rx:
 export type HelmetFit = AttachmentFit;
 
 const DEFAULT_HELMET_FIT: AttachmentFit = { s: 0.28, px: 0, py: 0.1, pz: 0, rx: 0, ry: 0, rz: 0 };
-const DEFAULT_HELMET_FIT_BY_RACE: Partial<Record<ModelRace, AttachmentFit>> = {
-  elf: { s: 0.470, px: 0.055, py: -0.010, pz: 0.000, rx: -1.550, ry: -3.090, rz: 1.630 },
+const DEFAULT_HELMET_FIT_BY_RACE: Partial<Record<ModelRace, AttachmentFit>> = {};
+const DEFAULT_HELMET_FIT_BY_RACE_GENDER: Partial<Record<ModelRace, Partial<Record<CharacterGender, AttachmentFit>>>> = {
+  elf: { male: { s: 0.470, px: 0.055, py: -0.010, pz: 0.000, rx: -1.550, ry: -3.090, rz: 1.630 } },
 };
 /** Base hair default — overridable per race via HairStyle.defaultFitByRace. */
 export const DEFAULT_HAIR_FIT: AttachmentFit = { s: 0.30, px: 0, py: 0.12, pz: 0, rx: 0, ry: 0, rz: 0 };
@@ -274,7 +275,10 @@ function saveFit(prefix: string, race: string, fit: AttachmentFit) {
   try { localStorage.setItem(prefix + race, JSON.stringify(fit)); } catch { /* ignore */ }
 }
 
-export const loadHelmetFit = (race: string) => loadFit('armorFit:helmet:', race, DEFAULT_HELMET_FIT_BY_RACE[race as ModelRace] ?? DEFAULT_HELMET_FIT);
+export const loadHelmetFit = (race: string, gender?: CharacterGender) => loadFit('armorFit:helmet:', race,
+  (gender ? DEFAULT_HELMET_FIT_BY_RACE_GENDER[race as ModelRace]?.[gender] : undefined)
+  ?? DEFAULT_HELMET_FIT_BY_RACE[race as ModelRace]
+  ?? DEFAULT_HELMET_FIT);
 const saveHelmetFit = (race: string, fit: AttachmentFit) => saveFit('armorFit:helmet:', race, fit);
 export const loadHairFit = (race: string, styleId: string, fallback = DEFAULT_HAIR_FIT) =>
   loadFit(`hairFit:${styleId}:`, race, fallback);
@@ -650,8 +654,8 @@ export default function CharacterViewport({
   // Armor fitting (dev tool). Off by default — zero impact on normal users; the
   // helmet GLB only loads when toggled on. Fit offsets persist per model-race.
   const [showArmor, setShowArmor] = React.useState(false);
-  const [helmetFit, setHelmetFit] = React.useState<AttachmentFit>(() => loadHelmetFit(race));
-  React.useEffect(() => { setHelmetFit(loadHelmetFit(race)); }, [race]);
+  const [helmetFit, setHelmetFit] = React.useState<AttachmentFit>(() => loadHelmetFit(race, gender));
+  React.useEffect(() => { setHelmetFit(loadHelmetFit(race, gender)); }, [race, gender]);
   const updateFit = React.useCallback((f: AttachmentFit) => { setHelmetFit(f); saveHelmetFit(race, f); }, [race]);
   const resetFit  = React.useCallback(() => updateFit({ ...DEFAULT_HELMET_FIT }), [updateFit]);
 
