@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import * as THREE from 'three';
 import { modelUrl, initModelUrls, NEEDS_TAURI_MODEL_INIT } from '../../utils/modelUrl';
-import { getHairStyle, hairUrlFor, modelRace } from '../../data/hair';
+import { getHairStyle, hairUrlFor, modelRace, type ModelRace } from '../../data/hair';
 
 // The merged *_Anims.glb files are compressed with EXT_meshopt_compression
 // (see scripts/compress-glb.cjs) — the loader needs the meshopt decoder to read
