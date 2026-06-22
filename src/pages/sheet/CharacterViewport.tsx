@@ -318,7 +318,7 @@ const fitFromCalib = (c: AutoCalib, headH: number): AttachmentFit =>
 const AUTO_CALIB_SEED: Record<string, AutoCalib> = {
   helmet: calibFromFit({ s: 0.470, px: 0.055, py: -0.010, pz: 0.000, rx: -1.550, ry: -3.090, rz: 1.630 }, REF_HEAD_H),
   'hair:short_crop': calibFromFit({ s: 0.190, px: 0.105, py: -0.015, pz: 0.005, rx: 1.070, ry: -0.430, rz: -1.170 }, REF_HEAD_H),
-  'hair:long_straight': calibFromFit({ s: 0.600, px: -0.050, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 }, REF_HEAD_H),
+  'hair:long_straight': calibFromFit({ s: 0.600, px: 0.000, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.000, rz: -1.510 }, REF_HEAD_H),
 };
 
 const loadCalib = (key: string): AutoCalib | null => {
