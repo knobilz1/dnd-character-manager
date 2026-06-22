@@ -816,10 +816,10 @@ export default function CharacterViewport({
   }, [bodyKey, race, gender]);
 
   // Hair. The selected style renders normally (driven by props); the 💇 dev
-  // toggle forces the placeholder 'test' style so hair fit can be tuned even when
-  // no hair is otherwise selected. Same override-wins-else-auto-fit model.
+  // toggle falls back to 'short_crop' so hair fit can be tuned even when no
+  // hair is otherwise selected. Same override-wins-else-auto-fit model.
   const [showHairTune, setShowHairTune] = React.useState(false);
-  const activeHairId = hairId ?? (showHairTune ? 'test' : undefined);
+  const activeHairId = hairId ?? (showHairTune ? 'short_crop' : undefined);
   const hairStyle = getHairStyle(activeHairId);
   const [hairOverride, setHairOverride] = React.useState<AttachmentFit | null>(() => hairStyle ? hairOverrideFor(hairStyle, race, gender) : null);
   const [hairEffective, setHairEffective] = React.useState<AttachmentFit | null>(null);

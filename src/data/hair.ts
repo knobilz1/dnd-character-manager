@@ -7,15 +7,9 @@
  * per-race mesh override (`perRaceUrl`) can be supplied where a style clips badly
  * on a divergent head shape (hybrid approach).
  *
- * URLs are BARE filenames (e.g. 'hair/short.glb') — `modelUrl()` resolves them
- * for dev (/models/…) and prod Tauri (side-loaded resource asset:// URLs).
- *
- * ⚠️ When the first REAL hair GLB lands in public/models/hair/, add this line to
- * `bundle.resources` in src-tauri/tauri.conf.json:
- *     "../public/models/hair/*.glb": "models/hair/"
- * Do NOT add it before a file exists there — an empty glob fails the Tauri build
- * ("glob didn't match any files"). The 'test' style below reuses the already-
- * bundled armor/helmet.glb, so no resources change is needed for the spike.
+ * URLs are BARE filenames (e.g. 'hair/short_crop.glb') — `modelUrl()` resolves
+ * them for dev (/models/…) and prod Tauri (side-loaded resource asset:// URLs).
+ * GLBs in public/models/hair/ are bundled via the hair glob in tauri.conf.json.
  *
  * ⚠️ Until bald base bodies ship, selected hair renders ON TOP of the baked-in
  * hair of the current fused meshes. That's expected during framework bring-up.
@@ -71,9 +65,6 @@ export const HAIR_STYLES: HairStyle[] = [
       elf: { female: { s: 0.600, px: -0.050, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 } },
     },
   },
-  // ── Framework spike placeholder ──────────────────────────────────────────
-  // Remove once enough real hair GLBs exist.
-  { id: 'test', label: 'Test (placeholder)', url: 'armor/helmet.glb', tintable: true },
 ];
 
 export function getHairStyle(id?: string): HairStyle | undefined {
