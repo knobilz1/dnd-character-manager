@@ -62,7 +62,7 @@ export const HAIR_STYLES: HairStyle[] = [
   },
   { id: 'long_straight', label: 'Long Straight', url: 'hair/long_straight.glb', tintable: true,
     defaultFitByRaceGender: {
-      elf: { female: { s: 0.600, px: 0.000, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.000, rz: -1.510 } },
+      elf: { female: { s: 0.600, px: 0.000, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 } },
     },
   },
 ];
