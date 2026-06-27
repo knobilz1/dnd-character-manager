@@ -353,13 +353,18 @@ function measureHeadHeight(scene: THREE.Object3D, bone: THREE.Object3D): number 
  *  Fit: if `manualFit` is given (a hand-tuned / saved fit for THIS body) it's used
  *  verbatim. Otherwise the fit is auto-derived from the prop's calibration scaled
  *  by this body's measured head height (see "Auto-fit calibration"). The effective
- *  fit is reported up via `onEffectiveFit` so the dev panel can display it. */
-function BoneAttachment({ scene, url, boneName, manualFit, defaultFit, calibKey, bodyKey, tint, tag, onEffectiveFit }: {
+ *  fit is reported up via `onEffectiveFit` so the dev panel can display it.
+ *
+ *  `fillGroove`: when true, adds a single-sided fill plane inside the normalized
+ *  hair mesh to cover the visible parting groove on long_straight hair. Placed at
+ *  the back face of the groove in normalized local space (Z=-0.188, Y≈0.36 crown). */
+function BoneAttachment({ scene, url, boneName, manualFit, defaultFit, calibKey, bodyKey, tint, tag, onEffectiveFit, fillGroove }: {
   scene: THREE.Object3D; url: string; boneName: string;
   manualFit: AttachmentFit | null; defaultFit: AttachmentFit;
   calibKey: string; bodyKey: string;
   tint?: string; tag: 'isArmor' | 'isHair';
   onEffectiveFit?: (fit: AttachmentFit) => void;
+  fillGroove?: boolean;
 }) {
   const gltf = useLoader(GLTFLoader, modelUrl(url), withMeshopt);
   const fitGroupRef = React.useRef<THREE.Group | null>(null);
@@ -397,9 +402,37 @@ function BoneAttachment({ scene, url, boneName, manualFit, defaultFit, calibKey,
       }
     });
     matsRef.current = mats;
+
     const inner = new THREE.Group();
     inner.add(prop);
     inner.scale.setScalar(1 / (size.y || 1));
+
+    // Parting-groove fill for long_straight hair. The hair is a TripoAI mesh split
+    // into two halves with no geometry bridging the center parting. A plane placed
+    // at the groove back face is visible through the gap from behind but occluded
+    // by the hair walls on the sides.
+    // Coordinates are in inner-local space (same scale as the raw GLB vertices).
+    // inner.scale=1/size.y shrinks children to fitGroup space, so multiply the
+    // intended fitGroup-space values (0.36, -0.188, 0.26, 0.30) by size.y.
+    if (fillGroove) {
+      const sy = size.y || 1;
+      const fillGeo = new THREE.PlaneGeometry(0.26 * sy, 0.30 * sy);
+      const fillMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(tint ?? '#3b2a1a'),
+        roughness: 0.85,
+        metalness: 0.0,
+        side: THREE.DoubleSide,
+      });
+      const fillMesh = new THREE.Mesh(fillGeo, fillMat);
+      // Groove center in fitGroup normalized space: Y=0.36 (crown midpoint), Z=-0.188
+      // Multiplied by sy to convert to inner-local coordinates.
+      fillMesh.position.set(0, 0.36 * sy, -0.188 * sy);
+      fillMesh.castShadow = false;
+      fillMesh.frustumCulled = false;
+      fillMesh.userData[tag] = true;
+      inner.add(fillMesh);
+      matsRef.current.push(fillMat);
+    }
 
     // Cancel the bone's world scale so `fit` is in world-meter units, not the
     // character's tiny rig-scale space.
@@ -471,7 +504,8 @@ function HairAttachment({ scene, url, styleId, manualFit, bodyKey, tint, onEffec
   onEffectiveFit?: (fit: AttachmentFit) => void;
 }) {
   return <BoneAttachment scene={scene} url={url} boneName="head" manualFit={manualFit}
-    defaultFit={DEFAULT_HAIR_FIT} calibKey={`hair:${styleId}`} bodyKey={bodyKey} tint={tint} tag="isHair" onEffectiveFit={onEffectiveFit} />;
+    defaultFit={DEFAULT_HAIR_FIT} calibKey={`hair:${styleId}`} bodyKey={bodyKey} tint={tint} tag="isHair"
+    onEffectiveFit={onEffectiveFit} fillGroove={styleId === 'long_straight'} />;
 }
 
 // ── Minimal character model (creator — idle GLB only, no merged anims) ────────

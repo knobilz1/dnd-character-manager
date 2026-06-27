@@ -49,6 +49,35 @@ function computeMaxSpellLevel(
   return highestIdx + 1; // convert 0-based index → spell level number
 }
 
+/** Per-spell-level CUMULATIVE caps for a wizard's spellbook. A wizard may only add
+ *  a spell "of a level for which you have spell slots" (PHB p.114), so the number
+ *  of book spells of level ≥ k can't exceed how many spells were learned at the
+ *  character levels where level-k slots already existed (6 at level 1, +2 each level
+ *  after). Returns { k: maxSpellsOfLevelKOrHigher } for k = 1..maxSpellLevel.
+ *
+ *  caps[1] === the total spellbook size (every batch can hold a 1st-level spell), so
+ *  1st level is bounded only by the total; the higher entries are the real limits.
+ *  This also guarantees the ≥8 first-level spells a wizard accrues at levels 1–2. */
+function spellbookCumulativeCaps(
+  spellcastingType: string,
+  classId: string,
+  charLevel: number,
+): Record<number, number> {
+  const maxLvl = computeMaxSpellLevel(spellcastingType, classId, charLevel);
+  const caps: Record<number, number> = {};
+  for (let k = 1; k <= maxLvl; k++) {
+    let n = 0;
+    for (let lvl = 1; lvl <= charLevel; lvl++) {
+      if (computeMaxSpellLevel(spellcastingType, classId, lvl) >= k) n += lvl === 1 ? 6 : 2;
+    }
+    caps[k] = n;
+  }
+  return caps;
+}
+
+/** 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th"… */
+const ordinal = (n: number) => `${n}${['st', 'nd', 'rd'][n - 1] ?? 'th'}`;
+
 export function StepSpells() {
   const { draft, updateDraft } = useCreatorStore();
   const [search, setSearch] = React.useState('');
@@ -138,10 +167,21 @@ export function StepSpells() {
   const spellAbilityMod = Math.floor((spellAbilityScore - 10) / 2);
   const preparedLimit = maxPreparedSpellsFor(primaryClass!.classId, charLevel, spellAbilityMod);
   const isPreparedCaster = preparedLimit !== null;
-  // Wizard starts with 6 spells in their spellbook at level 1 (PHB p.114).
+  // Wizard spellbook size: 6 spells at level 1, +2 for every level thereafter
+  // (PHB p.114). So a level-3 wizard's spellbook holds 6 + 2×2 = 10 spells, all
+  // of any level the wizard can cast (capped by maxSpellLevel below).
   const isSpellbookCaster = ['wizard', 'wizard-2024'].includes(primaryClass!.classId);
-  const spellbookStartLimit = isSpellbookCaster ? 6 : 0;
+  const spellbookLimit = isSpellbookCaster ? 6 + 2 * Math.max(0, charLevel - 1) : 0;
   const isKnownCaster = knownSpellLimit > 0 || isSpellbookCaster;
+  // How many non-cantrip spells the user may pick here: a wizard's spellbook size,
+  // or a spontaneous caster's spells-known. (Prepared-only casters like cleric/druid
+  // aren't "known" casters and have no pick cap — they prepare on the sheet.)
+  const effectiveSpellLimit = isSpellbookCaster ? spellbookLimit : knownSpellLimit;
+  // Wizards gate per spell level via cumulative "level-k-or-higher" caps; known
+  // casters pick any mix up to their spells-known, so no per-level cap for them.
+  const spellbookCaps = isSpellbookCaster
+    ? spellbookCumulativeCaps(effectiveType, mechClassId, charLevel)
+    : null;
 
   // Build set of expanded spell IDs from the subclass (e.g. Warlock patron spells).
   const expandedSpellIds = React.useMemo(() => {
@@ -174,6 +214,27 @@ export function StepSpells() {
   const selectedNonCantrips = selectedSpells.filter(
     s => (ALL_SPELLS.find(sp => sp.id === s.spellId)?.level ?? 0) > 0
   ).length;
+  // How many non-cantrip spells are selected at each spell level (for per-level gating).
+  const selectedByLevel: Record<number, number> = {};
+  for (const s of selectedSpells) {
+    const lv = ALL_SPELLS.find(sp => sp.id === s.spellId)?.level ?? 0;
+    if (lv > 0) selectedByLevel[lv] = (selectedByLevel[lv] ?? 0) + 1;
+  }
+  // Selected spells of level ≥ k (the quantity each cumulative cap limits).
+  const selectedAtOrAbove = (k: number) => {
+    let n = 0;
+    for (const [lv, cnt] of Object.entries(selectedByLevel)) if (Number(lv) >= k) n += cnt;
+    return n;
+  };
+  // A wizard can't add a spell of level `lvl` if doing so would push any of the
+  // "level-j-or-higher" buckets (j ≤ lvl) past its cap — including caps[1] (total).
+  const spellbookFullForLevel = (lvl: number): boolean => {
+    if (!isSpellbookCaster || !spellbookCaps) return false;
+    for (let j = 1; j <= lvl; j++) {
+      if (selectedAtOrAbove(j) >= (spellbookCaps[j] ?? Infinity)) return true;
+    }
+    return false;
+  };
 
   function toggleSpell(spell: Spell) {
     const current = draft.spellbook ?? [];
@@ -183,9 +244,15 @@ export function StepSpells() {
     }
     // Enforce cantrip limit
     if (spell.level === 0 && cantripLimit > 0 && selectedCantrips >= cantripLimit) return;
-    // Enforce known-spell limit for spontaneous casters and spellbook casters (wizard: 6)
-    const effectiveSpellLimit = isSpellbookCaster ? spellbookStartLimit : knownSpellLimit;
-    if (spell.level > 0 && isKnownCaster && selectedNonCantrips >= effectiveSpellLimit) return;
+    // Enforce the non-cantrip pick limit. Wizards gate per spell level (cumulative);
+    // known casters gate on the flat spells-known total.
+    if (spell.level > 0) {
+      if (isSpellbookCaster) {
+        if (spellbookFullForLevel(spell.level)) return;
+      } else if (isKnownCaster && selectedNonCantrips >= effectiveSpellLimit) {
+        return;
+      }
+    }
     updateDraft({ spellbook: [...current, { spellId: spell.id, isPrepared: true, isAlwaysPrepared: false }] });
   }
 
@@ -219,10 +286,32 @@ export function StepSpells() {
         {isKnownCaster && (
           <p className="text-sm text-slate-300">
             <span className="font-semibold text-white">{isSpellbookCaster ? 'Spellbook:' : 'Spells Known:'}</span>{' '}
-            <span className={selectedNonCantrips >= (isSpellbookCaster ? spellbookStartLimit : knownSpellLimit) ? 'text-green-400 font-bold' : 'text-amber-300'}>
-              {selectedNonCantrips} / {isSpellbookCaster ? spellbookStartLimit : knownSpellLimit}
+            <span className={selectedNonCantrips >= effectiveSpellLimit ? 'text-green-400 font-bold' : 'text-amber-300'}>
+              {selectedNonCantrips} / {effectiveSpellLimit}
             </span>
-            {selectedNonCantrips >= (isSpellbookCaster ? spellbookStartLimit : knownSpellLimit) && <span className="text-slate-400 ml-1">(full)</span>}
+            {selectedNonCantrips >= effectiveSpellLimit && <span className="text-slate-400 ml-1">(full)</span>}
+          </p>
+        )}
+        {/* Per-spell-level caps for wizards. Each entry is a CUMULATIVE limit on how
+            many book spells can be of that level or higher (e.g. at L20 at most 8 can
+            be 9th-level, 12 can be 8th-or-higher …). 1st level is bounded only by the
+            total spellbook size, so it isn't listed. */}
+        {isSpellbookCaster && spellbookCaps && maxSpellLevel >= 2 && (
+          <p className="text-sm text-slate-300 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span className="font-semibold text-white">By level (max of that level or higher):</span>
+            {Object.keys(spellbookCaps).map(Number).filter(k => k >= 2).sort((a, b) => b - a).map(k => {
+              const have = selectedAtOrAbove(k);
+              const cap = spellbookCaps[k];
+              const full = have >= cap;
+              const label = k === maxSpellLevel ? ordinal(k) : `${ordinal(k)}+`;
+              return (
+                <span key={k}>
+                  <span className="text-slate-400">{label}:</span>{' '}
+                  <span className={full ? 'text-green-400 font-bold' : 'text-amber-300'}>{have} / {cap}</span>
+                  {full && <span className="text-slate-500 ml-1">(full)</span>}
+                </span>
+              );
+            })}
           </p>
         )}
         {isPreparedCaster && !isKnownCaster && (
@@ -300,7 +389,11 @@ export function StepSpells() {
           const isSelected = selectedIds.has(spell.id);
           const isCantrip = spell.level === 0;
           const atCantripLimit = isCantrip && cantripLimit > 0 && selectedCantrips >= cantripLimit && !isSelected;
-          const atSpellLimit = !isCantrip && isKnownCaster && selectedNonCantrips >= knownSpellLimit && !isSelected;
+          const atSpellLimit = !isCantrip && !isSelected && (
+            isSpellbookCaster
+              ? spellbookFullForLevel(spell.level)
+              : isKnownCaster && selectedNonCantrips >= effectiveSpellLimit
+          );
           const isDisabled = atCantripLimit || atSpellLimit;
 
           return (

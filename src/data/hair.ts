@@ -63,6 +63,10 @@ export const HAIR_STYLES: HairStyle[] = [
   { id: 'long_straight', label: 'Long Straight', url: 'hair/long_straight.glb', tintable: true,
     defaultFitByRaceGender: {
       elf: { female: { s: 0.600, px: 0.000, py: 0.055, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 } },
+      // Human-male crown sits higher than the elf-female auto-calibration assumes,
+      // so the shared wig rode low and exposed scalp; lift py to seat it. (Tuned
+      // via scripts/hair-shot.mjs headless rear/crown capture, 2026-06-25.)
+      human: { male: { s: 0.600, px: 0.000, py: 0.100, pz: 0.015, rx: -1.470, ry: 0.390, rz: -1.510 } },
     },
   },
 ];
