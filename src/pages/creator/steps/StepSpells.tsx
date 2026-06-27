@@ -194,10 +194,21 @@ export function StepSpells() {
     return ids;
   }, [subclassDef]);
 
+  // 2024 classes reuse the 2014 core spell list (spellListClassId points at the
+  // 2014 class id, whose spells are sourceBook 'PHB'), but selecting the 2024
+  // edition swaps 'PHB' out of enabledBooks for 'PHB2024'. Treat PHB2024 as also
+  // unlocking the core PHB spell list so 2024 casters can actually see their spells.
+  // One-directional, so 2014 characters are unaffected.
+  const spellBooks = React.useMemo(() => {
+    const set = new Set(draft.enabledBooks);
+    if (set.has('PHB2024')) set.add('PHB');
+    return set;
+  }, [draft.enabledBooks]);
+
   // All spells accessible to this class, filtered by level access, books, and school restriction
   const classSpells = ALL_SPELLS.filter(s =>
     (s.classes.includes(spellListClassId) || expandedSpellIds.has(s.id)) &&
-    bookEnabled(s, draft.enabledBooks) &&
+    bookEnabled(s, spellBooks) &&
     (s.level === 0 || s.level <= maxSpellLevel) &&  // enforce max spell level
     (!schoolRestriction || showAllSchools || s.level === 0 || schoolRestriction.includes(s.school)) &&
     (filterLevel === 'all' || s.level === filterLevel) &&
