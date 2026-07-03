@@ -4,6 +4,7 @@ import { HomePage } from './pages/HomePage';
 import { CreatorPage } from './pages/creator/CreatorPage';
 import { SheetPage } from './pages/sheet/SheetPage';
 import { GraveyardPage } from './pages/GraveyardPage';
+import { DMConsolePage } from './pages/dm/DMConsolePage';
 import { useAppUpdater } from './hooks/useAppUpdater';
 import { useThemeStore } from './store/useThemeStore';
 import { useDriveSync } from './hooks/useDriveSync';
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="create" element={<CreatorPage />} />
         <Route path="character/:id" element={<SheetPage />} />
         <Route path="graveyard" element={<GraveyardPage />} />
+        <Route path="dm" element={<DMConsolePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

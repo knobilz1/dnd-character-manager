@@ -1,4 +1,6 @@
+mod dm;
 mod oauth;
+mod party_listener;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,6 +25,10 @@ pub fn run() {
       oauth::start_oauth_server,
       oauth::get_fresh_access_token,
       oauth::clear_google_token,
+      dm::ask_dm,
+      party_listener::start_party_listener,
+      party_listener::party_listener_port,
+      party_listener::local_lan_ip,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

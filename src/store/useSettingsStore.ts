@@ -11,6 +11,10 @@ import { persist } from 'zustand/middleware';
 interface SettingsState {
   show3DCharacter: boolean;
   setShow3DCharacter: (v: boolean) => void;
+  /** LAN address of the DM bot (dnd-dm server), e.g. "192.168.1.50" or
+   *  "192.168.1.50:7777". Empty until the player sets it for game night. */
+  dmIp: string;
+  setDmIp: (v: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -18,6 +22,8 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       show3DCharacter: true,
       setShow3DCharacter: (v) => set({ show3DCharacter: v }),
+      dmIp: '',
+      setDmIp: (v) => set({ dmIp: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )

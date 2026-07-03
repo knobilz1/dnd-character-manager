@@ -18,6 +18,7 @@ import { InventoryPanel } from './InventoryPanel';
 import { DiceRoller } from './DiceRoller';
 import { SnapshotPanel } from './SnapshotPanel';
 import { RageOverlay } from '../../components/RageOverlay';
+import { TalkToDMButton } from '../../components/TalkToDMButton';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
@@ -309,6 +310,7 @@ export function SheetPage() {
             <History size={18} />
           </button>
           <DiceRoller exhaustionLevel={exhaustionLevel} />
+          <TalkToDMButton characterName={character.name} />
           <div className="relative">
             <button
               onClick={async () => {

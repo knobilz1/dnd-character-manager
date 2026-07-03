@@ -30,4 +30,11 @@ function excludeModelsPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [tailwindcss(), react(), excludeModelsPlugin()],
+  server: {
+    watch: {
+      // Rust writes/locks files in target/ while linking; Vite's watcher
+      // picking them up crashes with EBUSY on Windows mid-build.
+      ignored: ['**/src-tauri/target/**'],
+    },
+  },
 });
