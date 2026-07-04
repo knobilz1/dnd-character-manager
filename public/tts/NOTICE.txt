@@ -1,0 +1,17 @@
+This directory bundles a redistributable build of Piper, a local neural
+text-to-speech engine, used by the DM Console to read narration aloud.
+
+  Piper:        https://github.com/OHF-Voice/piper1-gpl
+  License:      GNU General Public License v3.0 (see PIPER_LICENSE.txt)
+  Voice model:  en_US-lessac-medium
+                https://huggingface.co/rhasspy/piper-voices
+
+`piper.exe` in this directory is a standalone build of the `piper-tts`
+Python package (v1.4.2), produced with PyInstaller. It is invoked by
+Tavern Sheet as a separate subprocess (never linked into the app's own
+binary), consistent with how other GPL-licensed command-line tools
+(e.g. ffmpeg) are commonly bundled by non-GPL applications. Tavern
+Sheet's own source is not affected by Piper's license.
+
+The `piper-tts` source corresponding to this build is available at the
+repository above; the exact commit/version is v1.4.2.

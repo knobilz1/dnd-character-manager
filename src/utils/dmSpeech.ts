@@ -1,13 +1,19 @@
 /**
  * dmSpeech.ts — mic capture, local Whisper STT, and TTS for the in-app DM Console.
  *
- * Everything here runs inside the webview — no external processes, no installs.
  * STT is Whisper via transformers.js (WASM/WebGPU, model downloads once on first
- * use and is cached by the browser). TTS is the platform's built-in
- * speechSynthesis (instant, zero setup); swap synthesizeAndSpeak's body for a
- * nicer voice later if desired.
+ * use and is cached by the browser) — runs entirely inside the webview.
+ *
+ * TTS uses a bundled Piper voice (src-tauri/src/tts.rs's `speak_text` command —
+ * a standalone PyInstaller-frozen `piper.exe` + voice model shipped as a Tauri
+ * resource, invoked as a subprocess, no install/Python needed at runtime).
+ * Windows-only for now (see tauri.conf.json), so this falls back to the
+ * platform's built-in speechSynthesis whenever the command errors — e.g. any
+ * future non-Windows build that doesn't have Piper bundled yet, or a plain
+ * browser preview with no Tauri backend at all.
  */
 import { pipeline } from '@huggingface/transformers';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 
 // ── Microphone capture ───────────────────────────────────────────────────────
 
@@ -88,8 +94,9 @@ export async function stopAndTranscribe(): Promise<string> {
 
 // ── Text-to-speech ───────────────────────────────────────────────────────────
 
-/** Speaks text with the platform's built-in voice. Resolves when finished. */
-export function speak(text: string): Promise<void> {
+let currentAudio: HTMLAudioElement | null = null;
+
+function speakWithBrowserTTS(text: string): Promise<void> {
   return new Promise((resolve) => {
     if (!('speechSynthesis' in window) || !text.trim()) return resolve();
     window.speechSynthesis.cancel(); // don't queue over a previous line
@@ -100,6 +107,43 @@ export function speak(text: string): Promise<void> {
   });
 }
 
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  return new Blob([bytes], { type: mimeType });
+}
+
+function speakWithPiper(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    invoke<string>('speak_text', { text }).then((base64Wav) => {
+      const url = URL.createObjectURL(base64ToBlob(base64Wav, 'audio/wav'));
+      const audio = new Audio(url);
+      currentAudio = audio;
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
+        if (currentAudio === audio) currentAudio = null;
+      };
+      audio.onended = () => { cleanup(); resolve(); };
+      audio.onerror = () => { cleanup(); reject(new Error('Piper audio playback failed')); };
+      audio.play().catch((e) => { cleanup(); reject(e); });
+    }, reject);
+  });
+}
+
+/** Speaks text aloud — bundled Piper voice when available, falling back to
+ *  the platform's built-in speechSynthesis otherwise. Resolves when finished. */
+export async function speak(text: string): Promise<void> {
+  if (!text.trim()) return;
+  if (isTauri()) {
+    try {
+      return await speakWithPiper(text);
+    } catch (e) {
+      console.warn('Piper TTS failed, falling back to browser speechSynthesis:', e);
+    }
+  }
+  return speakWithBrowserTTS(text);
+}
+
 export function stopSpeaking(): void {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 }

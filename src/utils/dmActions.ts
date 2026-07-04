@@ -32,10 +32,20 @@ export interface DmActionSet {
   removeCondition?: NameCondition[];
   exhaustion?: NameLevel[];
   inspiration?: NameBool[];
-  /** Short standalone facts worth recalling much later — appended immediately
-   *  to memory/MEMORY.md (see campaign.rs's append_memory_note), which loads
-   *  every turn regardless of which module chapter is currently active. */
+  /** Short standalone facts worth recalling much later that aren't about one
+   *  specific named entity/location — appended immediately to memory/MEMORY.md
+   *  (see campaign.rs's append_memory_note), which loads every turn regardless
+   *  of which module chapter is currently active. Prefer rememberEntity/
+   *  rememberLocation below for facts that ARE about a specific named thing. */
   remember?: string[];
+  /** Named NPCs/factions/creatures worth recalling long-term — upserted by
+   *  name into memory/entities.md (see campaign.rs's append_entity_fact), so
+   *  a name introduced session 1 is still recognized session 100 without
+   *  ever being summarized away like the recap log. */
+  rememberEntity?: { name: string; description: string }[];
+  /** Same idea as rememberEntity, for named places (memory/locations.md, see
+   *  campaign.rs's append_location_fact). */
+  rememberLocation?: { name: string; description: string }[];
   /** A chapter id from module/index.md — the DM's own signal that the party's
    *  actions concluded the current chapter, handled by DMConsolePage calling
    *  set_current_chapter. Absent unless this campaign has an imported module. */
@@ -61,8 +71,18 @@ export function parseDmReply(reply: string): { narration: string; actions: DmAct
 
   const narration = reply.replace(ACTIONS_BLOCK, '').trim();
   try {
-    const actions = JSON.parse(match[1].trim()) as DmActionSet;
-    return { narration, actions };
+    const parsed: unknown = JSON.parse(match[1].trim());
+    // Valid JSON isn't necessarily the right *shape* — live-tested against a
+    // local model (llama3 via Ollama) that sometimes emits a syntactically
+    // valid but wrongly-shaped block (e.g. ["damage",[...]] instead of
+    // {"damage":[...]}), which would otherwise silently no-op downstream
+    // (actions.damage reads as undefined) with no visible sign anything was
+    // dropped. Treat "not a plain object" the same as a parse failure.
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.warn('dm-actions block parsed but was not a plain object:', parsed);
+      return { narration: reply.trim(), actions: null };
+    }
+    return { narration, actions: parsed as DmActionSet };
   } catch (e) {
     console.warn('dm-actions block failed to parse:', e);
     return { narration: reply.trim(), actions: null };
@@ -76,21 +96,52 @@ function findIndex(party: Character[], name: string): number {
   return party.findIndex((c) => c.name.trim().toLowerCase().startsWith(key));
 }
 
-/** Applies a parsed action set to the party, returning a new array. Characters
- *  with no matching action keep their original object reference (so callers can
+/** Amount fields (damage/heal/tempHp) beyond this are almost certainly a
+ *  hallucinated/malformed value rather than a real ruling — clamped rather
+ *  than applied as-is, with a warning surfaced to the DM operator. Mainly a
+ *  defense against weaker local models (see local_llm.rs), but applies to
+ *  either provider since it's cheap and never wrong to have. */
+const MAX_PLAUSIBLE_AMOUNT = 999;
+
+export interface ApplyDmActionsResult {
+  updated: Character[];
+  /** Anything skipped (unknown character name) or clamped (implausible
+   *  amount) — surfaced in the DM Console UI so a silently-dropped or
+   *  suspicious change is never invisible, even though it's still
+   *  auto-applied rather than gated behind a confirmation step. */
+  warnings: string[];
+}
+
+/** Applies a parsed action set to the party, returning a new array plus any
+ *  warnings for entries that were skipped or clamped. Characters with no
+ *  matching action keep their original object reference (so callers can
  *  cheaply detect which ones actually changed). */
-export function applyDmActions(party: Character[], actions: DmActionSet): Character[] {
+export function applyDmActions(party: Character[], actions: DmActionSet): ApplyDmActionsResult {
   const next = [...party];
+  const warnings: string[] = [];
 
   const mutate = (name: string, fn: (c: Character) => Character) => {
     const idx = findIndex(next, name);
-    if (idx === -1) return;
+    if (idx === -1) {
+      warnings.push(`Skipped an action for unknown character "${name}".`);
+      return;
+    }
     next[idx] = fn(next[idx]);
   };
 
+  const clampAmount = (name: string, kind: string, amount: number): number => {
+    if (amount < 0 || amount > MAX_PLAUSIBLE_AMOUNT) {
+      const clamped = Math.max(0, Math.min(MAX_PLAUSIBLE_AMOUNT, amount));
+      warnings.push(`Clamped an implausible ${kind} amount (${amount}) for ${name} to ${clamped}.`);
+      return clamped;
+    }
+    return amount;
+  };
+
   for (const { name, amount } of actions.damage ?? []) {
+    const dmgAmount = clampAmount(name, 'damage', amount);
     mutate(name, (c) => {
-      let dmg = amount;
+      let dmg = dmgAmount;
       let tempHP = c.tempHP ?? 0;
       if (tempHP > 0) { const absorbed = Math.min(tempHP, dmg); tempHP -= absorbed; dmg -= absorbed; }
       return { ...c, tempHP, currentHP: Math.max(0, c.currentHP - dmg) };
@@ -98,16 +149,18 @@ export function applyDmActions(party: Character[], actions: DmActionSet): Charac
   }
 
   for (const { name, amount } of actions.heal ?? []) {
+    const healAmount = clampAmount(name, 'heal', amount);
     mutate(name, (c) => {
       const was = c.currentHP;
-      const currentHP = Math.min(c.maxHP, c.currentHP + amount);
+      const currentHP = Math.min(c.maxHP, c.currentHP + healAmount);
       const deathSaves = was === 0 && currentHP > 0 ? { successes: 0, failures: 0 } : c.deathSaves;
       return { ...c, currentHP, deathSaves };
     });
   }
 
   for (const { name, amount } of actions.tempHp ?? []) {
-    mutate(name, (c) => ({ ...c, tempHP: Math.max(0, amount) }));
+    const tempAmount = clampAmount(name, 'temp HP', amount);
+    mutate(name, (c) => ({ ...c, tempHP: Math.max(0, tempAmount) }));
   }
 
   for (const { name, condition } of actions.addCondition ?? []) {
@@ -133,5 +186,5 @@ export function applyDmActions(party: Character[], actions: DmActionSet): Charac
     mutate(name, (c) => ({ ...c, inspiration: value }));
   }
 
-  return next;
+  return { updated: next, warnings };
 }

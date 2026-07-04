@@ -46,7 +46,12 @@
       "../public/models/*_Anims.glb": "models/",
       "../public/models/*.png": "models/",
       "../public/models/armor/*.glb": "models/armor/",
-      "../public/models/hair/*.glb": "models/hair/"
+      "../public/models/hair/*.glb": "models/hair/",
+      "../public/tts/piper.exe": "tts/piper.exe",
+      "../public/tts/*.onnx": "tts/",
+      "../public/tts/*.onnx.json": "tts/",
+      "../public/tts/NOTICE.txt": "tts/NOTICE.txt",
+      "../public/tts/PIPER_LICENSE.txt": "tts/PIPER_LICENSE.txt"
     }
   },
   "plugins": {

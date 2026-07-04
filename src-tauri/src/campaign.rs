@@ -64,19 +64,22 @@ const BASE_CLAUDE_MD: &str = r#"# You are the Dungeon Master
 
 You are the Dungeon Master for a Dungeons & Dragons game night. The players are physically at the table talking to you out loud through speech-to-text; you reply and your reply is read aloud with text-to-speech, so keep prose natural to hear, not to read.
 
-You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked. For what's happened in past sessions and any standing facts worth remembering, see the campaign memory below.
+You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked. For what's happened in past sessions and any standing facts worth remembering, see the campaign memory below. entities.md and locations.md are standing registries of every named NPC/faction/creature and place you've ever introduced — always check them before treating someone or somewhere as new; if a name you're about to introduce is already there, it means the party has met them/been there before.
 
 @memory/MEMORY.md
+@memory/entities.md
+@memory/locations.md
 
 ## Reporting state changes
 When your narration causes damage, healing, temp HP, a condition, exhaustion, or inspiration change — or something worth remembering long-term happens, or (if this campaign has an imported module) the party's actions clearly conclude the current chapter — end your reply with a fenced code block literally starting with ```dm-actions containing ONLY compact JSON (no comments), e.g.:
 
 ```dm-actions
-{"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"remember":["Gundren Rockseeker was captured by goblins near the Triboar Trail."]}
+{"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"rememberEntity":[{"name":"Gundren Rockseeker","description":"A dwarf merchant, captured by goblins near the Triboar Trail."}]}
 ```
 
 Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}], position [{name,q,r}], clearPositions (true|false).
-- `remember`: array of short, standalone facts worth recalling much later — a named NPC, a promise made, a secret learned, a consequence that should echo in a future session or a future chapter. These are saved permanently and shown to you at the start of every future turn, so don't rely on the current chapter's text alone to remember them.
+- `rememberEntity` / `rememberLocation`: `[{name, description}]` — use these for any named NPC, faction, creature (`rememberEntity`), or place (`rememberLocation`) worth recalling much later. Each is *upserted by name*: if the name already exists in entities.md/locations.md, your description **replaces** the old one (rewrite it to reflect what's changed, e.g. "captured by goblins" becoming "rescued, now allied with the party" — don't just restate the original), so keep the description as a short, current, standalone summary rather than a running diary. If the name is new, it's added fresh. These are the DM's long-term "who/where" memory and are never summarized away, so this is the reliable way to make sure someone met in session 3 is still recognized in session 100.
+- `remember`: array of short, standalone facts worth recalling much later that AREN'T about one specific named entity or location — a promise made, a secret learned, a general consequence that should echo later. These go in a separate recap log that does get periodically compressed over a long campaign, so prefer `rememberEntity`/`rememberLocation` whenever a fact is really about a specific person or place.
 - `advanceToChapter`: a chapter id (only relevant if this campaign has an imported module — see module/index.md for the current list of valid ids). Include this only when the party's actions have actually concluded the current chapter and moved the story into the next one. Don't skip ahead or advance early just because you're curious what's next.
 - `position` / `clearPositions`: see "Physical hex-grid positioning" below.
 Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
@@ -103,6 +106,16 @@ This table plays on physical 3D-printed hex terrain — uniform hexagonal cells 
 "#;
 
 const DEFAULT_MEMORY_MD: &str = "# Campaign Memory\n\n_No sessions logged yet. A short recap is appended here when a session ends, and standalone facts are appended whenever the DM flags something worth remembering._\n";
+
+/// Standing registry of named NPCs/factions/creatures — see the module doc
+/// comment and BASE_CLAUDE_MD's `rememberEntity` key. Deliberately separate
+/// from MEMORY.md: entries are upserted by name (never appended-and-lost in
+/// a wall of narrative), so this stays reliable across a campaign's whole
+/// life without needing lossy summarization.
+const DEFAULT_ENTITIES_MD: &str = "# Entities\n\n_Named NPCs, factions, and creatures the party has encountered — one line each, updated in place as their situation changes. Never summarized away, so a name introduced session 1 stays recognizable in session 100._\n";
+
+/// Same idea as DEFAULT_ENTITIES_MD, for places instead of people.
+const DEFAULT_LOCATIONS_MD: &str = "# Locations\n\n_Named places the party has visited — one line each, updated in place as their current state changes (cleared, destroyed, rebuilt, etc.)._\n";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see module/current.md) versus "what's just listed for
@@ -229,6 +242,8 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     let claude_md = format!("{BASE_CLAUDE_MD}{}", format_campaign_setting(intake));
     fs::write(dir.join("CLAUDE.md"), claude_md).map_err(|e| e.to_string())?;
     fs::write(dir.join("memory").join("MEMORY.md"), DEFAULT_MEMORY_MD).map_err(|e| e.to_string())?;
+    fs::write(dir.join("memory").join("entities.md"), DEFAULT_ENTITIES_MD).map_err(|e| e.to_string())?;
+    fs::write(dir.join("memory").join("locations.md"), DEFAULT_LOCATIONS_MD).map_err(|e| e.to_string())?;
     fs::write(dir.join("name.txt"), trimmed).map_err(|e| e.to_string())?;
     Ok(CampaignMeta { id, name: trimmed.to_string() })
 }
@@ -249,6 +264,67 @@ fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Resul
     let mut existing = fs::read_to_string(&path).unwrap_or_default();
     existing.push_str(&format!("- **{date}:** {}\n", note.trim()));
     fs::write(path, existing).map_err(|e| e.to_string())
+}
+
+/// Renders one entities.md/locations.md line. Matched back out by
+/// `find_entry_line_index` — keep these in sync.
+fn format_entry(name: &str, description: &str) -> String {
+    format!("- **{}:** {}", name.trim(), description.trim())
+}
+
+/// Finds the line holding an existing entry for `name` (case-insensitive),
+/// if any — used to upsert instead of blindly appending a duplicate.
+fn find_entry_line_index(content: &str, name: &str) -> Option<usize> {
+    let needle = format!("**{}:**", name.trim().to_lowercase());
+    content
+        .lines()
+        .position(|line| line.to_lowercase().contains(&needle))
+}
+
+/// Pure upsert: replaces the matching entry's line if `name` is already
+/// present (case-insensitive), otherwise appends a new entry. This is what
+/// makes entities.md/locations.md a *registry* rather than a growing log —
+/// re-mentioning a known name updates its current description in place
+/// instead of piling up a new line every time, so it never needs the same
+/// lossy compaction MEMORY.md's narrative recap does.
+///
+/// When updating an existing entry, the *original* entry's name casing is
+/// kept (only the description changes) rather than whatever casing this
+/// particular call happened to use — a later offhand "harbin wester" isn't
+/// allowed to downgrade the canonical "Harbin Wester" spelling.
+fn upsert_named_fact(content: &str, name: &str, description: &str) -> String {
+    match find_entry_line_index(content, name) {
+        Some(idx) => {
+            let existing_name = content
+                .lines()
+                .nth(idx)
+                .and_then(|line| line.split("**").nth(1))
+                .map(|s| s.trim_end_matches(':').to_string())
+                .unwrap_or_else(|| name.trim().to_string());
+            let new_line = format_entry(&existing_name, description);
+            content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| if i == idx { new_line.as_str() } else { line })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        None => {
+            let new_line = format_entry(name, description);
+            let mut out = content.trim_end().to_string();
+            out.push('\n');
+            out.push_str(&new_line);
+            out.push('\n');
+            out
+        }
+    }
+}
+
+fn upsert_named_fact_at(root: &Path, id: &str, filename: &str, name: &str, description: &str) -> Result<(), String> {
+    let path = root.join(id).join("memory").join(filename);
+    let existing = read_optional(&path);
+    let updated = upsert_named_fact(&existing, name, description);
+    fs::write(path, updated).map_err(|e| e.to_string())
 }
 
 /// Past this many characters, memory/MEMORY.md is worth compacting rather
@@ -291,8 +367,50 @@ fn compact_memory_if_needed_at(root: &Path, id: &str) -> Result<bool, String> {
     Ok(true)
 }
 
-fn read_optional(path: &Path) -> String {
+pub(crate) fn read_optional(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_default()
+}
+
+/// entities.md/locations.md are upserted-in-place (see upsert_named_fact) so
+/// they stay small over a normal campaign's life without needing the same
+/// treatment as MEMORY.md's narrative recap — this is purely a defensive
+/// fallback for the rare campaign that grows large enough to matter anyway.
+/// Much higher than MEMORY_COMPACT_THRESHOLD since hitting this at all would
+/// mean an unusually large number of distinct named entities/locations.
+const ENTITY_COMPACT_THRESHOLD: usize = 20_000;
+
+fn should_compact_entities(text: &str) -> bool {
+    text.len() > ENTITY_COMPACT_THRESHOLD
+}
+
+/// `file_label` is just for the prompt's wording ("entities"/"locations") —
+/// the instruction is deliberately stricter than build_compact_memory_prompt:
+/// never drop a named entry, since the whole point of this registry is that
+/// nothing in it should ever be forgotten.
+fn build_compact_entities_prompt(file_label: &str, content: &str) -> String {
+    format!(
+        "This is the registry of named {file_label} for an ongoing Dungeons & Dragons campaign — one line per name, each a short current-state description. It has grown large enough that reloading all of it every turn is wasteful.\n\n\
+        Rewrite it more compactly, but you must NEVER remove a named entry — every name currently listed must still be present afterward. Only merge exact or near-duplicate entries for the same name, and tighten overly wordy descriptions. If in doubt, leave an entry as-is rather than risk losing it.\n\n\
+        Reply with ONLY the rewritten doc in markdown, no other commentary, no code fences. Keep the same '- **Name:** description' format for every entry and the existing heading.\n\n\
+        Current registry:\n{content}"
+    )
+}
+
+/// Impure: mirrors compact_memory_if_needed_at but for one of the entity/
+/// location registry files. No-op below the threshold.
+fn compact_entities_if_needed_at(root: &Path, id: &str, filename: &str, file_label: &str) -> Result<bool, String> {
+    let path = root.join(id).join("memory").join(filename);
+    let current = read_optional(&path);
+    if !should_compact_entities(&current) {
+        return Ok(false);
+    }
+    let rewritten = crate::dm::ask_claude_once(build_compact_entities_prompt(file_label, &current), Some("sonnet"))?;
+    let trimmed = rewritten.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Compaction of {filename} returned empty content; leaving it untouched."));
+    }
+    fs::write(&path, trimmed).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// "Plan mode": a DM can ask for this days ahead of a session, not just at
@@ -553,6 +671,33 @@ pub fn append_memory_note(app: AppHandle, id: String, date: String, note: String
     append_memory_note_at(&campaigns_root(&app)?, &id, &date, &note)
 }
 
+/// Upserts one named NPC/faction/creature from a turn's dm-actions
+/// `rememberEntity` array — see DMConsolePage's runTurn.
+#[tauri::command]
+pub fn append_entity_fact(app: AppHandle, id: String, name: String, description: String) -> Result<(), String> {
+    upsert_named_fact_at(&campaigns_root(&app)?, &id, "entities.md", &name, &description)
+}
+
+/// Upserts one named place from a turn's dm-actions `rememberLocation` array
+/// — see DMConsolePage's runTurn.
+#[tauri::command]
+pub fn append_location_fact(app: AppHandle, id: String, name: String, description: String) -> Result<(), String> {
+    upsert_named_fact_at(&campaigns_root(&app)?, &id, "locations.md", &name, &description)
+}
+
+/// Reads the entities registry — feeds the History dialog. See
+/// read_campaign_memory for the equivalent over the session-recap log.
+#[tauri::command]
+pub fn read_campaign_entities(app: AppHandle, id: String) -> Result<String, String> {
+    Ok(read_optional(&campaign_dir(&app, &id)?.join("memory").join("entities.md")))
+}
+
+/// Reads the locations registry — feeds the History dialog.
+#[tauri::command]
+pub fn read_campaign_locations(app: AppHandle, id: String) -> Result<String, String> {
+    Ok(read_optional(&campaign_dir(&app, &id)?.join("memory").join("locations.md")))
+}
+
 /// Called once per "End session" (after append_session_recap) — compacts
 /// memory/MEMORY.md via one Claude call if it's grown past the threshold,
 /// otherwise a cheap no-op. Returns whether it actually compacted anything.
@@ -564,6 +709,22 @@ pub async fn compact_campaign_memory(app: AppHandle, id: String) -> Result<bool,
     })
     .await
     .map_err(|e| format!("Memory compaction task failed: {e}"))?
+}
+
+/// Called alongside compact_campaign_memory at "End session" — defensive
+/// compaction for entities.md/locations.md (see ENTITY_COMPACT_THRESHOLD).
+/// A cheap no-op for the vast majority of campaigns, which never grow large
+/// enough to trigger either check.
+#[tauri::command]
+pub async fn compact_campaign_knowledge(app: AppHandle, id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        compact_entities_if_needed_at(&root, &id, "entities.md", "entities")?;
+        compact_entities_if_needed_at(&root, &id, "locations.md", "locations")?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Knowledge compaction task failed: {e}"))?
 }
 
 /// "Plan mode" — read-only session-prep suggestion, callable any time (not
@@ -685,11 +846,21 @@ mod tests {
         let claude_md = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
         assert!(claude_md.contains("You are the Dungeon Master"));
         assert!(claude_md.contains("@memory/MEMORY.md"), "CLAUDE.md must import the memory file so it auto-loads");
+        assert!(claude_md.contains("@memory/entities.md"), "CLAUDE.md must import the entities registry so it auto-loads");
+        assert!(claude_md.contains("@memory/locations.md"), "CLAUDE.md must import the locations registry so it auto-loads");
         assert!(claude_md.contains("## Campaign setting"));
         assert!(claude_md.contains("remember"), "persona must document the remember dm-action");
+        assert!(claude_md.contains("rememberEntity"), "persona must document the rememberEntity dm-action");
+        assert!(claude_md.contains("rememberLocation"), "persona must document the rememberLocation dm-action");
 
         let memory_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("MEMORY.md")).unwrap();
         assert!(memory_md.contains("Campaign Memory"));
+
+        let entities_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("entities.md")).unwrap();
+        assert!(entities_md.contains("Entities"));
+
+        let locations_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("locations.md")).unwrap();
+        assert!(locations_md.contains("Locations"));
     }
 
     #[test]
@@ -764,6 +935,80 @@ mod tests {
         assert!(memory_md.contains("The party set out from Neverwinter."));
         assert!(memory_md.contains("Sildar Hallwinter is a friendly NPC"));
         assert!(memory_md.contains("The party promised Gundren Rockseeker"));
+    }
+
+    #[test]
+    fn upsert_named_fact_appends_a_new_entry_when_name_absent() {
+        let content = "# Entities\n\n_seed placeholder_\n";
+        let updated = upsert_named_fact(content, "Harbin Wester", "A suspicious merchant in Phandalin.");
+        assert!(updated.contains("- **Harbin Wester:** A suspicious merchant in Phandalin."));
+        assert!(updated.contains("seed placeholder"));
+    }
+
+    #[test]
+    fn upsert_named_fact_replaces_the_existing_entry_instead_of_duplicating() {
+        let content = "# Entities\n\n- **Harbin Wester:** A suspicious merchant in Phandalin.\n";
+        let updated = upsert_named_fact(content, "Harbin Wester", "Revealed as a Black Spider spy, now imprisoned.");
+        assert_eq!(updated.matches("Harbin Wester").count(), 1, "should have exactly one entry, not two");
+        assert!(updated.contains("Revealed as a Black Spider spy"));
+        assert!(!updated.contains("A suspicious merchant"), "the stale description should be gone");
+    }
+
+    #[test]
+    fn upsert_named_fact_matches_name_case_insensitively() {
+        let content = "# Entities\n\n- **Harbin Wester:** A suspicious merchant in Phandalin.\n";
+        let updated = upsert_named_fact(content, "harbin wester", "Now imprisoned.");
+        assert_eq!(updated.matches("Harbin Wester").count(), 1);
+        assert!(updated.contains("Now imprisoned."));
+    }
+
+    #[test]
+    fn upsert_named_fact_keeps_distinct_entries_separate() {
+        let content = "# Entities\n\n- **Harbin Wester:** A suspicious merchant.\n";
+        let updated = upsert_named_fact(content, "Sildar Hallwinter", "A friendly NPC travelling with the party.");
+        assert!(updated.contains("Harbin Wester"));
+        assert!(updated.contains("Sildar Hallwinter"));
+    }
+
+    #[test]
+    fn append_entity_and_location_fact_upsert_into_their_own_files() {
+        let root = Scratch::new("entities-locations");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "entities.md", "Sildar Hallwinter", "A friendly NPC.").unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "locations.md", "Phandalin", "A small frontier town.").unwrap();
+
+        let entities_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("entities.md")).unwrap();
+        assert!(entities_md.contains("Sildar Hallwinter"));
+        assert!(!entities_md.contains("Phandalin"), "locations shouldn't leak into entities.md");
+
+        let locations_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("locations.md")).unwrap();
+        assert!(locations_md.contains("Phandalin"));
+        assert!(!locations_md.contains("Sildar Hallwinter"), "entities shouldn't leak into locations.md");
+    }
+
+    #[test]
+    fn should_compact_entities_respects_a_much_higher_threshold() {
+        let short = "# Entities\n\n- **Someone:** A brief note.\n";
+        assert!(!should_compact_entities(short));
+        let huge = "x".repeat(ENTITY_COMPACT_THRESHOLD + 1);
+        assert!(should_compact_entities(&huge));
+    }
+
+    #[test]
+    fn compact_entities_if_needed_at_is_a_noop_below_threshold() {
+        let root = Scratch::new("entities-compact-noop");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        let did_compact = compact_entities_if_needed_at(&root.0, &meta.id, "entities.md", "entities").unwrap();
+        assert!(!did_compact);
+        let content = fs::read_to_string(root.0.join(&meta.id).join("memory").join("entities.md")).unwrap();
+        assert!(content.contains("Entities"), "should be untouched");
+    }
+
+    #[test]
+    fn build_compact_entities_prompt_forbids_dropping_named_entries() {
+        let prompt = build_compact_entities_prompt("entities", "- **Someone:** A note.");
+        assert!(prompt.to_lowercase().contains("never remove"));
+        assert!(prompt.contains("Someone"));
     }
 
     #[test]

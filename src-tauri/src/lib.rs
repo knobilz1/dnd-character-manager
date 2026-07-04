@@ -1,8 +1,10 @@
 mod campaign;
 mod dm;
+mod local_llm;
 mod oauth;
 mod party_listener;
 mod terrain;
+mod tts;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -28,6 +30,8 @@ pub fn run() {
       oauth::get_fresh_access_token,
       oauth::clear_google_token,
       dm::ask_dm,
+      local_llm::ask_dm_local,
+      local_llm::end_local_dm_session,
       party_listener::start_party_listener,
       party_listener::party_listener_port,
       party_listener::local_lan_ip,
@@ -38,7 +42,12 @@ pub fn run() {
       campaign::read_campaign_memory,
       campaign::append_session_recap,
       campaign::append_memory_note,
+      campaign::append_entity_fact,
+      campaign::append_location_fact,
+      campaign::read_campaign_entities,
+      campaign::read_campaign_locations,
       campaign::compact_campaign_memory,
+      campaign::compact_campaign_knowledge,
       campaign::extract_module_text,
       campaign::chapterize_and_import_module,
       campaign::get_module_chapters,
@@ -47,6 +56,7 @@ pub fn run() {
       campaign::suggest_session_plan,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
+      tts::speak_text,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

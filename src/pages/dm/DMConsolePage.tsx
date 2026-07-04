@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Map, ClipboardList } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Map, ClipboardList, Cpu } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { parseDmReply, applyDmActions } from '../../utils/dmActions';
 import type { HexPosition } from '../../utils/dmActions';
@@ -102,11 +103,14 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [turns, setTurns] = React.useState<Turn[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [warning, setWarning] = React.useState<string | null>(null);
+  const [dmModelOpen, setDmModelOpen] = React.useState(false);
   const [lanIp, setLanIp] = React.useState<string | null>(null);
   const [sttReady, setSttReady] = React.useState(false);
 
@@ -121,6 +125,8 @@ export function DMConsolePage() {
   const [notesSaving, setNotesSaving] = React.useState(false);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [historyText, setHistoryText] = React.useState('');
+  const [entitiesText, setEntitiesText] = React.useState('');
+  const [locationsText, setLocationsText] = React.useState('');
   const [moduleOpen, setModuleOpen] = React.useState(false);
   const [chapters, setChapters] = React.useState<ChapterSummary[]>([]);
   const [currentChapterId, setCurrentChapterId] = React.useState<string | null>(null);
@@ -200,8 +206,27 @@ export function DMConsolePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Runs one full turn through Claude and speaks the reply. `speaker` is the
-   *  character name for a remote turn, undefined for the DM Console's own mic. */
+  /** Routes one turn to whichever DM engine is configured (see
+   *  useSettingsStore's dmProvider) — a locally-hosted LLM (local_llm.rs's
+   *  ask_dm_local) or the Claude subscription (dm.rs's ask_dm). Both return
+   *  the identical `{text, session_id}` shape, so every caller below stays
+   *  provider-agnostic. */
+  async function callDm(prompt: string, sessionId: string | undefined, campaignId: string | undefined) {
+    if (dmProvider === 'local') {
+      return invoke<{ text: string; session_id?: string }>('ask_dm_local', {
+        prompt,
+        sessionId,
+        campaignId,
+        baseUrl: localLlmBaseUrl,
+        model: localLlmModel,
+      });
+    }
+    return invoke<{ text: string; session_id?: string }>('ask_dm', { prompt, sessionId, campaignId });
+  }
+
+  /** Runs one full turn through the configured DM engine and speaks the
+   *  reply. `speaker` is the character name for a remote turn, undefined for
+   *  the DM Console's own mic. */
   async function runTurn(spokenText: string, speaker: string | undefined, who: string) {
     setTurns((t) => [...t, { who, text: spokenText }]);
     try {
@@ -215,19 +240,17 @@ export function DMConsolePage() {
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
 
-      const reply = await invoke<{ text: string; session_id?: string }>('ask_dm', {
-        prompt,
-        sessionId: sessionIdRef.current,
-        campaignId: campaignIdRef.current ?? undefined,
-      });
+      const reply = await callDm(prompt, sessionIdRef.current, campaignIdRef.current ?? undefined);
       if (reply.session_id) sessionIdRef.current = reply.session_id;
 
       const { narration, actions } = parseDmReply(reply.text);
       setTurns((t) => [...t, { who: 'dm', text: narration }]);
+      setWarning(null);
 
       if (actions) {
-        const updated = applyDmActions(partyRef.current, actions);
+        const { updated, warnings } = applyDmActions(partyRef.current, actions);
         updated.forEach((c, i) => { if (c !== partyRef.current[i]) upsert(c); });
+        if (warnings.length) setWarning(warnings.join(' '));
 
         const campaignId = campaignIdRef.current;
         if (campaignId && actions.remember?.length) {
@@ -235,6 +258,20 @@ export function DMConsolePage() {
           for (const note of actions.remember) {
             await invoke('append_memory_note', { id: campaignId, date, note }).catch((e) =>
               console.warn('Failed to save a remembered fact:', e)
+            );
+          }
+        }
+        if (campaignId && actions.rememberEntity?.length) {
+          for (const { name, description } of actions.rememberEntity) {
+            await invoke('append_entity_fact', { id: campaignId, name, description }).catch((e) =>
+              console.warn('Failed to save an entity fact:', e)
+            );
+          }
+        }
+        if (campaignId && actions.rememberLocation?.length) {
+          for (const { name, description } of actions.rememberLocation) {
+            await invoke('append_location_fact', { id: campaignId, name, description }).catch((e) =>
+              console.warn('Failed to save a location fact:', e)
             );
           }
         }
@@ -306,7 +343,7 @@ export function DMConsolePage() {
   }
 
   /** Wraps up whatever campaign/session is currently active: if anything
-   *  actually happened, asks Claude for a short recap, appends it to that
+   *  actually happened, asks the configured DM engine for a short recap, appends it to that
    *  campaign's memory/MEMORY.md, compacts memory if it's grown large, then
    *  resets the in-memory conversation so next time starts a fresh --resume
    *  chain. Used both by the explicit "End session" button AND by the
@@ -321,11 +358,7 @@ export function DMConsolePage() {
       setBusy(true);
       try {
         const prompt = buildRecapPrompt(partyRef.current);
-        const reply = await invoke<{ text: string; session_id?: string }>('ask_dm', {
-          prompt,
-          sessionId: sessionIdRef.current,
-          campaignId,
-        });
+        const reply = await callDm(prompt, sessionIdRef.current, campaignId);
         const { narration } = parseDmReply(reply.text);
         const date = new Date().toISOString().slice(0, 10);
         await invoke('append_session_recap', { id: campaignId, date, recap: narration });
@@ -334,16 +367,27 @@ export function DMConsolePage() {
         await invoke('compact_campaign_memory', { id: campaignId }).catch((e) =>
           console.warn('Memory compaction failed (memory.md left as-is):', e)
         );
+        // Defensive fallback for entities.md/locations.md — normally a no-op,
+        // since those are upserted-in-place rather than an ever-growing log.
+        await invoke('compact_campaign_knowledge', { id: campaignId }).catch((e) =>
+          console.warn('Entity/location compaction failed (left as-is):', e)
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
     }
+    // Frees a local-LLM session's in-memory history (local_llm.rs) — a
+    // harmless no-op if the session was actually running on Claude.
+    if (sessionIdRef.current) {
+      invoke('end_local_dm_session', { sessionId: sessionIdRef.current }).catch(() => {});
+    }
     sessionIdRef.current = undefined;
     turnsSincePlanCheckRef.current = Infinity; // a new sitting starts with a fresh plan check-in
     queueRef.current = [];
     setTurns([]);
+    setWarning(null);
     setBattleMap({}); // positions are per-sitting/per-campaign, never persisted to disk
   }
 
@@ -481,8 +525,14 @@ export function DMConsolePage() {
   async function openHistory() {
     if (!activeCampaignId) return;
     try {
-      const content = await invoke<string>('read_campaign_memory', { id: activeCampaignId });
-      setHistoryText(content);
+      const [memory, entities, locations] = await Promise.all([
+        invoke<string>('read_campaign_memory', { id: activeCampaignId }),
+        invoke<string>('read_campaign_entities', { id: activeCampaignId }),
+        invoke<string>('read_campaign_locations', { id: activeCampaignId }),
+      ]);
+      setHistoryText(memory);
+      setEntitiesText(entities);
+      setLocationsText(locations);
       setHistoryOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -564,6 +614,10 @@ export function DMConsolePage() {
             <Map size={14} /> Terrain
           </Button>
 
+          <Button size="sm" variant="ghost" onClick={() => setDmModelOpen(true)} title="Which engine runs the DM — Claude or a local LLM">
+            <Cpu size={14} /> DM Model{dmProvider === 'local' ? ' (Local)' : ''}
+          </Button>
+
           {activeCampaignId && (
             <>
               <Button size="sm" variant="ghost" onClick={openNotes} title="Edit persona, house rules, and world lore (CLAUDE.md)">
@@ -610,6 +664,7 @@ export function DMConsolePage() {
             </div>
 
             {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+            {warning && <p className="text-xs text-amber-400 mb-3">⚠️ {warning}</p>}
 
             <div className="flex items-center justify-center gap-3">
               <Button
@@ -798,9 +853,24 @@ export function DMConsolePage() {
         </div>
       </Dialog>
 
-      <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} title={`${activeCampaignName ?? 'Campaign'} — History (memory/MEMORY.md)`} wide>
-        <p className="text-xs text-slate-400 mb-2">Recaps appended automatically each time you click "End session."</p>
-        <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{historyText}</pre>
+      <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} title={`${activeCampaignName ?? 'Campaign'} — History`} wide>
+        <div className="max-h-[65vh] overflow-y-auto space-y-4">
+          <div>
+            <p className="text-xs font-bold text-slate-300 mb-1">Session recaps (memory/MEMORY.md)</p>
+            <p className="text-xs text-slate-400 mb-2">Appended automatically each time you click "End session" — periodically compressed once it grows large.</p>
+            <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap">{historyText}</pre>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-slate-300 mb-1">Entities (memory/entities.md)</p>
+            <p className="text-xs text-slate-400 mb-2">Named NPCs/factions/creatures — updated in place, never summarized away.</p>
+            <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap">{entitiesText}</pre>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-slate-300 mb-1">Locations (memory/locations.md)</p>
+            <p className="text-xs text-slate-400 mb-2">Named places and their current state — updated in place.</p>
+            <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap">{locationsText}</pre>
+          </div>
+        </div>
         <div className="flex justify-end mt-3">
           <Button variant="outline" onClick={() => setHistoryOpen(false)}>Close</Button>
         </div>
@@ -866,6 +936,50 @@ export function DMConsolePage() {
         <div className="flex justify-end gap-2 mt-3">
           <Button variant="outline" onClick={() => setTerrainOpen(false)}>Cancel</Button>
           <Button onClick={saveTerrain} disabled={terrainSaving}>{terrainSaving ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={dmModelOpen} onClose={() => setDmModelOpen(false)} title="DM Model">
+        <p className="text-xs text-slate-400 mb-3">
+          Global for this device — switchable any time, including mid-campaign. A local model needs its own reliability tradeoffs in mind: HP/condition changes are still applied automatically, but skipped or clamped entries show up as a warning under the transcript instead of silently vanishing.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Engine</label>
+            <select
+              value={dmProvider}
+              onChange={(e) => setDmProvider(e.target.value as 'claude' | 'local')}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600"
+            >
+              <option value="claude">Claude (your subscription)</option>
+              <option value="local">Local LLM (Ollama / LM Studio / llama.cpp server…)</option>
+            </select>
+          </div>
+          {dmProvider === 'local' && (
+            <>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Server address</label>
+                <input
+                  value={localLlmBaseUrl}
+                  onChange={(e) => setLocalLlmBaseUrl(e.target.value)}
+                  placeholder="http://localhost:11434"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Model name</label>
+                <input
+                  value={localLlmModel}
+                  onChange={(e) => setLocalLlmModel(e.target.value)}
+                  placeholder="e.g. llama3.2, qwen2.5"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-600"
+                />
+              </div>
+            </>
+          )}
+        </div>
+        <div className="flex justify-end mt-4">
+          <Button onClick={() => setDmModelOpen(false)}>Done</Button>
         </div>
       </Dialog>
 

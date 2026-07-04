@@ -67,16 +67,18 @@ export async function sendCharacterToDM(character: Character, ip: string): Promi
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
 }
 
-/** Send several characters; returns counts so the UI can report partial success. */
+/** Send several characters; returns counts (and which ids actually succeeded,
+ *  so callers can mark those characters as DM-synced) for partial success. */
 export async function sendAllToDM(
   characters: Character[],
   ip: string,
-): Promise<{ ok: number; failed: string[] }> {
+): Promise<{ ok: number; okIds: string[]; failed: string[] }> {
   let ok = 0;
+  const okIds: string[] = [];
   const failed: string[] = [];
   for (const c of characters) {
-    try { await sendCharacterToDM(c, ip); ok++; }
+    try { await sendCharacterToDM(c, ip); ok++; okIds.push(c.id); }
     catch { failed.push(c.name || 'Unnamed'); }
   }
-  return { ok, failed };
+  return { ok, okIds, failed };
 }

@@ -37,7 +37,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const graveyardCount = allCharacters.filter(c => c.inGraveyard).length;
   const { theme, toggleTheme } = useThemeStore();
   const { show3DCharacter, setShow3DCharacter } = useSettingsStore();
-  const { dmIp, setDmIp } = useSettingsStore();
+  const { dmIp, setDmIp, addDmSyncedCharacter } = useSettingsStore();
   const [dmOpen, setDmOpen] = React.useState(false);
   const [dmStatus, setDmStatus] = React.useState<string | null>(null);
   const [dmSending, setDmSending] = React.useState(false);
@@ -166,6 +166,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     setDmStatus(`Sending ${character.name || 'character'}…`);
     try {
       await sendCharacterToDM(character, dmIp);
+      addDmSyncedCharacter(character.id);
       setDmStatus(`✅ Sent ${character.name || 'character'} to the DM.`);
     } catch (err) {
       setDmStatus(`❌ Couldn't reach the DM at ${dmIp}. ${err instanceof Error ? err.message : ''}`);
@@ -179,7 +180,8 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     if (!dmIp.trim()) { setDmStatus('Enter the DM\'s address first.'); return; }
     setDmSending(true);
     setDmStatus(`Sending ${characters.length} character(s)…`);
-    const { ok, failed } = await sendAllToDM(characters, dmIp);
+    const { ok, okIds, failed } = await sendAllToDM(characters, dmIp);
+    okIds.forEach(addDmSyncedCharacter);
     setDmSending(false);
     setDmStatus(failed.length
       ? `Sent ${ok}. Failed: ${failed.join(', ')}. Check the DM's address and that the bot is running.`
