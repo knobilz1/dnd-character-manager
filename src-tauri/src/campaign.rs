@@ -41,6 +41,19 @@
 //! (dmPrompt.ts's `planCheckIn`) periodically — first turn of a sitting,
 //! right after a chapter change, and every few turns otherwise — so the DM
 //! checks it regularly without paying for it on every prompt.
+//!
+//! `memory/MEMORY.md` can't get the same "drop it from the standing import"
+//! treatment — unlike the plan, any specific remembered fact (an NPC, a
+//! promise) could matter on literally any future turn, so it has to stay
+//! always-loaded. What it *can* have is a size cap: `compact_memory_if_needed`
+//! runs at the end of a session (piggybacking on the recap call that already
+//! happens there) and, only once the file has grown past a threshold, asks
+//! Claude (`sonnet` — this can recur many times over a campaign's life,
+//! unlike the one-time module import) to rewrite it into a smaller, organized
+//! doc: named facts kept intact, stale narrative filler compressed. This
+//! keeps the always-loaded memory file roughly constant-sized over a whole
+//! campaign instead of growing forever, without ever truly discarding facts
+//! the way a plain recency cutoff would.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -227,6 +240,46 @@ fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Resul
     let mut existing = fs::read_to_string(&path).unwrap_or_default();
     existing.push_str(&format!("- **{date}:** {}\n", note.trim()));
     fs::write(path, existing).map_err(|e| e.to_string())
+}
+
+/// Past this many characters, memory/MEMORY.md is worth compacting rather
+/// than left to grow forever — it's a standing CLAUDE.md import, reprocessed
+/// on every turn (see the module doc comment above).
+const MEMORY_COMPACT_THRESHOLD: usize = 6000;
+
+/// Pure size check, split out so the "don't bother compacting yet" branch has
+/// a real test without needing a live LLM call.
+fn should_compact_memory(memory_text: &str) -> bool {
+    memory_text.len() > MEMORY_COMPACT_THRESHOLD
+}
+
+fn build_compact_memory_prompt(memory_text: &str) -> String {
+    format!(
+        "This is the running memory log for an ongoing Dungeons & Dragons campaign: session recaps plus standalone facts flagged as worth remembering. It has grown large enough that reloading all of it every turn is wasteful. Rewrite it into a more compact version a Dungeon Master could scan quickly.\n\n\
+        Keep specific, reusable facts intact and easy to find — named NPCs and what's true about them, locations visited, promises made, open plot threads, anything a player might reference much later. Compress or drop blow-by-blow narrative detail from older sessions once its specific facts have been captured elsewhere in the doc — a one-line summary of what an old session covered is enough. The most recent session or two can stay close to full detail.\n\n\
+        Reply with ONLY the rewritten memory doc in markdown, no other commentary, no code fences. Keep the '# Campaign Memory' heading.\n\n\
+        Current memory log:\n{memory_text}"
+    )
+}
+
+/// Impure: if memory.md has grown past the threshold, asks Claude to rewrite
+/// it into a smaller, organized doc (see the module doc comment above for
+/// why this exists and why it stays on `sonnet`). No-op (returns Ok(false))
+/// below the threshold — called at the end of every session, but expected to
+/// actually do anything only occasionally over a campaign's life.
+fn compact_memory_if_needed_at(root: &Path, id: &str) -> Result<bool, String> {
+    let path = root.join(id).join("memory").join("MEMORY.md");
+    let current = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    if !should_compact_memory(&current) {
+        return Ok(false);
+    }
+    let rewritten = crate::dm::ask_claude_once(build_compact_memory_prompt(&current), Some("sonnet"))?;
+    let trimmed = rewritten.trim();
+    if trimmed.is_empty() {
+        return Err("Memory compaction returned empty content; leaving memory.md untouched.".into());
+    }
+    fs::write(&path, trimmed).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 fn build_chapterize_prompt(text: &str) -> String {
@@ -450,6 +503,19 @@ pub fn append_memory_note(app: AppHandle, id: String, date: String, note: String
     append_memory_note_at(&campaigns_root(&app)?, &id, &date, &note)
 }
 
+/// Called once per "End session" (after append_session_recap) — compacts
+/// memory/MEMORY.md via one Claude call if it's grown past the threshold,
+/// otherwise a cheap no-op. Returns whether it actually compacted anything.
+#[tauri::command]
+pub async fn compact_campaign_memory(app: AppHandle, id: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        compact_memory_if_needed_at(&root, &id)
+    })
+    .await
+    .map_err(|e| format!("Memory compaction task failed: {e}"))?
+}
+
 /// Reads a DM's own module/scenario file and returns its text. PDFs are text-
 /// extracted (pure-Rust `pdf-extract`, no external binary); anything else is
 /// read as UTF-8 text (.md/.txt, best-effort for other plain-text formats).
@@ -635,6 +701,36 @@ mod tests {
         assert!(memory_md.contains("The party set out from Neverwinter."));
         assert!(memory_md.contains("Sildar Hallwinter is a friendly NPC"));
         assert!(memory_md.contains("The party promised Gundren Rockseeker"));
+    }
+
+    #[test]
+    fn should_compact_memory_respects_threshold() {
+        assert!(!should_compact_memory("short memory log"));
+        let long = "x".repeat(MEMORY_COMPACT_THRESHOLD + 1);
+        assert!(should_compact_memory(&long));
+        let exact = "x".repeat(MEMORY_COMPACT_THRESHOLD);
+        assert!(!should_compact_memory(&exact));
+    }
+
+    #[test]
+    fn compact_memory_if_needed_at_is_a_noop_below_threshold() {
+        let root = Scratch::new("compact-noop");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        append_memory_note_at(&root.0, &meta.id, "2026-07-03", "Small note.").unwrap();
+
+        let before = fs::read_to_string(root.0.join(&meta.id).join("memory").join("MEMORY.md")).unwrap();
+        let compacted = compact_memory_if_needed_at(&root.0, &meta.id).unwrap();
+        assert!(!compacted, "should not compact while under the threshold");
+
+        let after = fs::read_to_string(root.0.join(&meta.id).join("memory").join("MEMORY.md")).unwrap();
+        assert_eq!(before, after, "memory.md should be untouched on the no-op path");
+    }
+
+    #[test]
+    fn build_compact_memory_prompt_includes_the_full_log() {
+        let prompt = build_compact_memory_prompt("# Campaign Memory\n\nSome long log content.");
+        assert!(prompt.contains("Some long log content."));
+        assert!(prompt.contains("Campaign Memory"));
     }
 
     #[test]

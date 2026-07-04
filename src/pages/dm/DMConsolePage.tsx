@@ -277,11 +277,17 @@ export function DMConsolePage() {
     }
   }
 
-  /** Wraps up the night: if anything actually happened, asks Claude for a short
-   *  recap and appends it to the campaign's memory/MEMORY.md, then resets the
-   *  in-memory conversation so next time starts a fresh --resume chain. */
-  async function handleEndSession() {
-    stopSpeaking();
+  /** Wraps up whatever campaign/session is currently active: if anything
+   *  actually happened, asks Claude for a short recap, appends it to that
+   *  campaign's memory/MEMORY.md, compacts memory if it's grown large, then
+   *  resets the in-memory conversation so next time starts a fresh --resume
+   *  chain. Used both by the explicit "End session" button AND by the
+   *  campaign switcher below — a `claude` session_id only resolves against
+   *  the project directory it was created in (confirmed live: resuming a
+   *  session from a different cwd fails with "No conversation found"), so
+   *  switching the active campaign without closing out the old one first
+   *  would make the very next turn error out. */
+  async function wrapUpCurrentSession() {
     const campaignId = campaignIdRef.current;
     if (campaignId && turns.length > 0) {
       setBusy(true);
@@ -295,6 +301,11 @@ export function DMConsolePage() {
         const { narration } = parseDmReply(reply.text);
         const date = new Date().toISOString().slice(0, 10);
         await invoke('append_session_recap', { id: campaignId, date, recap: narration });
+        // Only actually does anything once memory.md has grown past a size
+        // threshold — cheap no-op most session ends (see campaign.rs).
+        await invoke('compact_campaign_memory', { id: campaignId }).catch((e) =>
+          console.warn('Memory compaction failed (memory.md left as-is):', e)
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -307,12 +318,28 @@ export function DMConsolePage() {
     setTurns([]);
   }
 
+  async function handleEndSession() {
+    stopSpeaking();
+    await wrapUpCurrentSession();
+  }
+
+  /** Switching campaigns via the picker below — closes out whatever was
+   *  active first (see wrapUpCurrentSession's doc comment for why this is
+   *  required, not just tidy) before pointing the console at the new one. */
+  async function handleSelectCampaign(newId: string) {
+    stopSpeaking();
+    await wrapUpCurrentSession();
+    setActiveCampaignId(newId || null);
+  }
+
   async function handleCreateCampaign() {
     if (!newCampaign.name.trim()) return;
     setCreatingCampaign(true);
     try {
       const meta = await invoke<CampaignMeta>('create_campaign', { intake: newCampaign });
       setCampaigns((c) => [...c, meta].sort((a, b) => a.name.localeCompare(b.name)));
+      stopSpeaking();
+      await wrapUpCurrentSession(); // in case a different campaign was already active/mid-session
       setActiveCampaignId(meta.id);
       setNewCampaignOpen(false);
 
@@ -450,8 +477,9 @@ export function DMConsolePage() {
         <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">
           <select
             value={activeCampaignId ?? ''}
-            onChange={(e) => setActiveCampaignId(e.target.value || null)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-red-600"
+            onChange={(e) => handleSelectCampaign(e.target.value)}
+            disabled={busy}
+            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-red-600 disabled:opacity-50"
           >
             <option value="">Select a campaign…</option>
             {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

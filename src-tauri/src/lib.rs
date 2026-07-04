@@ -37,6 +37,7 @@ pub fn run() {
       campaign::read_campaign_memory,
       campaign::append_session_recap,
       campaign::append_memory_note,
+      campaign::compact_campaign_memory,
       campaign::extract_module_text,
       campaign::chapterize_and_import_module,
       campaign::get_module_chapters,
