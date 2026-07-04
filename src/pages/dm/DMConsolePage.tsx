@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Map, ClipboardList } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
 import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { parseDmReply, applyDmActions } from '../../utils/dmActions';
+import type { HexPosition } from '../../utils/dmActions';
 import { startRecording, stopAndTranscribe, warmupSTT, speak, stopSpeaking } from '../../utils/dmSpeech';
 import type { Character } from '../../types';
 
@@ -123,6 +124,15 @@ export function DMConsolePage() {
   const [moduleOpen, setModuleOpen] = React.useState(false);
   const [chapters, setChapters] = React.useState<ChapterSummary[]>([]);
   const [currentChapterId, setCurrentChapterId] = React.useState<string | null>(null);
+  // Terrain catalog is global (real-world inventory, not tied to any one
+  // campaign) — see terrain.rs. Plan mode is per-campaign but read-only/
+  // callable any time, not just at session start.
+  const [terrainOpen, setTerrainOpen] = React.useState(false);
+  const [terrainText, setTerrainText] = React.useState('');
+  const [terrainSaving, setTerrainSaving] = React.useState(false);
+  const [planOpen, setPlanOpen] = React.useState(false);
+  const [planText, setPlanText] = React.useState('');
+  const [planLoading, setPlanLoading] = React.useState(false);
   const [modulePlan, setModulePlan] = React.useState('');
 
   const sessionIdRef = React.useRef<string | undefined>(undefined);
@@ -140,6 +150,14 @@ export function DMConsolePage() {
   // includes it; reset to due again on a chapter change or a new sitting.
   const campaignPlanRef = React.useRef('');
   const turnsSincePlanCheckRef = React.useRef(Infinity);
+  // Ephemeral hex-position tracking for the current encounter (axial q,r per
+  // combatant, PC or monster/NPC — not stored in Character, not persisted to
+  // disk). Claude reports updates via dm-actions `position`/`clearPositions`
+  // (see dmActions.ts, campaign.rs's "Physical hex-grid positioning" section);
+  // fed back every turn as ground truth via dmPrompt.ts's battleMapStatusText.
+  const [battleMap, setBattleMap] = React.useState<Record<string, HexPosition>>({});
+  const battleMapRef = React.useRef(battleMap);
+  battleMapRef.current = battleMap;
 
   React.useEffect(() => {
     turnsSincePlanCheckRef.current = Infinity;
@@ -193,6 +211,7 @@ export function DMConsolePage() {
         spokenText,
         speaker,
         planCheckIn: dueForPlanCheck ? campaignPlanRef.current : undefined,
+        battleMap: battleMapRef.current,
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
 
@@ -226,6 +245,15 @@ export function DMConsolePage() {
           // A chapter just turned over — make sure the *next* turn re-checks
           // the plan instead of waiting out the rest of the interval.
           turnsSincePlanCheckRef.current = Infinity;
+        }
+        if (actions.clearPositions) {
+          setBattleMap({});
+        } else if (actions.position?.length) {
+          setBattleMap((bm) => {
+            const next = { ...bm };
+            for (const p of actions.position!) next[p.name] = { q: p.q, r: p.r };
+            return next;
+          });
         }
       }
 
@@ -316,6 +344,7 @@ export function DMConsolePage() {
     turnsSincePlanCheckRef.current = Infinity; // a new sitting starts with a fresh plan check-in
     queueRef.current = [];
     setTurns([]);
+    setBattleMap({}); // positions are per-sitting/per-campaign, never persisted to disk
   }
 
   async function handleEndSession() {
@@ -460,6 +489,48 @@ export function DMConsolePage() {
     }
   }
 
+  /** Global — not tied to any campaign, so this button is always available. */
+  async function openTerrain() {
+    try {
+      const content = await invoke<string>('read_terrain_catalog');
+      setTerrainText(content);
+      setTerrainOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function saveTerrain() {
+    setTerrainSaving(true);
+    try {
+      await invoke('save_terrain_catalog', { content: terrainText });
+      setTerrainOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTerrainSaving(false);
+    }
+  }
+
+  /** "Plan mode" — callable any time, not just at session start (e.g. days
+   *  ahead of actually playing). Read-only: makes one Claude call, no state
+   *  changes to the campaign or terrain catalog. */
+  async function openPlanMode() {
+    if (!activeCampaignId) return;
+    setPlanOpen(true);
+    setPlanLoading(true);
+    setPlanText('');
+    try {
+      const suggestion = await invoke<string>('suggest_session_plan', { id: activeCampaignId });
+      setPlanText(suggestion);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPlanOpen(false);
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
   const activeCampaignName = campaigns.find((c) => c.id === activeCampaignId)?.name;
 
   return (
@@ -489,6 +560,10 @@ export function DMConsolePage() {
             <Plus size={14} /> New campaign
           </Button>
 
+          <Button size="sm" variant="ghost" onClick={openTerrain} title="Your catalog of physical terrain pieces (not tied to any one campaign)">
+            <Map size={14} /> Terrain
+          </Button>
+
           {activeCampaignId && (
             <>
               <Button size="sm" variant="ghost" onClick={openNotes} title="Edit persona, house rules, and world lore (CLAUDE.md)">
@@ -499,6 +574,9 @@ export function DMConsolePage() {
               </Button>
               <Button size="sm" variant="ghost" onClick={openModule} title="Imported module chapters, and which one is current">
                 <FileUp size={14} /> Module
+              </Button>
+              <Button size="sm" variant="ghost" onClick={openPlanMode} title="Suggest terrain to set up (or print) for your next session — usable days ahead">
+                <ClipboardList size={14} /> Plan next session
               </Button>
             </>
           )}
@@ -554,49 +632,71 @@ export function DMConsolePage() {
             </div>
           </Card>
 
-          {/* Party sidebar */}
-          <Card className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5"><Radio size={14} /> Party ({party.length})</h2>
-              {party.length > 0 && (
-                <button onClick={clear} title="Clear party" className="text-slate-500 hover:text-red-400 transition-colors">
-                  <Trash2 size={14} />
-                </button>
+          {/* Sidebar: party + (when active) battle map */}
+          <div className="space-y-6">
+            <Card className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5"><Radio size={14} /> Party ({party.length})</h2>
+                {party.length > 0 && (
+                  <button onClick={clear} title="Clear party" className="text-slate-500 hover:text-red-400 transition-colors">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+              {party.length === 0 && (
+                <p className="text-xs text-slate-500">No one has joined yet.</p>
               )}
-            </div>
-            {party.length === 0 && (
-              <p className="text-xs text-slate-500">No one has joined yet.</p>
-            )}
-            <div className="space-y-2">
-              {party.map((c) => {
-                const hpPct = c.maxHP > 0 ? Math.round((c.currentHP / c.maxHP) * 100) : 0;
-                return (
-                  <div key={c.id} className="bg-slate-900 border border-slate-700 rounded-lg p-2 group relative">
-                    <button
-                      onClick={() => remove(c.id)}
-                      className="absolute top-1.5 right-1.5 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Remove from table"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                    <p className="text-sm font-bold text-white pr-4">{c.name}</p>
-                    <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden my-1">
-                      <div
-                        className={`h-full rounded-full ${hpPct > 50 ? 'bg-green-500' : hpPct > 25 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                        style={{ width: `${hpPct}%` }}
-                      />
-                    </div>
-                    <p className="text-[11px] text-slate-400">{c.currentHP}/{c.maxHP} HP</p>
-                    {c.conditions.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {c.conditions.map((cond) => <Badge key={cond} color="red">{cond}</Badge>)}
+              <div className="space-y-2">
+                {party.map((c) => {
+                  const hpPct = c.maxHP > 0 ? Math.round((c.currentHP / c.maxHP) * 100) : 0;
+                  return (
+                    <div key={c.id} className="bg-slate-900 border border-slate-700 rounded-lg p-2 group relative">
+                      <button
+                        onClick={() => remove(c.id)}
+                        className="absolute top-1.5 right-1.5 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Remove from table"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                      <p className="text-sm font-bold text-white pr-4">{c.name}</p>
+                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden my-1">
+                        <div
+                          className={`h-full rounded-full ${hpPct > 50 ? 'bg-green-500' : hpPct > 25 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                          style={{ width: `${hpPct}%` }}
+                        />
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
+                      <p className="text-[11px] text-slate-400">{c.currentHP}/{c.maxHP} HP</p>
+                      {c.conditions.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {c.conditions.map((cond) => <Badge key={cond} color="red">{cond}</Badge>)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            {Object.keys(battleMap).length > 0 && (
+              <Card className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5"><Map size={14} /> Battle Map</h2>
+                  <button onClick={() => setBattleMap({})} title="Clear tracked positions" className="text-slate-500 hover:text-red-400 transition-colors">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 mb-2">Claude's own hex bookkeeping (axial q,r) — for your reference only; it narrates placement in relative terms, not these coordinates.</p>
+                <div className="space-y-1">
+                  {Object.entries(battleMap).map(([name, { q, r }]) => (
+                    <div key={name} className="flex justify-between text-xs">
+                      <span className="text-slate-300">{name}</span>
+                      <span className="text-slate-500 font-mono">({q},{r})</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
         </div>
       </div>
 
@@ -751,6 +851,36 @@ export function DMConsolePage() {
         )}
         <div className="flex justify-end mt-3">
           <Button variant="outline" onClick={() => setModuleOpen(false)}>Close</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={terrainOpen} onClose={() => setTerrainOpen(false)} title="Terrain Catalog" wide>
+        <p className="text-xs text-slate-400 mb-2">
+          The physical terrain pieces you own — not tied to any one campaign. List each piece's name, appearance, and what it does mechanically (blocks line of sight, difficult terrain, elevation, cover). Referenced by "Plan next session" below.
+        </p>
+        <textarea
+          value={terrainText}
+          onChange={(e) => setTerrainText(e.target.value)}
+          className="w-full h-[50vh] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-mono focus:outline-none focus:border-red-600"
+        />
+        <div className="flex justify-end gap-2 mt-3">
+          <Button variant="outline" onClick={() => setTerrainOpen(false)}>Cancel</Button>
+          <Button onClick={saveTerrain} disabled={terrainSaving}>{terrainSaving ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={planOpen} onClose={() => setPlanOpen(false)} title={`${activeCampaignName ?? 'Campaign'} — Plan Next Session`} wide>
+        <p className="text-xs text-slate-400 mb-2">
+          A read-only suggestion based on the upcoming chapter, the campaign's arc plan, recent memory, and your terrain catalog — safe to check days ahead of actually playing.
+        </p>
+        {planLoading ? (
+          <p className="text-sm text-slate-400">Thinking through what's coming up…</p>
+        ) : (
+          <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{planText}</div>
+        )}
+        <div className="flex justify-end gap-2 mt-3">
+          <Button variant="outline" onClick={openPlanMode} disabled={planLoading}>Regenerate</Button>
+          <Button onClick={() => setPlanOpen(false)}>Close</Button>
         </div>
       </Dialog>
     </div>

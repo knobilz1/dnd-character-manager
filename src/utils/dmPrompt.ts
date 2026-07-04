@@ -1,4 +1,5 @@
 import type { Character } from '../types';
+import type { HexPosition } from './dmActions';
 
 /**
  * dmPrompt.ts — builds what gets sent to the Claude DM each turn.
@@ -39,6 +40,18 @@ export function partyStatusText(party: Character[]): string {
   return party.map(statusLine).join('\n');
 }
 
+/** Renders the current battle map (axial hex coordinates per combatant) as
+ *  ground truth fed back to Claude every turn — small enough that, unlike the
+ *  campaign plan, there's no reason to withhold it. Empty when no encounter
+ *  is active (positions cleared, or none ever set). See dmActions.ts's
+ *  `HexPosition`/`position`/`clearPositions` and BASE_CLAUDE_MD's positioning
+ *  section for the full convention (never read coordinates aloud). */
+export function battleMapStatusText(positions: Record<string, HexPosition>): string {
+  const entries = Object.entries(positions);
+  if (entries.length === 0) return '';
+  return entries.map(([name, { q, r }]) => `${name}: (${q},${r})`).join(', ');
+}
+
 /** Builds the text sent to `ask_dm` for one turn.
  *  `speaker` is set when the line came from a specific player's own device
  *  (via the "Talk to DM" button on their character sheet) rather than the
@@ -50,19 +63,26 @@ export function partyStatusText(party: Character[]): string {
  *  turn). The plan is high-level pacing/NPC/foreshadowing guidance, not
  *  something that needs re-reading every line, so DMConsolePage only passes
  *  it here periodically (first turn of a sitting, right after a chapter
- *  change, and every few turns otherwise) instead of every turn. */
+ *  change, and every few turns otherwise) instead of every turn.
+ *  `battleMap`, when non-empty, is the current hex positions — sent every
+ *  turn (unlike planCheckIn) since it's tiny and needs to stay exact. */
 export function buildTurnPrompt(opts: {
   party: Character[];
   spokenText: string;
   speaker?: string;
   planCheckIn?: string;
+  battleMap?: Record<string, HexPosition>;
 }): string {
-  const { party, spokenText, speaker, planCheckIn } = opts;
+  const { party, spokenText, speaker, planCheckIn, battleMap } = opts;
   const parts: string[] = [];
   if (planCheckIn) {
     parts.push(`Campaign-arc plan check-in (periodic reminder, not every turn — use it to keep pacing, NPCs, and foreshadowing consistent with the whole story, then continue):\n${planCheckIn}`);
   }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
+  const battleMapText = battleMap ? battleMapStatusText(battleMap) : '';
+  if (battleMapText) {
+    parts.push(`Current hex positions (axial q,r — internal bookkeeping only, never read aloud): ${battleMapText}`);
+  }
   parts.push(speaker
     ? `The player playing ${speaker} says: ${spokenText}`
     : `The DM (at the table, speaking) says: ${spokenText}`);

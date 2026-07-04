@@ -2,6 +2,7 @@ mod campaign;
 mod dm;
 mod oauth;
 mod party_listener;
+mod terrain;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -43,6 +44,9 @@ pub fn run() {
       campaign::get_module_chapters,
       campaign::set_current_chapter,
       campaign::read_campaign_plan,
+      campaign::suggest_session_plan,
+      terrain::read_terrain_catalog,
+      terrain::save_terrain_catalog,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

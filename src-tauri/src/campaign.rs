@@ -75,13 +75,22 @@ When your narration causes damage, healing, temp HP, a condition, exhaustion, or
 {"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"remember":["Gundren Rockseeker was captured by goblins near the Triboar Trail."]}
 ```
 
-Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}].
+Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}], position [{name,q,r}], clearPositions (true|false).
 - `remember`: array of short, standalone facts worth recalling much later — a named NPC, a promise made, a secret learned, a consequence that should echo in a future session or a future chapter. These are saved permanently and shown to you at the start of every future turn, so don't rely on the current chapter's text alone to remember them.
 - `advanceToChapter`: a chapter id (only relevant if this campaign has an imported module — see module/index.md for the current list of valid ids). Include this only when the party's actions have actually concluded the current chapter and moved the story into the next one. Don't skip ahead or advance early just because you're curious what's next.
+- `position` / `clearPositions`: see "Physical hex-grid positioning" below.
 Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
 
 ## Campaign-arc plan check-ins
 If this campaign has an imported module, most turns you'll just see the current chapter's text and won't see the overall campaign-arc plan — that's intentional, it's not repeated every turn. Every so often (session start, right after a chapter change, and periodically otherwise) your prompt will start with a "Campaign-arc plan check-in" section containing that plan again. When you see it, use it to steer pacing, keep foreshadowed threads and NPCs consistent with the wider story, and then continue narrating normally — don't call attention to it or treat it as new information from the players.
+
+## Physical hex-grid positioning
+This table plays on physical 3D-printed hex terrain — uniform hexagonal cells with no printed coordinates or landmarks, so you must never speak a raw coordinate or compass direction aloud (there's no shared "north" between your bookkeeping and the physical table). Instead:
+- Track every combatant's (PCs, monsters, NPCs) position as axial hex coordinates (q, r). When any exist, your prompt starts with a line like "Current hex positions (axial q,r — internal bookkeeping only, never read aloud): Thorin: (0,0), Goblin1: (3,-2)" — treat this as ground truth, it's tracked outside your own memory and given fresh every turn.
+- Hex distance between two axial coordinates: (|q1-q2| + |q1+r1-q2-r2| + |r1-r2|) / 2. Use this to reason about range, adjacency, and movement, but always translate the result into something a human can act on by eye-counting hexes on the table: a hex count plus a named anchor plus a natural relative direction (e.g. "place the goblin 3 hexes past Thorin, roughly toward the cave mouth" or "that's 2 hexes — well within your movement"). Never say "(3,-2)" or "northeast" out loud.
+- When a combatant is newly placed or moves, report it via the `position` key: `{"position":[{"name":"Goblin1","q":3,"r":-2}]}`. Assign new coordinates relative to whoever's already tracked (or, if nothing is tracked yet, ask where the party currently stands and assign them coordinates clustered near (0,0) to establish the starting reference).
+- When combat ends or a genuinely new encounter is about to start, include `"clearPositions":true` so stale coordinates from the last fight don't bleed into the next one — then re-establish starting positions as above.
+- If no hex-position line appears in your prompt, there's no active battle map — don't invent one; just narrate normally until positioning actually starts mattering.
 
 ## How to DM
 - Track initiative yourself. Each round: narrate enemies, resolve actions, prompt the next player by name.
@@ -280,6 +289,47 @@ fn compact_memory_if_needed_at(root: &Path, id: &str) -> Result<bool, String> {
     }
     fs::write(&path, trimmed).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+fn read_optional(path: &Path) -> String {
+    fs::read_to_string(path).unwrap_or_default()
+}
+
+/// "Plan mode": a DM can ask for this days ahead of a session, not just at
+/// session start — read-only, no state changes. Built from whatever's already
+/// on disk for this campaign (current chapter, campaign-arc plan, memory) plus
+/// the DM's global terrain catalog, so it can separate "set up what you own"
+/// from "here's a terrain type worth printing that doesn't exist yet" without
+/// ever naming a specific marketplace item (no MyMiniFactory-style catalog
+/// integration is possible — see the design conversation this came from).
+fn build_session_plan_prompt(module_plan: &str, current_chapter: &str, memory: &str, terrain_catalog: &str) -> String {
+    format!(
+        "You are helping a Dungeon Master prepare their physical table for an upcoming Dungeons & Dragons session, possibly days in advance of actually running it. Based on the campaign's overall arc, what's coming up in the current chapter, recent session memory, and the DM's own catalog of terrain pieces they physically own, suggest what to prepare.\n\n\
+        Campaign-arc plan:\n{module_plan}\n\n\
+        Current chapter (what's coming up):\n{current_chapter}\n\n\
+        Recent memory/recaps:\n{memory}\n\n\
+        DM's terrain catalog (pieces they already physically own):\n{terrain_catalog}\n\n\
+        Reply in markdown with exactly two sections:\n\
+        ## Set up from what you own\n\
+        Which cataloged pieces to lay out for the upcoming content, and a rough arrangement. If nothing owned clearly fits, say so plainly instead of forcing a suggestion.\n\n\
+        ## Consider printing\n\
+        Terrain TYPES (not specific marketplace items or brand names — the DM isn't connected to any model marketplace) that would suit the upcoming content but aren't in the catalog yet. Be specific about the gameplay purpose (e.g. \"a marsh/difficult-terrain piece for the bog encounter\"), not vague. If the existing catalog already covers everything needed, say so plainly instead of forcing a suggestion.\n\n\
+        Keep it concise — this is a quick prep checklist, not an essay."
+    )
+}
+
+/// Impure orchestration: reads whatever's on disk for this campaign (module/
+/// memory files may not exist yet — read_optional treats that as empty, not
+/// an error) plus the terrain catalog, then makes one Claude call. `sonnet`,
+/// not `opus` — this is closer to routine DM-assistant work than the one-time
+/// module ingestion.
+fn suggest_session_plan_at(root: &Path, id: &str, terrain_catalog: &str) -> Result<String, String> {
+    let dir = root.join(id);
+    let module_plan = read_optional(&dir.join("module").join("plan.md"));
+    let current_chapter = read_optional(&dir.join("module").join("current.md"));
+    let memory = read_optional(&dir.join("memory").join("MEMORY.md"));
+    let prompt = build_session_plan_prompt(&module_plan, &current_chapter, &memory, terrain_catalog);
+    crate::dm::ask_claude_once(prompt, Some("sonnet"))
 }
 
 fn build_chapterize_prompt(text: &str) -> String {
@@ -516,6 +566,19 @@ pub async fn compact_campaign_memory(app: AppHandle, id: String) -> Result<bool,
     .map_err(|e| format!("Memory compaction task failed: {e}"))?
 }
 
+/// "Plan mode" — read-only session-prep suggestion, callable any time (not
+/// just at session start; a DM can ask days ahead). See build_session_plan_prompt.
+#[tauri::command]
+pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
+        suggest_session_plan_at(&root, &id, &terrain_catalog)
+    })
+    .await
+    .map_err(|e| format!("Session-plan task failed: {e}"))?
+}
+
 /// Reads a DM's own module/scenario file and returns its text. PDFs are text-
 /// extracted (pure-Rust `pdf-extract`, no external binary); anything else is
 /// read as UTF-8 text (.md/.txt, best-effort for other plain-text formats).
@@ -731,6 +794,33 @@ mod tests {
         let prompt = build_compact_memory_prompt("# Campaign Memory\n\nSome long log content.");
         assert!(prompt.contains("Some long log content."));
         assert!(prompt.contains("Campaign Memory"));
+    }
+
+    #[test]
+    fn build_session_plan_prompt_includes_all_inputs_and_both_sections() {
+        let prompt = build_session_plan_prompt(
+            "Overall arc: rescue the princess.",
+            "Chapter 3: The Goblin Cave.",
+            "The party allied with Sildar Hallwinter.",
+            "- Rocky Hill: elevated, blocks line of sight from below.",
+        );
+        assert!(prompt.contains("Overall arc: rescue the princess."));
+        assert!(prompt.contains("Chapter 3: The Goblin Cave."));
+        assert!(prompt.contains("Sildar Hallwinter"));
+        assert!(prompt.contains("Rocky Hill"));
+        assert!(prompt.contains("## Set up from what you own"));
+        assert!(prompt.contains("## Consider printing"));
+    }
+
+    #[test]
+    fn suggest_session_plan_at_reads_optional_files_without_erroring_on_missing_ones() {
+        // No module/memory files exist for a brand-new campaign — read_optional
+        // should treat that as empty rather than failing before the (untestable
+        // without a live call) ask_claude_once step is even reached.
+        let root = Scratch::new("plan-missing-files");
+        let meta = create_campaign_at(&root.0, &intake("Fresh Campaign")).unwrap();
+        assert_eq!(read_optional(&root.0.join(&meta.id).join("module").join("plan.md")), "");
+        assert_eq!(read_optional(&root.0.join(&meta.id).join("module").join("current.md")), "");
     }
 
     #[test]

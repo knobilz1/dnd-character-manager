@@ -15,6 +15,15 @@ interface NameCondition { name: string; condition: string }
 interface NameLevel { name: string; level: number }
 interface NameBool { name: string; value: boolean }
 
+/** Axial hex coordinates for one combatant (PC or monster/NPC — not limited to
+ *  the tracked party, since monsters aren't Character objects). Raw numbers
+ *  are internal bookkeeping the DM uses for exact hex-distance math; they are
+ *  never meant to be read aloud (see BASE_CLAUDE_MD's positioning section) —
+ *  narration always describes placement in relative human terms a player can
+ *  act on by eye-counting hexes on unlabeled physical terrain. */
+export interface HexPosition { q: number; r: number }
+interface NamePosition extends HexPosition { name: string }
+
 export interface DmActionSet {
   damage?: NameAmount[];
   heal?: NameAmount[];
@@ -31,6 +40,16 @@ export interface DmActionSet {
    *  actions concluded the current chapter, handled by DMConsolePage calling
    *  set_current_chapter. Absent unless this campaign has an imported module. */
   advanceToChapter?: string;
+  /** New or updated hex coordinates for any combatant whose position changed
+   *  or who just entered the scene — kept in DMConsolePage's battle-map state
+   *  (not in Character, since monsters/NPCs aren't Characters) and fed back
+   *  to Claude every turn as ground truth (see dmPrompt.ts's battleMapStatusText). */
+  position?: NamePosition[];
+  /** The DM's own signal that a battle map is no longer relevant (combat
+   *  ended, or a brand-new encounter is starting) — wipes DMConsolePage's
+   *  tracked positions so stale coordinates from a previous fight don't bleed
+   *  into the next one. */
+  clearPositions?: boolean;
 }
 
 const ACTIONS_BLOCK = /```dm-actions\s*([\s\S]*?)```/i;
