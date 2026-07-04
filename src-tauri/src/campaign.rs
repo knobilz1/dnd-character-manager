@@ -1,0 +1,790 @@
+//! campaign.rs — each D&D campaign is its own local Claude Code *project*: a
+//! folder with a CLAUDE.md (persona + world lore) and a memory/MEMORY.md that
+//! accumulates a short recap after every session. dm.rs launches `claude` with
+//! this folder as its working directory, so CLAUDE.md — and, via its
+//! `@memory/MEMORY.md` import line, the campaign's history — auto-load into
+//! every turn the same way a real Claude Code project would for a developer.
+//! This is how the DM "remembers" the campaign week to week, instead of
+//! leaning on `--resume` surviving an arbitrarily long gap between sessions.
+//!
+//! Imported modules are **chaptered**, not dumped in whole: a single one-shot
+//! Claude call (ask_claude_once, forced onto the `opus` model — this happens
+//! once per module import, not every turn, so it's the right place to spend
+//! quality/latency budget) both identifies chapter boundaries in the DM's own
+//! PDF/text file *and* writes a high-level campaign-arc plan (major beats,
+//! key NPCs, foreshadowing, pacing) in the same reply, from the DM's own
+//! perspective: "any module provides a framework and fills in the gaps," so
+//! ingestion should read the whole thing once and produce that framework up
+//! front, not just a table of contents. The raw text is then split
+//! mechanically at the reported chapter boundaries; only the *current*
+//! chapter's full text loads into CLAUDE.md every turn (via
+//! `@module/current.md`) — `module/index.md` (titles + one-line summaries of
+//! every chapter) is small enough to always load too, so Claude always knows
+//! the shape of the whole adventure without paying the token/latency cost of
+//! the full text every single turn. Claude signals when to advance to the
+//! next chapter itself, via `advanceToChapter` in its dm-actions block (see
+//! dmActions.ts) — the player never names a chapter. From the DM's (and
+//! player's) perspective this is one seamless "import module" step, not two
+//! separate calls.
+//!
+//! `module/plan.md` (the campaign-arc plan from that same import call) is
+//! deliberately **not** a standing `@import` in CLAUDE.md, unlike the memory/
+//! index/current-chapter files above. Confirmed live: editing a project's
+//! CLAUDE.md and then resuming an existing `claude` session still picks up
+//! the edit on the very next turn — meaning CLAUDE.md and everything it
+//! imports gets reprocessed on *every single turn*, not once per sitting.
+//! That's the right behavior for memory/current-chapter (they need to be
+//! current), but the plan is high-level pacing guidance that doesn't need
+//! re-reading every line and would otherwise burn tokens on every turn for no
+//! benefit. Instead, `read_campaign_plan` (below) is called from
+//! DMConsolePage.tsx and injected directly into the *turn's own prompt text*
+//! (dmPrompt.ts's `planCheckIn`) periodically — first turn of a sitting,
+//! right after a chapter change, and every few turns otherwise — so the DM
+//! checks it regularly without paying for it on every prompt.
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
+
+const BASE_CLAUDE_MD: &str = r#"# You are the Dungeon Master
+
+You are the Dungeon Master for a Dungeons & Dragons game night. The players are physically at the table talking to you out loud through speech-to-text; you reply and your reply is read aloud with text-to-speech, so keep prose natural to hear, not to read.
+
+You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked. For what's happened in past sessions and any standing facts worth remembering, see the campaign memory below.
+
+@memory/MEMORY.md
+
+## Reporting state changes
+When your narration causes damage, healing, temp HP, a condition, exhaustion, or inspiration change — or something worth remembering long-term happens, or (if this campaign has an imported module) the party's actions clearly conclude the current chapter — end your reply with a fenced code block literally starting with ```dm-actions containing ONLY compact JSON (no comments), e.g.:
+
+```dm-actions
+{"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"remember":["Gundren Rockseeker was captured by goblins near the Triboar Trail."]}
+```
+
+Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}].
+- `remember`: array of short, standalone facts worth recalling much later — a named NPC, a promise made, a secret learned, a consequence that should echo in a future session or a future chapter. These are saved permanently and shown to you at the start of every future turn, so don't rely on the current chapter's text alone to remember them.
+- `advanceToChapter`: a chapter id (only relevant if this campaign has an imported module — see module/index.md for the current list of valid ids). Include this only when the party's actions have actually concluded the current chapter and moved the story into the next one. Don't skip ahead or advance early just because you're curious what's next.
+Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
+
+## Campaign-arc plan check-ins
+If this campaign has an imported module, most turns you'll just see the current chapter's text and won't see the overall campaign-arc plan — that's intentional, it's not repeated every turn. Every so often (session start, right after a chapter change, and periodically otherwise) your prompt will start with a "Campaign-arc plan check-in" section containing that plan again. When you see it, use it to steer pacing, keep foreshadowed threads and NPCs consistent with the wider story, and then continue narrating normally — don't call attention to it or treat it as new information from the players.
+
+## How to DM
+- Track initiative yourself. Each round: narrate enemies, resolve actions, prompt the next player by name.
+- Roll monster attacks, saves, and damage yourself and state the result; let players roll their own d20s unless asked to roll for them, in which case just state a result plausible for the situation.
+- Favor pace and fun over rules-lawyering — make a ruling, state it briefly, move on.
+- Describe scenes vividly but concisely — this is spoken aloud, so avoid long info-dumps.
+- Never decide a player's character's actions, feelings, or words for them.
+- At 0 HP a PC is unconscious and rolls death saves — track tension accordingly.
+- Use the edition and module/scenario noted below as the ground rules and adventure content — don't default to a generic published module unless that's actually what's listed.
+"#;
+
+const DEFAULT_MEMORY_MD: &str = "# Campaign Memory\n\n_No sessions logged yet. A short recap is appended here when a session ends, and standalone facts are appended whenever the DM flags something worth remembering._\n";
+
+/// A single chapter/section of an imported module — the unit of "what's
+/// currently loaded" (see module/current.md) versus "what's just listed for
+/// context" (module/index.md carries every chapter's title + summary).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ChapterSummary {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ModuleChapters {
+    pub chapters: Vec<ChapterSummary>,
+    pub current_id: Option<String>,
+}
+
+/// Answers collected once, when a campaign is first created (see the "New
+/// Campaign" dialog in DMConsolePage.tsx) — baked straight into CLAUDE.md's
+/// "Campaign setting" section so the DM already knows this on session one,
+/// instead of starting blank and only learning it through later recaps.
+#[derive(Deserialize, Clone, Debug)]
+pub struct CampaignIntake {
+    pub name: String,
+    /// e.g. "2014" or "2024" — which D&D 5e ruleset is in play.
+    pub edition: String,
+    /// Free text: who's playing, and which character.
+    pub players: String,
+    /// The published module/scenario being run, or "Homebrew".
+    pub module: String,
+    /// Anything else: tone, house rules, world lore, starting situation.
+    pub notes: String,
+}
+
+const MODULE_IMPORT_BLOCK: &str = "\n## Imported module content\nThis campaign has an imported module, broken into chapters so only the relevant part loads each turn. module/index.md lists every chapter with a one-line summary and marks which one is current; module/current.md has the FULL TEXT of the current chapter only — treat it as your primary source material for this part of the adventure. See the dm-actions `advanceToChapter` key above for how to move to the next one. (module/plan.md, the campaign-arc outline from import time, is sent to you periodically in the turn message itself, not as a standing import here — see the \"Campaign-arc plan check-ins\" section above.)\n\n@module/index.md\n@module/current.md\n";
+
+fn format_campaign_setting(intake: &CampaignIntake) -> String {
+    let mut s = String::from("\n## Campaign setting\n");
+    if !intake.edition.trim().is_empty() {
+        s.push_str(&format!("- **Edition:** D&D {}\n", intake.edition.trim()));
+    }
+    if !intake.module.trim().is_empty() {
+        s.push_str(&format!("- **Module/scenario:** {}\n", intake.module.trim()));
+    }
+    if !intake.players.trim().is_empty() {
+        s.push_str(&format!("- **Players:** {}\n", intake.players.trim()));
+    }
+    if intake.notes.trim().is_empty() {
+        s.push_str("\n_(Add more world/tone/NPC detail here anytime via the Notes button.)_\n");
+    } else {
+        s.push('\n');
+        s.push_str(intake.notes.trim());
+        s.push('\n');
+    }
+    s
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct CampaignMeta {
+    pub id: String,
+    pub name: String,
+}
+
+fn campaigns_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Couldn't resolve app data dir: {e}"))?;
+    let root = dir.join("campaigns");
+    fs::create_dir_all(&root).map_err(|e| format!("Couldn't create campaigns dir: {e}"))?;
+    Ok(root)
+}
+
+fn slugify(name: &str) -> String {
+    let s: String = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let collapsed = s.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    if collapsed.is_empty() { "campaign".into() } else { collapsed }
+}
+
+/// Directory for a given campaign id. Used by dm.rs as the `claude` CLI's
+/// working directory so CLAUDE.md auto-loads as the DM's persona + memory.
+pub fn campaign_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    Ok(campaigns_root(app)?.join(id))
+}
+
+// ── Pure, directly-testable logic (no AppHandle, no subprocess) ─────────────
+// The #[tauri::command] wrappers below just resolve `root` from the app
+// handle (and, for chapterization, call out to `claude`) and delegate here;
+// see the `tests` module for real file-IO coverage of everything except the
+// actual "ask Claude for chapter headings" step (same untestable-without-a-
+// live-process category as ask_dm itself).
+
+fn list_campaigns_at(root: &Path) -> Result<Vec<CampaignMeta>, String> {
+    let mut out = vec![];
+    for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let id = entry.file_name().to_string_lossy().to_string();
+        let name = fs::read_to_string(entry.path().join("name.txt")).unwrap_or_else(|_| id.clone());
+        out.push(CampaignMeta { id, name: name.trim().to_string() });
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMeta, String> {
+    let trimmed = intake.name.trim();
+    if trimmed.is_empty() {
+        return Err("Campaign needs a name.".into());
+    }
+    let id = slugify(trimmed);
+    let dir = root.join(&id);
+    if dir.exists() {
+        return Err(format!("A campaign named \"{trimmed}\" already exists."));
+    }
+    fs::create_dir_all(dir.join("memory")).map_err(|e| e.to_string())?;
+    let claude_md = format!("{BASE_CLAUDE_MD}{}", format_campaign_setting(intake));
+    fs::write(dir.join("CLAUDE.md"), claude_md).map_err(|e| e.to_string())?;
+    fs::write(dir.join("memory").join("MEMORY.md"), DEFAULT_MEMORY_MD).map_err(|e| e.to_string())?;
+    fs::write(dir.join("name.txt"), trimmed).map_err(|e| e.to_string())?;
+    Ok(CampaignMeta { id, name: trimmed.to_string() })
+}
+
+fn append_session_recap_at(root: &Path, id: &str, date: &str, recap: &str) -> Result<(), String> {
+    let path = root.join(id).join("memory").join("MEMORY.md");
+    let mut existing = fs::read_to_string(&path).unwrap_or_default();
+    existing.push_str(&format!("\n## Session — {date}\n{}\n", recap.trim()));
+    fs::write(path, existing).map_err(|e| e.to_string())
+}
+
+/// A single flagged fact (dm-actions `remember`), appended immediately rather
+/// than waiting for session end — this is the cross-chapter/cross-session
+/// recall mechanism: it lands in memory/MEMORY.md, which loads every turn
+/// regardless of which module chapter is currently active.
+fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Result<(), String> {
+    let path = root.join(id).join("memory").join("MEMORY.md");
+    let mut existing = fs::read_to_string(&path).unwrap_or_default();
+    existing.push_str(&format!("- **{date}:** {}\n", note.trim()));
+    fs::write(path, existing).map_err(|e| e.to_string())
+}
+
+fn build_chapterize_prompt(text: &str) -> String {
+    format!(
+        "You will be given the full text of a Dungeons & Dragons adventure module or scenario document, extracted from a PDF. Do two things with it, in one reply.\n\n\
+        1. Identify its logical chapters or major sections. The \"heading\" field MUST be copied EXACTLY character-for-character from a contiguous span of the document text below — including any extraction artifacts like doubled letters, stray spaces between every word, broken ligatures, or OCR garbling (e.g. if the document shows \"CHAPTER  I  I ACQUISITIO:-<S\", copy exactly that, do not clean it up to \"CHAPTER 1: ACQUISITIONS\"). This heading string will be used to find this exact position in the raw text programmatically, so ANY normalization, cleanup, or paraphrasing will make it fail to match. When in doubt, copy a shorter exact substring rather than a longer paraphrased one. List them in the order they appear.\n\n\
+        2. Write a high-level campaign-arc plan for the AI Dungeon Master who will run this live at the table: the overall story arc across all chapters, key NPCs/factions worth tracking, threads that should pay off later (foreshadowing), and pacing guidance for how the chapters connect. A module provides a framework and leaves the DM to fill in the gaps — this plan IS that framework. Write it as a concise, well-organized markdown outline (a few hundred words is plenty), not a retelling of the text.\n\n\
+        Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
+        {{\"chapters\": [{{\"heading\": \"<exact verbatim substring, artifacts included>\", \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"plan\": \"<markdown campaign-arc outline>\"}}\n\n\
+        If the document has no clear internal chapter structure, still return a single chapters entry whose heading is an exact short substring from the very start of the document and whose summary describes the whole document — and still include a plan.\n\n\
+        Document:\n{text}"
+    )
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct ChapterHeading {
+    heading: String,
+    summary: String,
+}
+
+/// The combined result of one chapterize call: chapter boundaries plus the
+/// high-level campaign-arc plan generated from the same read of the document.
+#[derive(Deserialize, Clone, Debug)]
+struct ChapterizeReply {
+    chapters: Vec<ChapterHeading>,
+    #[serde(default)]
+    plan: String,
+}
+
+/// Parses Claude's combined chapterize+plan reply, tolerating stray markdown
+/// code fences around the JSON (the model is asked not to include them, but
+/// defends the same way parseDmReply.ts does for the dm-actions block).
+fn parse_chapterize_reply(reply: &str) -> Result<ChapterizeReply, String> {
+    let mut s = reply.trim();
+    if let Some(rest) = s.strip_prefix("```json") {
+        s = rest;
+    } else if let Some(rest) = s.strip_prefix("```") {
+        s = rest;
+    }
+    if let Some(rest) = s.strip_suffix("```") {
+        s = rest;
+    }
+    let cleaned = s.trim();
+    serde_json::from_str(cleaned)
+        .map_err(|e| format!("Couldn't parse chapter/plan reply from Claude: {e}. Raw: {reply}"))
+}
+
+/// Mechanically splits `text` at each heading's position, in order. Headings
+/// Claude paraphrased slightly (so they don't literally appear) are skipped
+/// leniently rather than failing the whole import. If nothing at all matches,
+/// falls back to treating the entire document as one chapter.
+fn split_by_headings(text: &str, headings: &[ChapterHeading]) -> Vec<(String, String, String)> {
+    let mut positions: Vec<(usize, &ChapterHeading)> = vec![];
+    let mut search_from = 0usize;
+    for h in headings {
+        if h.heading.trim().is_empty() {
+            continue;
+        }
+        if let Some(idx) = text.get(search_from..).and_then(|s| s.find(h.heading.as_str())) {
+            let abs = search_from + idx;
+            positions.push((abs, h));
+            search_from = abs + h.heading.len();
+        }
+    }
+
+    if positions.is_empty() {
+        let (title, summary) = headings
+            .first()
+            .map(|h| (h.heading.clone(), h.summary.clone()))
+            .unwrap_or_else(|| ("Full Document".to_string(), String::new()));
+        return vec![(title, summary, text.to_string())];
+    }
+
+    positions
+        .iter()
+        .enumerate()
+        .map(|(i, (pos, h))| {
+            let end = positions.get(i + 1).map(|(p, _)| *p).unwrap_or(text.len());
+            (h.heading.clone(), h.summary.clone(), text[*pos..end].to_string())
+        })
+        .collect()
+}
+
+fn build_index_md(manifest: &[ChapterSummary], current_id: &str) -> String {
+    let mut s = String::from("# Module chapters\n\n");
+    for (i, c) in manifest.iter().enumerate() {
+        let marker = if c.id == current_id { " ← CURRENT CHAPTER" } else { "" };
+        s.push_str(&format!("{}. **{}** (`{}`){marker} — {}\n", i + 1, c.title, c.id, c.summary));
+    }
+    s
+}
+
+/// Writes chapter files, module/manifest.json (the structured source of
+/// truth), module/plan.md (the high-level campaign-arc outline from the same
+/// chapterize call), module/index.md (the always-loaded human/Claude-readable
+/// listing), and module/current.md + current_id.txt pointing at chapter 1 —
+/// then makes sure CLAUDE.md references the module import block (idempotent:
+/// re-running this after a re-import won't duplicate the reference line). A
+/// fresh import replaces any previously-imported module entirely.
+fn write_chapters_to_disk(root: &Path, id: &str, chapters: &[(String, String, String)], plan: &str) -> Result<Vec<ChapterSummary>, String> {
+    if chapters.is_empty() {
+        return Err("No chapters to write.".into());
+    }
+    let dir = root.join(id);
+    let module_dir = dir.join("module");
+    let _ = fs::remove_dir_all(&module_dir);
+    fs::create_dir_all(&module_dir).map_err(|e| e.to_string())?;
+
+    let mut summaries = vec![];
+    for (i, (title, summary, content)) in chapters.iter().enumerate() {
+        let chapter_id = format!("chapter-{:02}-{}", i + 1, slugify(title));
+        fs::write(module_dir.join(format!("{chapter_id}.md")), content).map_err(|e| e.to_string())?;
+        summaries.push(ChapterSummary { id: chapter_id, title: title.clone(), summary: summary.clone() });
+    }
+
+    fs::write(
+        module_dir.join("manifest.json"),
+        serde_json::to_string_pretty(&summaries).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let first_id = summaries[0].id.clone();
+    fs::write(module_dir.join("current.md"), &chapters[0].2).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("current_id.txt"), &first_id).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("index.md"), build_index_md(&summaries, &first_id)).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("plan.md"), plan).map_err(|e| e.to_string())?;
+
+    let claude_path = dir.join("CLAUDE.md");
+    let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    if !claude_md.contains("@module/current.md") {
+        claude_md.push_str(MODULE_IMPORT_BLOCK);
+        fs::write(&claude_path, claude_md).map_err(|e| e.to_string())?;
+    }
+
+    Ok(summaries)
+}
+
+/// Sets which chapter is "current" — called when a turn's dm-actions block
+/// includes `advanceToChapter`, or from the Module dialog's manual override.
+fn advance_chapter_at(root: &Path, id: &str, chapter_id: &str) -> Result<(), String> {
+    let module_dir = root.join(id).join("module");
+    let manifest: Vec<ChapterSummary> = serde_json::from_str(
+        &fs::read_to_string(module_dir.join("manifest.json"))
+            .map_err(|e| format!("No module imported for this campaign: {e}"))?,
+    )
+    .map_err(|e| e.to_string())?;
+    if !manifest.iter().any(|c| c.id == chapter_id) {
+        return Err(format!("Unknown chapter id \"{chapter_id}\"."));
+    }
+    let content = fs::read_to_string(module_dir.join(format!("{chapter_id}.md"))).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("current.md"), content).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("current_id.txt"), chapter_id).map_err(|e| e.to_string())?;
+    fs::write(module_dir.join("index.md"), build_index_md(&manifest, chapter_id)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn get_module_chapters_at(root: &Path, id: &str) -> Result<(Vec<ChapterSummary>, Option<String>), String> {
+    let module_dir = root.join(id).join("module");
+    let manifest_path = module_dir.join("manifest.json");
+    if !manifest_path.exists() {
+        return Ok((vec![], None));
+    }
+    let manifest: Vec<ChapterSummary> =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let current_id = fs::read_to_string(module_dir.join("current_id.txt")).ok().map(|s| s.trim().to_string());
+    Ok((manifest, current_id))
+}
+
+/// The impure orchestration step: one Opus call asks Claude to identify
+/// chapter headings AND write the campaign-arc plan in the same reply, then
+/// splits the raw text on those headings and writes everything to disk. Only
+/// this function (and the #[tauri::command] wrapping it) touches the network/
+/// subprocess — split_by_headings/write_chapters_to_disk above are pure and
+/// covered by real tests instead. Forced onto `opus` (see dm.rs) since this
+/// runs once per module import, not on every turn.
+fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Result<Vec<ChapterSummary>, String> {
+    let reply = crate::dm::ask_claude_once(build_chapterize_prompt(raw_text), Some("opus"))?;
+    let parsed = parse_chapterize_reply(&reply)?;
+    let chapters = split_by_headings(raw_text, &parsed.chapters);
+    write_chapters_to_disk(root, id, &chapters, &parsed.plan)
+}
+
+// ── Tauri commands ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn list_campaigns(app: AppHandle) -> Result<Vec<CampaignMeta>, String> {
+    list_campaigns_at(&campaigns_root(&app)?)
+}
+
+#[tauri::command]
+pub fn create_campaign(app: AppHandle, intake: CampaignIntake) -> Result<CampaignMeta, String> {
+    create_campaign_at(&campaigns_root(&app)?, &intake)
+}
+
+#[tauri::command]
+pub fn read_campaign_notes(app: AppHandle, id: String) -> Result<String, String> {
+    fs::read_to_string(campaign_dir(&app, &id)?.join("CLAUDE.md")).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn save_campaign_notes(app: AppHandle, id: String, content: String) -> Result<(), String> {
+    fs::write(campaign_dir(&app, &id)?.join("CLAUDE.md"), content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn read_campaign_memory(app: AppHandle, id: String) -> Result<String, String> {
+    fs::read_to_string(campaign_dir(&app, &id)?.join("memory").join("MEMORY.md")).map_err(|e| e.to_string())
+}
+
+/// Appends a dated recap entry to the campaign's memory log — called once
+/// when a session ends (see DMConsolePage's "End session" flow).
+#[tauri::command]
+pub fn append_session_recap(app: AppHandle, id: String, date: String, recap: String) -> Result<(), String> {
+    append_session_recap_at(&campaigns_root(&app)?, &id, &date, &recap)
+}
+
+/// Appends one flagged fact from a turn's dm-actions `remember` array — see
+/// DMConsolePage's runTurn.
+#[tauri::command]
+pub fn append_memory_note(app: AppHandle, id: String, date: String, note: String) -> Result<(), String> {
+    append_memory_note_at(&campaigns_root(&app)?, &id, &date, &note)
+}
+
+/// Reads a DM's own module/scenario file and returns its text. PDFs are text-
+/// extracted (pure-Rust `pdf-extract`, no external binary); anything else is
+/// read as UTF-8 text (.md/.txt, best-effort for other plain-text formats).
+/// The file path comes from the OS file picker (@tauri-apps/plugin-dialog),
+/// so it's whatever the DM chose, not something the app needs to sandbox.
+#[tauri::command]
+pub fn extract_module_text(path: String) -> Result<String, String> {
+    let is_pdf = Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+
+    if is_pdf {
+        pdf_extract::extract_text(&path).map_err(|e| format!("Couldn't read PDF: {e}"))
+    } else {
+        fs::read_to_string(&path).map_err(|e| format!("Couldn't read file: {e}"))
+    }
+}
+
+/// Chapterizes and imports a module's raw text (from extract_module_text) —
+/// replaces any previously-imported module for this campaign. Runs a real
+/// `claude` call to find chapter boundaries, so this can take a while for a
+/// long document; spawn_blocking keeps it off the async runtime's worker threads.
+#[tauri::command]
+pub async fn chapterize_and_import_module(app: AppHandle, id: String, text: String) -> Result<Vec<ChapterSummary>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        chapterize_and_import_module_at(&root, &id, &text)
+    })
+    .await
+    .map_err(|e| format!("Chapterize task failed: {e}"))?
+}
+
+/// The chapter list + which one is current — feeds the Module dialog. Empty
+/// chapters + None current_id means no module has been imported yet.
+#[tauri::command]
+pub fn get_module_chapters(app: AppHandle, id: String) -> Result<ModuleChapters, String> {
+    let (chapters, current_id) = get_module_chapters_at(&campaigns_root(&app)?, &id)?;
+    Ok(ModuleChapters { chapters, current_id })
+}
+
+/// The high-level campaign-arc plan written once at import time, alongside
+/// the chapter split — feeds the Module dialog. Empty string if no module has
+/// been imported yet.
+#[tauri::command]
+pub fn read_campaign_plan(app: AppHandle, id: String) -> Result<String, String> {
+    let path = campaign_dir(&app, &id)?.join("module").join("plan.md");
+    Ok(fs::read_to_string(path).unwrap_or_default())
+}
+
+/// Sets the current chapter — called automatically when a turn's dm-actions
+/// block includes `advanceToChapter`, or manually from the Module dialog.
+#[tauri::command]
+pub fn set_current_chapter(app: AppHandle, id: String, chapter_id: String) -> Result<(), String> {
+    advance_chapter_at(&campaigns_root(&app)?, &id, &chapter_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh, self-cleaning scratch directory per test (avoids adding a
+    /// tempfile dependency just for this).
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "dm-console-test-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn intake(name: &str) -> CampaignIntake {
+        CampaignIntake {
+            name: name.into(),
+            edition: String::new(),
+            players: String::new(),
+            module: String::new(),
+            notes: String::new(),
+        }
+    }
+
+    fn heading(h: &str, s: &str) -> ChapterHeading {
+        ChapterHeading { heading: h.into(), summary: s.into() }
+    }
+
+    #[test]
+    fn create_campaign_seeds_claude_md_and_memory() {
+        let root = Scratch::new("create");
+        let meta = create_campaign_at(&root.0, &intake("The Sunless Citadel")).unwrap();
+        assert_eq!(meta.id, "the-sunless-citadel");
+        assert_eq!(meta.name, "The Sunless Citadel");
+
+        let claude_md = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
+        assert!(claude_md.contains("You are the Dungeon Master"));
+        assert!(claude_md.contains("@memory/MEMORY.md"), "CLAUDE.md must import the memory file so it auto-loads");
+        assert!(claude_md.contains("## Campaign setting"));
+        assert!(claude_md.contains("remember"), "persona must document the remember dm-action");
+
+        let memory_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("MEMORY.md")).unwrap();
+        assert!(memory_md.contains("Campaign Memory"));
+    }
+
+    #[test]
+    fn create_campaign_bakes_intake_answers_into_claude_md() {
+        let root = Scratch::new("intake");
+        let full = CampaignIntake {
+            name: "Curse of Strahd".into(),
+            edition: "2014".into(),
+            players: "Alex — Thorin (Fighter); Sam — Mira (Wizard)".into(),
+            module: "Curse of Strahd".into(),
+            notes: "Gothic horror tone. Strahd should feel personally menacing early on.".into(),
+        };
+        let meta = create_campaign_at(&root.0, &full).unwrap();
+        let claude_md = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
+
+        assert!(claude_md.contains("D&D 2014"));
+        assert!(claude_md.contains("Curse of Strahd"));
+        assert!(claude_md.contains("Alex — Thorin (Fighter)"));
+        assert!(claude_md.contains("Gothic horror tone."));
+        let blank = create_campaign_at(&root.0, &intake("Homebrew Test")).unwrap();
+        let blank_md = fs::read_to_string(root.0.join(&blank.id).join("CLAUDE.md")).unwrap();
+        assert!(blank_md.contains("Add more world/tone/NPC detail"));
+    }
+
+    #[test]
+    fn create_campaign_rejects_duplicate_name() {
+        let root = Scratch::new("dup");
+        create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        let err = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap_err();
+        assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn create_campaign_rejects_blank_name() {
+        let root = Scratch::new("blank");
+        assert!(create_campaign_at(&root.0, &intake("   ")).is_err());
+    }
+
+    #[test]
+    fn list_campaigns_reflects_created_ones_sorted_by_name() {
+        let root = Scratch::new("list");
+        create_campaign_at(&root.0, &intake("Zeta Quest")).unwrap();
+        create_campaign_at(&root.0, &intake("Alpha Quest")).unwrap();
+        let names: Vec<String> = list_campaigns_at(&root.0).unwrap().into_iter().map(|c| c.name).collect();
+        assert_eq!(names, vec!["Alpha Quest", "Zeta Quest"]);
+    }
+
+    #[test]
+    fn append_session_recap_accumulates_entries() {
+        let root = Scratch::new("recap");
+        let meta = create_campaign_at(&root.0, &intake("Curse of Strahd")).unwrap();
+        append_session_recap_at(&root.0, &meta.id, "2026-07-03", "The party entered Barovia.").unwrap();
+        append_session_recap_at(&root.0, &meta.id, "2026-07-10", "They met Ireena.").unwrap();
+
+        let memory_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("MEMORY.md")).unwrap();
+        assert!(memory_md.contains("## Session — 2026-07-03"));
+        assert!(memory_md.contains("The party entered Barovia."));
+        assert!(memory_md.contains("## Session — 2026-07-10"));
+        assert!(memory_md.contains("They met Ireena."));
+        assert!(memory_md.contains("Campaign Memory"));
+    }
+
+    #[test]
+    fn append_memory_note_accumulates_alongside_recaps() {
+        let root = Scratch::new("note");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        append_session_recap_at(&root.0, &meta.id, "2026-07-03", "The party set out from Neverwinter.").unwrap();
+        append_memory_note_at(&root.0, &meta.id, "2026-07-03", "Sildar Hallwinter is a friendly NPC travelling with the party.").unwrap();
+        append_memory_note_at(&root.0, &meta.id, "2026-07-10", "The party promised Gundren Rockseeker they'd find his brothers.").unwrap();
+
+        let memory_md = fs::read_to_string(root.0.join(&meta.id).join("memory").join("MEMORY.md")).unwrap();
+        assert!(memory_md.contains("The party set out from Neverwinter."));
+        assert!(memory_md.contains("Sildar Hallwinter is a friendly NPC"));
+        assert!(memory_md.contains("The party promised Gundren Rockseeker"));
+    }
+
+    #[test]
+    fn slugify_handles_punctuation_and_case() {
+        assert_eq!(slugify("The Sunless Citadel!"), "the-sunless-citadel");
+        assert_eq!(slugify("  Multiple   Spaces  "), "multiple-spaces");
+        assert_eq!(slugify("Rise of Tiamat: Part 2"), "rise-of-tiamat-part-2");
+        assert_eq!(slugify(""), "campaign");
+    }
+
+    #[test]
+    fn parse_chapterize_reply_handles_plain_and_fenced_json() {
+        let plain = "{\"chapters\":[{\"heading\":\"Chapter 1: Goblin Arrows\",\"summary\":\"An ambush on the road.\"}],\"plan\":\"# Arc\\nGoblins, then the mine.\"}";
+        let parsed = parse_chapterize_reply(plain).unwrap();
+        assert_eq!(parsed.chapters[0].heading, "Chapter 1: Goblin Arrows");
+        assert!(parsed.plan.contains("Goblins, then the mine."));
+
+        let fenced = "```json\n{\"chapters\":[{\"heading\":\"Chapter 1\",\"summary\":\"Intro.\"}],\"plan\":\"Outline.\"}\n```";
+        let parsed2 = parse_chapterize_reply(fenced).unwrap();
+        assert_eq!(parsed2.chapters[0].heading, "Chapter 1");
+        assert_eq!(parsed2.plan, "Outline.");
+
+        assert!(parse_chapterize_reply("not json at all").is_err());
+    }
+
+    #[test]
+    fn parse_chapterize_reply_defaults_plan_when_absent() {
+        let no_plan = r#"{"chapters":[{"heading":"Chapter 1","summary":"Intro."}]}"#;
+        let parsed = parse_chapterize_reply(no_plan).unwrap();
+        assert_eq!(parsed.plan, "");
+    }
+
+    #[test]
+    fn split_by_headings_splits_in_order_on_verbatim_matches() {
+        let text = "Intro fluff.\nChapter 1: Goblin Arrows\nGoblins attack the wagon.\nChapter 2: Cragmaw Hideout\nA cave full of goblins.\n";
+        let headings = vec![heading("Chapter 1: Goblin Arrows", "Ambush."), heading("Chapter 2: Cragmaw Hideout", "Cave.")];
+        let chapters = split_by_headings(text, &headings);
+
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
+        assert!(chapters[0].2.contains("Goblins attack the wagon."));
+        assert!(!chapters[0].2.contains("Cragmaw"), "chapter 1 shouldn't bleed into chapter 2's text");
+        assert_eq!(chapters[1].0, "Chapter 2: Cragmaw Hideout");
+        assert!(chapters[1].2.contains("A cave full of goblins."));
+    }
+
+    #[test]
+    fn split_by_headings_skips_unmatched_headings_leniently() {
+        let text = "Chapter 1: Goblin Arrows\nSome content.\nChapter 3: The Cave\nMore content.\n";
+        // "Chapter 2" doesn't literally appear (e.g. Claude slightly misquoted it) —
+        // should just be skipped, not fail the whole split.
+        let headings = vec![
+            heading("Chapter 1: Goblin Arrows", "First."),
+            heading("Chapter 2: Missing", "Never actually appears."),
+            heading("Chapter 3: The Cave", "Third."),
+        ];
+        let chapters = split_by_headings(text, &headings);
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
+        assert_eq!(chapters[1].0, "Chapter 3: The Cave");
+    }
+
+    #[test]
+    fn split_by_headings_falls_back_to_whole_document_if_nothing_matches() {
+        let text = "Completely unstructured adventure text with no headings at all.";
+        let headings = vec![heading("Chapter 1: Nonexistent", "Doesn't appear anywhere.")];
+        let chapters = split_by_headings(text, &headings);
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(chapters[0].2, text);
+    }
+
+    fn sample_chapters() -> Vec<(String, String, String)> {
+        vec![
+            ("Chapter 1: Goblin Arrows".into(), "Ambush on the road.".into(), "Full text of chapter 1...".into()),
+            ("Chapter 2: Cragmaw Hideout".into(), "A goblin cave.".into(), "Full text of chapter 2...".into()),
+        ]
+    }
+
+    #[test]
+    fn write_chapters_to_disk_writes_files_manifest_and_claude_md_reference() {
+        let root = Scratch::new("write-chapters");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        let plan = "# Campaign Arc\nThe goblins lead to Cragmaw Castle.";
+        let summaries = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), plan).unwrap();
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].id, "chapter-01-chapter-1-goblin-arrows");
+
+        let module_dir = root.0.join(&meta.id).join("module");
+        assert!(fs::read_to_string(module_dir.join(format!("{}.md", summaries[0].id))).unwrap().contains("Full text of chapter 1"));
+        assert!(fs::read_to_string(module_dir.join("current.md")).unwrap().contains("Full text of chapter 1"));
+        assert_eq!(fs::read_to_string(module_dir.join("current_id.txt")).unwrap(), summaries[0].id);
+        assert!(fs::read_to_string(module_dir.join("plan.md")).unwrap().contains("Cragmaw Castle"));
+
+        let index_md = fs::read_to_string(module_dir.join("index.md")).unwrap();
+        assert!(index_md.contains("CURRENT CHAPTER"));
+        assert!(index_md.contains("Cragmaw Hideout"));
+
+        let claude_md = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
+        assert!(!claude_md.contains("@module/plan.md"), "plan.md is delivered periodically via the turn prompt, not as a standing import");
+        assert!(claude_md.contains("@module/index.md"));
+        assert!(claude_md.contains("@module/current.md"));
+
+        // Re-importing shouldn't duplicate the CLAUDE.md reference block.
+        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), plan).unwrap();
+        let reimported = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
+        assert_eq!(reimported.matches("@module/current.md").count(), 1);
+    }
+
+    #[test]
+    fn advance_chapter_updates_current_pointer_and_index_marker() {
+        let root = Scratch::new("advance");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        let summaries = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.").unwrap();
+        let second_id = summaries[1].id.clone();
+
+        advance_chapter_at(&root.0, &meta.id, &second_id).unwrap();
+
+        let module_dir = root.0.join(&meta.id).join("module");
+        assert_eq!(fs::read_to_string(module_dir.join("current_id.txt")).unwrap(), second_id);
+        assert!(fs::read_to_string(module_dir.join("current.md")).unwrap().contains("Full text of chapter 2"));
+        let index_md = fs::read_to_string(module_dir.join("index.md")).unwrap();
+        // The marker should have moved off chapter 1 and onto chapter 2.
+        let ch1_line = index_md.lines().find(|l| l.contains("Goblin Arrows")).unwrap();
+        let ch2_line = index_md.lines().find(|l| l.contains("Cragmaw Hideout")).unwrap();
+        assert!(!ch1_line.contains("CURRENT CHAPTER"));
+        assert!(ch2_line.contains("CURRENT CHAPTER"));
+    }
+
+    #[test]
+    fn advance_chapter_rejects_unknown_id() {
+        let root = Scratch::new("advance-bad");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.").unwrap();
+        let err = advance_chapter_at(&root.0, &meta.id, "chapter-99-nonexistent").unwrap_err();
+        assert!(err.contains("Unknown chapter id"));
+    }
+
+    #[test]
+    fn get_module_chapters_reflects_none_then_imported_state() {
+        let root = Scratch::new("get-chapters");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+
+        let (chapters, current) = get_module_chapters_at(&root.0, &meta.id).unwrap();
+        assert!(chapters.is_empty());
+        assert!(current.is_none());
+
+        let summaries = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.").unwrap();
+        let (chapters2, current2) = get_module_chapters_at(&root.0, &meta.id).unwrap();
+        assert_eq!(chapters2.len(), 2);
+        assert_eq!(current2, Some(summaries[0].id.clone()));
+    }
+}

@@ -1,3 +1,4 @@
+mod campaign;
 mod dm;
 mod oauth;
 mod party_listener;
@@ -29,6 +30,18 @@ pub fn run() {
       party_listener::start_party_listener,
       party_listener::party_listener_port,
       party_listener::local_lan_ip,
+      campaign::list_campaigns,
+      campaign::create_campaign,
+      campaign::read_campaign_notes,
+      campaign::save_campaign_notes,
+      campaign::read_campaign_memory,
+      campaign::append_session_recap,
+      campaign::append_memory_note,
+      campaign::extract_module_text,
+      campaign::chapterize_and_import_module,
+      campaign::get_module_chapters,
+      campaign::set_current_chapter,
+      campaign::read_campaign_plan,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

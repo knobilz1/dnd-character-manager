@@ -3,34 +3,15 @@ import type { Character } from '../types';
 /**
  * dmPrompt.ts — builds what gets sent to the Claude DM each turn.
  *
- * The app has no persistent tool-calling loop into Claude (unlike the old
- * standalone MCP server) — instead every turn re-states the current party
- * status as plain text, and the DM is instructed to reply with narration plus
- * an optional trailing ```dm-actions fenced JSON block describing state changes
- * (damage/heal/conditions/etc). dmActions.ts parses that block back out.
+ * The DM's persona, house rules, and campaign lore/history no longer travel
+ * in this text — they live in the active campaign's own CLAUDE.md (see
+ * campaign.rs), which `claude` auto-loads because dm.rs runs it with that
+ * campaign's folder as its working directory, exactly like any other Claude
+ * Code project. This file only sends what changes turn to turn: the party's
+ * live status and what was just said. The DM is still expected (per that
+ * CLAUDE.md) to reply with narration plus an optional trailing ```dm-actions
+ * fenced JSON block describing state changes — dmActions.ts parses that back out.
  */
-
-export const DM_PERSONA = `You are the Dungeon Master for a Dungeons & Dragons 5e game night. The players are physically at the table talking to you out loud through speech-to-text; you reply and your reply is read aloud with text-to-speech, so keep prose natural to hear, not to read.
-
-You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked.
-
-## Reporting state changes
-When your narration causes damage, healing, temp HP, a condition, exhaustion, or inspiration change, end your reply with a fenced code block literally starting with \`\`\`dm-actions containing ONLY compact JSON (no comments), e.g.:
-
-\`\`\`dm-actions
-{"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}]}
-\`\`\`
-
-Valid keys (all optional, all arrays): damage {name,amount}, heal {name,amount}, tempHp {name,amount}, addCondition {name,condition}, removeCondition {name,condition}, exhaustion {name,level}, inspiration {name,value: true|false}.
-Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
-
-## How to DM
-- Track initiative yourself. Each round: narrate enemies, resolve actions, prompt the next player by name.
-- Roll monster attacks, saves, and damage yourself and state the result; let players roll their own d20s unless asked to roll for them, in which case just state a result plausible for the situation.
-- Favor pace and fun over rules-lawyering — make a ruling, state it briefly, move on.
-- Describe scenes vividly but concisely — this is spoken aloud, so avoid long info-dumps.
-- Never decide a player's character's actions, feelings, or words for them.
-- At 0 HP a PC is unconscious and rolls death saves — track tension accordingly.`;
 
 function classLine(c: Character): string {
   return (c.classes || [])
@@ -58,22 +39,38 @@ export function partyStatusText(party: Character[]): string {
   return party.map(statusLine).join('\n');
 }
 
-/** Builds the full text sent to `ask_dm` for one turn.
+/** Builds the text sent to `ask_dm` for one turn.
  *  `speaker` is set when the line came from a specific player's own device
  *  (via the "Talk to DM" button on their character sheet) rather than the
- *  DM Console's own shared mic. */
+ *  DM Console's own shared mic.
+ *  `planCheckIn`, when set, is the module's campaign-arc plan text (see
+ *  campaign.rs's read_campaign_plan) — deliberately NOT a standing CLAUDE.md
+ *  import, since that gets reprocessed on every single turn even mid-session
+ *  (confirmed live: editing CLAUDE.md and resuming picks up the edit next
+ *  turn). The plan is high-level pacing/NPC/foreshadowing guidance, not
+ *  something that needs re-reading every line, so DMConsolePage only passes
+ *  it here periodically (first turn of a sitting, right after a chapter
+ *  change, and every few turns otherwise) instead of every turn. */
 export function buildTurnPrompt(opts: {
-  isFirstTurn: boolean;
   party: Character[];
   spokenText: string;
   speaker?: string;
+  planCheckIn?: string;
 }): string {
-  const { isFirstTurn, party, spokenText, speaker } = opts;
+  const { party, spokenText, speaker, planCheckIn } = opts;
   const parts: string[] = [];
-  if (isFirstTurn) parts.push(DM_PERSONA);
+  if (planCheckIn) {
+    parts.push(`Campaign-arc plan check-in (periodic reminder, not every turn — use it to keep pacing, NPCs, and foreshadowing consistent with the whole story, then continue):\n${planCheckIn}`);
+  }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
   parts.push(speaker
     ? `The player playing ${speaker} says: ${spokenText}`
     : `The DM (at the table, speaking) says: ${spokenText}`);
   return parts.join('\n\n');
+}
+
+/** Prompt sent when a session ends, asking for a short recap to persist into
+ *  the campaign's memory/MEMORY.md for next week (see campaign.rs). */
+export function buildRecapPrompt(party: Character[]): string {
+  return `The session is ending. In 3-4 sentences, summarize tonight's session for next week's recap — what happened, where the party ended up, and any open threads. Reply with ONLY the summary text, no dm-actions block.\n\nCurrent party status:\n${partyStatusText(party)}`;
 }

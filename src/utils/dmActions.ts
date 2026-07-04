@@ -23,6 +23,14 @@ export interface DmActionSet {
   removeCondition?: NameCondition[];
   exhaustion?: NameLevel[];
   inspiration?: NameBool[];
+  /** Short standalone facts worth recalling much later — appended immediately
+   *  to memory/MEMORY.md (see campaign.rs's append_memory_note), which loads
+   *  every turn regardless of which module chapter is currently active. */
+  remember?: string[];
+  /** A chapter id from module/index.md — the DM's own signal that the party's
+   *  actions concluded the current chapter, handled by DMConsolePage calling
+   *  set_current_chapter. Absent unless this campaign has an imported module. */
+  advanceToChapter?: string;
 }
 
 const ACTIONS_BLOCK = /```dm-actions\s*([\s\S]*?)```/i;
