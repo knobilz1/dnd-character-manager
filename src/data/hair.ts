@@ -26,6 +26,10 @@ export type ModelRace = 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'ti
 export function modelRace(raceId?: string): ModelRace {
   if (!raceId) return 'human';
   const id = raceId.toLowerCase();
+  // No dedicated half-elf model — 'half-elf' doesn't match the `startsWith('elf')`
+  // check below (it starts with 'half'), so without this it silently fell through
+  // to the generic 'human' default. Elf is the closer visual fit.
+  if (id.includes('half-elf')) return 'elf';
   if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
   if (id.startsWith('dwarf') || id.includes('duergar')) return 'dwarf';
   if (id.includes('orc')) return 'halforc';           // half-orc, orc-2024
