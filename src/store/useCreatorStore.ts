@@ -324,3 +324,11 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
   reset: () =>
     set({ step: 'books', draft: structuredClone(INITIAL_DRAFT), pointBuyRemaining: 27, standardArrayUnassigned: [15,14,13,12,10,8], rolledValues: [], rolledDice: [] }),
 }));
+
+// DEV-only escape hatch for headless 3D-model review (scripts/hair-shot.mjs).
+// Lets an automated browser jump straight to the Appearance step with a chosen
+// race/gender/hair without clicking through the whole wizard. Tree-shaken out of
+// production builds by the import.meta.env.DEV guard.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as Window & { __creator?: typeof useCreatorStore }).__creator = useCreatorStore;
+}
