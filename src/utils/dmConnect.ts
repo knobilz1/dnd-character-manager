@@ -43,8 +43,14 @@ export async function pingDM(ip: string): Promise<boolean> {
 
 /** Push one spoken line to the DM, tagged with which character said it — lets
  *  a player talk to the DM from their own character sheet without ever
- *  opening the DM Console themselves. */
-export async function sendTalkToDM(text: string, characterName: string, ip: string): Promise<void> {
+ *  opening the DM Console themselves. The request blocks (server-side, see
+ *  party_listener.rs's `/talk` handler) until the DM Console actually
+ *  processes this line, so the resolved value is the DM's real reply text —
+ *  not just a delivery ack — letting the caller show what was said instead
+ *  of a bare "sent" confirmation. `null` means the DM Console never got
+ *  around to it within the server's own timeout window; the caller should
+ *  fall back to a generic "sent" message in that case. */
+export async function sendTalkToDM(text: string, characterName: string, ip: string): Promise<string | null> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/talk`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -52,6 +58,8 @@ export async function sendTalkToDM(text: string, characterName: string, ip: stri
     connectTimeout: 5000,
   });
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const data = (await res.json().catch(() => null)) as { reply?: string | null } | null;
+  return data?.reply ?? null;
 }
 
 /** POST one character (with its snapshot history) to the DM bot. Throws on failure. */

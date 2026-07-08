@@ -65,16 +65,30 @@ export function battleMapStatusText(positions: Record<string, HexPosition>): str
  *  it here periodically (first turn of a sitting, right after a chapter
  *  change, and every few turns otherwise) instead of every turn.
  *  `battleMap`, when non-empty, is the current hex positions — sent every
- *  turn (unlike planCheckIn) since it's tiny and needs to stay exact. */
+ *  turn (unlike planCheckIn) since it's tiny and needs to stay exact.
+ *  `interruption` is set on the first turn after a player barged in mid-
+ *  narration: the previous reply was cut off, and `heard` is exactly how much
+ *  of it actually finished playing aloud before the cutoff (empty string =
+ *  none of it was ever spoken). Without this, Claude's own session history
+ *  contains everything it generated while the players only heard part of it
+ *  — so the next reply could casually reference things nobody at the table
+ *  ever heard. This note re-anchors Claude's model of the conversation to
+ *  what the table actually experienced. */
 export function buildTurnPrompt(opts: {
   party: Character[];
   spokenText: string;
   speaker?: string;
   planCheckIn?: string;
   battleMap?: Record<string, HexPosition>;
+  interruption?: { heard: string };
 }): string {
-  const { party, spokenText, speaker, planCheckIn, battleMap } = opts;
+  const { party, spokenText, speaker, planCheckIn, battleMap, interruption } = opts;
   const parts: string[] = [];
+  if (interruption) {
+    parts.push(interruption.heard
+      ? `(Heads-up: your previous reply was cut off by the player mid-speech. Out loud, the players only heard this much of it: "${interruption.heard}" — anything you said after that was never heard. Don't assume they know it; if something important was lost, work it back in naturally.)`
+      : `(Heads-up: your previous reply was cut off by the player before any of it was spoken aloud — the players heard none of it. Treat it as unsaid; don't reference anything from it.)`);
+  }
   if (planCheckIn) {
     parts.push(`Campaign-arc plan check-in (periodic reminder, not every turn — use it to keep pacing, NPCs, and foreshadowing consistent with the whole story, then continue):\n${planCheckIn}`);
   }

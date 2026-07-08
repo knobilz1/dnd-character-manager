@@ -309,7 +309,7 @@ export function SheetPage() {
           >
             <History size={18} />
           </button>
-          <DiceRoller exhaustionLevel={exhaustionLevel} />
+          <DiceRoller exhaustionLevel={exhaustionLevel} characterName={character.name} />
           <TalkToDMButton characterName={character.name} />
           <div className="relative">
             <button

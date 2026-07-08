@@ -1,8 +1,11 @@
 import React from 'react';
-import { Dice5, X } from 'lucide-react';
+import { Dice5, X, Send } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useDiceStore } from '../../store/useDiceStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
+import { useDmConnection } from '../../hooks/useDmConnection';
+import { useSettingsStore } from '../../store/useSettingsStore';
+import { sendTalkToDM } from '../../utils/dmConnect';
 
 const DICE = [4, 6, 8, 10, 12, 20, 100] as const;
 type Die = typeof DICE[number];
@@ -175,8 +178,30 @@ const EXHAUSTION_REMINDER: Record<number, string> = {
   6: '☠ Dead (Exhaustion 6)',
 };
 
+/** Renders one settled roll as a text line for the DM — used by both the
+ *  auto-send checkbox (labeled rolls only) and the manual "Send to DM" button
+ *  (any roll). `label` absent means an unlabeled manual click; `modifier`
+ *  absent means no modifier was attached (always the case for manual clicks —
+ *  only external skill/save/initiative dispatches carry one). */
+function describeRollForDM(opts: {
+  die: Die;
+  label: string | null;
+  modifier: number | null;
+  mode: Mode;
+  result: number;
+  two: { v1: number; v2: number; winner: 1 | 2 } | null;
+}): string {
+  const { die, label, modifier, mode, result, two } = opts;
+  const prefix = label ? `${label}: ` : 'Rolled ';
+  const rollPart = mode !== 'normal' && two
+    ? `d${die} (${mode}) — rolled ${two.v1} and ${two.v2}, took ${result}`
+    : `d${die} → ${result}`;
+  const totalPart = modifier !== null ? ` + ${modifier} = ${result + modifier}` : '';
+  return `${prefix}${rollPart}${totalPart}`;
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
-export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }) {
+export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionLevel?: number; characterName?: string }) {
   const [open, setOpen] = React.useState(false);
   const [mode, setMode] = React.useState<Mode>('normal');
   const [activeDie, setActiveDie] = React.useState<Die | null>(null);
@@ -197,6 +222,12 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   // Tracks the label of the currently-running roll so we can broadcast it
   // to subscribers (e.g. death save auto-apply) once the animation settles.
   const rollLabelRef = React.useRef<string>('');
+  // Mirrors rollLabelRef for the modifier — deliberately a ref, not read off
+  // the rollModifier STATE variable, inside the settle callbacks below:
+  // rollWithSides/rollTwo are called synchronously in the same effect tick as
+  // setRollModifier, so their closures would otherwise capture the PREVIOUS
+  // render's (stale) rollModifier value, same reason rollLabelRef exists.
+  const rollModifierRef = React.useRef<number | null>(null);
 
   // Hurry up: skip roll animations and show results instantly
   const [hurryUp, setHurryUpState] = React.useState<boolean>(() => {
@@ -205,6 +236,39 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
   function setHurryUp(val: boolean) {
     setHurryUpState(val);
     try { localStorage.setItem('dnd_hurryup', val ? '1' : '0'); } catch { /* ignore */ }
+  }
+
+  // Auto-send labeled rolls (skill/save/initiative) to the DM the instant
+  // they settle — same persisted-preference pattern as hurryUp. Only ever
+  // shown/usable when a DM listener is actually reachable (see `connected`
+  // below), so this can't silently do nothing if left checked from a
+  // previous session with no DM around.
+  const [autoSendToDM, setAutoSendToDMState] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('dnd_dice_autosend_dm') === '1'; } catch { return false; }
+  });
+  function setAutoSendToDM(val: boolean) {
+    setAutoSendToDMState(val);
+    try { localStorage.setItem('dnd_dice_autosend_dm', val ? '1' : '0'); } catch { /* ignore */ }
+  }
+  const connected = useDmConnection();
+  const dmIp = useSettingsStore((s) => s.dmIp);
+  const [dmStatus, setDmStatus] = React.useState<string | null>(null);
+
+  /** Sends one settled roll to the DM over LAN (see dmConnect.ts's
+   *  sendTalkToDM) — the same blocking "/talk" flow TalkToDMButton uses, so
+   *  the DM actually reacts to it as a real turn rather than it just
+   *  appearing silently. Used by both the auto-send path (labeled rolls
+   *  only) and the manual button (any roll). */
+  async function sendRollToDM(opts: { die: Die; result: number; mode: Mode; two: { v1: number; v2: number; winner: 1 | 2 } | null; label: string | null; modifier: number | null }) {
+    if (!connected || !characterName?.trim()) return;
+    const text = describeRollForDM(opts);
+    setDmStatus('Sending to DM…');
+    try {
+      const reply = await sendTalkToDM(text, characterName, dmIp);
+      setDmStatus(reply ? `DM: ${reply}` : 'Sent to the DM.');
+    } catch (e) {
+      setDmStatus(e instanceof Error ? e.message : "Couldn't reach the DM.");
+    }
   }
 
   // External trigger state (skill/save/initiative rolls)
@@ -228,6 +292,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     if (!req) return;
     const reqMode = req.mode ?? 'normal';
     rollLabelRef.current = req.label;
+    rollModifierRef.current = req.modifier;
     setOpen(true);
     setMode(reqMode);
     setRollModifier(req.modifier);
@@ -269,11 +334,23 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
 
   React.useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
+  /** Fires the auto-send path right as a roll settles — only when the
+   *  checkbox is on AND this roll actually carried a label (an external
+   *  skill/save/initiative dispatch), never for a bare manual click. Reads
+   *  the ref-mirrored label/modifier (see rollModifierRef's doc comment),
+   *  not the rollLabel/rollModifier state, since this runs inside the same
+   *  settle closures that would otherwise see a stale value. */
+  function maybeAutoSendRoll(sides: Die, result: number, effectiveMode: Mode, two: { v1: number; v2: number; winner: 1 | 2 } | null) {
+    if (!autoSendToDM || !rollLabelRef.current) return;
+    sendRollToDM({ die: sides, result, mode: effectiveMode, two, label: rollLabelRef.current, modifier: rollModifierRef.current });
+  }
+
   function rollWithSides(sides: Die) {
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setTwoDisplay(null);
     setTwoFinal(null);
+    setDmStatus(null);
 
     if (hurryUp) {
       const result = Math.ceil(Math.random() * sides);
@@ -284,6 +361,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
       setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
       setRolling(false);
       publishResult(result, sides, rollLabelRef.current);
+      maybeAutoSendRoll(sides, result, 'normal', null);
       return;
     }
 
@@ -310,6 +388,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
         setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
         setRolling(false);
         publishResult(result, sides, rollLabelRef.current);
+        maybeAutoSendRoll(sides, result, 'normal', null);
       }
     };
     timerRef.current = setTimeout(tick, 30);
@@ -321,6 +400,8 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     setRollModifier(null);
     setRollLabel(null);
     rollLabelRef.current = '';
+    rollModifierRef.current = null;
+    setDmStatus(null);
     if (mode !== 'normal') { rollTwo(sides); return; }
     rollWithSides(sides);
   }
@@ -330,6 +411,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setDisplay(null);
+    setDmStatus(null);
 
     if (hurryUp) {
       const v1 = Math.ceil(Math.random() * sides);
@@ -348,6 +430,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
       setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
       setRolling(false);
       publishResult(finalVal, sides, rollLabelRef.current);
+      maybeAutoSendRoll(sides, finalVal, effectiveMode, { v1, v2, winner });
       return;
     }
 
@@ -384,6 +467,7 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
         setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
         setRolling(false);
         publishResult(finalVal, sides, rollLabelRef.current);
+        maybeAutoSendRoll(sides, finalVal, effectiveMode, { v1, v2, winner });
       }
     };
     timerRef.current = setTimeout(tick, 30);
@@ -448,8 +532,26 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
             ))}
           </div>
 
-          {/* Hurry up toggle */}
-          <div className="flex items-center justify-end px-4 pb-1 -mt-0.5">
+          {/* Hurry up + auto-send toggles */}
+          <div className="flex items-center justify-end gap-3 px-4 pb-1 -mt-0.5">
+            {/* Only offered when a DM listener is actually reachable — a
+             *  checked-but-unreachable checkbox would silently do nothing. */}
+            {connected && (
+              <label className="flex items-center gap-1.5 cursor-pointer select-none group" title="Automatically sends labeled rolls (skill/save/initiative checks) to the DM the moment they settle">
+                <input
+                  type="checkbox"
+                  checked={autoSendToDM}
+                  onChange={e => setAutoSendToDM(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                />
+                <span className={cn(
+                  'text-[11px] font-medium transition-colors',
+                  autoSendToDM ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-400',
+                )}>
+                  📨 Auto-send
+                </span>
+              </label>
+            )}
             <label className="flex items-center gap-1.5 cursor-pointer select-none group">
               <input
                 type="checkbox"
@@ -642,6 +744,26 @@ export function DiceRoller({ exhaustionLevel = 0 }: { exhaustionLevel?: number }
               </>
             )}
           </div>
+
+          {/* Manual "Send to DM" — works for ANY settled roll, labeled or
+           *  not (the auto-send checkbox above only ever covers labeled
+           *  rolls), so an unlabeled/manual click can still be shared on
+           *  demand. Reads plain component state, not the refs above — a
+           *  button click always sees the current render's fresh state. */}
+          {connected && display !== null && !rolling && activeDie !== null && (
+            <div className="flex items-center justify-center px-4 pb-1.5 -mt-1">
+              <button
+                onClick={() => sendRollToDM({ die: activeDie, result: display, mode, two: twoFinal, label: rollLabel, modifier: rollModifier })}
+                className="flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-emerald-400 transition-colors"
+                title="Send this roll to the DM"
+              >
+                <Send size={12} /> Send to DM
+              </button>
+            </div>
+          )}
+          {dmStatus && (
+            <p className="px-4 pb-2 -mt-0.5 text-[11px] text-slate-400 text-center">{dmStatus}</p>
+          )}
 
           {/* Dice grid */}
           <div className="grid grid-cols-4 gap-2 px-4 pb-3">

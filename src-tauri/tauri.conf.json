@@ -52,6 +52,11 @@
       "../public/tts/*.onnx.json": "tts/",
       "../public/tts/NOTICE.txt": "tts/NOTICE.txt",
       "../public/tts/PIPER_LICENSE.txt": "tts/PIPER_LICENSE.txt"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer/uninstall-hook.nsh"
+      }
     }
   },
   "plugins": {

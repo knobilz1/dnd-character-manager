@@ -15,6 +15,7 @@ pub fn run() {
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_opener::init())
+    .manage(dm::DmTurnControl::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -30,20 +31,35 @@ pub fn run() {
       oauth::get_fresh_access_token,
       oauth::clear_google_token,
       dm::ask_dm,
+      dm::warmup_dm_session,
+      dm::check_claude_auth,
+      dm::connect_claude,
+      dm::install_claude_cli,
+      dm::cancel_dm_turn,
       local_llm::ask_dm_local,
       local_llm::end_local_dm_session,
       party_listener::start_party_listener,
       party_listener::party_listener_port,
       party_listener::local_lan_ip,
+      party_listener::respond_to_player_turn,
       campaign::list_campaigns,
       campaign::create_campaign,
+      campaign::establish_campaign_lore,
+      campaign::update_campaign_lore,
+      campaign::read_campaign_lore,
       campaign::read_campaign_notes,
       campaign::save_campaign_notes,
       campaign::read_campaign_memory,
+      campaign::read_campaign_flagged_facts,
       campaign::append_session_recap,
       campaign::append_memory_note,
       campaign::append_entity_fact,
       campaign::append_location_fact,
+      campaign::upsert_party_member,
+      campaign::resolve_flagged_fact,
+      campaign::set_npc_voice,
+      campaign::read_npc_voices,
+      campaign::reconcile_npc_voices,
       campaign::read_campaign_entities,
       campaign::read_campaign_locations,
       campaign::compact_campaign_memory,
@@ -51,12 +67,17 @@ pub fn run() {
       campaign::extract_module_text,
       campaign::chapterize_and_import_module,
       campaign::get_module_chapters,
+      campaign::list_campaign_modules,
+      campaign::set_active_module,
       campaign::set_current_chapter,
       campaign::read_campaign_plan,
+      campaign::resolve_chapter_section,
       campaign::suggest_session_plan,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tts::speak_text,
+      tts::warmup_piper,
+      tts::warmup_voice,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

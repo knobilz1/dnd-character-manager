@@ -44,8 +44,17 @@ export function TalkToDMButton({ characterName }: { characterName: string }) {
     try {
       const text = await stopAndTranscribe();
       if (text) {
-        await sendTalkToDM(text, characterName, dmIp);
-        setStatus('Sent to the DM.');
+        // The request can now sit for a while (server-side blocks for the
+        // real reply, see below) — show something other than a frozen
+        // button while it's in flight, especially if queued behind others.
+        setStatus('Waiting for the DM…');
+        // Blocks until the DM Console actually processes this line (see
+        // party_listener.rs's /talk handler + dmConnect.ts) — so `reply` is
+        // the DM's real spoken response, not just a delivery ack. Falls back
+        // to a generic confirmation only if the DM Console never got to it
+        // in time (still queued behind other turns) or was interrupted.
+        const reply = await sendTalkToDM(text, characterName, dmIp);
+        setStatus(reply ? `DM: ${reply}` : 'Sent to the DM.');
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Couldn't reach the DM.");
@@ -68,7 +77,7 @@ export function TalkToDMButton({ characterName }: { characterName: string }) {
         {listening ? <Square size={18} /> : <Mic size={18} />}
       </button>
       {status && (
-        <div className="absolute right-0 top-8 z-50 w-48 rounded bg-slate-800 border border-slate-700 p-2 text-[11px] text-slate-300 shadow-lg">
+        <div className="absolute right-0 top-8 z-50 w-72 max-h-56 overflow-y-auto rounded bg-slate-800 border border-slate-700 p-2 text-[11px] text-slate-300 shadow-lg">
           {status}
           <button className="ml-2 text-slate-500 hover:text-white" onClick={() => setStatus(null)}>✕</button>
         </div>

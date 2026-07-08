@@ -13,12 +13,34 @@
 //! The listener binds once per app run and is left open for the app's lifetime
 //! (idempotent start — calling it again just returns the already-bound port).
 
+use rand::Rng;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::sync::OnceLock;
+use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 static LISTENER_PORT: OnceLock<u16> = OnceLock::new();
+
+/// How long a `/talk` request blocks waiting for the DM Console to actually
+/// process that line and call `respond_to_player_turn` — generous since a
+/// turn can be queued behind others, but still a hard ceiling so a player's
+/// device never hangs forever if the DM Console is closed mid-turn.
+const TALK_REPLY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// One entry per in-flight `/talk` request, keyed by a request id handed to
+/// the frontend in the `dm-player-turn` event payload. The connection thread
+/// blocks on the receiving half (see `handle_conn`) until DMConsolePage.tsx
+/// finishes that turn and calls `respond_to_player_turn` with the DM's actual
+/// reply text — turning what used to be a fire-and-forget "delivered" ack
+/// into the player's device actually seeing what the DM said, over the same
+/// one-way connection that already exists (no new reverse channel needed).
+fn pending_talk_replies() -> &'static Mutex<HashMap<String, mpsc::Sender<String>>> {
+    static PENDING: OnceLock<Mutex<HashMap<String, mpsc::Sender<String>>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 fn write_response(stream: &mut TcpStream, status: u16, body: &str, content_type: &str) {
     let status_text = match status {
@@ -158,9 +180,28 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
 
         // Picked up by the DM Console's turn queue (DMConsolePage.tsx) so a
         // player's own device can push a spoken line without ever running the
-        // DM Console UI itself.
-        let _ = app.emit("dm-player-turn", serde_json::json!({ "name": name, "text": text }));
-        return write_response(&mut stream, 200, "{\"ok\":true}", "application/json");
+        // DM Console UI itself. Blocks this connection's own thread (each
+        // connection already gets its own, see start_party_listener) until
+        // that turn actually resolves, so the HTTP response can carry back
+        // the DM's real reply instead of just an immediate "received" ack.
+        let request_id = format!("talk-{:016x}", rand::thread_rng().gen::<u64>());
+        let (tx, rx) = mpsc::channel::<String>();
+        pending_talk_replies().lock().unwrap().insert(request_id.clone(), tx);
+
+        let _ = app.emit(
+            "dm-player-turn",
+            serde_json::json!({ "name": name, "text": text, "requestId": request_id }),
+        );
+
+        let reply = match rx.recv_timeout(TALK_REPLY_TIMEOUT) {
+            Ok(reply) => Some(reply),
+            Err(_) => {
+                pending_talk_replies().lock().unwrap().remove(&request_id);
+                None
+            }
+        };
+        let body = serde_json::json!({ "ok": true, "reply": reply }).to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
     }
 
     write_response(&mut stream, 404, "not found", "text/plain");
@@ -194,6 +235,18 @@ pub fn party_listener_port() -> Option<u16> {
     LISTENER_PORT.get().copied()
 }
 
+/// Completes a still-blocked `/talk` request with the DM's actual reply text
+/// — called by DMConsolePage.tsx once a remote-originated turn finishes (see
+/// runTurn/drainQueue). A missing `request_id` (already timed out and
+/// removed itself, or a stale/duplicate call) is a silent no-op — the
+/// connection either already got its best-effort response or is long gone.
+#[tauri::command]
+pub fn respond_to_player_turn(request_id: String, reply_text: String) {
+    if let Some(tx) = pending_talk_replies().lock().unwrap().remove(&request_id) {
+        let _ = tx.send(reply_text);
+    }
+}
+
 /// Best-effort LAN-facing IP address, so the DM can read it out to players.
 /// Uses the "connect a UDP socket to a public IP, read local_addr()" trick —
 /// no packets actually need to leave the machine for this to resolve via the
@@ -203,4 +256,46 @@ pub fn local_lan_ip() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     socket.local_addr().ok().map(|a| a.ip().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Exercises the real registry + channel `respond_to_player_turn` uses —
+    /// the same mechanism a live `/talk` connection thread blocks on inside
+    /// `handle_conn`, just without needing an actual TCP connection or
+    /// AppHandle (which `handle_conn` itself does need, so that part is
+    /// covered by live probing instead — see the PowerShell-based
+    /// verification convention already used for this file's other routes).
+    #[test]
+    fn respond_to_player_turn_unblocks_the_matching_waiting_receiver() {
+        let (tx, rx) = mpsc::channel::<String>();
+        pending_talk_replies().lock().unwrap().insert("talk-test-1".to_string(), tx);
+
+        respond_to_player_turn("talk-test-1".to_string(), "The goblin misses.".to_string());
+
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), "The goblin misses.");
+    }
+
+    #[test]
+    fn respond_to_player_turn_is_a_silent_noop_for_an_unknown_request_id() {
+        // Should never panic even if the connection already timed out and
+        // removed itself, or the id is simply wrong.
+        respond_to_player_turn("talk-does-not-exist".to_string(), "late reply".to_string());
+    }
+
+    #[test]
+    fn respond_to_player_turn_removes_the_entry_so_it_cannot_be_completed_twice() {
+        let (tx, rx) = mpsc::channel::<String>();
+        pending_talk_replies().lock().unwrap().insert("talk-test-2".to_string(), tx);
+
+        respond_to_player_turn("talk-test-2".to_string(), "first reply".to_string());
+        // A second call for the same id is a no-op — the entry was removed —
+        // so the first (and only) message received must be the first reply.
+        respond_to_player_turn("talk-test-2".to_string(), "second reply".to_string());
+
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), "first reply");
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err(), "no second message should ever arrive");
+    }
 }
