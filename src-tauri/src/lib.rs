@@ -61,6 +61,7 @@ pub fn run() {
       campaign::set_npc_voice,
       campaign::read_npc_voices,
       campaign::sync_dm_rules,
+      campaign::log_voice_debug,
       campaign::reconcile_npc_voices,
       campaign::reconcile_campaign_hooks,
       campaign::read_campaign_entities,

@@ -667,6 +667,14 @@ export function DMConsolePage() {
    *  resolveEphemeralVoice). Trimmed to the last NARRATION_GENDER_WINDOW chars
    *  so a gendered noun from several beats ago can't misattribute a voice. */
   const recentNarrationRef = React.useRef('');
+  /** Which branch of resolveVoiceAssignment produced the last voice, for
+   *  voice_debug.log. Set by the resolver, read by enqueueSentence. */
+  const resolveSourceRef = React.useRef('');
+  /** One line per spoken sentence this turn, flushed to voice_debug.log when
+   *  the turn ends. Records the state machine's INPUTS (raw tag, sticky
+   *  speaker, quote parity) beside its output, so a wrong voice at the table
+   *  traces back to the exact sentence and branch that caused it. */
+  const voiceDebugRef = React.useRef<string[]>([]);
   // State mirror of npcVoicesRef, purely so the History dialog's voice-
   // preview/override panel re-renders when an assignment changes — the ref
   // above stays the source of truth for the hot playback path (enqueueSentence
@@ -770,16 +778,16 @@ export function DMConsolePage() {
    *  moments. An ambiguous tag falls back to the narrator voice instead of
    *  guessing — a plain, predictable miss beats an occasional wrong guess. */
   function resolveVoiceAssignment(speaker: string | null, genderHint: 'male' | 'female' | null = null): NpcVoiceEntry | undefined {
-    if (!speaker) return npcVoicesRef.current[NARRATOR_VOICE_KEY];
+    if (!speaker) { resolveSourceRef.current = 'narration'; return npcVoicesRef.current[NARRATOR_VOICE_KEY]; }
     const key = speaker.trim().toLowerCase();
     // Explicit `[Narrator]:` tag (the DM's way of ending a sticky NPC speech
     // and returning to narration mid-turn — see enqueueSentence) resolves to
     // the very same narrator entry plain untagged narration does, so a custom
     // narrator-voice override is honored either way.
-    if (key === 'narrator') return npcVoicesRef.current[NARRATOR_VOICE_KEY];
-    if (npcVoicesRef.current[key]) return npcVoicesRef.current[key];
+    if (key === 'narrator') { resolveSourceRef.current = 'explicit-narrator'; return npcVoicesRef.current[NARRATOR_VOICE_KEY]; }
+    if (npcVoicesRef.current[key]) { resolveSourceRef.current = 'assigned'; return npcVoicesRef.current[key]; }
     const wordMatches = Object.entries(npcVoicesRef.current).filter(([storedKey]) => storedKey.split(' ').includes(key));
-    if (wordMatches.length === 1) return wordMatches[0][1];
+    if (wordMatches.length === 1) { resolveSourceRef.current = 'word-match'; return wordMatches[0][1]; }
     // Several stored NPCs share this word — a real named NPC we can't
     // disambiguate, NOT an unnamed walk-on, so don't mint a voice for them.
     // (This branch used to `return undefined`, which the comment above called
@@ -787,6 +795,7 @@ export function DMConsolePage() {
     // see resolveEphemeralVoice. Now it really is the narrator's voice.)
     if (wordMatches.length > 1) {
       console.warn(`Ambiguous NPC voice tag "${speaker}" matches ${wordMatches.length} entries; using narrator voice.`);
+      resolveSourceRef.current = 'AMBIGUOUS->narrator';
       return npcVoicesRef.current[NARRATOR_VOICE_KEY];
     }
     return resolveEphemeralVoice(speaker, genderHint);
@@ -811,7 +820,7 @@ export function DMConsolePage() {
   function resolveEphemeralVoice(speaker: string, genderHint: 'male' | 'female' | null): NpcVoiceEntry | undefined {
     const key = speaker.trim().toLowerCase();
     const cached = ephemeralVoicesRef.current[key];
-    if (cached) return cached;
+    if (cached) { resolveSourceRef.current = 'ephemeral-cached'; return cached; }
     const taken = new Set<string>();
     for (const a of Object.values(npcVoicesRef.current)) taken.add(a.voice_id);
     for (const a of Object.values(ephemeralVoicesRef.current)) taken.add(a.voice_id);
@@ -821,13 +830,15 @@ export function DMConsolePage() {
     // forgets the marker. That last resort demands unanimity (inferGenderStrict),
     // so a two-NPC introduction naming both a woman and her brother declines to
     // guess instead of coin-flipping on a majority.
-    const voiceId =
-      pickEphemeralVoice(speaker, taken, genderHint) ??
-      pickEphemeralVoice(speaker, taken, inferGenderStrict(recentNarrationRef.current));
+    const fromTag = pickEphemeralVoice(speaker, taken, genderHint);
+    const fromNarration = fromTag ? null : pickEphemeralVoice(speaker, taken, inferGenderStrict(recentNarrationRef.current));
+    const voiceId = fromTag ?? fromNarration;
     if (!voiceId) {
       console.warn(`No assigned voice and no gender signal for tag "${speaker}"; using narrator voice.`);
+      resolveSourceRef.current = 'NO-SIGNAL->narrator';
       return npcVoicesRef.current[NARRATOR_VOICE_KEY];
     }
+    resolveSourceRef.current = fromTag ? (genderHint ? 'ephemeral-marker' : 'ephemeral-tagwords') : 'ephemeral-narration';
     const entry: NpcVoiceEntry = { voice_id: voiceId };
     ephemeralVoicesRef.current = { ...ephemeralVoicesRef.current, [key]: entry };
     return entry;
@@ -908,7 +919,20 @@ export function DMConsolePage() {
     // The hint only rides the sentence that carried the tag. Continuation
     // sentences of the same speech resolve by name against the ephemeral cache
     // that first sentence populated, so the DM never has to repeat it.
+    // Read AFTER this sentence flips parity — the revert check above used the
+    // pre-flip value, so label it honestly.
+    const quoteOpenPost = quoteOpenRef.current;
+    resolveSourceRef.current = '';
     const assignment = resolveVoiceAssignment(currentSpeakerRef.current, genderHint);
+    voiceDebugRef.current.push(
+      `  tag=${speaker === null ? '(none)' : JSON.stringify(speaker)}` +
+        ` hint=${genderHint ?? '-'}` +
+        ` sticky=${currentSpeakerRef.current ?? '(narrator)'}` +
+        ` quoteOpenPost=${quoteOpenPost}` +
+        ` -> voice=${assignment?.voice_id ?? 'undefined(af_heart)'}` +
+        ` src=${resolveSourceRef.current || '?'}` +
+        ` | ${text.trim().slice(0, 60)}`
+    );
     // Record narration AFTER resolving, never before: this sentence's own text
     // must not be a gender signal for the speaker it introduces (an NPC line
     // is full of "he"/"she" spoken BY that NPC about someone else). Only
@@ -1152,6 +1176,7 @@ export function DMConsolePage() {
       currentSpeakerRef.current = null; // untagged canned line: never inherit a prior turn's sticky speaker
       quoteOpenRef.current = false;
       recentNarrationRef.current = '';
+      voiceDebugRef.current = [];
       enqueueSentence(CAMPAIGN_BUILDING_MESSAGE);
       if (drainingPromiseRef.current) await drainingPromiseRef.current;
       return { narration: CAMPAIGN_BUILDING_MESSAGE, interrupted: false, error: null };
@@ -1164,6 +1189,7 @@ export function DMConsolePage() {
     currentSpeakerRef.current = null;
     quoteOpenRef.current = false;
     recentNarrationRef.current = '';
+    voiceDebugRef.current = [];
     // Consume any pending "the previous reply was cut off, here's what was
     // actually heard" note exactly once — see interruptedTurnRef's doc comment.
     const interruption = interruptedTurnRef.current ?? undefined;
@@ -1201,6 +1227,27 @@ export function DMConsolePage() {
 
       const { narration, actions, warnings: parseWarnings } = parseDmReply(reply.text);
       lastDmNarrationRef.current = narration;
+      // Ground truth for voice bugs: the RAW reply (tags intact) plus the
+      // decision each sentence produced. Fire-and-forget — a diagnostic must
+      // never break a live turn.
+      const debugCampaignId = campaignIdRef.current;
+      if (debugCampaignId) {
+        const voiceMap = Object.entries(npcVoicesRef.current)
+          .map(([k, v]) => `${k}=${v.voice_id}`)
+          .join(', ');
+        const entry = [
+          `=== turn ${new Date().toISOString()} ===`,
+          `npc_voices: ${voiceMap || '(none)'}`,
+          `ephemeral: ${Object.entries(ephemeralVoicesRef.current).map(([k, v]) => `${k}=${v.voice_id}`).join(', ') || '(none)'}`,
+          '--- raw reply (tags intact) ---',
+          narration,
+          '--- per-sentence voice decisions ---',
+          ...voiceDebugRef.current,
+        ].join('\n');
+        invoke('log_voice_debug', { id: debugCampaignId, entry }).catch((e) =>
+          console.warn('Failed to write voice debug log:', e)
+        );
+      }
       // Strip any [Name]: voice cues before this reaches a human anywhere —
       // they're a TTS-only signal (see parseSpeakerTag). The raw `narration`
       // (cues intact) is kept for the local-LLM enqueue fallback further
@@ -1406,6 +1453,7 @@ export function DMConsolePage() {
     currentSpeakerRef.current = null;
     quoteOpenRef.current = false;
     recentNarrationRef.current = '';
+    voiceDebugRef.current = [];
     const { sentences } = extractCompleteSentences(lastDmNarrationRef.current);
     for (const sentence of sentences) enqueueSentence(sentence);
   }

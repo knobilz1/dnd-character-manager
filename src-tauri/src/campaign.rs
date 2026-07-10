@@ -2043,6 +2043,42 @@ pub fn sync_dm_rules(app: AppHandle, id: String) -> Result<(), String> {
     sync_dm_rules_at(&campaigns_root(&app)?, &id)
 }
 
+/// How much voice_debug.log to keep. It's a diagnostic, not a record — old
+/// turns are dropped from the front rather than growing without bound.
+const VOICE_DEBUG_MAX_BYTES: usize = 256 * 1024;
+
+/// Appends one turn's raw (still-tagged) narration plus the per-sentence voice
+/// decision that narration produced, to <campaign>/memory/voice_debug.log.
+///
+/// Exists because the DM's reply is stripped of its `[Name]:` tags before it's
+/// displayed or stored anywhere — so when a voice comes out wrong at the table,
+/// there is nothing on disk showing what the DM actually emitted or which
+/// branch of resolveVoiceAssignment fired. Every voice diagnosis before this
+/// was reverse-engineered from what a human heard, which repeatedly landed near
+/// the bug without hitting it. This is the ground truth.
+///
+/// Never an error the caller must handle: a diagnostic that breaks a live turn
+/// would be worse than the bug it's chasing.
+#[tauri::command]
+pub fn log_voice_debug(app: AppHandle, id: String, entry: String) -> Result<(), String> {
+    let root = campaigns_root(&app)?;
+    let path = root.join(&id).join("memory").join("voice_debug.log");
+    let mut existing = read_optional(&path);
+    existing.push_str(entry.trim_end());
+    existing.push_str("\n\n");
+    if existing.len() > VOICE_DEBUG_MAX_BYTES {
+        // Trim from the front, then forward to the next turn header so the file
+        // never starts mid-entry.
+        let cut = existing.len() - VOICE_DEBUG_MAX_BYTES;
+        let tail = match existing[cut..].find("\n=== turn ") {
+            Some(i) => &existing[cut + i + 1..],
+            None => &existing[cut..],
+        };
+        existing = tail.to_string();
+    }
+    write_atomic(&path, &existing)
+}
+
 /// Finds NPCs missing a voice assignment and assigns one via a dedicated
 /// Opus reasoning pass — see reconcile_npc_voices_at. Called from
 /// wrapUpCurrentSession (so voices are ready before the next sitting, not
