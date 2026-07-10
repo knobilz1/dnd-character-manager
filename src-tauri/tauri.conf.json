@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Tavern Sheet",
-  "version": "0.22.23",
+  "version": "0.22.24",
   "identifier": "com.nabil.dndsheet",
   "build": {
     "frontendDist": "../dist",
@@ -47,11 +47,11 @@
       "../public/models/*.png": "models/",
       "../public/models/armor/*.glb": "models/armor/",
       "../public/models/hair/*.glb": "models/hair/",
-      "../public/tts/piper.exe": "tts/piper.exe",
-      "../public/tts/*.onnx": "tts/",
-      "../public/tts/*.onnx.json": "tts/",
+      "../public/tts/kokoro_cli.exe": "tts/kokoro_cli.exe",
       "../public/tts/NOTICE.txt": "tts/NOTICE.txt",
-      "../public/tts/PIPER_LICENSE.txt": "tts/PIPER_LICENSE.txt"
+      "../public/tts/KOKORO_ONNX_LICENSE.txt": "tts/KOKORO_ONNX_LICENSE.txt",
+      "../public/tts/KOKORO_MODEL_LICENSE.txt": "tts/KOKORO_MODEL_LICENSE.txt",
+      "../public/tts/PHONEMIZER_LICENSE.txt": "tts/PHONEMIZER_LICENSE.txt"
     },
     "windows": {
       "nsis": {

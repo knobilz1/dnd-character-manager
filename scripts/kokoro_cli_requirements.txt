@@ -1,0 +1,29 @@
+# Build environment for freezing scripts/kokoro_cli.py into
+# public/tts/kokoro_cli.exe. Not installed at app runtime — this is a
+# dev-time-only tool, mirroring how piper.exe was produced (see
+# public/tts/NOTICE.txt).
+#
+# Build steps (Windows, PowerShell):
+#   python -m venv kokoro-build
+#   kokoro-build\Scripts\pip install -r scripts\kokoro_cli_requirements.txt
+#   kokoro-build\Scripts\pyinstaller --onefile --name kokoro_cli `
+#     --add-data "kokoro-build\Lib\site-packages\kokoro_onnx\config.json;kokoro_onnx" `
+#     --collect-all kokoro_onnx `
+#     --collect-all phonemizer_fork `
+#     --collect-all segments `
+#     --collect-all csvw `
+#     --collect-all language_tags `
+#     --collect-all espeakng_loader `
+#     scripts\kokoro_cli.py
+#   copy dist\kokoro_cli.exe public\tts\kokoro_cli.exe
+#
+# The --collect-all flags exist because phonemizer-fork's own dependency
+# chain (segments -> csvw -> language_tags) hides data files PyInstaller's
+# default analysis doesn't find on its own — confirmed by trial and error;
+# dropping any one of these produces a FileNotFoundError at runtime for that
+# package's own bundled data, not an import error, so it's easy to miss
+# until the frozen exe is actually run standalone (see verification notes
+# in the PR/commit that introduced this file for the exact errors hit).
+kokoro-onnx==0.4.7
+soundfile
+pyinstaller

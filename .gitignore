@@ -18,6 +18,14 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+
+# Throwaway build venv/output for scripts/kokoro_cli.py — see
+# scripts/kokoro_cli_requirements.txt for how to reproduce it.
+scripts/.kokoro-build*
+scripts/.kokoro-exe-test
+
+# Headless 3D-viewport review screenshots (scripts/hair-shot.mjs output).
+scripts/_shots/
 *.local
 
 # Editor directories and files

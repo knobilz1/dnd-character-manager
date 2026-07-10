@@ -1,26 +1,37 @@
-//! tts.rs — local, in-app text-to-speech via a bundled Piper binary.
+//! tts.rs — local, in-app text-to-speech via a bundled Kokoro binary.
 //!
-//! Piper (https://github.com/OHF-Voice/piper1-gpl, GPLv3) ships only as a
-//! Python wheel, so `public/tts/piper.exe` is a standalone build frozen with
-//! PyInstaller — no Python installation needed at runtime. It's invoked here
-//! as a plain subprocess (same Command+stdin-piping shape as dm.rs's `claude`
-//! call), never linked into this app's own binary — the standard "mere
-//! aggregation" pattern also used for bundling e.g. ffmpeg, which keeps
-//! Tavern Sheet's own code unaffected by Piper's GPLv3 license. See
-//! public/tts/NOTICE.txt + PIPER_LICENSE.txt for the license text shipped
-//! alongside the binary.
+//! Kokoro (https://github.com/thewh1teagle/kokoro-onnx, MIT wrapper around
+//! the Apache-2.0 hexgrad/Kokoro-82M model weights) ships only as a Python
+//! package, so `public/tts/kokoro_cli.exe` is a standalone build of
+//! scripts/kokoro_cli.py frozen with PyInstaller — no Python installation
+//! needed at runtime (see scripts/kokoro_cli_requirements.txt for exact
+//! build steps). It's invoked here as a plain subprocess (same
+//! Command+stdin-piping shape as dm.rs's `claude` call), never linked into
+//! this app's own binary — the same "mere aggregation" pattern previously
+//! used for Piper (which this replaced) and also used for bundling e.g.
+//! ffmpeg: one of the frozen exe's own bundled dependencies
+//! (phonemizer-fork, used internally for text-to-phoneme) is GPL-3.0, which
+//! keeps Tavern Sheet's own code unaffected but does mean this specific
+//! redistributed binary carries GPL code. See public/tts/NOTICE.txt +
+//! KOKORO_ONNX_LICENSE.txt + KOKORO_MODEL_LICENSE.txt + PHONEMIZER_LICENSE.txt
+//! for the license text shipped alongside the binary.
 //!
 //! Windows-only for now (see tauri.conf.json's `bundle.resources`) — the
 //! frontend (dmSpeech.ts) falls back to the browser's own speechSynthesis if
 //! this command errors, so other platforms keep working without this piece.
 //!
-//! **Piper runs as a persistent warm process**, not spawned fresh per call —
-//! confirmed live that `piper.exe -d <dir> --output-dir-naming timestamp`
-//! stays running and keeps accepting new lines on stdin indefinitely (only
-//! exits when stdin is closed), each line producing one new file in the
-//! output directory. Keeping it alive across turns (and, once per-line NPC
-//! voices land, across multiple calls within one turn) avoids paying process
-//! spawn overhead every single time.
+//! **Kokoro runs as a single persistent warm process**, not spawned fresh
+//! per call — confirmed live that `kokoro_cli.exe <onnx> <voices> <dir>`
+//! stays running and keeps accepting new JSON lines on stdin indefinitely
+//! (only exits when stdin is closed), each line producing one new WAV file
+//! in the output directory. Unlike Piper, Kokoro's voice and speaking rate
+//! are both *per-request* parameters (not fixed at process startup), so —
+//! unlike the old PersistentPiper pool, which had to keep several warm
+//! processes around because a voice/speed switch meant a full respawn —
+//! exactly one warm process ever needs to exist, and it serves every voice
+//! and every speed the app ever asks for. Keeping it alive across turns
+//! avoids paying process spawn + ONNX Runtime session creation overhead
+//! every single time.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::collections::HashSet;
@@ -31,101 +42,105 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
-/// Curated pool of NPC voices, plus the bundled narrator voice as just
-/// another catalog entry (see ensure_voice_available's doc comment for why
-/// that unifies the lookup instead of special-casing it). Each entry is
-/// (id, repo path, speaker index). The repo path is the voice's path within
-/// the rhasspy/piper-voices Hugging Face repo, relative to the repo root and
-/// without a file extension — both `<path>.onnx` and `<path>.onnx.json`
-/// exist there. All medium quality: low-quality Piper voices save only
-/// ~30-40MB each while sounding distinctly more synthetic (verified against
-/// Piper's own docs/community guidance), not a good trade now that voices are
-/// lazily downloaded rather than bundled — installer size is no longer the
-/// constraint, so there's no reason to take the quality hit.
-///
-/// The speaker index is `None` for a single-speaker model (the whole .onnx is
-/// one voice) and `Some(n)` for one specific speaker within a multi-speaker
-/// pack — several catalog ids can (and do, for `en_GB-vctk-medium` below)
-/// share the same repo path with different speaker indices, since the model
-/// file itself is identical and only the `-s`/`--speaker` flag picked at
-/// Piper process start differs (confirmed against Piper's own `__main__.py`
-/// argparse definitions: `-s, --speaker` takes an int, default 0, and is
-/// fixed for that process's whole lifetime — there is no per-line/JSON-input
-/// way to change it, which is why needs_restart below has to key off
-/// (model, speaker) as a pair, not just model).
-///
-/// Deliberately several distinct voices per gender/accent bucket (not just
-/// one or two) — see BASE_CLAUDE_MD's "Giving NPCs distinct voices" for the
-/// instruction to actually spread NPCs across them, since a bucket with only
-/// one real option means every same-gender NPC in a campaign converges on the
-/// same voice regardless of how large the catalog looks.
-///
-/// The `en_GB-vctk-medium` speaker indices were curated from real published
-/// metadata, not guessed and not "listened to for quality" (nobody has) —
-/// cross-referenced the University of Edinburgh's own VCTK speaker-info.txt
-/// (AGE/GENDER/ACCENT/REGION per speaker) against this specific Piper build's
-/// `speaker_id_map` (confirmed via its own onnx.json) so every id below maps
-/// to a real speaker with a verified gender and accent region, not a blind
-/// numeric guess into 109 unlabeled slots. VCTK itself is a controlled
-/// studio-recorded corpus (Centre for Speech Technology Research, Edinburgh),
-/// not scraped audiobook narration of wildly varying quality like
-/// `libritts_r` — which is why this pack was chosen over that one even
-/// though `libritts_r` has far more raw speakers (see the conversation this
-/// was decided in: `libritts_r`'s own config exposes nothing but bare numeric
-/// corpus IDs, no metadata at all, making honest curation impossible without
-/// an actual listening pass).
-///
-/// All non-VCTK single-speaker paths below were confirmed against
-/// rhasspy/piper-voices' own voices.json. Character (gender/register)
-/// mapping for the single-speaker (non-VCTK) ones is by voice name + accent
-/// only — nobody's actually listened to those yet either to confirm finer
-/// shades like "gruff" or "elderly"; swapping an id to a better-sounding
-/// voice later is a one-line change, not a re-architecture. Keep this in
-/// sync with BASE_CLAUDE_MD's voice catalog list (campaign.rs), campaign.rs's
-/// build_voice_reconciliation_prompt, and dmActions.ts's VOICE_CATALOG_IDS —
-/// all four must agree on valid ids.
-const VOICE_CATALOG: &[(&str, &str, Option<u32>)] = &[
-    ("narrator", "en/en_US/lessac/medium/en_US-lessac-medium", None),
-    ("male-us-1", "en/en_US/hfc_male/medium/en_US-hfc_male-medium", None),
-    ("male-us-2", "en/en_US/joe/medium/en_US-joe-medium", None),
-    ("male-us-3", "en/en_US/bryce/medium/en_US-bryce-medium", None),
-    ("male-us-4", "en/en_US/john/medium/en_US-john-medium", None),
-    ("male-us-5", "en/en_US/kusal/medium/en_US-kusal-medium", None),
-    ("male-gb-1", "en/en_GB/alan/medium/en_GB-alan-medium", None),
-    ("male-gb-2", "en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium", None),
-    ("female-us-1", "en/en_US/hfc_female/medium/en_US-hfc_female-medium", None),
-    ("female-us-2", "en/en_US/kristin/medium/en_US-kristin-medium", None),
-    ("female-us-3", "en/en_US/amy/medium/en_US-amy-medium", None),
-    ("female-gb-1", "en/en_GB/cori/medium/en_GB-cori-medium", None),
-    ("female-gb-2", "en/en_GB/alba/medium/en_GB-alba-medium", None),
-    ("female-gb-3", "en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium", None),
-    // en_GB-vctk-medium speakers — see the doc comment above for how these
-    // were curated. VCTK p-code / real region noted per entry so the mapping
-    // stays auditable against speaker-info.txt without re-deriving it.
-    ("male-gb-3", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(23)), // p287, York, English
-    ("female-gb-4", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(77)), // p269, Newcastle, English
-    ("male-scottish-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(102)), // p237, Fife, Scottish
-    ("male-scottish-2", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(79)), // p252, Edinburgh, Scottish
-    ("female-scottish-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(2)), // p264, West Lothian, Scottish
-    ("male-irish-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(97)), // p245, Dublin, Irish
-    ("male-irish-2", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(108)), // p364, Donegal, Irish
-    ("female-irish-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(58)), // p288, Dublin, Irish
-    ("female-welsh-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(88)), // p253, Cardiff, Welsh
-    ("male-northernirish-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(28)), // p304, Belfast, NorthernIrish
-    ("female-northernirish-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(6)), // p261, Belfast, NorthernIrish
-    ("male-australian-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(71)), // p326, Sydney, Australian
-    ("male-southafrican-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(32)), // p347, Johannesburg, SouthAfrican
-    ("female-southafrican-1", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(35)), // p314, Cape Town, SouthAfrican
-    ("female-us-4", "en/en_GB/vctk/medium/en_GB-vctk-medium", Some(34)), // p308, Alabama, American
+/// Curated catalog of NPC voices, plus the narrator voice as just another
+/// entry (see ensure_kokoro_model_available's doc comment for why the model
+/// itself doesn't need special-casing the way Piper's bundled-vs-downloaded
+/// split did). Each entry is (id, Kokoro voice name) — see
+/// https://github.com/thewh1teagle/kokoro-onnx for the full published voice
+/// list this was drawn from. Kokoro's built-in English coverage is only
+/// "American" (`af_`/`am_` prefixes) and "British" (`bf_`/`bm_`) — no
+/// regional accent variety the way Piper's curated VCTK subset had
+/// (Scottish/Irish/Welsh/Australian/South African); that variety is a real,
+/// accepted loss from switching engines, not an oversight (confirmed
+/// against Kokoro's own voice list — those accents simply don't exist in
+/// it). `"narrator"` is reserved to `af_heart` (Kokoro's own flagship/
+/// default voice) and deliberately excluded from the numbered female-us-*
+/// pool below so an NPC assigned female-us-1..10 never accidentally sounds
+/// identical to the narrator. Keep this in sync with BASE_CLAUDE_MD's voice
+/// catalog list (campaign.rs), campaign.rs's build_voice_reconciliation_prompt,
+/// and dmActions.ts's VOICE_CATALOG_IDS — all four must agree on valid ids.
+const VOICE_CATALOG: &[(&str, &str)] = &[
+    ("narrator", "af_heart"),
+    ("female-us-1", "af_alloy"),
+    ("female-us-2", "af_aoede"),
+    ("female-us-3", "af_bella"),
+    ("female-us-4", "af_jessica"),
+    ("female-us-5", "af_kore"),
+    ("female-us-6", "af_nicole"),
+    ("female-us-7", "af_nova"),
+    ("female-us-8", "af_river"),
+    ("female-us-9", "af_sarah"),
+    ("female-us-10", "af_sky"),
+    ("male-us-1", "am_adam"),
+    ("male-us-2", "am_echo"),
+    ("male-us-3", "am_eric"),
+    ("male-us-4", "am_fenrir"),
+    ("male-us-5", "am_liam"),
+    ("male-us-6", "am_michael"),
+    ("male-us-7", "am_onyx"),
+    ("male-us-8", "am_puck"),
+    ("male-us-9", "am_santa"),
+    ("female-gb-1", "bf_alice"),
+    ("female-gb-2", "bf_emma"),
+    ("female-gb-3", "bf_isabella"),
+    ("female-gb-4", "bf_lily"),
+    ("male-gb-1", "bm_daniel"),
+    ("male-gb-2", "bm_fable"),
+    ("male-gb-3", "bm_george"),
+    ("male-gb-4", "bm_lewis"),
 ];
 
-/// Used whenever a line has no NPC voice assigned (plain narration, or an NPC
-/// nobody's assigned a voice to yet) — the one voice actually bundled in the
-/// installer, so this is also the only catalog entry `ensure_voice_available`
-/// resolves for free with zero network access.
+/// Used whenever a line has no NPC voice assigned (plain narration, or an
+/// NPC nobody's assigned a voice to yet).
 const DEFAULT_VOICE_ID: &str = "narrator";
 
-const HF_VOICES_BASE_URL: &str = "https://huggingface.co/rhasspy/piper-voices/resolve/main";
+/// Accent-specific ids from the old Piper catalog that no longer exist in
+/// Kokoro's (US/GB-only) catalog, mapped to a same-gender replacement — a
+/// pre-existing campaign's npc_voices.json can still carry these, and
+/// without this mapping they'd fall back to the narrator voice, which is
+/// FEMALE (`af_heart`): a male NPC saved as "male-scottish-1" suddenly
+/// speaking in the female narrator's voice is exactly the wrong-gender bug
+/// class the voice system exists to prevent, silently reintroduced by the
+/// engine swap. Gender is the non-negotiable axis preserved here; the lost
+/// accent just becomes plain American/British. Replacements are spread
+/// across different same-gender ids (not all onto one) so a campaign whose
+/// cast leaned on several distinct accents doesn't collapse into everyone
+/// sharing a single voice.
+const LEGACY_VOICE_ALIASES: &[(&str, &str)] = &[
+    ("male-scottish-1", "male-gb-2"),
+    ("male-scottish-2", "male-gb-3"),
+    ("female-scottish-1", "female-gb-2"),
+    ("male-irish-1", "male-gb-1"),
+    ("male-irish-2", "male-gb-4"),
+    ("female-irish-1", "female-gb-3"),
+    ("female-welsh-1", "female-gb-4"),
+    ("male-northernirish-1", "male-us-6"),
+    ("female-northernirish-1", "female-gb-1"),
+    ("male-australian-1", "male-us-7"),
+    ("male-southafrican-1", "male-us-8"),
+    ("female-southafrican-1", "female-us-5"),
+];
+
+/// Pure: looks up a voice id in the catalog — checking LEGACY_VOICE_ALIASES
+/// first, so an id saved under the old Piper catalog still resolves to a
+/// same-gender voice (see that constant's doc comment) — or an error naming
+/// it as unknown. Called before any filesystem/network access so a genuinely
+/// bad id from a stale/hallucinated dm-actions value fails fast and cheaply.
+/// Callers (speak_text/warmup_tts) treat that failure the same harmless way
+/// an unknown value always has here — falling back to the narrator voice
+/// rather than erroring the whole turn.
+fn catalog_kokoro_voice(voice_id: &str) -> Result<&'static str, String> {
+    let resolved = LEGACY_VOICE_ALIASES
+        .iter()
+        .find(|(legacy, _)| *legacy == voice_id)
+        .map(|(_, replacement)| *replacement)
+        .unwrap_or(voice_id);
+    VOICE_CATALOG
+        .iter()
+        .find(|(id, _)| *id == resolved)
+        .map(|(_, kokoro_voice)| *kokoro_voice)
+        .ok_or_else(|| format!("Unknown voice id \"{voice_id}\""))
+}
 
 /// Where to look for a bundled TTS resource file, in priority order. Pulled
 /// out as pure logic (no AppHandle) so it's directly testable — mirrors
@@ -159,168 +174,96 @@ fn find_resource(app: &AppHandle, filename: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("Couldn't find bundled TTS resource '{filename}'"))
 }
 
-// ── NPC voice pool: lazy download + cache ────────────────────────────────
+// ── Kokoro model: lazy download + cache ──────────────────────────────────
+//
+// Unlike Piper (one .onnx file per voice, so only the narrator's was worth
+// bundling and every other voice was a separate download), Kokoro's whole
+// catalog above lives in exactly two shared files — one model, one voices
+// pack — so there's nothing to bundle-vs-download per voice: either both
+// files are on disk already, or neither is, and getting either covers every
+// catalog id at once. Not bundled in the installer at all (~200MB combined,
+// see NOTICE.txt) — downloaded once on first-ever synthesis and cached
+// forever after, same "lazy download, cache forever" shape already used for
+// the Whisper STT model in dmSpeech.ts.
 
-/// Pure: the last path segment of a catalog repo path is always that voice's
-/// file basename (e.g. "en/en_US/lessac/medium/en_US-lessac-medium" →
-/// "en_US-lessac-medium") — both the bundled resource filename (for
-/// "narrator") and the cached-download filename (for everything else) key
-/// off this same string, which is what lets ensure_voice_available check
-/// both locations with one code path instead of special-casing the narrator.
-fn voice_basename(repo_path: &str) -> &str {
-    repo_path.rsplit('/').next().unwrap_or(repo_path)
-}
+const KOKORO_RELEASE_BASE_URL: &str = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
+const KOKORO_MODEL_FILENAME: &str = "kokoro-v1.0.fp16.onnx";
+const KOKORO_VOICES_FILENAME: &str = "voices-v1.0.bin";
 
-/// Pure: looks up a voice id in the catalog, or an error naming it as
-/// unknown — called before any filesystem/network access so a bad id from a
-/// stale/hallucinated dm-actions value fails fast and cheaply.
-fn catalog_repo_path(voice_id: &str) -> Result<&'static str, String> {
-    VOICE_CATALOG
-        .iter()
-        .find(|(id, _, _)| *id == voice_id)
-        .map(|(_, path, _)| *path)
-        .ok_or_else(|| format!("Unknown voice id \"{voice_id}\""))
-}
-
-/// Pure: the speaker index for a multi-speaker catalog entry (e.g. one of
-/// the `en_GB-vctk-medium` ids), or `None` for a single-speaker voice —
-/// including an unknown id, tolerated the same way an unknown voice_id
-/// already is elsewhere (catalog_repo_path is what actually validates
-/// existence; this is only ever called after that already succeeded).
-fn catalog_speaker_id(voice_id: &str) -> Option<u32> {
-    VOICE_CATALOG.iter().find(|(id, _, _)| *id == voice_id).and_then(|(_, _, speaker)| *speaker)
-}
-
-/// Where downloaded (non-bundled) voices are cached — separate from
-/// piper_output_dir (that's ephemeral synthesis output; this is a permanent,
-/// once-ever-per-machine download cache), same "lives in app-data, survives
-/// forever" shape as dmSpeech.ts's Whisper model caching in the browser.
-fn voice_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
+/// Where the downloaded model files are cached — lives in app-data, survives
+/// forever, same directory Piper's downloaded (non-bundled) voices used to
+/// live in.
+fn kokoro_model_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("tts_voices"))
 }
 
-/// Streams `url` straight to `dest` (no full-file buffering in memory — these
-/// are ~60MB files) via a `.part` temp file renamed into place on success, so
-/// a download that dies partway through never leaves a corrupt file at the
-/// real path for a later call to mistake as complete.
+/// Streams `url` straight to `dest` (no full-file buffering in memory — the
+/// model file alone is ~175MB) via a `.part` temp file renamed into place on
+/// success, so a download that dies partway through never leaves a corrupt
+/// file at the real path for a later call to mistake as complete.
 fn download_to_file(url: &str, dest: &Path) -> Result<(), String> {
-    let resp = ureq::get(url).call().map_err(|e| format!("Voice download failed ({url}): {e}"))?;
+    let resp = ureq::get(url).call().map_err(|e| format!("Model download failed ({url}): {e}"))?;
     let tmp = dest.with_extension("part");
     {
         let mut file = std::fs::File::create(&tmp).map_err(|e| format!("Couldn't create {}: {e}", tmp.display()))?;
-        std::io::copy(&mut resp.into_reader(), &mut file).map_err(|e| format!("Voice download write failed: {e}"))?;
+        std::io::copy(&mut resp.into_reader(), &mut file).map_err(|e| format!("Model download write failed: {e}"))?;
     }
     std::fs::rename(&tmp, dest).map_err(|e| e.to_string())
 }
 
-/// Resolves a voice id to its .onnx model file on disk, fetching it if
-/// needed. Checks, in order: (1) bundled app resources — only ever hits for
-/// "narrator", the one voice actually shipped in the installer (see
-/// VOICE_CATALOG's doc comment); (2) the local download cache
-/// (app-data/tts_voices/), populated by a previous call; (3) downloads both
-/// the .onnx and its .onnx.json config from the rhasspy/piper-voices
-/// Hugging Face repo into that cache dir. Same "lazy download, cache
-/// forever" shape already used for the Whisper STT model in dmSpeech.ts —
-/// the first time any given campaign actually needs a voice, it costs one
-/// real download; every call after that (any campaign, this machine) is free.
-fn ensure_voice_available(app: &AppHandle, voice_id: &str) -> Result<PathBuf, String> {
-    let repo_path = catalog_repo_path(voice_id)?;
-    let basename = voice_basename(repo_path);
-    let onnx_filename = format!("{basename}.onnx");
-    let json_filename = format!("{basename}.onnx.json");
-
-    if let (Ok(onnx), Ok(_json)) = (find_resource(app, &onnx_filename), find_resource(app, &json_filename)) {
-        return Ok(onnx);
-    }
-
-    let cache_dir = voice_cache_dir(app)?;
-    let onnx_path = cache_dir.join(&onnx_filename);
-    let json_path = cache_dir.join(&json_filename);
-    if onnx_path.exists() && json_path.exists() {
-        return Ok(onnx_path);
+/// Resolves the shared Kokoro model + voices-pack files, fetching them if
+/// needed. Checks the local download cache (app-data/tts_voices/) first,
+/// populated by a previous call; downloads both from the kokoro-onnx GitHub
+/// release into that cache dir otherwise. The first time ANY voice is ever
+/// used in this app (any campaign, this machine) costs one real ~200MB
+/// download; every call after that is free, regardless of which catalog
+/// voice is actually being spoken.
+fn ensure_kokoro_model_available(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let cache_dir = kokoro_model_cache_dir(app)?;
+    let onnx_path = cache_dir.join(KOKORO_MODEL_FILENAME);
+    let voices_path = cache_dir.join(KOKORO_VOICES_FILENAME);
+    if onnx_path.exists() && voices_path.exists() {
+        return Ok((onnx_path, voices_path));
     }
 
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Couldn't create voice cache dir: {e}"))?;
-    download_to_file(&format!("{HF_VOICES_BASE_URL}/{repo_path}.onnx"), &onnx_path)?;
-    download_to_file(&format!("{HF_VOICES_BASE_URL}/{repo_path}.onnx.json"), &json_path)?;
-    Ok(onnx_path)
+    download_to_file(&format!("{KOKORO_RELEASE_BASE_URL}/{KOKORO_MODEL_FILENAME}"), &onnx_path)?;
+    download_to_file(&format!("{KOKORO_RELEASE_BASE_URL}/{KOKORO_VOICES_FILENAME}"), &voices_path)?;
+    Ok((onnx_path, voices_path))
 }
 
-// ── Persistent Piper process pool ────────────────────────────────────────
+// ── Persistent Kokoro process ─────────────────────────────────────────────
 //
-// A single warm process meant every speaker switch inside a dialogue-heavy
-// scene (narrator -> NPC A -> narrator -> NPC B) paid a full respawn — kill,
-// spawn, ONNX Runtime session creation off a ~60-80MB model file — on every
-// line, since Piper's `-s/--speaker` flag is fixed for a process's whole
-// lifetime (confirmed against Piper's own `__main__.py` argparse: no per-
-// line way to change it). Keeping several voices warm at once (an LRU pool,
-// not just one slot) means a scene's narrator plus a handful of active NPCs
-// can all stay loaded simultaneously, so only a genuinely new voice pays the
-// respawn cost. Purely a local RAM/process tradeoff — no token or Claude-API
-// cost at all, since this is 100% local TTS, unrelated to dm.rs's `claude`
-// subprocess. An idle warm process does no work and burns no CPU (it's just
-// sitting on a blocked stdin read); the cost is memory, roughly the model's
-// own file size plus ONNX Runtime overhead per resident process.
+// Exactly one warm process, ever — see the module doc comment for why this
+// is so much simpler than Piper's LRU pool of several processes: voice and
+// speed are per-request JSON fields (see scripts/kokoro_cli.py), not
+// process-startup-fixed CLI flags, so there is no "wrong voice loaded"
+// concept to evict/respawn around. An idle warm process does no work and
+// burns no CPU (it's just sitting on a blocked stdin read); the cost is
+// memory, roughly the model's own file size plus ONNX Runtime overhead —
+// paid once, not per-voice.
 
-/// How many distinct (model, speaker) voices stay warm at once. 5 was picked
-/// as comfortably covering a typical scene's active speaker set (narrator +
-/// a handful of NPCs) without needing to guess in advance which one to
-/// evict mid-conversation — see the module comment above for the memory
-/// cost this trades against.
-const MAX_WARM_PIPER_PROCESSES: usize = 5;
-
-struct PersistentPiper {
+struct PersistentKokoro {
     child: Child,
     stdin: ChildStdin,
-    model: PathBuf,
-    speaker: Option<u32>,
     output_dir: PathBuf,
-    last_used: Instant,
 }
 
-fn piper_pool() -> &'static Mutex<Vec<PersistentPiper>> {
-    static POOL: OnceLock<Mutex<Vec<PersistentPiper>>> = OnceLock::new();
-    POOL.get_or_init(|| Mutex::new(Vec::new()))
+fn kokoro_process() -> &'static Mutex<Option<PersistentKokoro>> {
+    static PROC: OnceLock<Mutex<Option<PersistentKokoro>>> = OnceLock::new();
+    PROC.get_or_init(|| Mutex::new(None))
 }
 
-fn piper_output_dir() -> PathBuf {
-    std::env::temp_dir().join("tavern-piper-out")
-}
-
-/// Pure: each warm process gets its own output subdirectory, keyed by model
-/// basename + speaker index, rather than every process sharing one — a
-/// stale leftover file from one voice's directory should never be mistaken
-/// for a different voice's completed synthesis. (Today's one-request-at-a-
-/// time locking in synthesize_via_persistent_piper already prevents a true
-/// concurrent mix-up across processes, but this keeps each process's own
-/// directory listing meaningful in isolation too — e.g. for debugging.)
-fn piper_output_dir_for(model: &Path, speaker: Option<u32>) -> PathBuf {
-    let basename = model.file_stem().and_then(|s| s.to_str()).unwrap_or("voice");
-    match speaker {
-        Some(s) => piper_output_dir().join(format!("{basename}_{s}")),
-        None => piper_output_dir().join(basename),
-    }
-}
-
-/// Pure: index of the pool entry already running this exact (model,
-/// speaker), if any. Speaker must match alongside model (not model alone)
-/// because Piper's `-s` flag is fixed at process startup — two catalog ids
-/// sharing one multi-speaker model file (e.g. two different VCTK voices)
-/// are NOT interchangeable warm entries.
-fn pool_match_index(entries: &[(PathBuf, Option<u32>)], model: &Path, speaker: Option<u32>) -> Option<usize> {
-    entries.iter().position(|(m, s)| m == model && *s == speaker)
-}
-
-/// Pure: index of the least-recently-used entry, for eviction once the pool
-/// is at MAX_WARM_PIPER_PROCESSES capacity. `None` only when given no
-/// entries at all.
-fn lru_index(last_used: &[Instant]) -> Option<usize> {
-    last_used.iter().enumerate().min_by_key(|(_, t)| **t).map(|(i, _)| i)
+fn kokoro_output_dir() -> PathBuf {
+    std::env::temp_dir().join("tavern-kokoro-out")
 }
 
 /// Drains a child's stdout/stderr in a background thread so the pipe buffer
-/// never fills and stalls the (long-lived) process — Piper writes one INFO
-/// log line per synthesis, harmless to just discard.
+/// never fills and stalls the (long-lived) process — kokoro_cli.py prints
+/// "READY" once at startup and "ERROR: ..." on a per-line synthesis failure
+/// (see its own module doc comment), both harmless to just discard here;
+/// synthesis success/failure is detected by watching the output directory
+/// (see wait_for_file_to_stabilize below), not by parsing stdout/stderr.
 fn drain_in_background<R: std::io::Read + Send + 'static>(reader: R) {
     std::thread::spawn(move || {
         let mut buf_reader = BufReader::new(reader);
@@ -331,9 +274,53 @@ fn drain_in_background<R: std::io::Read + Send + 'static>(reader: R) {
     });
 }
 
+fn spawn_kokoro(exe: &Path, onnx: &Path, voices: &Path, output_dir: &Path) -> Result<PersistentKokoro, String> {
+    std::fs::create_dir_all(output_dir).map_err(|e| format!("couldn't create Kokoro output dir: {e}"))?;
+
+    let mut cmd = Command::new(exe);
+    cmd.arg(onnx).arg(voices).arg(output_dir);
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Same console-flash issue as dm.rs's `claude` spawn — kokoro_cli.exe is
+    // a console-subsystem binary and this app has no console of its own.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Couldn't start Kokoro ({}): {e}", exe.display()))?;
+
+    let stdin = child.stdin.take().ok_or("no stdin handle")?;
+    if let Some(stdout) = child.stdout.take() {
+        drain_in_background(stdout);
+    }
+    if let Some(stderr) = child.stderr.take() {
+        drain_in_background(stderr);
+    }
+
+    Ok(PersistentKokoro { child, stdin, output_dir: output_dir.to_path_buf() })
+}
+
+/// Returns the live warm process, spawning one first if there isn't one yet
+/// or the previous one has exited (checked via try_wait, so a dead process
+/// never gets mistaken for a usable one).
+fn acquire_kokoro<'a>(proc: &'a mut Option<PersistentKokoro>, exe: &Path, onnx: &Path, voices: &Path) -> Result<&'a mut PersistentKokoro, String> {
+    let needs_spawn = match proc {
+        Some(p) => matches!(p.child.try_wait(), Ok(Some(_)) | Err(_)),
+        None => true,
+    };
+    if needs_spawn {
+        *proc = Some(spawn_kokoro(exe, onnx, voices, &kokoro_output_dir())?);
+    }
+    Ok(proc.as_mut().unwrap())
+}
+
 /// Pure: picks whichever file in `after` wasn't present in `before` — how a
-/// completed synthesis is detected without parsing Piper's stdout (which
-/// only carries a human-readable log line, not a machine-readable signal).
+/// completed synthesis is detected without parsing Kokoro's stdout (which
+/// only ever carries "READY" once and "ERROR: ..." on failure, neither of
+/// which is a per-request machine-readable signal — see kokoro_cli.py).
 fn pick_new_file<'a>(before: &'a HashSet<PathBuf>, after: &'a HashSet<PathBuf>) -> Option<&'a PathBuf> {
     after.difference(before).next()
 }
@@ -345,7 +332,7 @@ fn list_wav_files(dir: &Path) -> HashSet<PathBuf> {
 }
 
 /// Waits until `path`'s size stops changing across two checks a few ms apart
-/// (or 0-byte, which briefly happens right after Piper creates the file but
+/// (or 0-byte, which briefly happens right after Kokoro creates the file but
 /// before it's written anything) — a plain "does it exist" check can catch
 /// the file mid-write and read a truncated/empty result.
 fn wait_for_file_to_stabilize(path: &Path, deadline: Instant) {
@@ -363,227 +350,122 @@ fn wait_for_file_to_stabilize(path: &Path, deadline: Instant) {
     }
 }
 
-/// A fixed, deliberate slow-down applied to every voice's speaking rate.
-/// Piper's own per-voice default (baked into each voice's onnx.json,
-/// effectively ~1.0 when unset) reads as brisk/conversational — noticeable on
-/// every line, but most jarring against slower, weightier narration (the kind
-/// dramatic world-building calls for), where a rushed delivery clashes with
-/// the tone. `--length-scale` is Piper's own name for this (confirmed via
-/// this build's own `--help`: "Phoneme length" — bigger stretches every
-/// phoneme longer, i.e. slower speech). Like `-s/--speaker`, it's fixed for a
-/// process's whole lifetime — this build's `--help` shows no per-line/JSON-
-/// input override — so this is one constant applied to every warm process
-/// rather than something the DM could dial per-line without a full respawn
-/// per distinct rate. 1.15 was picked as a noticeably more deliberate,
-/// measured cadence without dragging into "slow reading aloud" territory;
-/// nobody's actually listened yet to confirm this is the right number — a
-/// one-line change to retune once someone has.
-const SPEECH_LENGTH_SCALE: f64 = 1.15;
+/// The stored/UI "pace factor" convention (bigger = slower — same meaning
+/// this field has always had, back when it was passed straight through as
+/// Piper's `--length-scale`) applied to every voice with no per-voice
+/// override (see npc_voices.json's optional `speed` field, threaded through
+/// from `speak_text`'s own `speed` param). 1.15 reads as a noticeably more
+/// deliberate, measured cadence than Kokoro's own neutral pace without
+/// dragging into "slow reading aloud" territory — see
+/// kokoro_speed_from_pace_factor for how this gets converted to Kokoro's
+/// own (inverted) speed scale at the actual synthesis call.
+const DEFAULT_PACE_FACTOR: f64 = 1.15;
 
-/// Pure: the full argument list `spawn_piper` passes to the Piper process,
-/// pulled out so the flag set (and their order/presence) is directly
-/// testable without actually spawning a binary. `speaker` conditionally adds
-/// `-s`; `--length-scale` is always present (see SPEECH_LENGTH_SCALE).
-fn piper_spawn_args(model_str: &str, speaker: Option<u32>, output_dir_str: &str) -> Vec<String> {
-    let mut args = vec![
-        "-m".to_string(),
-        model_str.to_string(),
-        "-d".to_string(),
-        output_dir_str.to_string(),
-        "--output-dir-naming".to_string(),
-        "timestamp".to_string(),
-        "--length-scale".to_string(),
-        SPEECH_LENGTH_SCALE.to_string(),
-    ];
-    if let Some(s) = speaker {
-        args.push("-s".to_string());
-        args.push(s.to_string());
-    }
-    args
+/// Converts this app's stored "pace factor" (bigger = slower, the
+/// convention every UI label, saved npc_voices.json value, and
+/// DEFAULT_PACE_FACTOR already use) into Kokoro's own native `speed`
+/// parameter, which is the OPPOSITE convention (bigger = faster — confirmed
+/// empirically: speed=0.8 produced a longer clip than speed=1.3 for the
+/// same text). Keeping the stored/UI value in the app's existing convention
+/// means no data migration for anyone's already-saved npc_voices.json speed
+/// overrides and no relabeling of the History dialog's Speed dropdown —
+/// only this one call site needs to know Kokoro's scale is inverted.
+fn kokoro_speed_from_pace_factor(pace_factor: f64) -> f64 {
+    1.0 / pace_factor
 }
 
-fn spawn_piper(exe: &Path, model: &Path, speaker: Option<u32>, output_dir: &Path) -> Result<PersistentPiper, String> {
-    std::fs::create_dir_all(output_dir).map_err(|e| format!("couldn't create Piper output dir: {e}"))?;
+/// One synthesis against the warm process, acquiring (finding or spawning)
+/// it first. Not retried here — the caller (`synthesize_via_persistent_kokoro`)
+/// handles the "process died mid-request" retry.
+fn synthesize_once(proc: &mut Option<PersistentKokoro>, exe: &Path, onnx: &Path, voices: &Path, voice: &str, speed: f64, text: &str) -> Result<Vec<u8>, String> {
+    let kokoro = acquire_kokoro(proc, exe, onnx, voices)?;
 
-    let model_str = model.to_string_lossy().into_owned();
-    let output_dir_str = output_dir.to_string_lossy().into_owned();
-
-    let mut cmd = Command::new(exe);
-    cmd.args(piper_spawn_args(&model_str, speaker, &output_dir_str));
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // Same console-flash issue as dm.rs's `claude` spawn — piper.exe is a
-    // console-subsystem binary and this app has no console of its own.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Couldn't start Piper ({}): {e}", exe.display()))?;
-
-    let stdin = child.stdin.take().ok_or("no stdin handle")?;
-    if let Some(stdout) = child.stdout.take() {
-        drain_in_background(stdout);
-    }
-    if let Some(stderr) = child.stderr.take() {
-        drain_in_background(stderr);
-    }
-
-    Ok(PersistentPiper {
-        child,
-        stdin,
-        model: model.to_path_buf(),
-        speaker,
-        output_dir: output_dir.to_path_buf(),
-        last_used: Instant::now(),
-    })
-}
-
-/// Finds a live, already-warm pool entry for (model, speaker), or makes room
-/// — evicting the least-recently-used entry if the pool is already at
-/// MAX_WARM_PIPER_PROCESSES capacity — and spawns a fresh one. Prunes any
-/// entry that exited on its own first (via try_wait, so this is the one part
-/// of pool management not covered by the pure pool_match_index/lru_index
-/// helpers above — a real Child handle is required), so a dead process
-/// never counts against the pool's size limit or gets mistaken for a live
-/// match. Returns the index into `pool` of the ready-to-use entry.
-fn acquire_piper(pool: &mut Vec<PersistentPiper>, exe: &Path, model: &Path, speaker: Option<u32>) -> Result<usize, String> {
-    pool.retain_mut(|p| !matches!(p.child.try_wait(), Ok(Some(_)) | Err(_)));
-
-    let entries: Vec<(PathBuf, Option<u32>)> = pool.iter().map(|p| (p.model.clone(), p.speaker)).collect();
-    if let Some(idx) = pool_match_index(&entries, model, speaker) {
-        return Ok(idx);
-    }
-
-    if pool.len() >= MAX_WARM_PIPER_PROCESSES {
-        let last_used: Vec<Instant> = pool.iter().map(|p| p.last_used).collect();
-        if let Some(evict_idx) = lru_index(&last_used) {
-            // Dropping this entry closes its stdin pipe, which is what
-            // actually makes the old Piper process exit on its own (see the
-            // module doc comment on why nothing here calls Child::kill).
-            pool.remove(evict_idx);
-        }
-    }
-
-    let output_dir = piper_output_dir_for(model, speaker);
-    pool.push(spawn_piper(exe, model, speaker, &output_dir)?);
-    Ok(pool.len() - 1)
-}
-
-/// One synthesis against whatever's warm in `pool`, acquiring (finding or
-/// spawning) the right entry first. Not retried here — the caller
-/// (`synthesize_via_persistent_piper`) handles the "process died mid-
-/// request" retry.
-fn synthesize_once(pool: &mut Vec<PersistentPiper>, exe: &Path, model: &Path, speaker: Option<u32>, text: &str) -> Result<Vec<u8>, String> {
-    let idx = acquire_piper(pool, exe, model, speaker)?;
-    pool[idx].last_used = Instant::now();
-
-    let before = list_wav_files(&pool[idx].output_dir);
-    writeln!(pool[idx].stdin, "{text}").map_err(|e| format!("failed writing text to Piper: {e}"))?;
-    pool[idx].stdin.flush().map_err(|e| format!("failed flushing Piper stdin: {e}"))?;
+    let before = list_wav_files(&kokoro.output_dir);
+    let request = serde_json::json!({ "text": text, "voice": voice, "speed": speed }).to_string();
+    writeln!(kokoro.stdin, "{request}").map_err(|e| format!("failed writing request to Kokoro: {e}"))?;
+    kokoro.stdin.flush().map_err(|e| format!("failed flushing Kokoro stdin: {e}"))?;
 
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let after = list_wav_files(&pool[idx].output_dir);
+        let after = list_wav_files(&kokoro.output_dir);
         if let Some(new_file) = pick_new_file(&before, &after) {
-            // Piper creates the file, then writes to it — reading the
+            // Kokoro creates the file, then writes to it — reading the
             // instant it exists can race the write and return a truncated
             // (sometimes 0-byte) file. Wait for its size to stop changing
             // across two checks before treating it as complete.
             wait_for_file_to_stabilize(new_file, deadline);
-            let bytes = std::fs::read(new_file).map_err(|e| format!("couldn't read Piper's output: {e}"))?;
+            let bytes = std::fs::read(new_file).map_err(|e| format!("couldn't read Kokoro's output: {e}"))?;
             let _ = std::fs::remove_file(new_file);
             return Ok(bytes);
         }
         if Instant::now() >= deadline {
-            return Err("Piper synthesis timed out".into());
+            return Err("Kokoro synthesis timed out".into());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
-/// Synthesizes via the warm process pool, holding the lock for the whole
+/// Synthesizes via the warm process, holding the lock for the whole
 /// request — matches the app's existing one-turn-at-a-time design, so this
 /// never needs to disambiguate which output file belongs to which
-/// concurrent caller. On failure, evicts just the one entry that failed
-/// (not the whole pool — a single dead voice shouldn't cost every other
-/// still-warm voice) and retries exactly once, covering "this particular
-/// process died since we last used it."
-fn synthesize_via_persistent_piper(exe: &Path, model: &Path, speaker: Option<u32>, text: &str) -> Result<Vec<u8>, String> {
-    let mut pool = piper_pool().lock().unwrap();
-    match synthesize_once(&mut pool, exe, model, speaker, text) {
+/// concurrent caller. On failure, drops the (possibly wedged) process and
+/// retries exactly once against a freshly spawned one.
+fn synthesize_via_persistent_kokoro(exe: &Path, onnx: &Path, voices: &Path, voice: &str, speed: f64, text: &str) -> Result<Vec<u8>, String> {
+    let mut proc = kokoro_process().lock().unwrap();
+    match synthesize_once(&mut proc, exe, onnx, voices, voice, speed, text) {
         Ok(bytes) => Ok(bytes),
         Err(_) => {
-            pool.retain(|p| !(p.model == model && p.speaker == speaker));
-            synthesize_once(&mut pool, exe, model, speaker, text)
+            *proc = None;
+            synthesize_once(&mut proc, exe, onnx, voices, voice, speed, text)
         }
     }
 }
 
-/// Warms up the narrator voice's Piper process ahead of the first real turn
-/// — mirrors dmSpeech.ts's `warmupSTT()` for Whisper. Fire-and-forget from
-/// the frontend (called once at app mount, before any campaign is even
-/// picked); a failure here just means the first real `speak_text` call pays
-/// the one-time spawn cost instead. See warmup_voice for the more general
-/// form used once a campaign's own NPC voice assignments are known.
+/// Warms up the shared Kokoro process ahead of the first real turn — mirrors
+/// dmSpeech.ts's `warmupSTT()` for Whisper. Fire-and-forget from the
+/// frontend (called once at app mount, before any campaign is even picked);
+/// a failure here just means the first real `speak_text` call pays the
+/// one-time spawn+download cost instead. Unlike Piper (where only the
+/// narrator's specific process got warmed at app mount, and each other NPC
+/// voice needed its own separate warm-up once a campaign's assignments were
+/// known — see git history for the per-campaign warm-up loop this replaced),
+/// there's nothing campaign-specific left to warm: this one call covers
+/// every catalog voice at once, since they all share the same process.
 #[tauri::command]
-pub async fn warmup_piper(app: AppHandle) -> Result<(), String> {
+pub async fn warmup_tts(app: AppHandle) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let exe = find_resource(&app, "piper.exe")?;
-        let model = ensure_voice_available(&app, DEFAULT_VOICE_ID)?;
-        let mut pool = piper_pool().lock().unwrap();
-        acquire_piper(&mut pool, &exe, &model, catalog_speaker_id(DEFAULT_VOICE_ID))?;
+        let exe = find_resource(&app, "kokoro_cli.exe")?;
+        let (onnx, voices) = ensure_kokoro_model_available(&app)?;
+        let mut proc = kokoro_process().lock().unwrap();
+        acquire_kokoro(&mut proc, &exe, &onnx, &voices)?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("Piper warmup task failed: {e}"))?
+    .map_err(|e| format!("Kokoro warmup task failed: {e}"))?
 }
 
-/// Warms up one arbitrary catalog voice ahead of time — generalizes
-/// warmup_piper (which only ever warms the narrator, the one voice known
-/// before any campaign is even picked) so the frontend can also pre-warm a
-/// campaign's already-assigned NPC voices right after switching to it (see
-/// DMConsolePage's campaign-switch effect), instead of the FIRST time any
-/// given NPC ever speaks in a sitting paying the full spawn+model-load cost
-/// mid-turn. Fire-and-forget, same tolerance as warmup_piper. An unknown
-/// voice_id fails fast via ensure_voice_available's own catalog lookup
-/// rather than doing any real work — harmless for the frontend to call this
-/// speculatively over every assigned NPC without pre-filtering.
-#[tauri::command]
-pub async fn warmup_voice(app: AppHandle, voice_id: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let exe = find_resource(&app, "piper.exe")?;
-        let model = ensure_voice_available(&app, &voice_id)?;
-        let mut pool = piper_pool().lock().unwrap();
-        acquire_piper(&mut pool, &exe, &model, catalog_speaker_id(&voice_id))?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("Voice warmup task failed: {e}"))?
-}
-
-/// Race/size-based pitch tag → playback-rate multiplier. Piper's CLI has no
-/// native pitch control (only length_scale/noise_scale/noise_w, none of
-/// which shift pitch — confirmed against Piper's own issue tracker/docs), so
-/// this fakes it the classic, dependency-free way: reinterpret_wav_sample_rate
-/// makes playback read the WAV at a different rate than it was actually
-/// synthesized at, which shifts pitch and tempo together (the "chipmunk"/
-/// "slowed-down" effect) — a well-established stand-in for true pitch-only
-/// shifting when the alternative is pulling in a full DSP/resampling
-/// library. Three tiers, not two: `"small"` (gnomes, halflings, kobolds — an
-/// actually Small creature) speeds up + raises pitch; `"large"` (ogres,
-/// trolls, hill giants and up, most adult dragons — an actually Large-or-
-/// bigger creature) slows down + lowers it a lot; `"gruff"` (half-orcs,
-/// goliaths, firbolgs, bugbears — Medium size, same as a human, but
-/// naturally read as rougher/deeper-voiced) applies the same slow-down-and-
-/// lower direction as `"large"` but much more mildly, since tagging them
-/// `"large"` would be mechanically wrong (they aren't Large) AND overshoot
-/// the actual effect wanted (a human-sized creature doesn't talk as slowly
-/// as an ogre just because it sounds gruffer). Anything else (including
-/// plain narration) is a no-op. See BASE_CLAUDE_MD's "Giving NPCs distinct
-/// voices" for how the DM picks between these.
+/// Race/size-based pitch tag → playback-rate multiplier. Kokoro's own API
+/// has no native pitch control (just `speed`, which is pace-only — confirmed
+/// against kokoro-onnx's own `create()` signature), so this fakes it the
+/// classic, dependency-free way: reinterpret_wav_sample_rate makes playback
+/// read the WAV at a different rate than it was actually synthesized at,
+/// which shifts pitch and tempo together (the "chipmunk"/"slowed-down"
+/// effect) — a well-established stand-in for true pitch-only shifting when
+/// the alternative is pulling in a full DSP/resampling library. Pure WAV
+/// post-processing, identical regardless of which engine produced the
+/// audio — unchanged from when this ran against Piper's output. Three
+/// tiers, not two: `"small"` (gnomes, halflings, kobolds — an actually
+/// Small creature) speeds up + raises pitch; `"large"` (ogres, trolls, hill
+/// giants and up, most adult dragons — an actually Large-or-bigger
+/// creature) slows down + lowers it a lot; `"gruff"` (half-orcs, goliaths,
+/// firbolgs, bugbears — Medium size, same as a human, but naturally read as
+/// rougher/deeper-voiced) applies the same slow-down-and-lower direction as
+/// `"large"` but much more mildly, since tagging them `"large"` would be
+/// mechanically wrong (they aren't Large) AND overshoot the actual effect
+/// wanted (a human-sized creature doesn't talk as slowly as an ogre just
+/// because it sounds gruffer). Anything else (including plain narration) is
+/// a no-op. See BASE_CLAUDE_MD's "Giving NPCs distinct voices" for how the
+/// DM picks between these.
 fn pitch_factor(pitch: Option<&str>) -> f64 {
     match pitch {
         Some("small") => 1.25,
@@ -597,7 +479,7 @@ fn pitch_factor(pitch: Option<&str>) -> f64 {
 /// `factor`, without touching any actual audio sample data — see
 /// pitch_factor's doc comment for why this is the chosen pitch-shift
 /// mechanism. Scans for the "fmt " sub-chunk rather than assuming a fixed
-/// header layout, since Piper's exact WAV writer isn't something this app
+/// header layout, since Kokoro's exact WAV writer isn't something this app
 /// controls. Deliberately conservative: any input that doesn't look like a
 /// well-formed RIFF/WAVE file with a findable "fmt " chunk (or `factor ==
 /// 1.0`, the common case) is returned completely unchanged — better to play
@@ -629,23 +511,104 @@ fn reinterpret_wav_sample_rate(wav: &[u8], factor: f64) -> Vec<u8> {
     wav.to_vec() // no "fmt " chunk found — leave untouched rather than guess
 }
 
-/// Synthesizes `text` to speech via Piper, returning base64-encoded WAV bytes
-/// — keeps this a plain request/response IPC call with no temp-file
+/// Duration of the click-eliminating fade applied at each clip's start/end —
+/// see fade_wav_edges. Short enough to be inaudible as a "fade" on its own,
+/// long enough to smooth over the discontinuity that causes the click.
+const EDGE_FADE_MS: f64 = 8.0;
+
+/// Applies a short linear fade-in and fade-out directly to a WAV's raw PCM
+/// samples — eliminates the audible click/pop that shows up at the seam
+/// between two independently-synthesized Kokoro clips played back to back
+/// as separate `<audio>` elements (see DMConsolePage's per-sentence
+/// playback queue). Kokoro synthesizes each sentence in total isolation
+/// with no knowledge of its neighbors, so consecutive clips routinely
+/// start/end mid-waveform (a non-zero-amplitude sample right at the
+/// boundary) rather than at a zero crossing — audible as a sharp tick on
+/// very nearly every sentence boundary across a long turn. Only handles
+/// 16-bit PCM (Kokoro's own output format via soundfile — see
+/// scripts/kokoro_cli.py) — any other bit depth, or a malformed/too-short
+/// file, is returned unchanged rather than guessed at, same conservative
+/// philosophy as reinterpret_wav_sample_rate. Deliberately operates on the
+/// TRUE (pre-pitch-reinterpretation) sample rate declared in the file —
+/// call this before reinterpret_wav_sample_rate so the fade's frame math
+/// lines up with the actual PCM data, not a rate that was only ever
+/// rewritten in the header.
+fn fade_wav_edges(wav: &[u8], fade_ms: f64) -> Vec<u8> {
+    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return wav.to_vec();
+    }
+    let mut out = wav.to_vec();
+    let mut pos = 12usize;
+    let (mut channels, mut sample_rate, mut bits_per_sample) = (0u16, 0u32, 0u16);
+    let mut data_range: Option<(usize, usize)> = None;
+    while pos + 8 <= out.len() {
+        let chunk_id = &out[pos..pos + 4];
+        let Ok(chunk_size_bytes) = <[u8; 4]>::try_from(&out[pos + 4..pos + 8]) else { break };
+        let chunk_size = u32::from_le_bytes(chunk_size_bytes) as usize;
+        let body = pos + 8;
+        if chunk_id == b"fmt " && chunk_size >= 16 && body + 16 <= out.len() {
+            channels = u16::from_le_bytes(out[body + 2..body + 4].try_into().unwrap());
+            sample_rate = u32::from_le_bytes(out[body + 4..body + 8].try_into().unwrap());
+            bits_per_sample = u16::from_le_bytes(out[body + 14..body + 16].try_into().unwrap());
+        } else if chunk_id == b"data" {
+            let len = chunk_size.min(out.len().saturating_sub(body));
+            data_range = Some((body, len));
+        }
+        pos = body + chunk_size + (chunk_size % 2); // sub-chunks are word-aligned/padded
+    }
+
+    let Some((data_start, data_len)) = data_range else { return wav.to_vec() };
+    if bits_per_sample != 16 || channels == 0 || sample_rate == 0 {
+        return wav.to_vec();
+    }
+
+    let bytes_per_frame = 2usize * channels as usize;
+    let total_frames = data_len / bytes_per_frame;
+    let fade_frames = ((sample_rate as f64 * fade_ms / 1000.0).round() as usize).min(total_frames / 2);
+    if fade_frames == 0 {
+        return out;
+    }
+
+    for i in 0..fade_frames {
+        let gain = i as f64 / fade_frames as f64;
+        for edge_frame in [i, total_frames - 1 - i] {
+            let frame_start = data_start + edge_frame * bytes_per_frame;
+            for c in 0..channels as usize {
+                let s = frame_start + c * 2;
+                let sample = i16::from_le_bytes(out[s..s + 2].try_into().unwrap());
+                let scaled = (sample as f64 * gain).round() as i16;
+                out[s..s + 2].copy_from_slice(&scaled.to_le_bytes());
+            }
+        }
+    }
+    out
+}
+
+/// Synthesizes `text` to speech via Kokoro, returning base64-encoded WAV
+/// bytes — keeps this a plain request/response IPC call with no temp-file
 /// bookkeeping needed on the JS side. `voice_id` picks from VOICE_CATALOG
-/// (defaulting to the bundled narrator voice when absent/for plain
-/// narration) — see ensure_voice_available for the bundled/cached/download
-/// resolution chain. `pitch` (`"small"`/`"large"`/absent) is applied as a
-/// post-processing step on the synthesized WAV — see pitch_factor. See
-/// dmSpeech.ts for the caller, which falls back to browser speechSynthesis
-/// (narrator voice only, no per-NPC voice or pitch) if this errors.
+/// (defaulting to the narrator voice when absent/for plain narration, or on
+/// an unrecognized id — e.g. a campaign's npc_voices.json still carrying an
+/// id from the old Piper catalog) — see ensure_kokoro_model_available for
+/// the cached/download resolution chain. `pitch` (`"small"`/`"large"`/
+/// absent) is applied as a post-processing step on the synthesized WAV —
+/// see pitch_factor. `speed` (absent = DEFAULT_PACE_FACTOR) is this app's
+/// own pace-factor convention (bigger = slower) — see
+/// kokoro_speed_from_pace_factor for the conversion to Kokoro's own
+/// (inverted) native scale. See dmSpeech.ts for the caller, which falls
+/// back to browser speechSynthesis (narrator voice only, no per-NPC voice/
+/// pitch/speed) if this errors.
 #[tauri::command]
-pub async fn speak_text(app: AppHandle, text: String, voice_id: Option<String>, pitch: Option<String>) -> Result<String, String> {
+pub async fn speak_text(app: AppHandle, text: String, voice_id: Option<String>, pitch: Option<String>, speed: Option<f64>) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let exe = find_resource(&app, "piper.exe")?;
+        let exe = find_resource(&app, "kokoro_cli.exe")?;
         let resolved_id = voice_id.as_deref().unwrap_or(DEFAULT_VOICE_ID);
-        let model = ensure_voice_available(&app, resolved_id)?;
-        let speaker = catalog_speaker_id(resolved_id);
-        let bytes = synthesize_via_persistent_piper(&exe, &model, speaker, &text)?;
+        let kokoro_voice = catalog_kokoro_voice(resolved_id).unwrap_or_else(|_| catalog_kokoro_voice(DEFAULT_VOICE_ID).unwrap());
+        let (onnx, voices) = ensure_kokoro_model_available(&app)?;
+        let pace_factor = speed.unwrap_or(DEFAULT_PACE_FACTOR);
+        let kokoro_speed = kokoro_speed_from_pace_factor(pace_factor);
+        let bytes = synthesize_via_persistent_kokoro(&exe, &onnx, &voices, kokoro_voice, kokoro_speed, &text)?;
+        let bytes = fade_wav_edges(&bytes, EDGE_FADE_MS);
         let bytes = reinterpret_wav_sample_rate(&bytes, pitch_factor(pitch.as_deref()));
         Ok(STANDARD.encode(bytes))
     })
@@ -659,126 +622,106 @@ mod tests {
 
     #[test]
     fn resource_candidates_prefers_packaged_dir_then_dev_fallback() {
-        let candidates = resource_candidates(Some(PathBuf::from("/packaged")), "piper.exe");
-        assert_eq!(candidates[0], PathBuf::from("/packaged/tts/piper.exe"));
-        assert!(candidates[1].ends_with("public/tts/piper.exe"));
+        let candidates = resource_candidates(Some(PathBuf::from("/packaged")), "kokoro_cli.exe");
+        assert_eq!(candidates[0], PathBuf::from("/packaged/tts/kokoro_cli.exe"));
+        assert!(candidates[1].ends_with("public/tts/kokoro_cli.exe"));
     }
 
     #[test]
     fn resource_candidates_falls_back_when_no_resource_dir() {
-        let candidates = resource_candidates(None, "piper.exe");
+        let candidates = resource_candidates(None, "kokoro_cli.exe");
         assert_eq!(candidates.len(), 1);
-        assert!(candidates[0].ends_with("public/tts/piper.exe"));
+        assert!(candidates[0].ends_with("public/tts/kokoro_cli.exe"));
     }
 
     #[test]
-    fn voice_basename_takes_the_last_path_segment() {
-        assert_eq!(voice_basename("en/en_US/lessac/medium/en_US-lessac-medium"), "en_US-lessac-medium");
-        assert_eq!(voice_basename("no-slashes-here"), "no-slashes-here");
+    fn catalog_kokoro_voice_resolves_known_ids_and_rejects_unknown_ones() {
+        assert_eq!(catalog_kokoro_voice("narrator").unwrap(), "af_heart");
+        assert_eq!(catalog_kokoro_voice("male-gb-3").unwrap(), "bm_george");
+        assert!(catalog_kokoro_voice("dragon-lord-9000").is_err());
     }
 
     #[test]
-    fn catalog_repo_path_resolves_known_ids_and_rejects_unknown_ones() {
-        assert_eq!(catalog_repo_path("narrator").unwrap(), "en/en_US/lessac/medium/en_US-lessac-medium");
-        assert!(catalog_repo_path("dragon-lord-9000").is_err());
+    fn every_legacy_piper_id_resolves_to_a_same_gender_kokoro_voice() {
+        // The stakes: an unmapped legacy id falls back to the narrator,
+        // which is a FEMALE voice — so a male NPC saved under the old Piper
+        // catalog would flip gender mid-campaign. Every legacy alias must
+        // (a) resolve at all, and (b) preserve the gender encoded in its
+        // own id prefix.
+        for (legacy, _) in LEGACY_VOICE_ALIASES {
+            let kokoro_voice = catalog_kokoro_voice(legacy)
+                .unwrap_or_else(|_| panic!("legacy id \"{legacy}\" must resolve, not fall back to the narrator"));
+            let legacy_is_male = legacy.starts_with("male-");
+            let kokoro_is_male = kokoro_voice.starts_with("am_") || kokoro_voice.starts_with("bm_");
+            assert_eq!(
+                legacy_is_male, kokoro_is_male,
+                "legacy id \"{legacy}\" resolved to \"{kokoro_voice}\", flipping gender"
+            );
+        }
     }
 
     #[test]
-    fn voice_catalog_ids_are_unique_and_narrators_basename_matches_the_bundled_file() {
-        let mut ids: Vec<&str> = VOICE_CATALOG.iter().map(|(id, _, _)| *id).collect();
+    fn legacy_aliases_spread_across_distinct_replacements_within_each_gender() {
+        // A campaign that used several distinct accents shouldn't collapse
+        // into everyone sharing one replacement voice. Not required to be
+        // perfectly unique across genders (male/female pools are disjoint
+        // anyway) — just no duplicate replacement within a gender.
+        for prefix in ["male-", "female-"] {
+            let mut replacements: Vec<&str> = LEGACY_VOICE_ALIASES
+                .iter()
+                .filter(|(legacy, _)| legacy.starts_with(prefix))
+                .map(|(_, replacement)| *replacement)
+                .collect();
+            let before = replacements.len();
+            replacements.sort();
+            replacements.dedup();
+            assert_eq!(replacements.len(), before, "two {prefix}* legacy ids share one replacement voice");
+        }
+    }
+
+    #[test]
+    fn voice_catalog_ids_and_kokoro_voices_are_both_unique() {
+        let mut ids: Vec<&str> = VOICE_CATALOG.iter().map(|(id, _)| *id).collect();
         let before = ids.len();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), before, "duplicate voice id in VOICE_CATALOG");
+        assert_eq!(ids.len(), before, "duplicate catalog id in VOICE_CATALOG");
 
-        let narrator_path = catalog_repo_path(DEFAULT_VOICE_ID).unwrap();
-        assert_eq!(format!("{}.onnx", voice_basename(narrator_path)), "en_US-lessac-medium.onnx");
+        let mut kokoro_voices: Vec<&str> = VOICE_CATALOG.iter().map(|(_, v)| *v).collect();
+        let before = kokoro_voices.len();
+        kokoro_voices.sort();
+        kokoro_voices.dedup();
+        assert_eq!(kokoro_voices.len(), before, "two catalog ids resolved to the same underlying Kokoro voice");
     }
 
     #[test]
-    fn catalog_speaker_id_is_none_for_single_speaker_voices_and_unknown_ids() {
-        assert_eq!(catalog_speaker_id("narrator"), None);
-        assert_eq!(catalog_speaker_id("male-us-1"), None);
-        assert_eq!(catalog_speaker_id("dragon-lord-9000"), None);
+    fn voice_catalog_only_uses_american_and_british_kokoro_voice_prefixes() {
+        // Kokoro has no Scottish/Irish/Welsh/Australian/South African
+        // voices — see VOICE_CATALOG's doc comment. Every entry must be one
+        // of the two English prefixes Kokoro actually ships.
+        for (id, kokoro_voice) in VOICE_CATALOG {
+            assert!(
+                kokoro_voice.starts_with("af_") || kokoro_voice.starts_with("am_") || kokoro_voice.starts_with("bf_") || kokoro_voice.starts_with("bm_"),
+                "catalog id \"{id}\" maps to \"{kokoro_voice}\", which isn't a recognized American/British Kokoro voice prefix"
+            );
+        }
     }
 
     #[test]
-    fn catalog_speaker_id_resolves_vctk_entries_to_their_curated_index() {
-        assert_eq!(catalog_speaker_id("male-scottish-1"), Some(102));
-        assert_eq!(catalog_speaker_id("female-welsh-1"), Some(88));
+    fn narrator_is_reserved_and_not_reused_as_a_numbered_voice() {
+        let narrator_voice = catalog_kokoro_voice(DEFAULT_VOICE_ID).unwrap();
+        let reused = VOICE_CATALOG.iter().any(|(id, v)| *id != DEFAULT_VOICE_ID && *v == narrator_voice);
+        assert!(!reused, "the narrator's Kokoro voice must not also be assigned to a numbered NPC id");
     }
 
     #[test]
-    fn vctk_catalog_entries_share_the_same_model_path_but_have_distinct_speaker_indices() {
-        let vctk_entries: Vec<&(&str, &str, Option<u32>)> =
-            VOICE_CATALOG.iter().filter(|(_, path, _)| path.contains("vctk")).collect();
-        assert!(vctk_entries.len() >= 10, "expected a meaningful curated VCTK subset, found {}", vctk_entries.len());
-        assert!(vctk_entries.iter().all(|(_, _, speaker)| speaker.is_some()), "every VCTK catalog entry must carry a speaker index");
-
-        let mut speakers: Vec<u32> = vctk_entries.iter().filter_map(|(_, _, s)| *s).collect();
-        let before = speakers.len();
-        speakers.sort();
-        speakers.dedup();
-        assert_eq!(speakers.len(), before, "two VCTK catalog ids resolved to the same speaker index");
-    }
-
-    #[test]
-    fn piper_spawn_args_always_includes_length_scale_and_conditionally_speaker() {
-        let no_speaker = piper_spawn_args("/voices/a.onnx", None, "/out");
-        assert!(no_speaker.contains(&"--length-scale".to_string()));
-        assert!(no_speaker.contains(&SPEECH_LENGTH_SCALE.to_string()));
-        assert!(!no_speaker.contains(&"-s".to_string()));
-
-        let with_speaker = piper_spawn_args("/voices/vctk.onnx", Some(102), "/out");
-        let s_pos = with_speaker.iter().position(|a| a == "-s").expect("-s flag missing");
-        assert_eq!(with_speaker[s_pos + 1], "102");
-    }
-
-    #[test]
-    fn pool_match_index_finds_an_exact_model_and_speaker_match_only() {
-        let entries = vec![
-            (PathBuf::from("/voices/a.onnx"), None),
-            (PathBuf::from("/voices/vctk.onnx"), Some(102)),
-        ];
-        assert_eq!(pool_match_index(&entries, Path::new("/voices/a.onnx"), None), Some(0));
-        assert_eq!(pool_match_index(&entries, Path::new("/voices/vctk.onnx"), Some(102)), Some(1));
-        // The exact bug this (model, speaker) pairing exists to prevent: two
-        // different VCTK voices sharing one .onnx file are NOT the same warm
-        // entry just because the model path matches — Piper's -s flag is
-        // fixed for a process's whole lifetime, so a different speaker index
-        // on the same file still needs its own process.
-        assert_eq!(pool_match_index(&entries, Path::new("/voices/vctk.onnx"), Some(88)), None);
-        assert_eq!(pool_match_index(&entries, Path::new("/voices/unknown.onnx"), None), None);
-    }
-
-    #[test]
-    fn pool_match_index_is_none_for_an_empty_pool() {
-        assert_eq!(pool_match_index(&[], Path::new("/voices/a.onnx"), None), None);
-    }
-
-    #[test]
-    fn lru_index_picks_the_oldest_timestamp() {
-        let now = Instant::now();
-        let last_used = vec![now, now - Duration::from_secs(10), now - Duration::from_secs(1)];
-        assert_eq!(lru_index(&last_used), Some(1));
-    }
-
-    #[test]
-    fn lru_index_is_none_for_an_empty_pool() {
-        assert_eq!(lru_index(&[]), None);
-    }
-
-    #[test]
-    fn piper_output_dir_for_is_distinct_per_model_and_per_speaker() {
-        let model_a = Path::new("/voices/en_US-hfc_male-medium.onnx");
-        let vctk = Path::new("/voices/en_GB-vctk-medium.onnx");
-
-        let single_speaker = piper_output_dir_for(model_a, None);
-        let vctk_speaker_102 = piper_output_dir_for(vctk, Some(102));
-        let vctk_speaker_88 = piper_output_dir_for(vctk, Some(88));
-
-        assert_ne!(single_speaker, vctk_speaker_102, "different models must get different output dirs");
-        assert_ne!(vctk_speaker_102, vctk_speaker_88, "same model, different speaker, must still get different output dirs");
+    fn kokoro_speed_from_pace_factor_inverts_the_stored_convention() {
+        // Stored convention: bigger pace_factor = slower. Kokoro's native
+        // convention: bigger speed = faster. So a pace_factor above 1.0
+        // (meant to read as "slower") must produce a Kokoro speed BELOW 1.0.
+        assert!(kokoro_speed_from_pace_factor(1.30) < 1.0, "a 'slower' pace factor must map to a Kokoro speed below 1.0");
+        assert!(kokoro_speed_from_pace_factor(0.85) > 1.0, "a 'faster' pace factor must map to a Kokoro speed above 1.0");
+        assert_eq!(kokoro_speed_from_pace_factor(1.0), 1.0, "a neutral pace factor must map to Kokoro's own neutral speed");
     }
 
     #[test]
@@ -815,8 +758,8 @@ mod tests {
     }
 
     /// A minimal, canonical 44-byte-header PCM WAV — mirrors the shape
-    /// Piper's own output takes closely enough to exercise
-    /// reinterpret_wav_sample_rate's chunk-scanning honestly.
+    /// Kokoro's own output (via soundfile) takes closely enough to exercise
+    /// reinterpret_wav_sample_rate/fade_wav_edges' chunk-scanning honestly.
     fn minimal_wav(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[u8]) -> Vec<u8> {
         let byte_rate = sample_rate * channels as u32 * (bits_per_sample as u32 / 8);
         let block_align = channels * (bits_per_sample / 8);
@@ -840,11 +783,11 @@ mod tests {
 
     #[test]
     fn reinterpret_wav_sample_rate_rewrites_rate_and_matching_byte_rate() {
-        let wav = minimal_wav(22050, 1, 16, &[0u8; 8]);
+        let wav = minimal_wav(24000, 1, 16, &[0u8; 8]);
         let shifted = reinterpret_wav_sample_rate(&wav, 1.25);
         let new_rate = u32::from_le_bytes(shifted[24..28].try_into().unwrap());
         let new_byte_rate = u32::from_le_bytes(shifted[28..32].try_into().unwrap());
-        assert_eq!(new_rate, 27563); // 22050 * 1.25, rounded
+        assert_eq!(new_rate, 30000); // 24000 * 1.25
         assert_eq!(new_byte_rate, new_rate * 1 * 2); // mono, 16-bit = 2 bytes/sample
         // Sample data itself must be untouched — only header fields change.
         assert_eq!(&shifted[44..], &[0u8; 8]);
@@ -852,10 +795,78 @@ mod tests {
 
     #[test]
     fn reinterpret_wav_sample_rate_is_a_no_op_at_factor_one_or_on_malformed_input() {
-        let wav = minimal_wav(22050, 1, 16, &[1, 2, 3, 4]);
+        let wav = minimal_wav(24000, 1, 16, &[1, 2, 3, 4]);
         assert_eq!(reinterpret_wav_sample_rate(&wav, 1.0), wav);
 
         let garbage = b"not a wav file at all".to_vec();
         assert_eq!(reinterpret_wav_sample_rate(&garbage, 1.25), garbage);
+    }
+
+    #[test]
+    fn fade_wav_edges_ramps_first_and_last_frames_toward_zero() {
+        // A clip long enough that an 8ms fade region (≈192 frames @
+        // 24000Hz) doesn't reach the middle — leaves a genuinely untouched
+        // interior to assert against, unlike a clip short enough to force
+        // fade_frames to be capped at total_frames/2.
+        let sample_rate = 24000u32;
+        let frame_count = 1000usize;
+        let mut data = Vec::with_capacity(frame_count * 2);
+        for _ in 0..frame_count {
+            data.extend_from_slice(&30000i16.to_le_bytes());
+        }
+        let wav = minimal_wav(sample_rate, 1, 16, &data);
+        let faded = fade_wav_edges(&wav, 8.0);
+
+        let frame = |bytes: &[u8], i: usize| i16::from_le_bytes(bytes[44 + i * 2..44 + i * 2 + 2].try_into().unwrap());
+
+        assert_eq!(frame(&faded, 0), 0, "very first sample must be silenced to zero");
+        assert_eq!(frame(&faded, frame_count - 1), 0, "very last sample must be silenced to zero");
+        // A frame just inside the fade-in region should be scaled down but
+        // not silenced.
+        let mid = frame(&faded, 10);
+        assert!(mid > 0 && mid < 30000, "expected a partial ramp value, got {mid}");
+        // The clip's interior, outside both fade regions, must be untouched.
+        assert_eq!(frame(&faded, frame_count / 2), 30000);
+    }
+
+    #[test]
+    fn fade_wav_edges_is_a_no_op_on_malformed_or_non_16bit_input() {
+        let wav_24bit = minimal_wav(24000, 1, 24, &[0u8; 12]);
+        assert_eq!(fade_wav_edges(&wav_24bit, 8.0), wav_24bit);
+
+        let garbage = b"not a wav file at all".to_vec();
+        assert_eq!(fade_wav_edges(&garbage, 8.0), garbage);
+    }
+
+    /// Real integration check against the actual frozen kokoro_cli.exe and
+    /// downloaded model files — not run as part of the normal `cargo test`
+    /// suite (needs a live subprocess + real files on disk, unsuitable for
+    /// CI), but exercised manually once after any change to the spawn/JSON
+    /// stdin/file-watch plumbing above. Run with:
+    ///   TTS_TEST_EXE=<path> TTS_TEST_ONNX=<path> TTS_TEST_VOICES=<path> \
+    ///     cargo test --quiet -- --ignored kokoro_end_to_end
+    #[test]
+    #[ignore]
+    fn kokoro_end_to_end_produces_playable_wav_bytes() {
+        let exe = PathBuf::from(std::env::var("TTS_TEST_EXE").expect("set TTS_TEST_EXE"));
+        let onnx = PathBuf::from(std::env::var("TTS_TEST_ONNX").expect("set TTS_TEST_ONNX"));
+        let voices = PathBuf::from(std::env::var("TTS_TEST_VOICES").expect("set TTS_TEST_VOICES"));
+
+        let bytes = synthesize_via_persistent_kokoro(&exe, &onnx, &voices, "af_heart", 1.0, "Testing the real Kokoro pipeline end to end.")
+            .expect("synthesis against the real exe should succeed");
+        assert!(bytes.len() > 1000, "expected a real WAV file, got {} bytes", bytes.len());
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WAVE");
+
+        // A second call with a different voice/speed must reuse the SAME
+        // warm process (no respawn) — proves the "one process serves every
+        // voice" design actually works, not just compiles.
+        let bytes2 = synthesize_via_persistent_kokoro(&exe, &onnx, &voices, "bm_george", 1.3, "A second line, a different British voice.")
+            .expect("second synthesis against the same warm process should succeed");
+        assert!(bytes2.len() > 1000);
+
+        let faded = fade_wav_edges(&bytes, EDGE_FADE_MS);
+        let pitched = reinterpret_wav_sample_rate(&faded, pitch_factor(Some("small")));
+        assert_eq!(&pitched[0..4], b"RIFF", "post-processing pipeline must still produce a well-formed WAV");
     }
 }

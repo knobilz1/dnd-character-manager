@@ -1,17 +1,26 @@
-This directory bundles a redistributable build of Piper, a local neural
+This directory bundles a redistributable build of Kokoro, a local neural
 text-to-speech engine, used by the DM Console to read narration aloud.
+(Replaced Piper as of this build — see git history for the prior notice if
+you need it.)
 
-  Piper:        https://github.com/OHF-Voice/piper1-gpl
-  License:      GNU General Public License v3.0 (see PIPER_LICENSE.txt)
-  Voice model:  en_US-lessac-medium
-                https://huggingface.co/rhasspy/piper-voices
+  Kokoro-onnx (Python wrapper): https://github.com/thewh1teagle/kokoro-onnx
+                                 License: MIT (see KOKORO_ONNX_LICENSE.txt)
+  Kokoro-82M (model weights):   https://huggingface.co/hexgrad/Kokoro-82M
+                                 License: Apache 2.0 (see KOKORO_MODEL_LICENSE.txt)
+  phonemizer-fork (bundled dependency, used internally for text-to-phoneme):
+                                 License: GNU General Public License v3.0
+                                 (see PHONEMIZER_LICENSE.txt)
 
-`piper.exe` in this directory is a standalone build of the `piper-tts`
-Python package (v1.4.2), produced with PyInstaller. It is invoked by
-Tavern Sheet as a separate subprocess (never linked into the app's own
-binary), consistent with how other GPL-licensed command-line tools
-(e.g. ffmpeg) are commonly bundled by non-GPL applications. Tavern
-Sheet's own source is not affected by Piper's license.
+`kokoro_cli.exe` in this directory is a standalone build of
+scripts/kokoro_cli.py (this repo), produced with PyInstaller — see
+scripts/kokoro_cli_requirements.txt for the exact build steps and pinned
+dependency versions. It is invoked by Tavern Sheet as a separate subprocess
+(never linked into the app's own binary), the same "mere aggregation"
+pattern already used for other bundled command-line tools (e.g. ffmpeg) —
+Tavern Sheet's own source is not affected by phonemizer-fork's GPL license,
+even though this specific redistributed binary contains GPL-3.0 code.
 
-The `piper-tts` source corresponding to this build is available at the
-repository above; the exact commit/version is v1.4.2.
+The model weights (kokoro-v1.0.fp16.onnx + voices-v1.0.bin) are NOT bundled
+in this directory or the installer — they're downloaded once on first use
+from the kokoro-onnx GitHub release above and cached in the app's own data
+directory (see src-tauri/src/tts.rs's ensure_kokoro_model_available).
