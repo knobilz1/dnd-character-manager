@@ -1271,31 +1271,6 @@ export function DMConsolePage() {
 
       const { narration, actions, warnings: parseWarnings } = parseDmReply(reply.text);
       lastDmNarrationRef.current = narration;
-      // Ground truth for voice bugs: the RAW reply (tags intact) plus the
-      // decision each sentence produced. Fire-and-forget — a diagnostic must
-      // never break a live turn.
-      const debugCampaignId = campaignIdRef.current;
-      if (debugCampaignId) {
-        const voiceMap = Object.entries(npcVoicesRef.current)
-          .map(([k, v]) => `${k}=${v.voice_id}`)
-          .join(', ');
-        const entry = [
-          `=== turn ${new Date().toISOString()} ===`,
-          `npc_voices: ${voiceMap || '(none)'}`,
-          `ephemeral: ${Object.entries(ephemeralVoicesRef.current).map(([k, v]) => `${k}=${v.voice_id}`).join(', ') || '(none)'}`,
-          '--- raw reply (tags intact) ---',
-          narration,
-          '--- per-sentence voice decisions ---',
-          ...voiceDebugRef.current,
-        ].join('\n');
-        invoke('log_voice_debug', { id: debugCampaignId, entry }).catch((e) =>
-          console.warn('Failed to write voice debug log:', e)
-        );
-      }
-      // Strip any [Name]: voice cues before this reaches a human anywhere —
-      // they're a TTS-only signal (see parseSpeakerTag). The raw `narration`
-      // (cues intact) is kept for the local-LLM enqueue fallback further
-      // below, which still needs to detect them for voice selection.
       const displayNarration = stripSpeakerTagsForDisplay(narration);
       setTurns((t) => [...t, { who: 'dm', text: displayNarration }]);
       setWarning(parseWarnings.length ? parseWarnings.join(' ') : null);
@@ -1353,15 +1328,28 @@ export function DMConsolePage() {
             // them, since it only fills NPCs that have no voice at all.
             const resolvedVoiceId = voiceId ?? autoAssignVoiceId(name, description);
             if (resolvedVoiceId) {
+              // enforceUnique: this id was chosen by a machine (the DM inline,
+              // or autoAssignVoiceId), and neither checks whether another NPC
+              // already holds it. Rust moves it to a free id in the same
+              // gender/accent bucket and returns whatever it actually wrote —
+              // cache THAT, not what we asked for, or the hot playback path
+              // speaks a voice that isn't in npc_voices.json.
+              const writtenVoiceId = await invoke<string>('set_npc_voice', {
+                id: campaignId,
+                name,
+                voiceId: resolvedVoiceId,
+                pitch,
+                enforceUnique: true,
+              }).catch((e) => {
+                console.warn('Failed to save an NPC voice assignment:', e);
+                return resolvedVoiceId;
+              });
               // Update the local cache immediately (not just after the next
               // campaign switch's read_npc_voices fetch) so this NPC's voice
               // is usable the moment they speak again, even later this same
               // turn's remaining narration.
-              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: resolvedVoiceId, pitch } };
+              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: writtenVoiceId, pitch } };
               setNpcVoices(npcVoicesRef.current);
-              await invoke('set_npc_voice', { id: campaignId, name, voiceId: resolvedVoiceId, pitch }).catch((e) =>
-                console.warn('Failed to save an NPC voice assignment:', e)
-              );
             }
           }
         }
@@ -1427,6 +1415,33 @@ export function DMConsolePage() {
       } else {
         enqueueSentence(narration);
       }
+      // Ground truth for voice bugs: the RAW reply (tags intact) plus the
+      // decision each sentence produced. Written AFTER the trailing-sentence
+      // flush above — that leftover sentence is spoken, so its decision belongs
+      // in the log; writing earlier silently dropped the last line of every
+      // turn. Fire-and-forget — a diagnostic must never break a live turn.
+      const debugCampaignId = campaignIdRef.current;
+      if (debugCampaignId) {
+        const voiceMap = Object.entries(npcVoicesRef.current)
+          .map(([k, v]) => `${k}=${v.voice_id}`)
+          .join(', ');
+        const entry = [
+          `=== turn ${new Date().toISOString()} ===`,
+          `npc_voices: ${voiceMap || '(none)'}`,
+          `ephemeral: ${Object.entries(ephemeralVoicesRef.current).map(([k, v]) => `${k}=${v.voice_id}`).join(', ') || '(none)'}`,
+          '--- raw reply (tags intact) ---',
+          narration,
+          '--- per-sentence voice decisions ---',
+          ...voiceDebugRef.current,
+        ].join('\n');
+        invoke('log_voice_debug', { id: debugCampaignId, entry }).catch((e) =>
+          console.warn('Failed to write voice debug log:', e)
+        );
+      }
+      // Strip any [Name]: voice cues before this reaches a human anywhere —
+      // they're a TTS-only signal (see parseSpeakerTag). The raw `narration`
+      // (cues intact) is kept for the local-LLM enqueue fallback further
+      // below, which still needs to detect them for voice selection.
       if (drainingPromiseRef.current) await drainingPromiseRef.current;
       return { narration: displayNarration, interrupted: false, error: null };
     } catch (e) {
@@ -1606,11 +1621,20 @@ export function DMConsolePage() {
               console.warn('Failed to save an entity fact:', e)
             );
             if (voiceId) {
-              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: voiceId, pitch } };
+              // Machine-chosen id, same as the live turn's path — dedupe it and
+              // cache whatever Rust actually wrote (see runTurn's handling).
+              const writtenVoiceId = await invoke<string>('set_npc_voice', {
+                id: campaignId,
+                name,
+                voiceId,
+                pitch,
+                enforceUnique: true,
+              }).catch((e) => {
+                console.warn('Failed to save an NPC voice assignment:', e);
+                return voiceId;
+              });
+              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: writtenVoiceId, pitch } };
               setNpcVoices(npcVoicesRef.current);
-              await invoke('set_npc_voice', { id: campaignId, name, voiceId, pitch }).catch((e) =>
-                console.warn('Failed to save an NPC voice assignment:', e)
-              );
             }
           }
         }

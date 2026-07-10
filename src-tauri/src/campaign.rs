@@ -500,7 +500,7 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
         // Best-effort — a campaign with a broken narrator-voice pick should
         // still get its lore doc saved; the narrator just falls back to the
         // default voice at speak time (see tts.rs's ensure_voice_available).
-        let _ = set_npc_voice_at(root, id, NARRATOR_VOICE_KEY, &voice_id, pitch.as_deref(), None);
+        let _ = set_npc_voice_at(root, id, NARRATOR_VOICE_KEY, &voice_id, pitch.as_deref(), None, false);
     }
 
     write_atomic(&root.join(id).join("memory").join("campaign_lore.md"), &final_lore)?;
@@ -948,12 +948,68 @@ fn read_npc_voices_at(root: &Path, id: &str) -> HashMap<String, NpcVoiceAssignme
 /// pre-existing risk pitch already carried: a resent voiceId with no speed
 /// would clear a manually-set speed override, exactly as it already could
 /// clear a manually-set pitch).
-fn set_npc_voice_at(root: &Path, id: &str, name: &str, voice_id: &str, pitch: Option<&str>, speed: Option<f64>) -> Result<(), String> {
+/// `enforce_unique` resolves a collision instead of accepting one — see
+/// pick_non_colliding_voice. True for machine-chosen ids (the DM's inline
+/// `voiceId`, the Opus reconciliation pass); false for the manual override
+/// panel, where a human deliberately picking a duplicate is their business.
+fn set_npc_voice_at(
+    root: &Path,
+    id: &str,
+    name: &str,
+    voice_id: &str,
+    pitch: Option<&str>,
+    speed: Option<f64>,
+    enforce_unique: bool,
+) -> Result<String, String> {
     let path = root.join(id).join("memory").join("npc_voices.json");
     let mut map = read_npc_voices_at(root, id);
     let pitch = pitch.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
-    map.insert(normalize_name_key(name), NpcVoiceAssignment { voice_id: voice_id.trim().to_string(), pitch, speed });
-    write_atomic(&path, &serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?)
+    let key = normalize_name_key(name);
+    let voice_id = if enforce_unique {
+        pick_non_colliding_voice(&map, &key, voice_id.trim())
+    } else {
+        voice_id.trim().to_string()
+    };
+    map.insert(key, NpcVoiceAssignment { voice_id: voice_id.clone(), pitch, speed });
+    write_atomic(&path, &serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?)?;
+    // The id actually written, which dedupe may have moved off the request —
+    // the frontend caches this map locally for the hot playback path, so it
+    // must learn the real value rather than the one it asked for.
+    Ok(voice_id)
+}
+
+/// Pure: `requested` unless another NPC already holds it, in which case the
+/// first free id in the same gender/accent bucket (see tts::sibling_voice_ids).
+///
+/// Nothing used to enforce this. The reconciliation prompt merely *asks* Opus
+/// to vary its picks, and a `voiceId` the DM sends inline was written through
+/// as-is — so a real campaign ended up with `father carrow` and `tomas` both on
+/// `male-gb-2`, and `mera` and `yara` both on `female-us-2`. Two NPCs sharing a
+/// voice is silent until they share a scene, and then it's indistinguishable
+/// from the voice system being broken.
+///
+/// The narrator occupies a key in this same map, so its voice is in `taken`
+/// too: an NPC can never be handed the narration's own voice. When the whole
+/// bucket is spoken for, `requested` wins — a duplicate beats a wrong-gender
+/// voice, and beats failing a turn over cosmetics.
+fn pick_non_colliding_voice(
+    existing: &HashMap<String, NpcVoiceAssignment>,
+    name_key: &str,
+    requested: &str,
+) -> String {
+    let taken: HashSet<&str> = existing
+        .iter()
+        .filter(|(k, _)| k.as_str() != name_key)
+        .map(|(_, v)| v.voice_id.as_str())
+        .collect();
+    if !taken.contains(requested) {
+        return requested.to_string();
+    }
+    crate::tts::sibling_voice_ids(requested)
+        .into_iter()
+        .find(|candidate| !taken.contains(candidate))
+        .unwrap_or(requested)
+        .to_string()
 }
 
 /// Builds the one-time Opus prompt for the periodic voice-reconciliation
@@ -1062,7 +1118,7 @@ fn reconcile_npc_voices_at(root: &Path, id: &str) -> Result<usize, String> {
         if entry.voice_id.trim().is_empty() || !unvoiced_names.contains(&normalize_name_key(&entry.name)) {
             continue;
         }
-        set_npc_voice_at(root, id, &entry.name, &entry.voice_id, entry.pitch.as_deref(), None)?;
+        set_npc_voice_at(root, id, &entry.name, &entry.voice_id, entry.pitch.as_deref(), None, true)?;
         applied += 1;
     }
     Ok(applied)
@@ -2024,8 +2080,8 @@ pub fn upsert_party_member(app: AppHandle, id: String, name: String, description
 /// ensure_voice_available/pitch_factor/DEFAULT_LENGTH_SCALE), same "harmless
 /// no-op on a bad value" tolerance as other dm-actions fields.
 #[tauri::command]
-pub fn set_npc_voice(app: AppHandle, id: String, name: String, voice_id: String, pitch: Option<String>, speed: Option<f64>) -> Result<(), String> {
-    set_npc_voice_at(&campaigns_root(&app)?, &id, &name, &voice_id, pitch.as_deref(), speed)
+pub fn set_npc_voice(app: AppHandle, id: String, name: String, voice_id: String, pitch: Option<String>, speed: Option<f64>, enforce_unique: Option<bool>) -> Result<String, String> {
+    set_npc_voice_at(&campaigns_root(&app)?, &id, &name, &voice_id, pitch.as_deref(), speed, enforce_unique.unwrap_or(false))
 }
 
 /// Reads the full name→assignment map for a campaign — fetched once per
@@ -2411,6 +2467,66 @@ mod tests {
         assert!(bak.contains("Something irreplaceable that must survive in the backup."));
     }
 
+    /// The real collision from a live campaign: Opus handed `male-gb-2` to
+    /// both Father Carrow and Tomas, and `female-us-2` to both Mera and Yara.
+    /// Two NPCs sharing a voice is silent until they share a scene.
+    #[test]
+    fn machine_chosen_voices_never_collide_with_an_existing_npc() {
+        let root = Scratch::new("voice_collide");
+        create_campaign_at(&root.0, &intake("Fogreach")).unwrap();
+
+        set_npc_voice_at(&root.0, "fogreach", "Father Carrow", "male-gb-2", None, None, true).unwrap();
+        set_npc_voice_at(&root.0, "fogreach", "Tomas", "male-gb-2", None, None, true).unwrap();
+        set_npc_voice_at(&root.0, "fogreach", "Mera", "female-us-2", None, None, true).unwrap();
+        set_npc_voice_at(&root.0, "fogreach", "Yara", "female-us-2", None, None, true).unwrap();
+
+        let map = read_npc_voices_at(&root.0, "fogreach");
+        assert_eq!(map["father carrow"].voice_id, "male-gb-2", "first claim keeps what it asked for");
+        assert_ne!(map["tomas"].voice_id, "male-gb-2", "second must move off the taken id");
+        assert!(map["tomas"].voice_id.starts_with("male-gb-"), "and must stay in its gender/accent bucket");
+        assert_eq!(map["mera"].voice_id, "female-us-2");
+        assert_ne!(map["yara"].voice_id, "female-us-2");
+        assert!(map["yara"].voice_id.starts_with("female-us-"));
+    }
+
+    #[test]
+    fn dedupe_never_steals_the_narrator_voice_and_is_stable_on_resend() {
+        let root = Scratch::new("voice_narr");
+        create_campaign_at(&root.0, &intake("Fogreach")).unwrap();
+        set_npc_voice_at(&root.0, "fogreach", NARRATOR_VOICE_KEY, "male-gb-1", None, None, false).unwrap();
+
+        // An NPC asking for the narrator's exact voice gets moved off it.
+        set_npc_voice_at(&root.0, "fogreach", "Carrow", "male-gb-1", None, None, true).unwrap();
+        let first = read_npc_voices_at(&root.0, "fogreach")["carrow"].voice_id.clone();
+        assert_ne!(first, "male-gb-1");
+
+        // Re-sending the same NPC's own assignment must not shuffle them onward
+        // every time — their current voice is not a collision with themselves.
+        set_npc_voice_at(&root.0, "fogreach", "Carrow", &first, None, None, true).unwrap();
+        assert_eq!(read_npc_voices_at(&root.0, "fogreach")["carrow"].voice_id, first);
+    }
+
+    #[test]
+    fn manual_override_may_deliberately_duplicate_a_voice() {
+        let root = Scratch::new("voice_manual");
+        create_campaign_at(&root.0, &intake("Fogreach")).unwrap();
+        set_npc_voice_at(&root.0, "fogreach", "Carrow", "male-gb-2", None, None, true).unwrap();
+        // enforce_unique = false: a human picking a duplicate said what they meant.
+        set_npc_voice_at(&root.0, "fogreach", "Tomas", "male-gb-2", None, None, false).unwrap();
+        assert_eq!(read_npc_voices_at(&root.0, "fogreach")["tomas"].voice_id, "male-gb-2");
+    }
+
+    #[test]
+    fn sibling_voice_ids_stay_in_bucket_and_exclude_the_narrator() {
+        let gb_males = crate::tts::sibling_voice_ids("male-gb-2");
+        assert!(gb_males.contains(&"male-gb-1") && gb_males.contains(&"male-gb-4"));
+        assert!(gb_males.iter().all(|id| id.starts_with("male-gb-")));
+        assert!(!gb_males.contains(&"narrator"), "the narration's voice is never an NPC alternative");
+        assert!(!gb_males.contains(&"male-us-1"), "a different accent is a different bucket");
+        assert!(crate::tts::sibling_voice_ids("narrator").is_empty());
+        assert!(crate::tts::sibling_voice_ids("nonsense").is_empty());
+    }
+
     /// The bug this whole mechanism exists for: a campaign created before a
     /// rule change must still pick that change up. Simulates an OLD campaign by
     /// stripping the import line and the generated file, then asserts one load
@@ -2711,7 +2827,7 @@ mod tests {
 
         assert!(read_npc_voices_at(&root.0, "camp").is_empty());
 
-        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None, None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None, None, false).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         let assigned = voices.get("gundren rockseeker").expect("should be present under a lowercased key");
         assert_eq!(assigned.voice_id, "male-us-1");
@@ -2724,8 +2840,8 @@ mod tests {
         let root = Scratch::new("npc-voices-overwrite");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
 
-        set_npc_voice_at(&root.0, "camp", "Elara", "female-us-1", None, None).unwrap();
-        set_npc_voice_at(&root.0, "camp", "elara", "female-gb-1", None, None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Elara", "female-us-1", None, None, false).unwrap();
+        set_npc_voice_at(&root.0, "camp", "elara", "female-gb-1", None, None, false).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         assert_eq!(voices.len(), 1, "same name under different casing should overwrite, not duplicate");
         assert_eq!(voices.get("elara").unwrap().voice_id, "female-gb-1");
@@ -2736,7 +2852,7 @@ mod tests {
         let root = Scratch::new("npc-voices-pitch");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
 
-        set_npc_voice_at(&root.0, "camp", "Squibbins", "male-us-2", Some("small"), None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Squibbins", "male-us-2", Some("small"), None, false).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         let assigned = voices.get("squibbins").unwrap();
         assert_eq!(assigned.voice_id, "male-us-2");
@@ -2748,7 +2864,7 @@ mod tests {
         let root = Scratch::new("npc-voices-speed");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
 
-        set_npc_voice_at(&root.0, "camp", "Narrator-ish NPC", "male-us-3", None, Some(0.95)).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Narrator-ish NPC", "male-us-3", None, Some(0.95), false).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         let assigned = voices.get("narrator-ish npc").unwrap();
         assert_eq!(assigned.speed, Some(0.95));
@@ -2833,7 +2949,7 @@ mod tests {
         let memory_dir = root.0.join("camp").join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
         fs::write(memory_dir.join("entities.md"), "- **Gundren Rockseeker:** A dwarf merchant.\n").unwrap();
-        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None, None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None, None, false).unwrap();
 
         assert_eq!(reconcile_npc_voices_at(&root.0, "camp").unwrap(), 0);
     }

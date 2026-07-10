@@ -94,6 +94,31 @@ const VOICE_CATALOG: &[(&str, &str)] = &[
 /// NPC nobody's assigned a voice to yet).
 const DEFAULT_VOICE_ID: &str = "narrator";
 
+/// Every catalog id sharing `voice_id`'s gender+accent bucket — the part
+/// before the trailing number, so `male-gb-2` yields all `male-gb-*`, in
+/// catalog order.
+///
+/// Lets campaign.rs resolve a voice collision without keeping its own copy of
+/// the catalog. Alternatives stay inside the requested bucket on purpose: the
+/// gender prefix is a hard constraint (a wrong-gender voice is the worst
+/// mistake this system can make), and the accent carries the register whoever
+/// picked the original id deliberately chose.
+///
+/// Empty for `"narrator"` — reserved, and deliberately excluded from every
+/// bucket so an NPC can never be handed the narration's own voice — and for
+/// any id not in the catalog.
+pub fn sibling_voice_ids(voice_id: &str) -> Vec<&'static str> {
+    let Some((bucket, _)) = voice_id.rsplit_once('-') else {
+        return Vec::new();
+    };
+    VOICE_CATALOG
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| *id != DEFAULT_VOICE_ID)
+        .filter(|id| id.rsplit_once('-').is_some_and(|(b, _)| b == bucket))
+        .collect()
+}
+
 /// Accent-specific ids from the old Piper catalog that no longer exist in
 /// Kokoro's (US/GB-only) catalog, mapped to a same-gender replacement — a
 /// pre-existing campaign's npc_voices.json can still carry these, and
