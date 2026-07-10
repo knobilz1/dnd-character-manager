@@ -75,6 +75,26 @@ export async function sendCharacterToDM(character: Character, ip: string): Promi
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
 }
 
+/** One line of narration the DM has spoken, as broadcast to every connected
+ *  player device — mirrors party_listener.rs's NarrationEntry. */
+export interface NarrationEntry {
+  seq: number;
+  text: string;
+}
+
+/** Polls for narration lines newer than `since` (0 = everything currently
+ *  buffered on the DM's machine — see party_listener.rs's NARRATION_LOG_CAPACITY
+ *  for how far back that reaches). Lets every player device follow what the
+ *  DM said, not just whoever's own /talk request happened to carry a reply
+ *  back — see useDmNarrationFeed, the caller. Throws the same way pingDM's
+ *  underlying fetch would on an unreachable DM; callers should treat that as
+ *  "try again next poll," not a fatal error. */
+export async function fetchNarrationSince(since: number, ip: string): Promise<{ entries: NarrationEntry[]; latest: number }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/narration?since=${since}`, { method: 'GET', connectTimeout: 5000 });
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  return (await res.json()) as { entries: NarrationEntry[]; latest: number };
+}
+
 /** Send several characters; returns counts (and which ids actually succeeded,
  *  so callers can mark those characters as DM-synced) for partial success. */
 export async function sendAllToDM(
