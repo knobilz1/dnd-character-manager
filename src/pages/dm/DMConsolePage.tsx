@@ -270,6 +270,15 @@ const SPEAKER_TAG = /^\s*\[([^\]]{1,60})\]:\s*/;
  *  enough that a gendered noun from an earlier beat has already fallen out. */
 const NARRATION_GENDER_WINDOW = 240;
 
+/** True when a sentence begins with an OPENING double quote — the signature of
+ *  dialogue, as opposed to prose that merely contains a quotation somewhere in
+ *  the middle. Used to decide whether an untagged sentence is an NPC resuming
+ *  speech (see enqueueSentence's dialogue-resume branch). A closing curly quote
+ *  never opens dialogue, so it is deliberately not matched here. */
+function opensWithQuote(sentence: string): boolean {
+  return /^\s*["“]/.test(sentence);
+}
+
 /** Strips a leading `[Name]:` cue from one sentence, returning the cue-free
  *  text plus whichever name it names (or null when the sentence carries no
  *  tag of its own). Purely parses this one sentence — the stickiness that
@@ -675,6 +684,12 @@ export function DMConsolePage() {
    *  speaker, quote parity) beside its output, so a wrong voice at the table
    *  traces back to the exact sentence and branch that caused it. */
   const voiceDebugRef = React.useRef<string[]>([]);
+  /** The last NPC the DM explicitly tagged this turn, and whether the sticky
+   *  speaker was cleared by the automatic quote-aware revert (as opposed to an
+   *  explicit `[Narrator]:`). Together these let a dialogue line that resumes
+   *  without a tag return to its speaker — see enqueueSentence. */
+  const lastTaggedSpeakerRef = React.useRef<string | null>(null);
+  const autoRevertedRef = React.useRef(false);
   // State mirror of npcVoicesRef, purely so the History dialog's voice-
   // preview/override panel re-renders when an assignment changes — the ref
   // above stays the source of truth for the hot playback path (enqueueSentence
@@ -900,17 +915,42 @@ export function DMConsolePage() {
     // turn's opening prose.
     if (speaker !== null) {
       currentSpeakerRef.current = speaker;
+      autoRevertedRef.current = false;
+      if (speaker.toLowerCase() !== 'narrator') lastTaggedSpeakerRef.current = speaker;
     } else if (currentSpeakerRef.current && currentSpeakerRef.current.toLowerCase() !== 'narrator') {
       // No tag on this sentence and a non-narrator NPC is sticky. If the NPC's
-      // quoted speech has ended — we're not mid-quote AND this sentence has no
-      // quote of its own — it's almost certainly narration the DM resumed
+      // quoted speech has ended — we're not mid-quote AND this sentence doesn't
+      // OPEN with a quote — it's almost certainly narration the DM resumed
       // without the explicit `[Narrator]:` tag, so revert to the narrator
-      // rather than voicing the description as the NPC. Only ever demotes an
-      // NPC to the narrator; it never promotes an untagged sentence TO an NPC,
-      // so a stray quote in real narration can't hijack a voice.
-      if (!quoteOpenRef.current && countDoubleQuotes(sentence) === 0) {
+      // rather than voicing the description as the NPC.
+      //
+      // The test is "opens with a quote", not "contains one": prose routinely
+      // quotes a word mid-sentence (`the word "mist" hung between them`), and a
+      // contains-check let that block the revert, leaving narration in the
+      // NPC's voice.
+      if (!quoteOpenRef.current && !opensWithQuote(sentence)) {
         currentSpeakerRef.current = null;
+        autoRevertedRef.current = true;
       }
+    } else if (
+      currentSpeakerRef.current === null &&
+      autoRevertedRef.current &&
+      lastTaggedSpeakerRef.current &&
+      opensWithQuote(sentence)
+    ) {
+      // Dialogue resuming without a tag. The DM reliably writes an NPC's block
+      // as `[Carrow]: "..." He rises from the pews. "..."` — tagging only the
+      // first line. The revert above correctly hands the narration beat back to
+      // the narrator, but before this branch existed nothing could hand the
+      // NEXT quoted line back to Carrow, so an NPC's voice fired exactly once
+      // per turn and every later line of theirs spoke as the narrator.
+      //
+      // Only fires when the revert was AUTOMATIC: if the DM explicitly said
+      // `[Narrator]:`, it meant it, and a quoted line after that stays
+      // narration (someone reading an inscription aloud, say). And only when
+      // the sentence OPENS with a quote — mid-sentence quotes in real prose
+      // ("the sign read \"turn back\"") must not hijack a voice.
+      currentSpeakerRef.current = lastTaggedSpeakerRef.current;
     }
     // Advance the running mid-quote state (an odd count flips it) so the next
     // sentence knows whether it's still inside the NPC's quoted speech.
@@ -1177,6 +1217,8 @@ export function DMConsolePage() {
       quoteOpenRef.current = false;
       recentNarrationRef.current = '';
       voiceDebugRef.current = [];
+      lastTaggedSpeakerRef.current = null;
+      autoRevertedRef.current = false;
       enqueueSentence(CAMPAIGN_BUILDING_MESSAGE);
       if (drainingPromiseRef.current) await drainingPromiseRef.current;
       return { narration: CAMPAIGN_BUILDING_MESSAGE, interrupted: false, error: null };
@@ -1190,6 +1232,8 @@ export function DMConsolePage() {
     quoteOpenRef.current = false;
     recentNarrationRef.current = '';
     voiceDebugRef.current = [];
+    lastTaggedSpeakerRef.current = null;
+    autoRevertedRef.current = false;
     // Consume any pending "the previous reply was cut off, here's what was
     // actually heard" note exactly once — see interruptedTurnRef's doc comment.
     const interruption = interruptedTurnRef.current ?? undefined;
@@ -1454,6 +1498,8 @@ export function DMConsolePage() {
     quoteOpenRef.current = false;
     recentNarrationRef.current = '';
     voiceDebugRef.current = [];
+    lastTaggedSpeakerRef.current = null;
+    autoRevertedRef.current = false;
     const { sentences } = extractCompleteSentences(lastDmNarrationRef.current);
     for (const sentence of sentences) enqueueSentence(sentence);
   }
