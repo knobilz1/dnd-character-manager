@@ -32,17 +32,33 @@ interface NamePosition extends HexPosition { name: string }
  *  hallucinated id degrades gracefully rather than breaking playback. */
 export const VOICE_CATALOG_IDS = new Set([
   'narrator',
-  'male-us-1', 'male-us-2', 'male-us-3', 'male-us-4', 'male-us-5',
-  'male-gb-1', 'male-gb-2', 'male-gb-3',
-  'female-us-1', 'female-us-2', 'female-us-3', 'female-us-4',
+  'male-us-1', 'male-us-2', 'male-us-3', 'male-us-4', 'male-us-5', 'male-us-6', 'male-us-7', 'male-us-8', 'male-us-9',
+  'male-gb-1', 'male-gb-2', 'male-gb-3', 'male-gb-4',
+  'female-us-1', 'female-us-2', 'female-us-3', 'female-us-4', 'female-us-5', 'female-us-6', 'female-us-7', 'female-us-8', 'female-us-9', 'female-us-10',
   'female-gb-1', 'female-gb-2', 'female-gb-3', 'female-gb-4',
-  'male-scottish-1', 'male-scottish-2', 'female-scottish-1',
-  'male-irish-1', 'male-irish-2', 'female-irish-1',
-  'female-welsh-1',
-  'male-northernirish-1', 'female-northernirish-1',
-  'male-australian-1',
-  'male-southafrican-1', 'female-southafrican-1',
 ]);
+
+/** Old Piper-catalog accent ids a pre-Kokoro campaign's npc_voices.json (or an
+ *  LLM turn re-asserting an existing NPC's voiceId) may still carry, mapped to
+ *  a same-gender replacement in the current catalog — mirrors tts.rs's
+ *  LEGACY_VOICE_ALIASES exactly (that is the source of truth; keep in sync).
+ *  Without this, VOICE_CATALOG_IDS.has() rejects the legacy id as "unknown"
+ *  before it ever reaches the Rust side, which has its own equivalent
+ *  fallback for synthesis but never gets the chance to apply it. */
+const LEGACY_VOICE_ALIASES: Record<string, string> = {
+  'male-scottish-1': 'male-gb-2',
+  'male-scottish-2': 'male-gb-3',
+  'female-scottish-1': 'female-gb-2',
+  'male-irish-1': 'male-gb-1',
+  'male-irish-2': 'male-gb-4',
+  'female-irish-1': 'female-gb-3',
+  'female-welsh-1': 'female-gb-4',
+  'male-northernirish-1': 'male-us-6',
+  'female-northernirish-1': 'female-gb-1',
+  'male-australian-1': 'male-us-7',
+  'male-southafrican-1': 'male-us-8',
+  'female-southafrican-1': 'female-us-5',
+};
 
 /** Every valid `pitch` tag for `rememberEntity` (see tts.rs's pitch_factor,
  *  the source of truth) — a size/build-based pitch shift layered on top of
@@ -206,7 +222,8 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   const rememberEntity = sanitizeArray(raw.rememberEntity, 'rememberEntity', isNamedEntityFact, warnings).map((entry) => {
     const cleaned: NamedEntityFact = { name: entry.name, description: entry.description };
     if (entry.voiceId !== undefined) {
-      if (VOICE_CATALOG_IDS.has(entry.voiceId)) cleaned.voiceId = entry.voiceId;
+      const resolvedVoiceId = LEGACY_VOICE_ALIASES[entry.voiceId] ?? entry.voiceId;
+      if (VOICE_CATALOG_IDS.has(resolvedVoiceId)) cleaned.voiceId = resolvedVoiceId;
       else warnings.push(`Ignored unknown voiceId "${entry.voiceId}" for "${entry.name}" — falling back to the narrator voice.`);
     }
     if (entry.pitch !== undefined) {

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Map, ClipboardList, Cpu, Landmark } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Map, ClipboardList, Cpu, Landmark, RotateCcw } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -11,8 +11,9 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { parseDmReply, applyDmActions, VOICE_CATALOG_IDS, PITCH_TAG_IDS } from '../../utils/dmActions';
 import type { HexPosition } from '../../utils/dmActions';
-import { startRecording, stopAndTranscribe, warmupSTT, speak, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
+import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
+import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
 import { getBackground } from '../../data/backgrounds';
@@ -40,42 +41,51 @@ const CAMPAIGN_BUILDING_MESSAGE = "I am currently building our campaign, please 
  *  needed on this side). */
 const NARRATOR_VOICE_KEY = '__narrator__';
 
+/** One npc_voices.json entry, mirroring campaign.rs's NpcVoiceAssignment —
+ *  `speed` is this app's own pace-factor convention (bigger = slower; see
+ *  DEFAULT_PACE_FACTOR's doc comment in tts.rs), independent of `pitch`.
+ *  Converted to Kokoro's own (inverted) native speed scale only at the
+ *  actual synthesis call, so this stored value's meaning never changed
+ *  across the Piper->Kokoro engine swap. */
+type NpcVoiceEntry = { voice_id: string; pitch?: string; speed?: number };
+
 /** Human-readable label per catalog id, for the voice-override panel's
- *  dropdown — purely cosmetic, doesn't affect anything sent to Piper.
+ *  dropdown — purely cosmetic, doesn't affect anything sent to Kokoro.
  *  "narrator" deliberately excluded: NPCs pick from this list, and
  *  "(narrator default)" is offered as its own separate option instead (see
  *  the panel's <select>) rather than listing "narrator" as if it were just
  *  another NPC voice choice. Keep in sync with VOICE_CATALOG_IDS (imported
- *  from dmActions.ts, which itself mirrors tts.rs's VOICE_CATALOG). */
+ *  from dmActions.ts, which itself mirrors tts.rs's VOICE_CATALOG). Only
+ *  American/British — Kokoro (unlike the Piper VCTK pack this replaced) has
+ *  no Scottish/Irish/Welsh/Australian/South African voices at all. */
 const VOICE_LABELS: Record<string, string> = {
   'male-us-1': 'American (male 1)',
   'male-us-2': 'American (male 2)',
   'male-us-3': 'American (male 3)',
   'male-us-4': 'American (male 4)',
   'male-us-5': 'American (male 5)',
+  'male-us-6': 'American (male 6)',
+  'male-us-7': 'American (male 7)',
+  'male-us-8': 'American (male 8)',
+  'male-us-9': 'American (male 9)',
   'male-gb-1': 'English (male 1)',
-  'male-gb-2': 'English (male 2, regional)',
-  'male-gb-3': 'English (male 3, regional)',
+  'male-gb-2': 'English (male 2)',
+  'male-gb-3': 'English (male 3)',
+  'male-gb-4': 'English (male 4)',
   'female-us-1': 'American (female 1)',
   'female-us-2': 'American (female 2)',
   'female-us-3': 'American (female 3)',
-  'female-us-4': 'American (female 4, regional)',
+  'female-us-4': 'American (female 4)',
+  'female-us-5': 'American (female 5)',
+  'female-us-6': 'American (female 6)',
+  'female-us-7': 'American (female 7)',
+  'female-us-8': 'American (female 8)',
+  'female-us-9': 'American (female 9)',
+  'female-us-10': 'American (female 10)',
   'female-gb-1': 'English (female 1)',
   'female-gb-2': 'English (female 2)',
   'female-gb-3': 'English (female 3)',
-  'female-gb-4': 'English (female 4, regional)',
-  'male-scottish-1': 'Scottish (male 1)',
-  'male-scottish-2': 'Scottish (male 2)',
-  'female-scottish-1': 'Scottish (female)',
-  'male-irish-1': 'Irish (male 1)',
-  'male-irish-2': 'Irish (male 2)',
-  'female-irish-1': 'Irish (female)',
-  'female-welsh-1': 'Welsh (female)',
-  'male-northernirish-1': 'Northern Irish (male)',
-  'female-northernirish-1': 'Northern Irish (female)',
-  'male-australian-1': 'Australian (male)',
-  'male-southafrican-1': 'South African (male)',
-  'female-southafrican-1': 'South African (female)',
+  'female-gb-4': 'English (female 4)',
 };
 
 /** Ordered options for the voice-override panel's dropdown — every catalog
@@ -93,10 +103,40 @@ const PITCH_LABELS: Record<string, string> = {
 };
 const NPC_PITCH_OPTIONS = ['', ...Array.from(PITCH_TAG_IDS)];
 
-/** A fixed sample line for the voice-override panel's Preview button — long
- *  enough to actually hear the voice's character, short enough to preview
- *  quickly. Same text for every voice so previews are comparable. */
-const VOICE_PREVIEW_LINE = "Well met, traveler. The road ahead grows dark.";
+/** Label per speed override for the voice-override panel — the value is the
+ *  literal pace-factor string passed to tts.rs's speak_text (smaller =
+ *  faster; see DEFAULT_PACE_FACTOR's doc comment for why 1.15 is "default"
+ *  rather than a neutral 1.0 — tts.rs converts this to Kokoro's own
+ *  inverted native speed scale right before synthesis, so this value's
+ *  meaning here is unchanged from before the Piper->Kokoro swap).
+ *  Independent of pitch — this only changes pace, never tone. */
+const SPEED_LABELS: Record<string, string> = {
+  '': 'Default pace',
+  // 0.65/0.55 push past what the Piper-era list offered. tts.rs inverts these
+  // into Kokoro's native scale (1/0.55 ≈ 1.82), which it accepts without
+  // clamping — kokoro_cli.py passes `speed` straight through to
+  // kokoro.create. Intelligibility at the top end is a matter of taste, so
+  // audition with the panel's Preview button before committing a voice to it.
+  '0.55': 'Fastest',
+  '0.65': 'Extremely fast',
+  '0.75': 'Very fast',
+  '0.85': 'Fast',
+  '0.95': 'Faster',
+  '1.05': 'Slightly faster',
+  '1.30': 'Slower',
+  '1.45': 'Slow',
+  '1.60': 'Very slow',
+};
+const NPC_SPEED_OPTIONS = ['', '0.55', '0.65', '0.75', '0.85', '0.95', '1.05', '1.30', '1.45', '1.60'];
+
+/** A fixed sample line for the voice-override panel's Preview button. Kept
+ *  short on purpose — Kokoro synthesis time scales with text length, and this
+ *  is auditioned repeatedly on CPU-only machines, so a shorter line makes each
+ *  first-time preview noticeably faster while still carrying two beats (a
+ *  greeting + a fall) to judge the voice's timbre and prosody. Same text for
+ *  every voice so previews are comparable; re-plays are cached (see
+ *  dmSpeech's previewVoice). */
+const VOICE_PREVIEW_LINE = "Well met, traveler. Night draws near.";
 
 /** Deliberate silence inserted between spoken sentences (see enqueueSentence's
  *  playback loop). Before synthesis/playback pipelining, the time it took to
@@ -224,16 +264,48 @@ function extractCompleteSentences(buffer: string): { sentences: string[]; remain
  *  NPCs distinct voices") at the very start of a sentence. */
 const SPEAKER_TAG = /^\s*\[([^\]]{1,60})\]:\s*/;
 
+/** How much recent narrator prose to keep as a gender signal for an untagged
+ *  NPC (see resolveEphemeralVoice). Roughly a sentence or two — long enough to
+ *  catch "an old man shuffles from the pews" right before he speaks, short
+ *  enough that a gendered noun from an earlier beat has already fallen out. */
+const NARRATION_GENDER_WINDOW = 240;
+
 /** Strips a leading `[Name]:` cue from one sentence, returning the cue-free
- *  text plus whichever name it names (or null for plain narration).
- *  Deliberately per-sentence, not sticky across a multi-sentence speech — a
- *  long NPC monologue needs the tag repeated on each sentence to keep
- *  sounding like that NPC; an untagged sentence always falls back to the
- *  narrator voice. BASE_CLAUDE_MD documents this convention to the DM. */
-function parseSpeakerTag(sentence: string): { speaker: string | null; text: string } {
+ *  text plus whichever name it names (or null when the sentence carries no
+ *  tag of its own). Purely parses this one sentence — the stickiness that
+ *  carries a speaker across untagged continuation sentences lives one level
+ *  up in enqueueSentence, so a null here means "no tag on this sentence,"
+ *  NOT "revert to narrator." BASE_CLAUDE_MD documents the sticky convention
+ *  (and the `[Narrator]:` reset) to the DM.
+ *
+ *  Also accepts an optional gender marker: `[Ismark|male]:`. A proper name
+ *  carries no gender word of its own, so for an NPC who has no voice on file
+ *  yet — every NPC on the turn that introduces them, since the `dm-actions`
+ *  block that could assign one only arrives AFTER the narration has already
+ *  streamed and been spoken — the marker is the only thing that can pick a
+ *  correctly-gendered voice for their very first line. BASE_CLAUDE_MD asks
+ *  for it on first mention only; it's stripped from the spoken text either
+ *  way, and an absent or unrecognized marker just yields a null hint. */
+function parseSpeakerTag(sentence: string): { speaker: string | null; text: string; genderHint: 'male' | 'female' | null } {
   const match = sentence.match(SPEAKER_TAG);
-  if (!match) return { speaker: null, text: sentence };
-  return { speaker: match[1].trim(), text: sentence.slice(match[0].length) };
+  if (!match) return { speaker: null, text: sentence, genderHint: null };
+  const [rawName, rawGender] = match[1].split('|');
+  const gender = rawGender?.trim().toLowerCase();
+  return {
+    speaker: rawName.trim(),
+    text: sentence.slice(match[0].length),
+    genderHint: gender === 'male' || gender === 'female' ? gender : null,
+  };
+}
+
+/** Counts double-quote characters (straight " plus curly “ ”) in a string.
+ *  Used to track whether we're mid-quote across sentences — NPC dialogue is
+ *  quoted, narration isn't, so quote state is what lets a sticky NPC voice
+ *  auto-revert to the narrator when the speech ends (see enqueueSentence).
+ *  Single quotes/apostrophes are deliberately ignored — they're contractions
+ *  ("don't"), not speech delimiters. */
+function countDoubleQuotes(s: string): number {
+  return (s.match(/["“”]/g) || []).length;
 }
 
 /** Strips every `[Name]:` cue out of a full (already-complete) narration
@@ -549,6 +621,10 @@ export function DMConsolePage() {
   const [loreText, setLoreText] = React.useState('');
   const [loreAddition, setLoreAddition] = React.useState('');
   const [pendingLoreUpdateFile, setPendingLoreUpdateFile] = React.useState<{ name: string; text: string } | null>(null);
+  // Result of the last manual "Personalize campaign hooks" click (see
+  // handleReconcileCampaignHooks) — cleared each time the Lore dialog reopens
+  // so a stale result from a previous visit never lingers.
+  const [campaignHooksResult, setCampaignHooksResult] = React.useState<string | null>(null);
 
   const sessionIdRef = React.useRef<string | undefined>(undefined);
   const processingRef = React.useRef(false);
@@ -581,17 +657,26 @@ export function DMConsolePage() {
   // re-fetch. Field names mirror campaign.rs's NpcVoiceAssignment struct
   // as-is (snake_case) — no serde rename_all anywhere in this codebase, same
   // convention as ChapterizeImportResult's module_id/module_title.
-  const npcVoicesRef = React.useRef<Record<string, { voice_id: string; pitch?: string }>>({});
+  const npcVoicesRef = React.useRef<Record<string, NpcVoiceEntry>>({});
+  /** Tag → auto-minted voice for unnamed walk-on NPCs (see
+   *  resolveEphemeralVoice). In-memory only, cleared on campaign switch; these
+   *  are deliberately never persisted to npc_voices.json. */
+  const ephemeralVoicesRef = React.useRef<Record<string, NpcVoiceEntry>>({});
+  /** The narrator-voiced prose most recently spoken this turn, used as a
+   *  last-resort gender signal for an NPC whose tag carries none (see
+   *  resolveEphemeralVoice). Trimmed to the last NARRATION_GENDER_WINDOW chars
+   *  so a gendered noun from several beats ago can't misattribute a voice. */
+  const recentNarrationRef = React.useRef('');
   // State mirror of npcVoicesRef, purely so the History dialog's voice-
   // preview/override panel re-renders when an assignment changes — the ref
   // above stays the source of truth for the hot playback path (enqueueSentence
   // reads a ref, not state, to avoid a re-render on every spoken line).
-  const [npcVoices, setNpcVoices] = React.useState<Record<string, { voice_id: string; pitch?: string }>>({});
+  const [npcVoices, setNpcVoices] = React.useState<Record<string, NpcVoiceEntry>>({});
   // Per-NPC-name pending edits in the voice-override panel, keyed the same
   // way as npcVoices (lowercased name) — separate from npcVoices itself so
   // an in-progress edit isn't clobbered by an unrelated npcVoices refresh
   // (e.g. a live turn assigning some other NPC's voice) before it's saved.
-  const [voiceEdits, setVoiceEdits] = React.useState<Record<string, { voiceId: string; pitch: string }>>({});
+  const [voiceEdits, setVoiceEdits] = React.useState<Record<string, { voiceId: string; pitch: string; speed: string }>>({});
   // Which row's Preview button is currently playing (disables that button
   // and prevents overlapping playback) — null when nothing's previewing.
   const [previewingKey, setPreviewingKey] = React.useState<string | null>(null);
@@ -615,8 +700,19 @@ export function DMConsolePage() {
   // before this pipeline existed.
   const narrationBufferRef = React.useRef('');
   const streamedAnyChunkRef = React.useRef(false);
-  const sentenceQueueRef = React.useRef<{ text: string; voiceId?: string; pitch?: string }[]>([]);
+  const sentenceQueueRef = React.useRef<{ text: string; voiceId?: string; pitch?: string; speed?: number }[]>([]);
   const drainingPromiseRef = React.useRef<Promise<void> | null>(null);
+  // The speaker whose `[Name]:` tag was seen most recently within the current
+  // narration — the voice cue is now STICKY across sentences (see
+  // enqueueSentence). Reset to null at the start of every fresh narration (a
+  // new turn or a replay) so a speech that trailed the previous turn never
+  // bleeds into the next one's opening narration.
+  const currentSpeakerRef = React.useRef<string | null>(null);
+  // Whether we're currently inside an open quote (odd number of double-quote
+  // marks seen so far this narration). Lets a sticky NPC voice auto-revert to
+  // the narrator once the NPC's quoted speech closes and plain prose follows,
+  // even if the DM forgot the explicit `[Narrator]:` tag — see enqueueSentence.
+  const quoteOpenRef = React.useRef(false);
   // Set whenever the currently in-flight turn gets cut short — either a
   // player barging in mid-narration (handleTalkToggle) or the console tearing
   // down the current turn outright (stopSpeakingAndClearQueue, called from
@@ -639,6 +735,16 @@ export function DMConsolePage() {
   // buildTurnPrompt so Claude knows exactly how much of its cut-off reply
   // ever reached the players' ears.
   const interruptedTurnRef = React.useRef<{ heard: string } | null>(null);
+  // The most recently completed DM turn's raw narration — `[Name]:` speech
+  // tags intact (not the display-stripped version shown in the transcript),
+  // so "Replay last response" (see handleReplayLastResponse) can re-run it
+  // through enqueueSentence and get the same per-NPC voices as the original,
+  // not everything flattened onto the narrator. Purely local re-synthesis via
+  // Piper — no Claude call, so replaying costs zero tokens. Only ever set for
+  // a turn that actually completed (see runTurn's suppressNarrationRef guard
+  // above it) — an interrupted, never-fully-delivered reply never overwrites
+  // whatever the last real one was.
+  const lastDmNarrationRef = React.useRef('');
 
   /** Resolves a `[Name]:` speech tag to its stored voice assignment.
    *  npc_voices.json keys off the NPC's *full* name as given to rememberEntity
@@ -646,22 +752,172 @@ export function DMConsolePage() {
    *  dialogue with just the first name (`[Gundren]:`) — an exact-key-only
    *  lookup would silently miss every such tag and fall back to the narrator
    *  voice, defeating the feature for what's actually the natural, common
-   *  case. Falls back to matching the tag against the first word of a stored
-   *  key when there's no exact match, mirroring dmActions.ts's findIndex
-   *  prefix-match tolerance for character names. */
-  function resolveVoiceAssignment(speaker: string | null): { voice_id: string; pitch?: string } | undefined {
+   *  case. Falls back to matching the tag against any individual word of a
+   *  stored key (not just the first) when there's no exact match — plenty of
+   *  natural NPC names lead with a title/descriptor rather than the name
+   *  itself ("Old Xoblob", "Sister Garaele", "Captain Harbin"), and Claude
+   *  reasonably tags dialogue with the NPC's actual name, not whichever word
+   *  happens to come first in the stored key. A first-word-only match would
+   *  silently and PERMANENTLY miss every such NPC, every single time they
+   *  spoke, since the mismatch never resolves itself turn to turn.
+   *
+   *  That word-match must be UNIQUE across the whole roster before it's
+   *  trusted. Common title words ("Sister", "Captain", "Old", ...) are
+   *  exactly the words most likely to be shared by two unrelated NPCs — an
+   *  any-match-wins lookup would silently pick whichever of them happened to
+   *  be inserted first into npc_voices.json, which reads to a player as the
+   *  wrong (and sometimes wrong-gender) voice firing at effectively random
+   *  moments. An ambiguous tag falls back to the narrator voice instead of
+   *  guessing — a plain, predictable miss beats an occasional wrong guess. */
+  function resolveVoiceAssignment(speaker: string | null, genderHint: 'male' | 'female' | null = null): NpcVoiceEntry | undefined {
     if (!speaker) return npcVoicesRef.current[NARRATOR_VOICE_KEY];
     const key = speaker.trim().toLowerCase();
+    // Explicit `[Narrator]:` tag (the DM's way of ending a sticky NPC speech
+    // and returning to narration mid-turn — see enqueueSentence) resolves to
+    // the very same narrator entry plain untagged narration does, so a custom
+    // narrator-voice override is honored either way.
+    if (key === 'narrator') return npcVoicesRef.current[NARRATOR_VOICE_KEY];
     if (npcVoicesRef.current[key]) return npcVoicesRef.current[key];
-    const firstNameMatch = Object.entries(npcVoicesRef.current).find(([storedKey]) => storedKey.split(' ')[0] === key);
-    return firstNameMatch?.[1];
+    const wordMatches = Object.entries(npcVoicesRef.current).filter(([storedKey]) => storedKey.split(' ').includes(key));
+    if (wordMatches.length === 1) return wordMatches[0][1];
+    // Several stored NPCs share this word — a real named NPC we can't
+    // disambiguate, NOT an unnamed walk-on, so don't mint a voice for them.
+    // (This branch used to `return undefined`, which the comment above called
+    // "the narrator voice" but which tts.rs actually resolves to af_heart —
+    // see resolveEphemeralVoice. Now it really is the narrator's voice.)
+    if (wordMatches.length > 1) {
+      console.warn(`Ambiguous NPC voice tag "${speaker}" matches ${wordMatches.length} entries; using narrator voice.`);
+      return npcVoicesRef.current[NARRATOR_VOICE_KEY];
+    }
+    return resolveEphemeralVoice(speaker, genderHint);
+  }
+
+  /** An unnamed walk-on the DM tagged but never `rememberEntity`'d, so it has
+   *  no npc_voices.json entry (BASE_CLAUDE_MD tells it not to bother giving a
+   *  permanent voice to someone with one throwaway line). Returning undefined
+   *  here used to send `voiceId: undefined` to tts.rs, whose
+   *  `voice_id.unwrap_or(DEFAULT_VOICE_ID)` picks the catalog's `"narrator"`
+   *  id — `af_heart`, a FEMALE voice, and NOT the campaign's configured
+   *  narrator override. Observed at the table: an old man and a woman in one
+   *  scene both spoke in that same stock female voice, matching neither each
+   *  other's gender nor the (correct, dark, low) narration around them.
+   *
+   *  So mint a voice from the tag's own words instead, cached per session and
+   *  never written to npc_voices.json — the same "don't persist throwaways"
+   *  invariant that keeps them out of entities.md. A tag with no gender signal
+   *  (`[Innkeeper]:`) deliberately gets the narrator's voice rather than a
+   *  coin flip: BASE_CLAUDE_MD calls a wrong-gender voice the single most
+   *  jarring mistake this system can make. */
+  function resolveEphemeralVoice(speaker: string, genderHint: 'male' | 'female' | null): NpcVoiceEntry | undefined {
+    const key = speaker.trim().toLowerCase();
+    const cached = ephemeralVoicesRef.current[key];
+    if (cached) return cached;
+    const taken = new Set<string>();
+    for (const a of Object.values(npcVoicesRef.current)) taken.add(a.voice_id);
+    for (const a of Object.values(ephemeralVoicesRef.current)) taken.add(a.voice_id);
+    // Tag first (`[Ismark|male]:`, or a descriptive `[Old Man]:`), then the
+    // narration that just introduced them — the DM reliably writes "an old man
+    // shuffles from the pews" a beat before he speaks, even on the turns it
+    // forgets the marker. That last resort demands unanimity (inferGenderStrict),
+    // so a two-NPC introduction naming both a woman and her brother declines to
+    // guess instead of coin-flipping on a majority.
+    const voiceId =
+      pickEphemeralVoice(speaker, taken, genderHint) ??
+      pickEphemeralVoice(speaker, taken, inferGenderStrict(recentNarrationRef.current));
+    if (!voiceId) {
+      console.warn(`No assigned voice and no gender signal for tag "${speaker}"; using narrator voice.`);
+      return npcVoicesRef.current[NARRATOR_VOICE_KEY];
+    }
+    const entry: NpcVoiceEntry = { voice_id: voiceId };
+    ephemeralVoicesRef.current = { ...ephemeralVoicesRef.current, [key]: entry };
+    return entry;
+  }
+
+  /** Picks a permanent voice for an NPC the DM remembered but gave no
+   *  `voiceId`. Gender comes from their name + description together, since a
+   *  bare name carries no signal but the description almost always does ("a
+   *  young woman", "the old priest, he..."). Returns null when even that is
+   *  genderless — better an unvoiced NPC (who speaks as the narrator) than a
+   *  permanently wrong-gender one, and the manual override panel and
+   *  reconcile_npc_voices both remain available to fix them. Skips NPCs who
+   *  already have a voice so a re-sent rememberEntity can't churn it. */
+  function autoAssignVoiceId(name: string, description: string): string | null {
+    const key = name.trim().toLowerCase();
+    if (npcVoicesRef.current[key]) return null;
+    // If this NPC already spoke this turn under a tag, they were given an
+    // ephemeral voice — keep it. The tag ("Ireena") and the remembered name
+    // ("Ireena Kolyana") hash differently, so minting a fresh voice here would
+    // make the same NPC audibly change voice between the turn that introduced
+    // them and the next one.
+    const spokenAs = ephemeralVoicesRef.current[key] ?? findEphemeralByNamePart(key);
+    if (spokenAs) return spokenAs.voice_id;
+    const gender = inferGender(`${name} ${description}`);
+    if (!gender) {
+      console.warn(`No gender signal in "${name}"'s description; leaving unvoiced.`);
+      return null;
+    }
+    const taken = new Set<string>();
+    for (const a of Object.values(npcVoicesRef.current)) taken.add(a.voice_id);
+    for (const a of Object.values(ephemeralVoicesRef.current)) taken.add(a.voice_id);
+    return pickVoiceForGender(gender, name, taken);
+  }
+
+  /** An ephemeral voice minted under a short tag ("ireena") that belongs to a
+   *  longer remembered name ("ireena kolyana"). Requires a UNIQUE match, on
+   *  the same reasoning as resolveVoiceAssignment's word-match: two NPCs
+   *  sharing a word must not silently inherit each other's voice. */
+  function findEphemeralByNamePart(fullNameKey: string): NpcVoiceEntry | undefined {
+    const nameWords = new Set(fullNameKey.split(' '));
+    const hits = Object.entries(ephemeralVoicesRef.current).filter(([tagKey]) =>
+      tagKey.split(' ').every((w) => nameWords.has(w))
+    );
+    return hits.length === 1 ? hits[0][1] : undefined;
   }
 
   function enqueueSentence(sentence: string) {
-    const { speaker, text } = parseSpeakerTag(sentence);
+    const { speaker, text, genderHint } = parseSpeakerTag(sentence);
+    // Sticky voice cue: a `[Name]:` tag applies to its own sentence AND every
+    // following untagged sentence until the next tag, instead of each untagged
+    // sentence silently reverting to the narrator. The old per-sentence
+    // behavior required the DM to repeat `[Name]:` on every single sentence of
+    // a multi-sentence speech; when it didn't (the common case), an NPC's
+    // continuation sentences dropped onto the narrator voice mid-speech — an
+    // NPC could sound half-themselves, half-narrator within one line. The DM
+    // returns to narration with an explicit `[Narrator]:` tag (see
+    // BASE_CLAUDE_MD); currentSpeakerRef is also reset to null at the start of
+    // each fresh narration so a trailing NPC line never carries into the next
+    // turn's opening prose.
+    if (speaker !== null) {
+      currentSpeakerRef.current = speaker;
+    } else if (currentSpeakerRef.current && currentSpeakerRef.current.toLowerCase() !== 'narrator') {
+      // No tag on this sentence and a non-narrator NPC is sticky. If the NPC's
+      // quoted speech has ended — we're not mid-quote AND this sentence has no
+      // quote of its own — it's almost certainly narration the DM resumed
+      // without the explicit `[Narrator]:` tag, so revert to the narrator
+      // rather than voicing the description as the NPC. Only ever demotes an
+      // NPC to the narrator; it never promotes an untagged sentence TO an NPC,
+      // so a stray quote in real narration can't hijack a voice.
+      if (!quoteOpenRef.current && countDoubleQuotes(sentence) === 0) {
+        currentSpeakerRef.current = null;
+      }
+    }
+    // Advance the running mid-quote state (an odd count flips it) so the next
+    // sentence knows whether it's still inside the NPC's quoted speech.
+    if (countDoubleQuotes(sentence) % 2 === 1) quoteOpenRef.current = !quoteOpenRef.current;
     if (!text.trim()) return;
-    const assignment = resolveVoiceAssignment(speaker);
-    sentenceQueueRef.current.push({ text, voiceId: assignment?.voice_id, pitch: assignment?.pitch });
+    // The hint only rides the sentence that carried the tag. Continuation
+    // sentences of the same speech resolve by name against the ephemeral cache
+    // that first sentence populated, so the DM never has to repeat it.
+    const assignment = resolveVoiceAssignment(currentSpeakerRef.current, genderHint);
+    // Record narration AFTER resolving, never before: this sentence's own text
+    // must not be a gender signal for the speaker it introduces (an NPC line
+    // is full of "he"/"she" spoken BY that NPC about someone else). Only
+    // narrator-voiced prose counts.
+    const speakingAsNarrator = !currentSpeakerRef.current || currentSpeakerRef.current.toLowerCase() === 'narrator';
+    if (speakingAsNarrator) {
+      recentNarrationRef.current = (recentNarrationRef.current + ' ' + text).slice(-NARRATION_GENDER_WINDOW);
+    }
+    sentenceQueueRef.current.push({ text, voiceId: assignment?.voice_id, pitch: assignment?.pitch, speed: assignment?.speed });
     if (!drainingPromiseRef.current) {
       drainingPromiseRef.current = (async () => {
         // Pipelines synthesis with playback: previously each iteration
@@ -677,11 +933,11 @@ export function DMConsolePage() {
         let prepared: PreparedSpeech | null = null;
         while (sentenceQueueRef.current.length > 0) {
           const next = sentenceQueueRef.current.shift()!;
-          const current = prepared ?? (await prepareSpeech(next.text, next.voiceId, next.pitch));
+          const current = prepared ?? (await prepareSpeech(next.text, next.voiceId, next.pitch, next.speed));
           prepared = null;
 
           const upcoming = sentenceQueueRef.current[0];
-          const lookahead = upcoming ? prepareSpeech(upcoming.text, upcoming.voiceId, upcoming.pitch) : null;
+          const lookahead = upcoming ? prepareSpeech(upcoming.text, upcoming.voiceId, upcoming.pitch, upcoming.speed) : null;
 
           await playPrepared(current);
           // Only count a sentence as "heard" if it wasn't the one force-cut
@@ -719,32 +975,30 @@ export function DMConsolePage() {
 
   React.useEffect(() => {
     turnsSincePlanCheckRef.current = Infinity;
+    // Walk-on voices are scoped to the campaign that minted them — a tag like
+    // "[Old Man]:" means a different person in a different campaign.
+    ephemeralVoicesRef.current = {};
     if (!activeCampaignId) {
       campaignPlanRef.current = '';
       npcVoicesRef.current = {};
       setNpcVoices({});
       return;
     }
+    // Refresh the campaign's generated DM rules (memory/dm_rules.md) before
+    // anything warms the DM session. CLAUDE.md is written once at creation and
+    // never rewritten, so without this an old campaign never sees rule changes
+    // shipped after the day it was made — which is exactly how the `|male`
+    // speaker-tag marker failed to reach a live campaign through three builds.
+    invoke('sync_dm_rules', { id: activeCampaignId }).catch((e) =>
+      console.warn('Failed to sync DM rules:', e)
+    );
     invoke<string>('read_campaign_plan', { id: activeCampaignId })
       .then((plan) => { campaignPlanRef.current = plan; })
       .catch(() => { campaignPlanRef.current = ''; });
-    invoke<Record<string, { voice_id: string; pitch?: string }>>('read_npc_voices', { id: activeCampaignId })
+    invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId })
       .then((voices) => {
         npcVoicesRef.current = voices;
         setNpcVoices(voices);
-        // Pre-warm this campaign's already-assigned NPC voices (not just the
-        // narrator, which warmup_piper already covers at app mount) — the
-        // pool self-manages capacity (see tts.rs's acquire_piper/LRU
-        // eviction), so it's fine to fire one request per distinct voice_id
-        // without pre-filtering to a count; a campaign with more assigned
-        // voices than warm slots just means the pool settles on whichever
-        // ones actually got used most recently, same as it would anyway.
-        // Fire-and-forget: a failure here just means that NPC's first real
-        // line this sitting pays the one-time spawn cost instead.
-        const distinctVoiceIds = new Set(Object.values(voices).map((v) => v.voice_id));
-        for (const voiceId of distinctVoiceIds) {
-          invoke('warmup_voice', { voiceId }).catch((e) => console.warn(`Voice warmup failed for "${voiceId}" (will retry on first use):`, e));
-        }
       })
       .catch(() => { npcVoicesRef.current = {}; setNpcVoices({}); });
 
@@ -767,6 +1021,29 @@ export function DMConsolePage() {
         invoke('warmup_dm_session', { campaignId: activeCampaignId }).catch((e) =>
           console.warn('DM session warmup failed (first turn will just be slower):', e)
         );
+        // Backfill a voice for any NPC in entities.md that doesn't have one yet
+        // — one the DM introduced live but never voiced, or a manually-added
+        // entity (see the History dialog's editable entities.md). Without this,
+        // such an NPC keeps speaking in the narrator's voice until the DM
+        // happens to run "Assign NPC voices" or ends a session. This is the
+        // same reconciliation pass End Session already runs, just also fired on
+        // load; it's a FREE no-op unless there's a genuinely unvoiced NPC (the
+        // Rust side early-returns without any Opus call when none are missing —
+        // see reconcile_npc_voices_at), so it costs nothing in steady state.
+        invoke<number>('reconcile_npc_voices', { id: activeCampaignId })
+          .then((assigned) => {
+            // Only refresh if it actually assigned something AND the user
+            // hasn't switched campaigns out from under this async call — a
+            // stale refresh would clobber the now-active campaign's voices.
+            if (assigned > 0 && campaignIdRef.current === activeCampaignId) {
+              invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId })
+                .then((voices) => {
+                  if (campaignIdRef.current === activeCampaignId) { npcVoicesRef.current = voices; setNpcVoices(voices); }
+                })
+                .catch(() => {});
+            }
+          })
+          .catch((e) => console.warn('NPC voice auto-reconcile on load failed (unvoiced NPCs use the narrator until End Session):', e));
       });
     }
   }, [activeCampaignId]);
@@ -779,9 +1056,10 @@ export function DMConsolePage() {
     invoke<string | null>('local_lan_ip').then(setLanIp).catch(() => setLanIp(null));
     warmupSTT().then(() => setSttReady(true)).catch((e) => setError(`Speech recognition failed to load: ${e.message || e}`));
     invoke<CampaignMeta[]>('list_campaigns').then(setCampaigns).catch((e) => setError(`Couldn't load campaigns: ${e}`));
-    // Starts the persistent Piper process ahead of the first real turn, so
-    // that turn doesn't also pay the one-time process-spawn cost.
-    invoke('warmup_piper').catch((e) => console.warn('Piper warmup failed (will retry on first use):', e));
+    // Starts the persistent Kokoro process ahead of the first real turn, so
+    // that turn doesn't also pay the one-time process-spawn (+ first-ever
+    // model download) cost.
+    invoke('warmup_tts').catch((e) => console.warn('TTS warmup failed (will retry on first use):', e));
   }, []);
 
   /** Mirrors one character's identity/backstory into the active campaign's
@@ -871,6 +1149,9 @@ export function DMConsolePage() {
     // don't call Claude at all, just log/speak the canned line and bail.
     if (moduleBusyRef.current) {
       setTurns((t) => [...t, { who: 'dm', text: CAMPAIGN_BUILDING_MESSAGE }]);
+      currentSpeakerRef.current = null; // untagged canned line: never inherit a prior turn's sticky speaker
+      quoteOpenRef.current = false;
+      recentNarrationRef.current = '';
       enqueueSentence(CAMPAIGN_BUILDING_MESSAGE);
       if (drainingPromiseRef.current) await drainingPromiseRef.current;
       return { narration: CAMPAIGN_BUILDING_MESSAGE, interrupted: false, error: null };
@@ -880,6 +1161,9 @@ export function DMConsolePage() {
     streamedAnyChunkRef.current = false;
     suppressNarrationRef.current = false;
     spokenThisTurnRef.current = [];
+    currentSpeakerRef.current = null;
+    quoteOpenRef.current = false;
+    recentNarrationRef.current = '';
     // Consume any pending "the previous reply was cut off, here's what was
     // actually heard" note exactly once — see interruptedTurnRef's doc comment.
     const interruption = interruptedTurnRef.current ?? undefined;
@@ -916,6 +1200,7 @@ export function DMConsolePage() {
       }
 
       const { narration, actions, warnings: parseWarnings } = parseDmReply(reply.text);
+      lastDmNarrationRef.current = narration;
       // Strip any [Name]: voice cues before this reaches a human anywhere —
       // they're a TTS-only signal (see parseSpeakerTag). The raw `narration`
       // (cues intact) is kept for the local-LLM enqueue fallback further
@@ -923,6 +1208,17 @@ export function DMConsolePage() {
       const displayNarration = stripSpeakerTagsForDisplay(narration);
       setTurns((t) => [...t, { who: 'dm', text: displayNarration }]);
       setWarning(parseWarnings.length ? parseWarnings.join(' ') : null);
+      // Lets every connected player device catch up on what the DM said —
+      // not just whoever's own /talk request happened to carry the reply
+      // back (see party_listener.rs's narration_log). Fire-and-forget: a
+      // player missing one line because their device briefly couldn't reach
+      // the DM isn't worth blocking this turn over, and the next poll picks
+      // up wherever they left off regardless.
+      if (displayNarration.trim()) {
+        invoke('push_narration', { text: displayNarration }).catch((e) =>
+          console.warn('Failed to push narration to connected players:', e)
+        );
+      }
 
       if (actions) {
         const { updated, warnings } = applyDmActions(partyRef.current, actions);
@@ -955,14 +1251,24 @@ export function DMConsolePage() {
             await invoke('append_entity_fact', { id: campaignId, name, description }).catch((e) =>
               console.warn('Failed to save an entity fact:', e)
             );
-            if (voiceId) {
+            // The DM is asked to send a voiceId when introducing an NPC, but
+            // often doesn't — and an NPC with no assignment has no voice this
+            // session OR any future one, since reconcile_npc_voices only runs
+            // at campaign load / session end / the manual button. Rather than
+            // leave them to fall through to the narrator forever, derive one
+            // from their own name + description (which nearly always carries
+            // pronouns or a gendered noun). Deterministic and instant — no
+            // Opus call on a live turn. A later reconcile pass won't touch
+            // them, since it only fills NPCs that have no voice at all.
+            const resolvedVoiceId = voiceId ?? autoAssignVoiceId(name, description);
+            if (resolvedVoiceId) {
               // Update the local cache immediately (not just after the next
               // campaign switch's read_npc_voices fetch) so this NPC's voice
               // is usable the moment they speak again, even later this same
               // turn's remaining narration.
-              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: voiceId, pitch } };
+              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: resolvedVoiceId, pitch } };
               setNpcVoices(npcVoicesRef.current);
-              await invoke('set_npc_voice', { id: campaignId, name, voiceId, pitch }).catch((e) =>
+              await invoke('set_npc_voice', { id: campaignId, name, voiceId: resolvedVoiceId, pitch }).catch((e) =>
                 console.warn('Failed to save an NPC voice assignment:', e)
               );
             }
@@ -1084,6 +1390,26 @@ export function DMConsolePage() {
     setBusy(false);
   }
 
+  /** Re-speaks the last completed DM turn (see lastDmNarrationRef) — for
+   *  "wait, what did the DM just say" without spending a single token: this
+   *  is pure local Kokoro re-synthesis of text already generated, not a new
+   *  Claude call. Stops whatever's currently playing first (a plain audio
+   *  stop, not stopSpeakingAndClearQueue's heavier "kill the in-flight Claude
+   *  turn" behavior — there's no live turn to cancel here, just old audio to
+   *  get out of the way), then re-splits and re-enqueues the same raw text
+   *  through the normal pipeline so per-NPC voices replay correctly instead
+   *  of collapsing everything onto the narrator. */
+  function handleReplayLastResponse() {
+    if (!lastDmNarrationRef.current.trim()) return;
+    stopSpeaking();
+    sentenceQueueRef.current = [];
+    currentSpeakerRef.current = null;
+    quoteOpenRef.current = false;
+    recentNarrationRef.current = '';
+    const { sentences } = extractCompleteSentences(lastDmNarrationRef.current);
+    for (const sentence of sentences) enqueueSentence(sentence);
+  }
+
   async function handleTalkToggle() {
     setError(null);
     if (!listening) {
@@ -1101,6 +1427,16 @@ export function DMConsolePage() {
         // cut-off reply stopped being audible (see interruptedTurnRef).
         interruptedTurnRef.current = { heard: spokenThisTurnRef.current.join(' ') };
         stopSpeakingAndClearQueue();
+      } else {
+        // A replay (see handleReplayLastResponse) can still be playing here
+        // even though busy is false — replaying old audio isn't a live turn,
+        // so it never sets busy. Stop it before recording so the player's
+        // own line doesn't overlap with old DM audio. Plain stopSpeaking()
+        // + clearing the queue, not the heavier stopSpeakingAndClearQueue():
+        // there's no live Claude turn to cancel and nothing worth recording
+        // as "interrupted" for the next prompt.
+        stopSpeaking();
+        sentenceQueueRef.current = [];
       }
       try {
         await startRecording();
@@ -1161,9 +1497,36 @@ export function DMConsolePage() {
         // but a plain summarization task same as an ordinary turn — no
         // reason to pay for extra deliberation here either.
         const reply = await callDm(prompt, sessionIdRef.current, campaignId, 'low');
-        const { narration } = parseDmReply(reply.text);
+        const { narration, actions } = parseDmReply(reply.text);
         const date = new Date().toISOString().slice(0, 10);
         await invoke('append_session_recap', { id: campaignId, date, recap: narration });
+        // Catches any NPC/place this session that a live turn never got
+        // around to calling rememberEntity/rememberLocation for — see
+        // buildRecapPrompt's doc comment for why this last chance exists.
+        // Same application logic as a live turn's dm-actions handling
+        // (runTurn, below), just scoped to these two keys since the recap
+        // prompt only ever asks for them.
+        if (actions?.rememberEntity?.length) {
+          for (const { name, description, voiceId, pitch } of actions.rememberEntity) {
+            await invoke('append_entity_fact', { id: campaignId, name, description }).catch((e) =>
+              console.warn('Failed to save an entity fact:', e)
+            );
+            if (voiceId) {
+              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: voiceId, pitch } };
+              setNpcVoices(npcVoicesRef.current);
+              await invoke('set_npc_voice', { id: campaignId, name, voiceId, pitch }).catch((e) =>
+                console.warn('Failed to save an NPC voice assignment:', e)
+              );
+            }
+          }
+        }
+        if (actions?.rememberLocation?.length) {
+          for (const { name, description } of actions.rememberLocation) {
+            await invoke('append_location_fact', { id: campaignId, name, description }).catch((e) =>
+              console.warn('Failed to save a location fact:', e)
+            );
+          }
+        }
         // Only actually does anything once memory.md has grown past a size
         // threshold — cheap no-op most session ends (see campaign.rs).
         await invoke('compact_campaign_memory', { id: campaignId }).catch((e) =>
@@ -1182,9 +1545,16 @@ export function DMConsolePage() {
         await invoke('reconcile_npc_voices', { id: campaignId }).catch((e) =>
           console.warn('NPC voice reconciliation failed (unvoiced NPCs will just use the narrator voice):', e)
         );
-        await invoke<Record<string, { voice_id: string; pitch?: string }>>('read_npc_voices', { id: campaignId })
+        await invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: campaignId })
           .then((voices) => { npcVoicesRef.current = voices; setNpcVoices(voices); })
           .catch(() => {});
+        // Ties any party member missing a personal campaign-lore hook to
+        // something already established (see campaign.rs's
+        // reconcile_campaign_hooks_at) — a free no-op once everyone at the
+        // table already has one, a real Opus call otherwise.
+        await invoke('reconcile_campaign_hooks', { id: campaignId }).catch((e) =>
+          console.warn('Campaign-hooks reconciliation failed (PCs will rely on live improv only):', e)
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -1466,7 +1836,7 @@ export function DMConsolePage() {
         invoke<string>('read_campaign_flagged_facts', { id: activeCampaignId }),
         invoke<string>('read_campaign_entities', { id: activeCampaignId }),
         invoke<string>('read_campaign_locations', { id: activeCampaignId }),
-        invoke<Record<string, { voice_id: string; pitch?: string }>>('read_npc_voices', { id: activeCampaignId }),
+        invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId }),
       ]);
       setHistoryText(memory);
       setFlaggedFactsText(flaggedFacts);
@@ -1495,7 +1865,7 @@ export function DMConsolePage() {
     try {
       const assigned = await invoke<number>('reconcile_npc_voices', { id: activeCampaignId });
       setVoiceReconcileResult(assigned === 0 ? 'Every named NPC already has a voice.' : `Assigned voices to ${assigned} NPC${assigned === 1 ? '' : 's'}.`);
-      const voices = await invoke<Record<string, { voice_id: string; pitch?: string }>>('read_npc_voices', { id: activeCampaignId });
+      const voices = await invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId });
       npcVoicesRef.current = voices;
       setNpcVoices(voices);
     } catch (e) {
@@ -1505,9 +1875,30 @@ export function DMConsolePage() {
     }
   }
 
+  /** Manual trigger for the same campaign-hooks pass wrapUpCurrentSession
+   *  already runs automatically at "End session" — lets you tie PC
+   *  backstories into the campaign's lore on demand instead of waiting (e.g.
+   *  right after everyone's connected for the first time). Reuses moduleBusy/
+   *  moduleBusyLabel for its busy state, same shape as handleReconcileNpcVoices. */
+  async function handleReconcileCampaignHooks() {
+    if (!activeCampaignId) return;
+    setCampaignHooksResult(null);
+    setModuleBusy('Reviewing party.md for any PC missing a campaign hook…');
+    try {
+      const added = await invoke<number>('reconcile_campaign_hooks', { id: activeCampaignId });
+      setCampaignHooksResult(added === 0 ? 'Every known party member already has a hook.' : `Added a hook for ${added} PC${added === 1 ? '' : 's'}.`);
+      const content = await invoke<string>('read_campaign_lore', { id: activeCampaignId });
+      setLoreText(content);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setModuleBusy(null);
+    }
+  }
+
   /** Plays VOICE_PREVIEW_LINE through a candidate voice/pitch — reuses
    *  dmSpeech's speak() directly rather than hand-rolling playback, same
-   *  Piper-with-browser-speechSynthesis-fallback path a real turn uses. Not
+   *  Kokoro-with-browser-speechSynthesis-fallback path a real turn uses. Not
    *  tied to any NPC or saved anywhere; purely "let the DM hear this pick
    *  before committing to it" (see the voice-override panel in the History
    *  dialog). Disabled while a turn is actively speaking (see the panel's
@@ -1515,11 +1906,11 @@ export function DMConsolePage() {
    *  slot with the live playback queue — previewing mid-turn would fight
    *  over the same audio element. `key` disables just this row's button
    *  while its own preview plays; unrelated rows stay usable. */
-  async function handlePreviewVoice(key: string, voiceId: string, pitch: string) {
+  async function handlePreviewVoice(key: string, voiceId: string, pitch: string, speed: string) {
     if (previewingKey) return;
     setPreviewingKey(key);
     try {
-      await speak(VOICE_PREVIEW_LINE, voiceId, pitch || undefined);
+      await previewVoice(VOICE_PREVIEW_LINE, voiceId, pitch || undefined, speed ? Number(speed) : undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1527,24 +1918,91 @@ export function DMConsolePage() {
     }
   }
 
-  /** Persists a manual voice/pitch override for one NPC — the same
+  /** Persists a manual voice/pitch/speed override for one NPC — the same
    *  set_npc_voice command rememberEntity's live assignment already uses
    *  (campaign.rs doesn't distinguish "the DM picked this" from "a human
    *  overrode it," so this is a normal, permanent assignment afterward, not
-   *  a special pinned state). Updates both npcVoicesRef (the hot playback
-   *  path) and npcVoices (the panel's own display) immediately, same as
-   *  every other npc_voices.json write site in this file. */
-  async function handleSaveVoiceOverride(name: string, voiceId: string, pitch: string) {
+   *  a special pinned state). `speed` is this app's own pace-factor
+   *  (independent of pitch — pace, not tone), stored as the literal string
+   *  from NPC_SPEED_OPTIONS and parsed to a number here. Updates both
+   *  npcVoicesRef (the hot playback path) and npcVoices (the panel's own
+   *  display) immediately, same as every other npc_voices.json write site in
+   *  this file. */
+  async function handleSaveVoiceOverride(name: string, voiceId: string, pitch: string, speed: string) {
     if (!activeCampaignId || !voiceId) return;
     const pitchArg = pitch || undefined;
+    const speedArg = speed ? Number(speed) : undefined;
     try {
-      await invoke('set_npc_voice', { id: activeCampaignId, name, voiceId, pitch: pitchArg });
-      const updated = { ...npcVoicesRef.current, [name.trim().toLowerCase()]: { voice_id: voiceId, pitch: pitchArg } };
+      await invoke('set_npc_voice', { id: activeCampaignId, name, voiceId, pitch: pitchArg, speed: speedArg });
+      const updated = { ...npcVoicesRef.current, [name.trim().toLowerCase()]: { voice_id: voiceId, pitch: pitchArg, speed: speedArg } };
       npcVoicesRef.current = updated;
       setNpcVoices(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /** One voice/pitch/speed override row — select + select + select + Preview
+   *  + Save — shared by the narrator's own row and every per-NPC row below
+   *  it, since both need identical controls over the exact same underlying
+   *  npc_voices.json map (see set_npc_voice_at's doc comment on why the
+   *  narrator is "just another key" there). `key` is the already-lowercased
+   *  lookup key (NARRATOR_VOICE_KEY for the narrator, or an NPC's lowercased
+   *  name); `label` is what's actually displayed. `speed` is independent of
+   *  `pitch` — this app's own pace factor (pace only, no tone change), see
+   *  SPEED_LABELS/NPC_SPEED_OPTIONS. */
+  function renderVoiceOverrideRow(key: string, label: string) {
+    const current = npcVoices[key];
+    const edit = voiceEdits[key] ?? { voiceId: current?.voice_id ?? '', pitch: current?.pitch ?? '', speed: current?.speed !== undefined ? String(current.speed) : '' };
+    const previewKey = `${key}|${edit.voiceId}|${edit.pitch}|${edit.speed}`;
+    return (
+      <div key={key} className="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
+        <span className="text-sm text-slate-100 min-w-[9rem]">{label}</span>
+        <select
+          className="bg-slate-800 border border-slate-600 rounded text-xs px-1 py-1"
+          value={edit.voiceId}
+          onChange={(e) => setVoiceEdits((v) => ({ ...v, [key]: { ...edit, voiceId: e.target.value } }))}
+        >
+          <option value="">(narrator default)</option>
+          {NPC_VOICE_OPTIONS.map((id) => (
+            <option key={id} value={id}>{VOICE_LABELS[id]}</option>
+          ))}
+        </select>
+        <select
+          className="bg-slate-800 border border-slate-600 rounded text-xs px-1 py-1"
+          value={edit.pitch}
+          onChange={(e) => setVoiceEdits((v) => ({ ...v, [key]: { ...edit, pitch: e.target.value } }))}
+        >
+          {NPC_PITCH_OPTIONS.map((tag) => (
+            <option key={tag} value={tag}>{PITCH_LABELS[tag]}</option>
+          ))}
+        </select>
+        <select
+          className="bg-slate-800 border border-slate-600 rounded text-xs px-1 py-1"
+          value={edit.speed}
+          onChange={(e) => setVoiceEdits((v) => ({ ...v, [key]: { ...edit, speed: e.target.value } }))}
+        >
+          {NPC_SPEED_OPTIONS.map((tag) => (
+            <option key={tag} value={tag}>{SPEED_LABELS[tag]}</option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!edit.voiceId || previewingKey !== null || busy}
+          onClick={() => handlePreviewVoice(previewKey, edit.voiceId, edit.pitch, edit.speed)}
+        >
+          {previewingKey === previewKey ? 'Playing…' : 'Preview'}
+        </Button>
+        <Button
+          size="sm"
+          disabled={!edit.voiceId || busy}
+          onClick={() => handleSaveVoiceOverride(key, edit.voiceId, edit.pitch, edit.speed)}
+        >
+          Save
+        </Button>
+      </div>
+    );
   }
 
   /** Global — not tied to any campaign, so this button is always available. */
@@ -1596,6 +2054,7 @@ export function DMConsolePage() {
       setLoreText(content);
       setLoreAddition('');
       setPendingLoreUpdateFile(null);
+      setCampaignHooksResult(null);
       setLoreOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1751,6 +2210,16 @@ export function DMConsolePage() {
                       : busy
                         ? 'Interrupt & Talk'
                         : 'Talk'}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={handleReplayLastResponse}
+                disabled={!lastDmNarrationRef.current.trim()}
+                title="Re-hear the DM's last response — free, no new turn is generated"
+              >
+                <RotateCcw size={18} />
+                Replay
               </Button>
             </div>
           </Card>
@@ -1973,56 +2442,18 @@ export function DMConsolePage() {
             {voiceReconcileResult && <p className="text-xs text-emerald-400 mt-1">{voiceReconcileResult}</p>}
           </div>
           <div>
+            <p className="text-xs font-bold text-slate-300 mb-1">Narrator voice</p>
+            <p className="text-xs text-slate-400 mb-2">
+              Auto-picked once, from this campaign's tone, at the moment it was created (see the Lore dialog) — never re-evaluated after that, and campaigns created before this existed never got a pick at all. Set or change it here any time.
+            </p>
+            <div className="mb-4">{renderVoiceOverrideRow(NARRATOR_VOICE_KEY, 'Narrator')}</div>
+
             <p className="text-xs font-bold text-slate-300 mb-1">NPC voices</p>
             <p className="text-xs text-slate-400 mb-2">
               The DM's own picks (live or via "Assign NPC voices" above) are a starting point, not final — preview any candidate before committing, or override one you don't like.
             </p>
             <div className="space-y-2 max-h-64 overflow-y-auto">
-              {parseEntityNamesForVoicePanel(entitiesText).map((name) => {
-                const key = name.trim().toLowerCase();
-                const current = npcVoices[key];
-                const edit = voiceEdits[key] ?? { voiceId: current?.voice_id ?? '', pitch: current?.pitch ?? '' };
-                const previewKey = `${key}|${edit.voiceId}|${edit.pitch}`;
-                return (
-                  <div key={name} className="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
-                    <span className="text-sm text-slate-100 min-w-[9rem]">{name}</span>
-                    <select
-                      className="bg-slate-800 border border-slate-600 rounded text-xs px-1 py-1"
-                      value={edit.voiceId}
-                      onChange={(e) => setVoiceEdits((v) => ({ ...v, [key]: { ...edit, voiceId: e.target.value } }))}
-                    >
-                      <option value="">(narrator default)</option>
-                      {NPC_VOICE_OPTIONS.map((id) => (
-                        <option key={id} value={id}>{VOICE_LABELS[id]}</option>
-                      ))}
-                    </select>
-                    <select
-                      className="bg-slate-800 border border-slate-600 rounded text-xs px-1 py-1"
-                      value={edit.pitch}
-                      onChange={(e) => setVoiceEdits((v) => ({ ...v, [key]: { ...edit, pitch: e.target.value } }))}
-                    >
-                      {NPC_PITCH_OPTIONS.map((tag) => (
-                        <option key={tag} value={tag}>{PITCH_LABELS[tag]}</option>
-                      ))}
-                    </select>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!edit.voiceId || previewingKey !== null || busy}
-                      onClick={() => handlePreviewVoice(previewKey, edit.voiceId, edit.pitch)}
-                    >
-                      {previewingKey === previewKey ? 'Playing…' : 'Preview'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={!edit.voiceId || busy}
-                      onClick={() => handleSaveVoiceOverride(name, edit.voiceId, edit.pitch)}
-                    >
-                      Save
-                    </Button>
-                  </div>
-                );
-              })}
+              {parseEntityNamesForVoicePanel(entitiesText).map((name) => renderVoiceOverrideRow(name.trim().toLowerCase(), name))}
               {parseEntityNamesForVoicePanel(entitiesText).length === 0 && (
                 <p className="text-xs text-slate-500">No named NPCs yet.</p>
               )}
@@ -2218,6 +2649,15 @@ export function DMConsolePage() {
         <div className="mb-3">
           <p className="text-xs font-bold text-slate-300 mb-1">Currently established</p>
           <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto">{loreText || '(nothing established yet)'}</pre>
+        </div>
+        <div className="mb-3">
+          <Button size="sm" variant="outline" onClick={handleReconcileCampaignHooks} disabled={!!moduleBusy}>
+            {moduleBusyLabel ?? 'Personalize campaign hooks'}
+          </Button>
+          <p className="text-xs text-slate-400 mt-1">
+            Ties any player character's backstory (from memory/party.md) to something already established above — runs automatically at "End session" too, once everyone's connected.
+          </p>
+          {campaignHooksResult && <p className="text-xs text-emerald-400 mt-1">{campaignHooksResult}</p>}
         </div>
         <div>
           <label className="block text-xs text-slate-400 mb-1">Add new material</label>

@@ -4,13 +4,14 @@
  * STT is Whisper via transformers.js (WASM/WebGPU, model downloads once on first
  * use and is cached by the browser) — runs entirely inside the webview.
  *
- * TTS uses a bundled Piper voice (src-tauri/src/tts.rs's `speak_text` command —
- * a standalone PyInstaller-frozen `piper.exe` + voice model shipped as a Tauri
- * resource, invoked as a subprocess, no install/Python needed at runtime).
- * Windows-only for now (see tauri.conf.json), so this falls back to the
- * platform's built-in speechSynthesis whenever the command errors — e.g. any
- * future non-Windows build that doesn't have Piper bundled yet, or a plain
- * browser preview with no Tauri backend at all.
+ * TTS uses a bundled Kokoro voice (src-tauri/src/tts.rs's `speak_text` command —
+ * a standalone PyInstaller-frozen `kokoro_cli.exe` shipped as a Tauri resource,
+ * invoked as a subprocess, no install/Python needed at runtime; the shared
+ * model files are lazily downloaded and cached on first use — see tts.rs's
+ * ensure_kokoro_model_available). Windows-only for now (see tauri.conf.json),
+ * so this falls back to the platform's built-in speechSynthesis whenever the
+ * command errors — e.g. any future non-Windows build that doesn't have Kokoro
+ * bundled yet, or a plain browser preview with no Tauri backend at all.
  */
 import { pipeline } from '@huggingface/transformers';
 import { invoke, isTauri } from '@tauri-apps/api/core';
@@ -61,24 +62,97 @@ async function blobToMono16k(blob: Blob): Promise<Float32Array> {
   return rendered.getChannelData(0);
 }
 
-// ── Speech-to-text (Whisper via transformers.js) ────────────────────────────
+// ── Speech-to-text (Whisper via transformers.js, in a dedicated worker) ─────
+//
+// Transcription runs inside src/utils/sttWorker.ts so the long synchronous
+// WASM computation never blocks the main thread (which owns the DM Console's
+// 3D viewport render loop — a main-thread transcription visibly freezes the
+// character model every time a player finishes talking). See the worker's
+// header comment for why onnxruntime-web's own proxy mode couldn't be used.
+// If the worker itself fails to load (never seen, but conceivable in an
+// exotic embedder), transcription falls back to running on the main thread —
+// functional, just with the viewport freeze back.
 
 type Transcriber = (input: Float32Array) => Promise<{ text: string } | { text: string }[]>;
-let transcriberPromise: Promise<Transcriber> | null = null;
+let mainThreadTranscriberPromise: Promise<Transcriber> | null = null;
 
-function getTranscriber(): Promise<Transcriber> {
-  if (!transcriberPromise) {
+function getMainThreadTranscriber(): Promise<Transcriber> {
+  if (!mainThreadTranscriberPromise) {
     const model = import.meta.env.VITE_WHISPER_MODEL || 'Xenova/whisper-base.en';
     // dtype: 'fp32' — the default auto-selected quantized variant is missing a
     // dequantization scale for this model/backend combo (WASM); fp32 always works.
-    transcriberPromise = pipeline('automatic-speech-recognition', model, { dtype: 'fp32' }) as unknown as Promise<Transcriber>;
+    mainThreadTranscriberPromise = pipeline('automatic-speech-recognition', model, { dtype: 'fp32' }) as unknown as Promise<Transcriber>;
   }
-  return transcriberPromise;
+  return mainThreadTranscriberPromise;
+}
+
+// Sentinel distinguishing "the worker script itself died" (→ fall back to the
+// main thread) from a real per-request error like a failed model download
+// (→ surface to the caller; retrying on the main thread would just fail the
+// same way after a second wasted download attempt).
+const STT_WORKER_DEAD = '__stt_worker_dead__';
+
+let sttWorker: Worker | null = null;
+let sttWorkerDead = false;
+let nextSttRpcId = 0;
+const pendingSttRpcs = new Map<number, { resolve: (text: string) => void; reject: (err: Error) => void }>();
+
+function getSttWorker(): Worker | null {
+  if (sttWorkerDead) return null;
+  if (!sttWorker) {
+    try {
+      sttWorker = new Worker(new URL('./sttWorker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      sttWorkerDead = true;
+      return null;
+    }
+    sttWorker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; text?: string; error?: string }>) => {
+      const rpc = pendingSttRpcs.get(e.data.id);
+      if (!rpc) return;
+      pendingSttRpcs.delete(e.data.id);
+      if (e.data.ok) rpc.resolve(e.data.text || '');
+      else rpc.reject(new Error(e.data.error || 'Transcription failed'));
+    };
+    // Fires only when the worker script itself fails to load or throws at the
+    // top level — per-request errors come back as { ok: false } messages.
+    sttWorker.onerror = () => {
+      sttWorkerDead = true;
+      sttWorker?.terminate();
+      sttWorker = null;
+      for (const rpc of pendingSttRpcs.values()) rpc.reject(new Error(STT_WORKER_DEAD));
+      pendingSttRpcs.clear();
+    };
+  }
+  return sttWorker;
+}
+
+// `samples` is structured-cloned rather than transferred: if the worker dies
+// after the message is queued but before it runs, the fallback path below
+// still needs an intact buffer (a transfer would have detached it). At 16kHz
+// mono the clone is ~2MB/30s of speech — negligible next to the inference.
+async function sttRequest(type: 'warmup' | 'transcribe', samples?: Float32Array): Promise<string> {
+  const worker = getSttWorker();
+  if (worker) {
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        const id = nextSttRpcId++;
+        pendingSttRpcs.set(id, { resolve, reject });
+        worker.postMessage({ id, type, samples });
+      });
+    } catch (e) {
+      if (!(e instanceof Error) || e.message !== STT_WORKER_DEAD) throw e;
+      // fall through to the main-thread path
+    }
+  }
+  const transcriber = await getMainThreadTranscriber();
+  if (type === 'warmup' || !samples) return '';
+  const result = await transcriber(samples);
+  return (Array.isArray(result) ? result[0]?.text : result.text) || '';
 }
 
 /** Kicks off the (large, one-time) model download so the first utterance isn't slow. */
 export function warmupSTT(): Promise<unknown> {
-  return getTranscriber();
+  return sttRequest('warmup');
 }
 
 /** Stops recording and transcribes it. Returns '' for silence/no speech. */
@@ -86,10 +160,7 @@ export async function stopAndTranscribe(): Promise<string> {
   const blob = await stopRecording();
   const samples = await blobToMono16k(blob);
   if (samples.length < 1600) return ''; // < 0.1s
-  const transcriber = await getTranscriber();
-  const result = await transcriber(samples);
-  const text = Array.isArray(result) ? result[0]?.text : result.text;
-  return (text || '').trim();
+  return (await sttRequest('transcribe', samples)).trim();
 }
 
 // ── Text-to-speech ───────────────────────────────────────────────────────────
@@ -144,8 +215,10 @@ function playPiperUrl(url: string): Promise<void> {
 }
 
 /** Cleans a line of narration for TTS ONLY — never for anything a human
- *  reads. Piper's espeak-ng phonemizer announces certain Unicode punctuation
- *  by its character NAME instead of treating it as a pause: an em dash (—)
+ *  reads. Kokoro's espeak-ng-based phonemizer (same underlying phonemizer
+ *  Piper used, before this app switched engines) announces certain Unicode
+ *  punctuation by its character NAME instead of treating it as a pause: an
+ *  em dash (—)
  *  comes out spoken as "circumflex", en dashes/ellipses/quotes similarly get
  *  mangled. Claude's prose legitimately uses these (they render fine on
  *  screen), so we strip/normalize them right before synthesis rather than
@@ -183,14 +256,17 @@ export type PreparedSpeech = { kind: 'piper'; url: string } | { kind: 'browser';
  *  right here; playPrepared's Piper branch is just decoding+playing an
  *  already-finished Blob. Same Piper-with-browser-fallback behavior as
  *  before (see tts.rs's ensure_voice_available for how `voiceId` resolves,
- *  pitch_factor for `pitch`) — both are ignored on the browser fallback,
- *  which has no equivalent per-NPC voice/pitch switching. */
-export async function prepareSpeech(text: string, voiceId?: string, pitch?: string): Promise<PreparedSpeech> {
+ *  pitch_factor for `pitch`, DEFAULT_LENGTH_SCALE for `speed`) — none of the
+ *  three are honored on the browser fallback, which has no equivalent
+ *  per-NPC voice/pitch/speed switching. `speed` is Piper's own
+ *  `--length-scale` (smaller = faster) — independent of `pitch`, which only
+ *  shifts tone via a WAV-resample trick; the two can be set separately. */
+export async function prepareSpeech(text: string, voiceId?: string, pitch?: string, speed?: number): Promise<PreparedSpeech> {
   const clean = sanitizeForTTS(text);
   if (!clean.trim()) return { kind: 'empty' };
   if (isTauri()) {
     try {
-      const base64Wav = await invoke<string>('speak_text', { text: clean, voiceId, pitch });
+      const base64Wav = await invoke<string>('speak_text', { text: clean, voiceId, pitch, speed });
       return { kind: 'piper', url: URL.createObjectURL(base64ToBlob(base64Wav, 'audio/wav')) };
     } catch (e) {
       console.warn('Piper TTS failed, falling back to browser speechSynthesis:', e);
@@ -223,8 +299,40 @@ export function discardPrepared(prepared: PreparedSpeech): void {
  *  with nothing to pipeline against (e.g. the voice-preview button in the
  *  History dialog); DMConsolePage's own playback queue uses
  *  prepareSpeech/playPrepared directly instead so it can overlap lines. */
-export async function speak(text: string, voiceId?: string, pitch?: string): Promise<void> {
-  return playPrepared(await prepareSpeech(text, voiceId, pitch));
+export async function speak(text: string, voiceId?: string, pitch?: string, speed?: number): Promise<void> {
+  return playPrepared(await prepareSpeech(text, voiceId, pitch, speed));
+}
+
+// Cache of already-synthesized voice-preview clips, keyed by voice+pitch+speed
+// (the preview line itself is fixed, so it's deliberately NOT part of the key).
+// Auditioning voices means re-playing the same handful of candidates over and
+// over; without this, every replay pays Kokoro's full synthesis cost again —
+// which is the slow part on a CPU-only machine. Each clip is a ~1-2s WAV as
+// base64 (tens of KB), so a whole session's worth of auditions is a few MB at
+// most; no eviction needed for the lifetime of the page.
+const previewCache = new Map<string, string>();
+
+/** Like speak(), but for the History dialog's voice-audition button: caches
+ *  the synthesized clip per voice/pitch/speed so re-previewing a voice you've
+ *  already heard is instant instead of re-running Kokoro on every click. Only
+ *  the first play of each distinct voice/pitch/speed pays synthesis cost. */
+export async function previewVoice(text: string, voiceId?: string, pitch?: string, speed?: number): Promise<void> {
+  const key = `${voiceId ?? ''}|${pitch ?? ''}|${speed ?? ''}`;
+  let b64 = previewCache.get(key);
+  if (b64 === undefined && isTauri()) {
+    try {
+      b64 = await invoke<string>('speak_text', { text: sanitizeForTTS(text), voiceId, pitch, speed });
+      previewCache.set(key, b64);
+    } catch (e) {
+      console.warn('Kokoro preview failed, falling back to browser speechSynthesis:', e);
+    }
+  }
+  if (b64) {
+    // Fresh object URL each play — playPiperUrl revokes it once playback ends,
+    // so the cache keeps the base64, not a one-shot URL.
+    return playPiperUrl(URL.createObjectURL(base64ToBlob(b64, 'audio/wav')));
+  }
+  return speakWithBrowserTTS(sanitizeForTTS(text));
 }
 
 export function stopSpeaking(): void {

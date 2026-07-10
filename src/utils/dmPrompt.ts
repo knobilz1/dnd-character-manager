@@ -104,7 +104,17 @@ export function buildTurnPrompt(opts: {
 }
 
 /** Prompt sent when a session ends, asking for a short recap to persist into
- *  the campaign's memory/MEMORY.md for next week (see campaign.rs). */
+ *  the campaign's memory/MEMORY.md for next week (see campaign.rs). Also
+ *  gives Claude one last explicit chance to catch up entities.md/locations.md
+ *  for this session — a live turn's own judgment about when an NPC/place is
+ *  "worth remembering" can reasonably hold off mid-conversation (see
+ *  BASE_CLAUDE_MD's rememberEntity guidance), and if the table calls it a
+ *  night before that conversation ever resolves, nothing else was catching
+ *  that gap: next sitting would see no entities.md entry at all and treat
+ *  someone the party is mid-conversation with as a stranger. Deliberately
+ *  scoped to ONLY rememberEntity/rememberLocation here, unlike a live turn's
+ *  dm-actions block — damage/conditions/chapter-advance etc. don't make
+ *  sense retroactively at session end. */
 export function buildRecapPrompt(party: Character[]): string {
-  return `The session is ending. In 3-4 sentences, summarize tonight's session for next week's recap — what happened, where the party ended up, and any open threads. Reply with ONLY the summary text, no dm-actions block.\n\nCurrent party status:\n${partyStatusText(party)}`;
+  return `The session is ending. In 3-4 sentences, summarize tonight's session for next week's recap — what happened, where the party ended up, and any open threads. Then check memory/entities.md and memory/locations.md above: go back through everyone and everywhere in tonight's actual session (not just ones that felt like a formal "introduction") — anyone who spoke to the party, was spoken about by name, or was visited, even mid-conversation and even if things weren't fully resolved — and if they're missing from those files, end your reply with a \`\`\`dm-actions block containing ONLY rememberEntity/rememberLocation for those (same shape as any other turn — see "Reporting state changes"). Err on the side of including a borderline case: a redundant re-add is harmless (upserted by name), but missing someone genuinely important to tonight's session — especially whoever the session ended on, mid-scene with — means next week's DM greets them as a total stranger. Omit the block entirely if nothing's missing. Never include any other dm-actions key here, and never invent an entry for anything that was only an out-of-character exchange (see "Out-of-character requests").\n\nCurrent party status:\n${partyStatusText(party)}`;
 }
