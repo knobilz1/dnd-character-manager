@@ -65,13 +65,14 @@ const BASE_CLAUDE_MD: &str = r#"# You are the Dungeon Master
 
 You are the Dungeon Master for a Dungeons & Dragons game night. The players are physically at the table talking to you out loud through speech-to-text; you reply and your reply is read aloud with text-to-speech, so keep prose natural to hear, not to read.
 
-You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked. For what's happened in past sessions and any standing facts worth remembering, see the campaign memory below. entities.md and locations.md are standing registries of every named NPC/faction/creature and place you've ever introduced — always check them before treating someone or somewhere as new; if a name you're about to introduce is already there, it means the party has met them/been there before. party.md is the player characters themselves — who plays them, their identity, and their player-written backstory notes, synced automatically from the players' own character sheets. Treat it as read-only ground truth about who these people are (party members are NOT NPCs — never add them to entities.md via rememberEntity), and actively mine it: a character's bonds, flaws, and unresolved backstory threads are the best material for making the story feel personal to this table.
+You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked. For what's happened in past sessions and any standing facts worth remembering, see the campaign memory below. entities.md and locations.md are standing registries of every named NPC/faction/creature and place you've ever introduced — always check them before treating someone or somewhere as new; if a name you're about to introduce is already there, it means the party has met them/been there before. These registries are YOUR reference, not the party's — knowing a name is in entities.md is not the same as the party having actually learned it in-fiction. Never have a PC or the narration casually use a named NPC's proper name until that name has actually been given to the party in-scene (the NPC introduces themselves, someone else names them, a sign/notice/rumor names them, etc.); before that, refer to them by description only ("the innkeeper", "a hooded figure by the fire", "the guard captain"). This applies even to someone already logged in entities.md from a past session, if the CURRENT scene is genuinely the party's first encounter with them face to face. party.md is the player characters themselves — who plays them, their identity, and their player-written backstory notes, synced automatically from the players' own character sheets. Treat it as read-only ground truth about who these people are (party members are NOT NPCs — never add them to entities.md via rememberEntity), and actively mine it: a character's bonds, flaws, and unresolved backstory threads are the best material for making the story feel personal to this table.
 
 @memory/MEMORY.md
 @memory/flagged_facts.md
 @memory/entities.md
 @memory/locations.md
 @memory/party.md
+@memory/dm_rules.md
 
 ## Sound like a person talking, not a document
 This is a person talking out loud at a table, not prose on a page — the biggest tell of a robotic DM is narration that reads like it was written, not spoken.
@@ -100,13 +101,6 @@ Only include this block when something actually changed. Never mention the block
 
 ## Campaign-arc plan check-ins
 Most turns you'll just see the active module's current chapter text (if any) and won't see the overarching campaign lore or the active module's own arc plan — that's intentional, it's not repeated every turn. Every so often (session start, right after a chapter or module change, and periodically otherwise) your prompt will start with a "Campaign-arc plan check-in" section containing the campaign's overarching lore and/or the active module's arc plan again. When you see it, use it to steer pacing, keep foreshadowed threads and NPCs consistent with the wider story, and then continue narrating normally — don't call attention to it or treat it as new information from the players.
-
-## Giving NPCs distinct voices
-There's a pool of distinct synthesized voices available so players can tell speakers apart by ear instead of everyone (narrator and every NPC alike) sounding the same. Three parts:
-1. The first time you introduce a named NPC worth giving a voice to (via `rememberEntity`'s `voiceId`), pick one id from this catalog based on their apparent gender, accent, and social register: `male-us-1` through `male-us-5` / `female-us-1` through `female-us-4` (American, common/regional); `male-gb-1` through `male-gb-3` / `female-gb-1` through `female-gb-4` (English accents — read posher/more formal, good for nobles, officials, scholars); `male-scottish-1`/`male-scottish-2`/`female-scottish-1` (Scottish — good for dwarves, highlanders, gruff mercenaries); `male-irish-1`/`male-irish-2`/`female-irish-1` (Irish — good for bards, tricksters, wanderers); `female-welsh-1` (Welsh); `male-northernirish-1`/`female-northernirish-1` (Northern Irish); `male-australian-1` (Australian — good for outlanders, rangers); `male-southafrican-1`/`female-southafrican-1` (South African — good for a distinctly foreign-sounding NPC). Don't invent an id outside this list. Several ids exist in each bucket specifically so NPCs don't all blend together — entities.md above already shows you the full roster of NPCs introduced so far, so when assigning a new one, actually vary which id you pick rather than defaulting to the same one every time (e.g. don't make every American male NPC `male-us-1` just because it's listed first), and reach for one of the non-US/GB accents when an NPC's background or race calls for something more distinctive rather than defaulting everyone to American/English. The assignment is permanent once made — don't reassign the same NPC a different voice later.
-2. Also optionally include `pitch` alongside it — three tiers, based on the NPC's actual D&D size and build, not just how imposing they read in flavor text: `"small"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `"large"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `"gruff"` for a Medium-size race that still naturally reads as rougher/deeper-voiced than a human (half-orcs, goliaths, firbolgs, bugbears, and similar) — a milder version of `"large"`'s shift, since they aren't mechanically Large and shouldn't get the full ogre-slow treatment, but they shouldn't default to sounding just like a human either. Omit the field entirely for an ordinary Medium NPC with nothing distinctive about their build — most NPCs don't need it. This layers a pitch/pace shift on top of whichever voice you picked in step 1, it doesn't replace that choice.
-3. When that NPC actually speaks, prefix the line in your narration with `[Name]:` immediately before it, e.g. `[Gundren]: "Well met, travelers."` — this tag is mechanically stripped before anyone sees or hears it; it only exists to signal which voice speaks that line. Plain narration (no tag) always uses the default narrator voice. If an NPC's speech runs more than one sentence, repeat the tag on each sentence — it does not automatically carry over to the next one.
-Don't bother assigning a voice to someone who'll only ever say one throwaway line — save it for NPCs the party will hear from repeatedly.
 
 ## Physical hex-grid positioning
 This table plays on physical 3D-printed hex terrain — uniform hexagonal cells with no printed coordinates or landmarks, so you must never speak a raw coordinate or compass direction aloud (there's no shared "north" between your bookkeeping and the physical table). Instead:
@@ -254,6 +248,46 @@ pub struct CampaignIntake {
     pub lore: String,
 }
 
+/// The DM rules that change as this app's voice system evolves — kept OUT of
+/// CLAUDE.md on purpose.
+///
+/// CLAUDE.md is written exactly once, when a campaign is created, and never
+/// rewritten (it's also hand-editable by the DM via the Notes dialog, so
+/// overwriting it would clobber their edits). That meant every improvement to
+/// these rules only ever reached NEW campaigns — an existing campaign kept
+/// whatever text shipped the day it was created, forever. Voice bugs "fixed"
+/// by editing BASE_CLAUDE_MD went right on happening at the table, because the
+/// DM running that campaign was still reading the old copy. Confirmed live: a
+/// campaign created before the `|male` marker existed never emitted a single
+/// one, across three rounds of "fixes".
+///
+/// So the volatile rules live here, get rewritten into memory/dm_rules.md on
+/// every campaign load (see sync_dm_rules_at), and reach the DM through
+/// CLAUDE.md's standing `@memory/dm_rules.md` import. Editing this const is
+/// now sufficient: every campaign, however old, picks it up on its next load.
+/// Campaigns created before that import line existed get it appended
+/// idempotently — the same `.contains()` trick MODULE_IMPORT_BLOCK uses.
+const DM_RULES: &str = r##"# DM rules (auto-generated — do not edit)
+
+Tavern Sheet rewrites this file every time the campaign loads, so it is always the current, authoritative version of the rules below. If an older copy of any of these sections also appears in CLAUDE.md, THIS file supersedes it.
+
+## Giving NPCs distinct voices
+There's a pool of distinct synthesized voices available so players can tell speakers apart by ear instead of everyone (narrator and every NPC alike) sounding the same. The parts:
+1. The first time you introduce a named NPC worth giving a voice to (via `rememberEntity`'s `voiceId`), pick one id from this catalog: `male-us-1` through `male-us-9` / `female-us-1` through `female-us-10` (American); `male-gb-1` through `male-gb-4` / `female-gb-1` through `female-gb-4` (English — reads posher/more formal, good for nobles, officials, scholars). The gender prefix is a hard constraint, not a suggestion: a male NPC MUST get a `male-*` id and a female NPC MUST get a `female-*` id — a wrong-gender voice is the single most jarring mistake this system can make at the table, far worse than a bland-but-correct pick. Don't invent an id outside this list — this catalog only has American and British English, nothing more regionally specific (no Scottish/Irish/Welsh/Australian/South African or similar), so don't imply one in your narration just because an NPC's background suggests it. Several ids exist in each bucket specifically so NPCs don't all blend together — entities.md already shows you the full roster of NPCs introduced so far, so when assigning a new one, actually vary which id you pick rather than defaulting to the same one every time. The assignment is permanent once made — don't reassign the same NPC a different voice later.
+2. Also optionally include `pitch` alongside it — three tiers, based on the NPC's actual D&D size and build, not just how imposing they read in flavor text: `"small"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `"large"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `"gruff"` for a Medium-size race that still naturally reads as rougher/deeper-voiced than a human (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `"large"`'s shift, since they aren't mechanically Large. Omit the field entirely for an ordinary Medium NPC with nothing distinctive about their build — most NPCs don't need it. This layers a pitch/pace shift on top of whichever voice you picked in step 1, it doesn't replace that choice.
+3. When that NPC actually speaks, prefix the line in your narration with `[Name]:` immediately before it, e.g. `[Gundren]: "Well met, travelers."` — this tag is mechanically stripped before anyone sees or hears it; it only exists to signal which voice speaks that line. The tag is STICKY: once you tag a line with `[Gundren]:`, every following sentence keeps Gundren's voice until you either tag a different speaker or explicitly switch back to narration with `[Narrator]:`. So for a multi-sentence speech by one NPC you only need the tag once, at the start (repeating it is harmless). Crucially, the moment you stop quoting that NPC and go back to describing the scene, you MUST start that narration with `[Narrator]:` — otherwise your description keeps speaking in the NPC's voice. Example: `[Gundren]: "Well met! I've been expecting you. Come, sit." [Narrator]: The old dwarf pulls out a chair, his eyes darting to the door.` Plain narration at the very start of a reply (before any tag) always uses the narrator voice, so you only need `[Narrator]:` to RETURN to narration after an NPC has spoken within the same reply.
+4. **Before you write any NPC's first line of dialogue, ask yourself: is this NPC listed in entities.md?** If they are NOT, they have no voice yet, and you MUST append their gender to the tag with a pipe: `[Ismark|male]: "Come inside, quickly."` — then just `[Ismark]:` for the rest of the scene. This matters because the `dm-actions` block only reaches the app AFTER your narration has already been spoken aloud, so on the very turn you introduce someone, the tag is the ONLY thing that can tell the app what they should sound like; a bare name like `[Ismark]:` carries no gender, and an NPC with no voice yet falls back to the narrator's own voice, making them sound like the narration around them. The `|male`/`|female` marker is stripped before anyone sees or hears it. Once an NPC has a voice (you sent a `voiceId`, or the app derived one from their description), the marker is ignored — so it is always safe to include, and only ever needed on first mention.
+5. Unnamed one-off speakers work the same way, but their descriptive tag can carry the gender by itself: `[Old Man]:`, `[Young Woman]:`, `[Female Guard]:`. Avoid a bare genderless role like `[Innkeeper]:` or `[Guard]:` — either name the gender in the tag (`[Male Innkeeper]:`) or use the pipe marker (`[Innkeeper|male]:`).
+Don't bother assigning a permanent voice (step 1) to someone who'll only ever say one throwaway line — but DO still tag them, with gender, per steps 4 and 5.
+
+## Out-of-character requests
+Sometimes the table steps outside the fiction entirely — testing the microphone, asking you to demo what a voice sounds like, asking how the app works, or otherwise clearly addressing you (the DM/app) rather than acting through their characters. Answer those naturally, but nothing said or invented to satisfy one is part of the campaign: never emit a dm-actions block for it, and never let a name, place, or event you made up purely to fulfill a demo/test bleed into entities.md/locations.md/flagged_facts.md/MEMORY.md — those files are the permanent record of the actual story, and an invented sound-check character or made-up test location has no business surviving in there forever.
+"##;
+
+/// Appended to a pre-existing CLAUDE.md that predates the dm_rules import.
+/// New campaigns get this line inside BASE_CLAUDE_MD's own import list.
+const DM_RULES_IMPORT_LINE: &str = "\n@memory/dm_rules.md\n";
+
 const MODULE_IMPORT_BLOCK: &str = "\n## Imported modules\nThis campaign has one or more imported modules — self-contained adventures/side-quests, each broken into chapters so only the relevant part loads each turn. modules_index.md lists every imported module with a one-line summary and marks which one is active. Only the ACTIVE module's chapters are loaded: active_module/index.md lists that module's chapters and marks which one is current; active_module/current.md has the FULL TEXT of the current chapter only — treat it as your primary source material for this part of the adventure. See the dm-actions `advanceToChapter` key above for moving to the next chapter within the active module, and `switchActiveModule` for moving the party to a different already-imported module entirely. (Each module's own arc plan — plus this campaign's overarching lore, if established — is sent to you periodically in the turn message itself, not as a standing import here — see the \"Campaign-arc plan check-ins\" section above.)\n\n@modules_index.md\n@active_module/index.md\n@active_module/current.md\n";
 
 fn format_campaign_setting(intake: &CampaignIntake) -> String {
@@ -333,7 +367,7 @@ fn build_campaign_inventory_prompt(intake: &CampaignIntake) -> String {
 /// different from a lighthearted one: zero extra API calls, and the voice
 /// files themselves (tts.rs's VOICE_CATALOG) are the same lazily-downloaded-
 /// once, cached-forever pool already used for NPCs.
-const NARRATOR_VOICE_TRAILER_INSTRUCTION: &str = "Also choose a narrator voice for this campaign's plain narration (not NPC dialogue, which has its own separate voice system) based on the tone above: `male-us-1` through `male-us-5` / `female-us-1` through `female-us-4` (American, neutral); `male-gb-1` through `male-gb-3` / `female-gb-1` through `female-gb-4` (English accents, more formal/atmospheric); `male-scottish-1`/`male-scottish-2`/`female-scottish-1` (Scottish); `male-irish-1`/`male-irish-2`/`female-irish-1` (Irish); `female-welsh-1` (Welsh); `male-northernirish-1`/`female-northernirish-1` (Northern Irish); `male-australian-1` (Australian); `male-southafrican-1`/`female-southafrican-1` (South African) — reach for one of these when the campaign's setting has a distinct regional or cultural flavor the accent would reinforce, rather than defaulting to American/English by habit. Optionally pair it with a pitch shift: `large` for a slower, deeper, more ominous read (fitting for a grim/gothic/horror tone), `small` for a lighter, quicker read (fitting for a whimsical/comedic tone) — omit for a neutral read. After the markdown doc, add exactly one more line with nothing else on it: `NARRATOR_VOICE: <voice_id>` or, with a pitch, `NARRATOR_VOICE: <voice_id>|<pitch>`.";
+const NARRATOR_VOICE_TRAILER_INSTRUCTION: &str = "Also choose a narrator voice for this campaign's plain narration (not NPC dialogue, which has its own separate voice system), matched deliberately to the campaign's tone as established above — this voice IS the campaign's atmosphere every time the DM speaks, so treat the pick as a real tonal decision, not an afterthought. The catalog: `male-us-1` through `male-us-9` / `female-us-1` through `female-us-10` (American, neutral/warm); `male-gb-1` through `male-gb-4` / `female-gb-1` through `female-gb-4` (British — reads more formal, literary, atmospheric). Never invent an id outside this list. Guidance by tone: a dark, gothic, or horror campaign (Curse of Strahd and the like) wants a deep, measured British male voice (`male-gb-1`..`male-gb-4`), optionally paired with the `large` pitch tag for an even slower, deeper, more ominous read; a whimsical, lighthearted, or fae-flavored romp wants a brighter, warmer voice (a `female-us-*`/`female-gb-*` or a lighter `male-us-*`), optionally paired with `small` for a quicker, more playful read; a neutral heroic-adventure campaign can take any voice with no pitch tag at all. After the markdown doc, add exactly one more line with nothing else on it: `NARRATOR_VOICE: <voice_id>` or, with a pitch, `NARRATOR_VOICE: <voice_id>|<pitch>`.";
 
 /// Pulls the `NARRATOR_VOICE: ...` trailer (see
 /// NARRATOR_VOICE_TRAILER_INSTRUCTION) off the end of an establish/critique-
@@ -465,7 +499,7 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
         // Best-effort — a campaign with a broken narrator-voice pick should
         // still get its lore doc saved; the narrator just falls back to the
         // default voice at speak time (see tts.rs's ensure_voice_available).
-        let _ = set_npc_voice_at(root, id, NARRATOR_VOICE_KEY, &voice_id, pitch.as_deref());
+        let _ = set_npc_voice_at(root, id, NARRATOR_VOICE_KEY, &voice_id, pitch.as_deref(), None);
     }
 
     write_atomic(&root.join(id).join("memory").join("campaign_lore.md"), &final_lore)?;
@@ -619,6 +653,9 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     write_atomic(&dir.join("memory").join("locations.md"), DEFAULT_LOCATIONS_MD)?;
     write_atomic(&dir.join("memory").join("party.md"), DEFAULT_PARTY_MD)?;
     write_atomic(&dir.join("memory").join("full_history.md"), DEFAULT_HISTORY_MD)?;
+    // Seeded here too so a brand-new campaign's very first turn already has the
+    // rules — sync_dm_rules_at only runs on load, which is after creation.
+    write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
     write_atomic(&dir.join("name.txt"), trimmed)?;
     Ok(CampaignMeta { id, name: trimmed.to_string() })
 }
@@ -658,6 +695,33 @@ fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Resul
     existing.push_str(&format!("- **{date}:** {}\n", note.trim()));
     write_atomic(&path, &existing)?;
     let _ = append_to_history_at(root, id, &format!("[{date}] Remembered: {}", note.trim()));
+    Ok(())
+}
+
+/// Brings any campaign — including one created many app versions ago — up to
+/// the current DM rules. Two steps, both idempotent, so this is safe to run on
+/// every single campaign load:
+///
+/// 1. Overwrite memory/dm_rules.md with DM_RULES. It's generated, not authored,
+///    so there's nothing of the DM's to preserve and no backup is taken.
+/// 2. Append the `@memory/dm_rules.md` import to CLAUDE.md if it isn't already
+///    there. Campaigns created before this existed have no import line; ones
+///    created after get it from BASE_CLAUDE_MD and skip the append. This only
+///    ever ADDS a line, never rewrites CLAUDE.md's body, so the DM's own
+///    hand-edits (Notes dialog) survive untouched.
+///
+/// A missing CLAUDE.md is an error rather than a silent skip — that would mean
+/// a corrupt campaign folder, and swallowing it would leave the DM reading no
+/// rules at all with nothing to show for it.
+fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
+    let dir = root.join(id);
+    write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
+    let claude_path = dir.join("CLAUDE.md");
+    let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    if !claude_md.contains("@memory/dm_rules.md") {
+        claude_md.push_str(DM_RULES_IMPORT_LINE);
+        write_atomic(&claude_path, &claude_md)?;
+    }
     Ok(())
 }
 
@@ -816,11 +880,14 @@ fn upsert_named_fact_at(root: &Path, id: &str, filename: &str, name: &str, descr
     Ok(())
 }
 
-/// Pure: lowercases+trims a name for use as an npc_voices.json key — the
-/// same case-insensitive matching entities.md's own upsert already relies on
-/// (find_entry_line_index), so a later "gundren" from ordinary narration
-/// still resolves to whatever voice was assigned to "Gundren Rockseeker".
-fn normalize_voice_key(name: &str) -> String {
+/// Pure: lowercases+trims a name for case-insensitive comparison — the same
+/// matching entities.md's own upsert already relies on (find_entry_line_index),
+/// so e.g. a later "gundren" from ordinary narration still resolves to
+/// whatever voice was assigned to "Gundren Rockseeker". Used as a key for
+/// npc_voices.json, dropped_entity_names' before/after diff, and
+/// reconcile_campaign_hooks_at's "already has a hook" ledger — general
+/// enough by now that it's named for what it does, not any one caller.
+fn normalize_name_key(name: &str) -> String {
     name.trim().to_lowercase()
 }
 
@@ -828,23 +895,30 @@ fn normalize_voice_key(name: &str) -> String {
 /// narration) voice pick — see extract_narrator_voice_pick /
 /// establish_campaign_lore_at. Double-underscore-wrapped and lowercase
 /// already, so it can never collide with a real NPC name normalized through
-/// normalize_voice_key (no player is going to name an NPC "__narrator__").
+/// normalize_name_key (no player is going to name an NPC "__narrator__").
 /// Reusing npc_voices.json rather than a new file means the frontend needs
 /// no new fetch/store — DMConsolePage's existing npcVoicesRef map already
 /// gets read once per campaign switch and consulted per spoken line; it just
 /// also checks this one reserved key when a line has no NPC speaker tag.
 const NARRATOR_VOICE_KEY: &str = "__narrator__";
 
-/// One NPC's voice assignment — a Piper voice id plus an optional race/size
-/// pitch tag (`"small"`/`"large"`, see tts.rs's pitch_factor). `pitch` isn't
-/// validated against that specific set here; an unrecognized value just
-/// falls back to no pitch change at speak time, same tolerance as an
-/// unrecognized voice_id falling back to the narrator voice.
+/// One NPC's voice assignment — a Kokoro voice id plus an optional race/size
+/// pitch tag (`"small"`/`"large"`, see tts.rs's pitch_factor) and an optional
+/// speaking-rate override (`speed`, this app's own pace-factor convention —
+/// see tts.rs's DEFAULT_PACE_FACTOR — independent of pitch, pure pace).
+/// Neither is validated
+/// against a specific set/range here; an unrecognized pitch tag or absent
+/// speed just falls back to no shift / the default rate at speak time, same
+/// tolerance as an unrecognized voice_id falling back to the narrator voice.
+/// `#[serde(default)]` on `speed` keeps this backward-compatible with an
+/// npc_voices.json written before this field existed.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NpcVoiceAssignment {
     pub voice_id: String,
     #[serde(default)]
     pub pitch: Option<String>,
+    #[serde(default)]
+    pub speed: Option<f64>,
 }
 
 /// name→assignment map for NPCs the DM has assigned a distinct voice to (see
@@ -863,15 +937,21 @@ fn read_npc_voices_at(root: &Path, id: &str) -> HashMap<String, NpcVoiceAssignme
 
 /// Upserts one NPC's voice assignment — called from `rememberEntity`'s
 /// handling in DMConsolePage.tsx whenever a turn's dm-actions entry includes
-/// a `voiceId`. Silently overwrites any previous assignment for that name
-/// (BASE_CLAUDE_MD asks the DM to treat assignments as permanent and not
-/// re-send one once made, but nothing here enforces that — a later call just
-/// wins, same "last write wins" shape as upsert_named_fact).
-fn set_npc_voice_at(root: &Path, id: &str, name: &str, voice_id: &str, pitch: Option<&str>) -> Result<(), String> {
+/// a `voiceId`, and from the History dialog's manual voice-override panel
+/// (which is also the only caller that ever passes a `speed`, since Claude's
+/// own dm-actions schema has no speed concept — see BASE_CLAUDE_MD). Silently
+/// overwrites any previous assignment for that name, `speed` included
+/// (BASE_CLAUDE_MD asks the DM to treat voice assignments as permanent and
+/// not re-send one once made, but nothing here enforces that — a later call
+/// just wins, same "last write wins" shape as upsert_named_fact and the same
+/// pre-existing risk pitch already carried: a resent voiceId with no speed
+/// would clear a manually-set speed override, exactly as it already could
+/// clear a manually-set pitch).
+fn set_npc_voice_at(root: &Path, id: &str, name: &str, voice_id: &str, pitch: Option<&str>, speed: Option<f64>) -> Result<(), String> {
     let path = root.join(id).join("memory").join("npc_voices.json");
     let mut map = read_npc_voices_at(root, id);
     let pitch = pitch.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
-    map.insert(normalize_voice_key(name), NpcVoiceAssignment { voice_id: voice_id.trim().to_string(), pitch });
+    map.insert(normalize_name_key(name), NpcVoiceAssignment { voice_id: voice_id.trim().to_string(), pitch, speed });
     write_atomic(&path, &serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?)
 }
 
@@ -911,8 +991,8 @@ fn build_voice_reconciliation_prompt(unvoiced: &[(String, String)], usage_summar
     };
     format!(
         "You are assigning text-to-speech voices to Dungeons & Dragons NPCs so players at the table can tell speakers apart by ear. For each NPC below, read their description and pick:\n\n\
-        1. `voice_id` — based on their apparent gender, accent, and social register: `male-us-1` through `male-us-5` / `female-us-1` through `female-us-4` (American, common/regional); `male-gb-1` through `male-gb-3` / `female-gb-1` through `female-gb-4` (English accents, posher/more formal); `male-scottish-1`/`male-scottish-2`/`female-scottish-1` (Scottish); `male-irish-1`/`male-irish-2`/`female-irish-1` (Irish); `female-welsh-1` (Welsh); `male-northernirish-1`/`female-northernirish-1` (Northern Irish); `male-australian-1` (Australian); `male-southafrican-1`/`female-southafrican-1` (South African). Never invent an id outside this list. Several ids exist per bucket specifically so same-gender NPCs don't all sound identical — when assigning several NPCs in this same batch, spread them across the different ids and accents rather than defaulting everyone to the same American/English options.\n\
-        2. `pitch` (optional) — three tiers, based on their actual D&D size and build, NOT gender: `\"small\"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `\"large\"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `\"gruff\"` for a Medium-size race that still naturally reads as rougher/deeper-voiced (half-orcs, goliaths, firbolgs, bugbears, and similar) — a milder version of `\"large\"`'s shift, since they aren't mechanically Large. Omit entirely (or use null) for an ordinary Medium NPC with nothing distinctive about their build.\n\
+        1. `voice_id` — from this catalog: `male-us-1` through `male-us-9` / `female-us-1` through `female-us-10` (American); `male-gb-1` through `male-gb-4` / `female-gb-1` through `female-gb-4` (English, posher/more formal). The gender prefix is a hard constraint: a male NPC MUST get a `male-*` id and a female NPC MUST get a `female-*` id — a wrong-gender voice is the most jarring mistake possible here, far worse than a bland-but-correct pick; if a description leaves gender genuinely ambiguous, pick whichever reading the name/pronouns/context best support rather than ignoring gender. Never invent an id outside this list — only American and British English exist in this catalog, nothing more regionally specific. Several ids exist per bucket specifically so same-gender NPCs don't all sound identical — when assigning several NPCs in this same batch, spread them across the different ids rather than defaulting everyone to the same one or two.\n\
+        2. `pitch` (optional) — three tiers, based on their actual D&D size and build, NOT gender: `\"small\"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `\"large\"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `\"gruff\"` for a Medium-size race that still naturally reads as rougher/deeper-voiced (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `\"large\"`'s shift, since they aren't mechanically Large. Omit entirely (or use null) for an ordinary Medium NPC with nothing distinctive about their build.\n\
         {usage_block}\n\
         If a description doesn't give you quite enough to judge, make the most reasonable guess rather than skipping the NPC — every name below needs an assignment.\n\n\
         NPCs:\n{listing}\n\n\
@@ -966,7 +1046,7 @@ fn reconcile_npc_voices_at(root: &Path, id: &str) -> Result<usize, String> {
     let entities = parse_entities_md(&read_optional(&dir.join("memory").join("entities.md")));
     let existing = read_npc_voices_at(root, id);
     let unvoiced: Vec<(String, String)> =
-        entities.into_iter().filter(|(name, _)| !existing.contains_key(&normalize_voice_key(name))).collect();
+        entities.into_iter().filter(|(name, _)| !existing.contains_key(&normalize_name_key(name))).collect();
     if unvoiced.is_empty() {
         return Ok(0);
     }
@@ -975,15 +1055,163 @@ fn reconcile_npc_voices_at(root: &Path, id: &str) -> Result<usize, String> {
     let reply = crate::dm::ask_claude_once(build_voice_reconciliation_prompt(&unvoiced, &usage_summary), Some("opus"))?;
     let parsed = parse_voice_reconciliation_reply(&reply)?;
 
-    let unvoiced_names: HashSet<String> = unvoiced.iter().map(|(n, _)| normalize_voice_key(n)).collect();
+    let unvoiced_names: HashSet<String> = unvoiced.iter().map(|(n, _)| normalize_name_key(n)).collect();
     let mut applied = 0;
     for entry in parsed.assignments {
-        if entry.voice_id.trim().is_empty() || !unvoiced_names.contains(&normalize_voice_key(&entry.name)) {
+        if entry.voice_id.trim().is_empty() || !unvoiced_names.contains(&normalize_name_key(&entry.name)) {
             continue;
         }
-        set_npc_voice_at(root, id, &entry.name, &entry.voice_id, entry.pitch.as_deref())?;
+        set_npc_voice_at(root, id, &entry.name, &entry.voice_id, entry.pitch.as_deref(), None)?;
         applied += 1;
     }
+    Ok(applied)
+}
+
+// ── Campaign-hooks reconciliation: tying PC backstories to the campaign ────
+//
+// Every turn, the DM already sees both memory/campaign_lore.md (the hub,
+// recurring NPCs/factions, plot threads) and memory/party.md (each PC's own
+// backstory) at once — in principle enough for it to improvise a connection
+// between the two live, the same way a human DM does at the table. But nothing
+// steers toward that actually happening: it's pure chance whether the model
+// ever thinks to tie a specific PC's backstory into the wider plot, or does so
+// at a good moment. This pass complements that live improv (never replaces
+// it) by guaranteeing at least one deliberate, concrete hook per PC exists in
+// campaign_lore.md itself — the DM can still invent further connections on
+// its own, but now always has at least one intentional one to build on.
+
+/// name→() ledger of party members who already have a personal campaign-lore
+/// hook (see reconcile_campaign_hooks_at) — a separate small file rather than
+/// folding this into party.md itself, since party.md's own upsert-by-name
+/// format has no room for a second, unrelated boolean per entry. Empty set
+/// (not an error) when nothing's been reconciled yet.
+fn read_reconciled_hook_names_at(root: &Path, id: &str) -> HashSet<String> {
+    let path = root.join(id).join("memory").join("party_hooks.json");
+    let text = read_optional(&path);
+    if text.trim().is_empty() {
+        return HashSet::new();
+    }
+    serde_json::from_str::<Vec<String>>(&text).unwrap_or_default().into_iter().collect()
+}
+
+fn write_reconciled_hook_names_at(root: &Path, id: &str, names: &HashSet<String>) -> Result<(), String> {
+    let path = root.join(id).join("memory").join("party_hooks.json");
+    let mut sorted: Vec<&String> = names.iter().collect();
+    sorted.sort();
+    write_atomic(&path, &serde_json::to_string_pretty(&sorted).map_err(|e| e.to_string())?)
+}
+
+/// Section heading marking where reconcile_campaign_hooks_at's per-PC ties
+/// live within campaign_lore.md — inserted once, above the first hook entry
+/// ever written for a campaign, so a handful of "- **Name:** hook" lines read
+/// as a deliberate section instead of stray entries tacked onto the end of
+/// the prose doc establish_campaign_lore_at wrote. Idempotent: a no-op once
+/// the heading's already present (checked by its trimmed text, not the exact
+/// literal including surrounding blank lines, so it still matches after
+/// upsert_named_fact's own line-based edits touch nearby whitespace).
+const PERSONAL_HOOKS_HEADING: &str = "## Personal hooks\n\n_How each player character's own backstory ties into this campaign's hub, factions, or threads — written once per character by the hook-reconciliation pass, never touched by hand._";
+
+fn ensure_personal_hooks_heading(content: &str) -> String {
+    if content.contains(PERSONAL_HOOKS_HEADING.lines().next().unwrap_or_default()) {
+        content.to_string()
+    } else {
+        let mut out = content.trim_end().to_string();
+        out.push_str("\n\n");
+        out.push_str(PERSONAL_HOOKS_HEADING);
+        out.push('\n');
+        out
+    }
+}
+
+/// Builds the one-time Opus prompt for the campaign-hooks reconciliation pass
+/// (see reconcile_campaign_hooks_at) — given the campaign's established lore
+/// and a batch of PCs who don't have a personal hook yet (name + their
+/// party.md description), asks Claude to invent one concrete tie per PC to
+/// something ALREADY named in campaign_lore.md, never a brand-new NPC/
+/// faction/thread invented just for this (that would silently duplicate or
+/// contradict the DM's own established doc instead of building on it).
+fn build_campaign_hooks_prompt(campaign_lore: &str, pending: &[(String, String)]) -> String {
+    let listing = pending.iter().map(|(name, desc)| format!("- {name}: {desc}")).collect::<Vec<_>>().join("\n");
+    let lore_block = if campaign_lore.trim().is_empty() {
+        "(Nothing established yet — invent a plausible tie to a generic hub/faction concept rather than skipping a PC.)".to_string()
+    } else {
+        campaign_lore.trim().to_string()
+    };
+    format!(
+        "You are weaving player characters into an ongoing Dungeons & Dragons campaign's existing lore, so their personal backstories feel tied to the wider story instead of just sitting beside it.\n\n\
+        Campaign lore (the hub, recurring NPCs/factions, and plot threads already established):\n{lore_block}\n\n\
+        For each player character below, invent ONE concrete, specific connection between their backstory and something already named above — a specific NPC, faction, location, or thread, never a brand new element invented just for this. A plausible, minor tie (a shared enemy, a family name, a place they both know) is better than a forced dramatic one, and a loose fit is still better than skipping a PC. Write it as a single sentence the DM can use as a hook whenever it naturally comes up in play, not an instruction to force it in THIS session.\n\n\
+        Player characters:\n{listing}\n\n\
+        Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
+        {{\"hooks\": [{{\"name\": \"<exact name as given above>\", \"hook\": \"<one sentence>\"}}]}}"
+    )
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct CampaignHookEntry {
+    name: String,
+    #[serde(default)]
+    hook: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct CampaignHooksReply {
+    #[serde(default)]
+    hooks: Vec<CampaignHookEntry>,
+}
+
+/// Parses the campaign-hooks reply, tolerating stray markdown code fences
+/// around the JSON — same defensive shape as parse_voice_reconciliation_reply.
+fn parse_campaign_hooks_reply(reply: &str) -> Result<CampaignHooksReply, String> {
+    let mut s = reply.trim();
+    if let Some(rest) = s.strip_prefix("```json") {
+        s = rest;
+    } else if let Some(rest) = s.strip_prefix("```") {
+        s = rest;
+    }
+    if let Some(rest) = s.strip_suffix("```") {
+        s = rest;
+    }
+    serde_json::from_str(s.trim()).map_err(|e| format!("Couldn't parse campaign-hooks reply from Claude: {e}. Raw: {reply}"))
+}
+
+/// Finds every named party member in party.md that doesn't have a personal
+/// campaign-lore hook yet and asks Claude (forced onto opus — see
+/// build_claude_args's doc comment on why one-time reasoning work gets that
+/// budget) to invent one. A cheap no-op — no network call — when every known
+/// party member already has a hook, the common case any time this runs after
+/// the first sitting a given PC connected in. Ignores any hook in the reply
+/// for a name outside the batch actually asked about (a hallucinated or
+/// malformed name). Returns how many PCs newly got a hook.
+fn reconcile_campaign_hooks_at(root: &Path, id: &str) -> Result<usize, String> {
+    let dir = root.join(id);
+    let party = parse_entities_md(&read_optional(&dir.join("memory").join("party.md")));
+    let already = read_reconciled_hook_names_at(root, id);
+    let pending: Vec<(String, String)> =
+        party.into_iter().filter(|(name, _)| !already.contains(&normalize_name_key(name))).collect();
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
+    let reply = crate::dm::ask_claude_once(build_campaign_hooks_prompt(&campaign_lore, &pending), Some("opus"))?;
+    let parsed = parse_campaign_hooks_reply(&reply)?;
+
+    let pending_names: HashSet<String> = pending.iter().map(|(n, _)| normalize_name_key(n)).collect();
+    let mut reconciled = already;
+    let mut applied = 0;
+    for entry in parsed.hooks {
+        if entry.hook.trim().is_empty() || !pending_names.contains(&normalize_name_key(&entry.name)) {
+            continue;
+        }
+        let lore_path = dir.join("memory").join("campaign_lore.md");
+        let with_heading = ensure_personal_hooks_heading(&read_optional(&lore_path));
+        write_atomic(&lore_path, &with_heading)?;
+        upsert_named_fact_at(root, id, "campaign_lore.md", &entry.name, entry.hook.trim())?;
+        reconciled.insert(normalize_name_key(&entry.name));
+        applied += 1;
+    }
+    write_reconciled_hook_names_at(root, id, &reconciled)?;
     Ok(applied)
 }
 
@@ -1075,14 +1303,14 @@ fn build_compact_entities_prompt(file_label: &str, content: &str, current_chapte
 /// reconcile_npc_voices_at depends on, so this also catches an entry getting
 /// reformatted out of that parser's exact "- **Name:** description" pattern,
 /// not just a name vanishing from the text entirely) but missing from
-/// `after`, compared case/whitespace-insensitively via normalize_voice_key.
+/// `after`, compared case/whitespace-insensitively via normalize_name_key.
 /// Empty means the compaction is safe to accept.
 fn dropped_entity_names(before: &str, after: &str) -> Vec<String> {
     let before_names: HashMap<String, String> = parse_entities_md(before)
         .into_iter()
-        .map(|(name, _)| (normalize_voice_key(&name), name))
+        .map(|(name, _)| (normalize_name_key(&name), name))
         .collect();
-    let after_keys: HashSet<String> = parse_entities_md(after).into_iter().map(|(name, _)| normalize_voice_key(&name)).collect();
+    let after_keys: HashSet<String> = parse_entities_md(after).into_iter().map(|(name, _)| normalize_name_key(&name)).collect();
     let mut missing: Vec<String> = before_names
         .into_iter()
         .filter(|(key, _)| !after_keys.contains(key))
@@ -1783,16 +2011,20 @@ pub fn upsert_party_member(app: AppHandle, id: String, name: String, description
     upsert_named_fact_at(&campaigns_root(&app)?, &id, "party.md", &name, &description)
 }
 
-/// Assigns an NPC's TTS voice (+ optional race/size pitch tag) — called from
-/// DMConsolePage's runTurn whenever a turn's `rememberEntity` entry includes
-/// a `voiceId` (see BASE_CLAUDE_MD's "Giving NPCs distinct voices"). Doesn't
-/// validate voice_id/pitch against tts.rs's known sets here — an unknown
-/// value just falls back to the narrator voice / no pitch change at speak
-/// time (see tts.rs's ensure_voice_available/pitch_factor), same "harmless
+/// Assigns an NPC's TTS voice (+ optional race/size pitch tag, + optional
+/// speaking-rate override) — called from DMConsolePage's runTurn whenever a
+/// turn's `rememberEntity` entry includes a `voiceId` (see BASE_CLAUDE_MD's
+/// "Giving NPCs distinct voices" — Claude never sends `speed`, that's manual-
+/// override-only, see the History dialog's voice panel), and from the manual
+/// voice-override panel itself (voice_id/pitch/speed all human-set there).
+/// Doesn't validate voice_id/pitch/speed against tts.rs's known sets/ranges
+/// here — an unknown value just falls back to the narrator voice / no pitch
+/// change / the default rate at speak time (see tts.rs's
+/// ensure_voice_available/pitch_factor/DEFAULT_LENGTH_SCALE), same "harmless
 /// no-op on a bad value" tolerance as other dm-actions fields.
 #[tauri::command]
-pub fn set_npc_voice(app: AppHandle, id: String, name: String, voice_id: String, pitch: Option<String>) -> Result<(), String> {
-    set_npc_voice_at(&campaigns_root(&app)?, &id, &name, &voice_id, pitch.as_deref())
+pub fn set_npc_voice(app: AppHandle, id: String, name: String, voice_id: String, pitch: Option<String>, speed: Option<f64>) -> Result<(), String> {
+    set_npc_voice_at(&campaigns_root(&app)?, &id, &name, &voice_id, pitch.as_deref(), speed)
 }
 
 /// Reads the full name→assignment map for a campaign — fetched once per
@@ -1801,6 +2033,14 @@ pub fn set_npc_voice(app: AppHandle, id: String, name: String, voice_id: String,
 #[tauri::command]
 pub fn read_npc_voices(app: AppHandle, id: String) -> Result<HashMap<String, NpcVoiceAssignment>, String> {
     Ok(read_npc_voices_at(&campaigns_root(&app)?, &id))
+}
+
+/// Refreshes this campaign's generated DM rules — see sync_dm_rules_at. Called
+/// from DMConsolePage on every campaign load, before the DM session is warmed,
+/// so the very first turn already sees the current rules.
+#[tauri::command]
+pub fn sync_dm_rules(app: AppHandle, id: String) -> Result<(), String> {
+    sync_dm_rules_at(&campaigns_root(&app)?, &id)
 }
 
 /// Finds NPCs missing a voice assignment and assigns one via a dedicated
@@ -1817,6 +2057,22 @@ pub async fn reconcile_npc_voices(app: AppHandle, id: String) -> Result<usize, S
     })
     .await
     .map_err(|e| format!("Voice reconciliation task failed: {e}"))?
+}
+
+/// Ties any party member missing a personal campaign-lore hook to something
+/// already established in campaign_lore.md — see reconcile_campaign_hooks_at.
+/// Called from wrapUpCurrentSession (so hooks are ready before the next
+/// sitting) and from a manual "Personalize campaign hooks" button. Returns
+/// how many PCs newly got a hook — 0 is the common case once everyone at the
+/// table already has one.
+#[tauri::command]
+pub async fn reconcile_campaign_hooks(app: AppHandle, id: String) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        reconcile_campaign_hooks_at(&root, &id)
+    })
+    .await
+    .map_err(|e| format!("Campaign-hooks reconciliation task failed: {e}"))?
 }
 
 /// Reads the entities registry — feeds the History dialog. See
@@ -2118,6 +2374,73 @@ mod tests {
         assert!(bak.contains("Something irreplaceable that must survive in the backup."));
     }
 
+    /// The bug this whole mechanism exists for: a campaign created before a
+    /// rule change must still pick that change up. Simulates an OLD campaign by
+    /// stripping the import line and the generated file, then asserts one load
+    /// restores both.
+    #[test]
+    fn sync_dm_rules_upgrades_a_campaign_created_before_the_import_existed() {
+        let root = Scratch::new("dm_rules_migrate");
+        let meta = create_campaign_at(&root.0, &intake("Old Campaign")).unwrap();
+        let dir = root.0.join(&meta.id);
+        let claude_path = dir.join("CLAUDE.md");
+        let rules_path = dir.join("memory").join("dm_rules.md");
+
+        // Rewind to a pre-dm_rules campaign: no import line, no generated file,
+        // plus a hand-edit of the kind the Notes dialog produces.
+        let legacy = fs::read_to_string(&claude_path)
+            .unwrap()
+            .replace("@memory/dm_rules.md\n", "");
+        fs::write(&claude_path, format!("{legacy}\n## My house rules\nCrits do max damage.\n")).unwrap();
+        fs::remove_file(&rules_path).unwrap();
+        assert!(!fs::read_to_string(&claude_path).unwrap().contains("@memory/dm_rules.md"));
+
+        sync_dm_rules_at(&root.0, &meta.id).unwrap();
+
+        let claude_md = fs::read_to_string(&claude_path).unwrap();
+        assert!(claude_md.contains("@memory/dm_rules.md"), "old campaign must gain the import");
+        assert!(claude_md.contains("Crits do max damage."), "the DM's own hand-edits must survive");
+        let rules = fs::read_to_string(&rules_path).unwrap();
+        assert!(rules.contains("[Ismark|male]"), "generated rules must carry the gender marker");
+        assert!(rules.contains("supersedes"), "generated rules must claim precedence over a stale inline copy");
+    }
+
+    #[test]
+    fn sync_dm_rules_is_idempotent_and_refreshes_stale_content() {
+        let root = Scratch::new("dm_rules_idem");
+        let meta = create_campaign_at(&root.0, &intake("Repeat")).unwrap();
+        let dir = root.0.join(&meta.id);
+        let rules_path = dir.join("memory").join("dm_rules.md");
+
+        // A stale generated file from an older app version gets replaced wholesale.
+        fs::write(&rules_path, "# ancient rules\n").unwrap();
+        for _ in 0..3 {
+            sync_dm_rules_at(&root.0, &meta.id).unwrap();
+        }
+
+        let claude_md = fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+        assert_eq!(claude_md.matches("@memory/dm_rules.md").count(), 1, "import must not accumulate");
+        let rules = fs::read_to_string(&rules_path).unwrap();
+        assert!(!rules.contains("ancient rules"), "stale generated rules must be overwritten");
+        assert_eq!(rules, DM_RULES);
+    }
+
+    /// The voice rules must live ONLY in the generated file — if they were also
+    /// left inline in BASE_CLAUDE_MD, every new campaign would carry two copies
+    /// and old campaigns would see a contradictory pair.
+    #[test]
+    fn voice_rules_are_not_duplicated_into_claude_md() {
+        let root = Scratch::new("dm_rules_nodup");
+        let meta = create_campaign_at(&root.0, &intake("No Dup")).unwrap();
+        let claude_md = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
+        assert!(!claude_md.contains("## Giving NPCs distinct voices"));
+        assert!(!claude_md.contains("## Out-of-character requests"));
+        assert!(claude_md.contains("@memory/dm_rules.md"));
+        let rules = fs::read_to_string(root.0.join(&meta.id).join("memory").join("dm_rules.md")).unwrap();
+        assert!(rules.contains("## Giving NPCs distinct voices"));
+        assert!(rules.contains("## Out-of-character requests"));
+    }
+
     #[test]
     fn create_campaign_seeds_claude_md_and_memory() {
         let root = Scratch::new("create");
@@ -2351,11 +2674,12 @@ mod tests {
 
         assert!(read_npc_voices_at(&root.0, "camp").is_empty());
 
-        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None, None).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         let assigned = voices.get("gundren rockseeker").expect("should be present under a lowercased key");
         assert_eq!(assigned.voice_id, "male-us-1");
         assert_eq!(assigned.pitch, None);
+        assert_eq!(assigned.speed, None);
     }
 
     #[test]
@@ -2363,8 +2687,8 @@ mod tests {
         let root = Scratch::new("npc-voices-overwrite");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
 
-        set_npc_voice_at(&root.0, "camp", "Elara", "female-us-1", None).unwrap();
-        set_npc_voice_at(&root.0, "camp", "elara", "female-gb-1", None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Elara", "female-us-1", None, None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "elara", "female-gb-1", None, None).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         assert_eq!(voices.len(), 1, "same name under different casing should overwrite, not duplicate");
         assert_eq!(voices.get("elara").unwrap().voice_id, "female-gb-1");
@@ -2375,11 +2699,23 @@ mod tests {
         let root = Scratch::new("npc-voices-pitch");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
 
-        set_npc_voice_at(&root.0, "camp", "Squibbins", "male-us-2", Some("small")).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Squibbins", "male-us-2", Some("small"), None).unwrap();
         let voices = read_npc_voices_at(&root.0, "camp");
         let assigned = voices.get("squibbins").unwrap();
         assert_eq!(assigned.voice_id, "male-us-2");
         assert_eq!(assigned.pitch.as_deref(), Some("small"));
+    }
+
+    #[test]
+    fn set_npc_voice_at_persists_a_speed_override_independent_of_pitch() {
+        let root = Scratch::new("npc-voices-speed");
+        fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
+
+        set_npc_voice_at(&root.0, "camp", "Narrator-ish NPC", "male-us-3", None, Some(0.95)).unwrap();
+        let voices = read_npc_voices_at(&root.0, "camp");
+        let assigned = voices.get("narrator-ish npc").unwrap();
+        assert_eq!(assigned.speed, Some(0.95));
+        assert_eq!(assigned.pitch, None, "speed and pitch are independent overrides");
     }
 
     #[test]
@@ -2406,11 +2742,9 @@ mod tests {
         let prompt = build_voice_reconciliation_prompt(&unvoiced, "");
         assert!(prompt.contains("Gundren Rockseeker"));
         assert!(prompt.contains("Squibbins"));
-        assert!(prompt.contains("male-us-5"));
-        assert!(prompt.contains("male-gb-3"));
+        assert!(prompt.contains("male-us-9"));
+        assert!(prompt.contains("male-gb-4"));
         assert!(prompt.contains("female-gb-4"));
-        assert!(prompt.contains("male-scottish-2"));
-        assert!(prompt.contains("female-southafrican-1"));
         assert!(prompt.contains("\"small\""));
         assert!(prompt.contains("\"large\""));
         assert!(prompt.to_lowercase().contains("spread"), "should ask it to spread picks across the bucket instead of defaulting to one id");
@@ -2432,9 +2766,9 @@ mod tests {
         assert_eq!(summarize_voice_usage(&HashMap::new()), "");
 
         let mut existing = HashMap::new();
-        existing.insert("gundren".to_string(), NpcVoiceAssignment { voice_id: "male-us-1".to_string(), pitch: None });
-        existing.insert("squibbins".to_string(), NpcVoiceAssignment { voice_id: "male-us-1".to_string(), pitch: Some("small".to_string()) });
-        existing.insert("elara".to_string(), NpcVoiceAssignment { voice_id: "female-gb-1".to_string(), pitch: None });
+        existing.insert("gundren".to_string(), NpcVoiceAssignment { voice_id: "male-us-1".to_string(), pitch: None, speed: None });
+        existing.insert("squibbins".to_string(), NpcVoiceAssignment { voice_id: "male-us-1".to_string(), pitch: Some("small".to_string()), speed: None });
+        existing.insert("elara".to_string(), NpcVoiceAssignment { voice_id: "female-gb-1".to_string(), pitch: None, speed: None });
         assert_eq!(summarize_voice_usage(&existing), "female-gb-1 (x1), male-us-1 (x2)");
     }
 
@@ -2462,7 +2796,7 @@ mod tests {
         let memory_dir = root.0.join("camp").join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
         fs::write(memory_dir.join("entities.md"), "- **Gundren Rockseeker:** A dwarf merchant.\n").unwrap();
-        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "male-us-1", None, None).unwrap();
 
         assert_eq!(reconcile_npc_voices_at(&root.0, "camp").unwrap(), 0);
     }
@@ -2472,6 +2806,70 @@ mod tests {
         let root = Scratch::new("reconcile-empty");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
         assert_eq!(reconcile_npc_voices_at(&root.0, "camp").unwrap(), 0);
+    }
+
+    #[test]
+    fn ensure_personal_hooks_heading_is_idempotent() {
+        let lore = "# Campaign Lore\n\nA sleepy village on the frontier.";
+        let once = ensure_personal_hooks_heading(lore);
+        assert!(once.contains("## Personal hooks"));
+        let twice = ensure_personal_hooks_heading(&once);
+        assert_eq!(once, twice, "must not duplicate the heading on a second call");
+    }
+
+    #[test]
+    fn build_campaign_hooks_prompt_includes_lore_and_every_pending_name() {
+        let pending = vec![
+            ("Thorin".to_string(), "Raised by monks after her village was burned.".to_string()),
+            ("Elara".to_string(), "A disgraced noble seeking redemption.".to_string()),
+        ];
+        let prompt = build_campaign_hooks_prompt("The Ashfen Cult hunts an ancient bloodline.", &pending);
+        assert!(prompt.contains("Ashfen Cult"));
+        assert!(prompt.contains("Thorin"));
+        assert!(prompt.contains("Elara"));
+        assert!(prompt.contains("never a brand new element"));
+    }
+
+    #[test]
+    fn build_campaign_hooks_prompt_degrades_gracefully_with_no_established_lore_yet() {
+        let pending = vec![("Thorin".to_string(), "A dwarf fighter.".to_string())];
+        let prompt = build_campaign_hooks_prompt("", &pending);
+        assert!(prompt.contains("Nothing established yet"));
+    }
+
+    #[test]
+    fn parse_campaign_hooks_reply_handles_plain_and_fenced_json() {
+        let plain = r#"{"hooks": [{"name": "Thorin", "hook": "The cult leader recognizes her family crest."}]}"#;
+        let parsed = parse_campaign_hooks_reply(plain).unwrap();
+        assert_eq!(parsed.hooks.len(), 1);
+        assert_eq!(parsed.hooks[0].name, "Thorin");
+
+        let fenced = format!("```json\n{plain}\n```");
+        let parsed2 = parse_campaign_hooks_reply(&fenced).unwrap();
+        assert_eq!(parsed2.hooks[0].name, "Thorin");
+
+        assert!(parse_campaign_hooks_reply("not json").is_err());
+    }
+
+    #[test]
+    fn reconcile_campaign_hooks_at_is_a_free_no_op_when_party_md_is_empty() {
+        // No network access happens in this test — if the early-return
+        // short-circuit ever regressed, this would hang/fail trying to shell
+        // out to the `claude` CLI instead of completing instantly.
+        let root = Scratch::new("hooks-empty");
+        fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
+        assert_eq!(reconcile_campaign_hooks_at(&root.0, "camp").unwrap(), 0);
+    }
+
+    #[test]
+    fn reconcile_campaign_hooks_at_is_a_free_no_op_when_everyone_already_has_a_hook() {
+        let root = Scratch::new("hooks-noop");
+        let memory_dir = root.0.join("camp").join("memory");
+        fs::create_dir_all(&memory_dir).unwrap();
+        fs::write(memory_dir.join("party.md"), "- **Thorin:** A dwarf fighter.\n").unwrap();
+        write_reconciled_hook_names_at(&root.0, "camp", &["thorin".to_string()].into_iter().collect()).unwrap();
+
+        assert_eq!(reconcile_campaign_hooks_at(&root.0, "camp").unwrap(), 0);
     }
 
     #[test]

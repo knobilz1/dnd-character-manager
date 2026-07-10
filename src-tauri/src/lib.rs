@@ -42,6 +42,7 @@ pub fn run() {
       party_listener::party_listener_port,
       party_listener::local_lan_ip,
       party_listener::respond_to_player_turn,
+      party_listener::push_narration,
       campaign::list_campaigns,
       campaign::create_campaign,
       campaign::establish_campaign_lore,
@@ -59,7 +60,9 @@ pub fn run() {
       campaign::resolve_flagged_fact,
       campaign::set_npc_voice,
       campaign::read_npc_voices,
+      campaign::sync_dm_rules,
       campaign::reconcile_npc_voices,
+      campaign::reconcile_campaign_hooks,
       campaign::read_campaign_entities,
       campaign::read_campaign_locations,
       campaign::compact_campaign_memory,
@@ -76,8 +79,7 @@ pub fn run() {
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tts::speak_text,
-      tts::warmup_piper,
-      tts::warmup_voice,
+      tts::warmup_tts,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
