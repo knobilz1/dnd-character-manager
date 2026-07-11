@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer, Radio, Send, Wand2, Settings as SettingsIcon } from 'lucide-react';
 import { DriveSyncButton } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -17,6 +17,7 @@ import type { UpdateCheckStatus } from '../hooks/useAppUpdater';
 import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useThemeStore } from '../store/useThemeStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { sendCharacterToDM, sendAllToDM } from '../utils/dmConnect';
 
 async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
@@ -36,6 +37,15 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const graveyardCount = allCharacters.filter(c => c.inGraveyard).length;
   const { theme, toggleTheme } = useThemeStore();
   const { show3DCharacter, setShow3DCharacter } = useSettingsStore();
+  const { dmIp, setDmIp, addDmSyncedCharacter } = useSettingsStore();
+  const [dmOpen, setDmOpen] = React.useState(false);
+  // All persisted app-wide settings except theme (which stays in its own
+  // header toggle) live behind this one gear-triggered dialog — see
+  // useSettingsStore. Keeps the header from accumulating a loose toggle
+  // button per setting as more get added.
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [dmStatus, setDmStatus] = React.useState<string | null>(null);
+  const [dmSending, setDmSending] = React.useState(false);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
@@ -153,6 +163,38 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
     }
   }
 
+  // Send a single character to the DM bot. Opens the connection dialog first if
+  // no DM address is set yet.
+  async function handleSendToDM(character: Character) {
+    // The address itself is configured in Settings now, not inline here —
+    // send there first rather than opening a dialog with nothing to type into.
+    if (!dmIp.trim()) { setDmStatus(null); setSettingsOpen(true); return; }
+    setDmSending(true);
+    setDmStatus(`Sending ${character.name || 'character'}…`);
+    try {
+      await sendCharacterToDM(character, dmIp);
+      addDmSyncedCharacter(character.id);
+      setDmStatus(`✅ Sent ${character.name || 'character'} to the DM.`);
+    } catch (err) {
+      setDmStatus(`❌ Couldn't reach the DM at ${dmIp}. ${err instanceof Error ? err.message : ''}`);
+      setDmOpen(true);
+    } finally {
+      setDmSending(false);
+    }
+  }
+
+  async function handleSendAllToDM() {
+    if (!dmIp.trim()) { setDmStatus('Enter the DM\'s address first.'); return; }
+    setDmSending(true);
+    setDmStatus(`Sending ${characters.length} character(s)…`);
+    const { ok, okIds, failed } = await sendAllToDM(characters, dmIp);
+    okIds.forEach(addDmSyncedCharacter);
+    setDmSending(false);
+    setDmStatus(failed.length
+      ? `Sent ${ok}. Failed: ${failed.join(', ')}. Check the DM's address and that the bot is running.`
+      : `✅ Sent all ${ok} character(s) to the DM.`);
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 p-6">
       <div className="max-w-5xl mx-auto">
@@ -167,19 +209,25 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShow3DCharacter(!show3DCharacter)}
-              title={show3DCharacter ? 'Disable 3D character' : 'Enable 3D character'}
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors"
+            >
+              <SettingsIcon size={16} />
+            </button>
+            <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
+            <button
+              onClick={() => { setDmStatus(null); setDmOpen(true); }}
+              title="Send to DM (game night)"
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors ${
-                show3DCharacter
-                  ? 'bg-red-900/40 border-red-700 text-red-300 hover:bg-red-900/60'
+                dmIp
+                  ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300 hover:bg-emerald-900/60'
                   : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
               }`}
             >
-              <span>🧍</span>
-              <span className="text-xs font-medium">3D</span>
+              <Radio size={16} />
+              <span className="text-xs font-medium">DM</span>
             </button>
-            <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
-            <DriveSyncButton />
             {graveyardCount > 0 && (
               <button
                 onClick={() => navigate('/graveyard')}
@@ -235,6 +283,13 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
                 >
                   {/* Card actions */}
                   <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button
+                      onClick={e => { e.stopPropagation(); handleSendToDM(character); }}
+                      className="text-slate-500 hover:text-emerald-400 transition-colors p-1 rounded"
+                      title="Send to DM"
+                    >
+                      <Send size={16} />
+                    </button>
                     <button
                       onClick={e => { e.stopPropagation(); exportCharacter(character); }}
                       className="text-slate-500 hover:text-blue-400 transition-colors p-1 rounded"
@@ -306,6 +361,99 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           </div>
         )}
       </div>
+
+      {/* Transient DM status toast (when the dialog is closed) */}
+      {dmStatus && !dmOpen && (
+        <div
+          onClick={() => setDmStatus(null)}
+          className="fixed bottom-4 right-4 max-w-sm bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-sm text-slate-200 shadow-lg cursor-pointer z-50"
+        >
+          {dmStatus}
+        </div>
+      )}
+
+      {/* DM connection dialog */}
+      <Dialog open={dmOpen} onClose={() => setDmOpen(false)} title="Send to DM">
+        <p className="text-slate-400 text-sm mb-4">
+          On game night, whoever's running the DM Console tells you an address like
+          <span className="text-slate-200"> 192.168.1.50</span> (shown at the top of their
+          DM Console screen). Set it once in Settings, then send your character so the DM
+          sees your live stats.
+        </p>
+        {dmIp.trim() ? (
+          <p className="text-xs text-slate-400 mb-4">
+            Sending to <span className="text-slate-200 font-mono">{dmIp}</span>.{' '}
+            <button type="button" onClick={() => { setDmOpen(false); setSettingsOpen(true); }} className="text-slate-400 hover:text-white underline">
+              Change in Settings
+            </button>
+          </p>
+        ) : (
+          <p className="text-xs text-amber-400 mb-4">
+            No DM address set yet.{' '}
+            <button type="button" onClick={() => { setDmOpen(false); setSettingsOpen(true); }} className="underline hover:text-amber-300">
+              Set one in Settings
+            </button>
+            .
+          </p>
+        )}
+
+        <div className="flex gap-2 mb-3">
+          <Button onClick={handleSendAllToDM} disabled={dmSending || !dmIp.trim() || characters.length === 0}>
+            <Radio size={16} />
+            Send all ({characters.length})
+          </Button>
+          <Button variant="outline" onClick={() => setDmOpen(false)}>Done</Button>
+        </div>
+        {dmStatus && <p className="text-sm text-slate-300">{dmStatus}</p>}
+      </Dialog>
+
+      {/* Settings dialog — every persisted app-wide setting except theme */}
+      <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings">
+        <div className="mb-4">
+          <label className="flex items-center justify-between gap-3 py-1">
+            <span className="text-sm text-slate-200">Show 3D character preview</span>
+            <input
+              type="checkbox"
+              checked={show3DCharacter}
+              onChange={(e) => setShow3DCharacter(e.target.checked)}
+              className="accent-red-500 w-4 h-4"
+            />
+          </label>
+          <p className="text-xs text-slate-500 mt-1">Renders a 3D model on the Race/Appearance steps and the character sheet.</p>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">DM address (IP or IP:port)</label>
+          <input
+            type="text"
+            value={dmIp}
+            onChange={e => { setDmIp(e.target.value); setDmStatus(null); }}
+            placeholder="192.168.1.50"
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm mb-1 focus:outline-none focus:border-emerald-600"
+          />
+          <p className="text-[11px] text-slate-500">Port defaults to 7777 if you don't specify one. Used by "Send to DM" and per-character sync.</p>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-700 flex flex-col gap-2">
+          <button
+            onClick={() => { setSettingsOpen(false); navigate('/dm'); }}
+            className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm border bg-purple-900/40 border-purple-700 text-purple-300 hover:bg-purple-900/60 transition-colors"
+          >
+            <span className="flex items-center gap-2"><Wand2 size={16} /> DM Console</span>
+            <ChevronRight size={16} />
+          </button>
+          {/* DriveSyncButton manages its own dialog/open-state — clicking it
+             bubbles up to this wrapper, which just also closes Settings so
+             the two dialogs don't stack. */}
+          <div onClick={() => setSettingsOpen(false)} className="flex items-center justify-between gap-2 px-1">
+            <span className="text-sm text-slate-300">Google Drive sync</span>
+            <DriveSyncButton />
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-4">
+          <Button onClick={() => setSettingsOpen(false)}>Done</Button>
+        </div>
+      </Dialog>
 
       {/* Print picker dialog */}
       <Dialog open={printOpen} onClose={() => setPrintOpen(false)} title="Print Character Sheets">
