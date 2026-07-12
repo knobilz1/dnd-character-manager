@@ -641,6 +641,93 @@ pub async fn speak_text(app: AppHandle, text: String, voice_id: Option<String>, 
     .map_err(|e| format!("TTS task failed: {e}"))?
 }
 
+// ── Campaign export/import: zip helpers ───────────────────────────────────
+//
+// Generic zip directory <-> archive helpers, used by campaign.rs's
+// export_campaign_at/import_campaign_at (the "Export campaign" backup
+// feature). Not TTS-specific — they just live in this file alongside the
+// `zip` crate dependency they need.
+
+/// Pure: turns a (forward-slash-normalized) zip entry name into a safe relative
+/// path under the extraction root, or None if it's unsafe. Guards against
+/// zip-slip: rejects `..` traversal and drive/ADS (`:`) components, and drops
+/// `.`/empty segments (so a leading `/` becomes relative, staying under the
+/// root). Callers normalize `\`→`/` first, so a backslash-separated archive
+/// (which .NET's zipper unfortunately produces) is handled identically.
+fn sanitize_zip_path(normalized: &str) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    for comp in normalized.split('/') {
+        if comp.is_empty() || comp == "." {
+            continue;
+        }
+        if comp == ".." || comp.contains(':') {
+            return None;
+        }
+        out.push(comp);
+    }
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// Extracts `zip_path` into `dest`, creating `dest/<entry>` for each file. Entry
+/// names are normalized `\`→`/` (defensive) and run through sanitize_zip_path so
+/// a malicious archive can't write outside `dest`. Takes no AppHandle so it's
+/// directly testable; campaign.rs's import_campaign_at extracts into a scratch
+/// dir first, so a bad archive never touches a real campaign folder.
+pub(crate) fn extract_zip_to(zip_path: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("couldn't open archive: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("not a valid zip archive: {e}"))?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("archive entry {i} unreadable: {e}"))?;
+        let normalized = entry.name().replace('\\', "/");
+        let is_dir = entry.is_dir() || normalized.ends_with('/');
+        let Some(rel) = sanitize_zip_path(&normalized) else {
+            return Err(format!("archive contains an unsafe path: {normalized}"));
+        };
+        let out_path = dest.join(&rel);
+        if is_dir {
+            std::fs::create_dir_all(&out_path).map_err(|e| format!("couldn't create {}: {e}", out_path.display()))?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("couldn't create {}: {e}", parent.display()))?;
+            }
+            let mut out = std::fs::File::create(&out_path).map_err(|e| format!("couldn't write {}: {e}", out_path.display()))?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| format!("couldn't extract {}: {e}", out_path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Recursively zips every file under `src_dir` into a new archive at
+/// `dest_zip` (created fresh — errors if something's already there), with
+/// entry names relative to `src_dir` and forward-slash separated so
+/// extract_zip_to reads them back identically on any platform. Write-side
+/// sibling of extract_zip_to above; used by campaign.rs's export_campaign_at.
+pub(crate) fn zip_dir_to(src_dir: &Path, dest_zip: &Path) -> Result<(), String> {
+    let file = std::fs::File::create(dest_zip).map_err(|e| format!("couldn't create {}: {e}", dest_zip.display()))?;
+    let mut zw = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut stack = vec![src_dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(|e| format!("couldn't read {}: {e}", dir.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            let rel = path.strip_prefix(src_dir).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                zw.start_file(&rel, opts).map_err(|e| format!("couldn't add {rel} to archive: {e}"))?;
+                let mut f = std::fs::File::open(&path).map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
+                std::io::copy(&mut f, &mut zw).map_err(|e| format!("couldn't write {rel} to archive: {e}"))?;
+            }
+        }
+    }
+    zw.finish().map_err(|e| format!("couldn't finalize archive: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -893,5 +980,111 @@ mod tests {
         let faded = fade_wav_edges(&bytes, EDGE_FADE_MS);
         let pitched = reinterpret_wav_sample_rate(&faded, pitch_factor(Some("small")));
         assert_eq!(&pitched[0..4], b"RIFF", "post-processing pipeline must still produce a well-formed WAV");
+    }
+
+    #[test]
+    fn sanitize_zip_path_keeps_normal_nested_paths() {
+        assert_eq!(
+            sanitize_zip_path("campaign/CLAUDE.md"),
+            Some(PathBuf::from("campaign").join("CLAUDE.md"))
+        );
+        assert_eq!(
+            sanitize_zip_path("campaign/memory/MEMORY.md"),
+            Some(PathBuf::from("campaign").join("memory").join("MEMORY.md"))
+        );
+        // A leading "/", a leading "./", and doubled slashes all collapse away,
+        // and the result stays relative (so it can only ever land under root).
+        assert_eq!(
+            sanitize_zip_path("/campaign//memory/MEMORY.md"),
+            Some(PathBuf::from("campaign").join("memory").join("MEMORY.md"))
+        );
+    }
+
+    #[test]
+    fn sanitize_zip_path_rejects_zip_slip_and_drive_paths() {
+        assert_eq!(sanitize_zip_path("../evil.exe"), None);
+        assert_eq!(sanitize_zip_path("campaign/../../evil"), None);
+        assert_eq!(sanitize_zip_path("C:/Windows/system32/evil.dll"), None); // drive letter
+        assert_eq!(sanitize_zip_path(""), None);
+        assert_eq!(sanitize_zip_path("/"), None);
+        assert_eq!(sanitize_zip_path("./"), None);
+    }
+
+    #[test]
+    fn extract_zip_to_builds_tree_and_normalizes_backslash_entries() {
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!("zip-extract-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let zip_path = tmp.join("test.zip");
+        {
+            let f = std::fs::File::create(&zip_path).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            zw.start_file("campaign/CLAUDE.md", opts).unwrap();
+            zw.write_all(b"persona text").unwrap();
+            zw.start_file("campaign/memory/MEMORY.md", opts).unwrap();
+            zw.write_all(b"a b c").unwrap();
+            // A backslash-separated entry, as .NET's zipper produces, must still
+            // nest correctly rather than become a file literally named with
+            // backslashes.
+            zw.start_file("campaign\\memory\\flagged_facts.md", opts).unwrap();
+            zw.write_all(b"flagged").unwrap();
+            zw.finish().unwrap();
+        }
+
+        let dest = tmp.join("out");
+        extract_zip_to(&zip_path, &dest).unwrap();
+        assert!(dest.join("campaign").join("CLAUDE.md").exists());
+        assert_eq!(
+            std::fs::read(dest.join("campaign").join("memory").join("MEMORY.md")).unwrap(),
+            b"a b c"
+        );
+        assert!(
+            dest.join("campaign").join("memory").join("flagged_facts.md").exists(),
+            "backslash entry must extract as a nested path"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn extract_zip_to_rejects_a_zip_slip_entry() {
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!("zip-slip-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let zip_path = tmp.join("evil.zip");
+        {
+            let f = std::fs::File::create(&zip_path).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            zw.start_file("../escape.txt", opts).unwrap();
+            zw.write_all(b"pwned").unwrap();
+            zw.finish().unwrap();
+        }
+        let dest = tmp.join("out");
+        assert!(extract_zip_to(&zip_path, &dest).is_err(), "a ../ entry must be rejected");
+        assert!(!tmp.join("escape.txt").exists(), "nothing may be written outside dest");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn zip_dir_to_round_trips_through_extract_zip_to() {
+        let tmp = std::env::temp_dir().join(format!("zip-roundtrip-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        std::fs::create_dir_all(src.join("memory")).unwrap();
+        std::fs::write(src.join("CLAUDE.md"), "persona text").unwrap();
+        std::fs::write(src.join("memory").join("MEMORY.md"), "session recap").unwrap();
+
+        let zip_path = tmp.join("out.zip");
+        zip_dir_to(&src, &zip_path).expect("zipping a real directory should succeed");
+
+        let dest = tmp.join("restored");
+        extract_zip_to(&zip_path, &dest).expect("the zip it just wrote should extract cleanly");
+
+        assert_eq!(std::fs::read_to_string(dest.join("CLAUDE.md")).unwrap(), "persona text");
+        assert_eq!(std::fs::read_to_string(dest.join("memory").join("MEMORY.md")).unwrap(), "session recap");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

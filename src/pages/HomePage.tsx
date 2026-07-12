@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer, Radio, Send, Wand2, Settings as SettingsIcon } from 'lucide-react';
-import { DriveSyncButton } from '../components/DriveSync';
+import { DriveSyncButton, DriveSync } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, writeFile } from '@tauri-apps/plugin-fs';
@@ -44,6 +44,11 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   // useSettingsStore. Keeps the header from accumulating a loose toggle
   // button per setting as more get added.
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  // Deliberately NOT nested inside settingsOpen's Dialog — that Dialog
+  // unmounts its whole subtree on close, and the button that opens this
+  // lives inside it (see DriveSyncButton's doc comment for the bug that
+  // caused when this dialog's state lived there instead of here).
+  const [driveOpen, setDriveOpen] = React.useState(false);
   const [dmStatus, setDmStatus] = React.useState<string | null>(null);
   const [dmSending, setDmSending] = React.useState(false);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
@@ -441,12 +446,13 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             <span className="flex items-center gap-2"><Wand2 size={16} /> DM Console</span>
             <ChevronRight size={16} />
           </button>
-          {/* DriveSyncButton manages its own dialog/open-state — clicking it
-             bubbles up to this wrapper, which just also closes Settings so
-             the two dialogs don't stack. */}
+          {/* Clicking bubbles up to this wrapper, which also closes Settings
+             so the two dialogs don't stack — driveOpen itself lives in
+             HomePage (not inside this Dialog), so that close doesn't wipe it
+             out. See DriveSyncButton's doc comment for the bug this fixes. */}
           <div onClick={() => setSettingsOpen(false)} className="flex items-center justify-between gap-2 px-1">
             <span className="text-sm text-slate-300">Google Drive sync</span>
-            <DriveSyncButton />
+            <DriveSyncButton onClick={() => setDriveOpen(true)} />
           </div>
         </div>
 
@@ -454,6 +460,8 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
           <Button onClick={() => setSettingsOpen(false)}>Done</Button>
         </div>
       </Dialog>
+
+      <DriveSync open={driveOpen} onClose={() => setDriveOpen(false)} />
 
       {/* Print picker dialog */}
       <Dialog open={printOpen} onClose={() => setPrintOpen(false)} title="Print Character Sheets">

@@ -33,6 +33,13 @@ interface SettingsState {
   setLocalLlmBaseUrl: (v: string) => void;
   localLlmModel: string;
   setLocalLlmModel: (v: string) => void;
+  /** How many past user+DM turns to resend as conversational history on a
+   *  local-LLM turn (local_llm.rs's trim_history) — local models resend the
+   *  whole transcript every turn (no lightweight session token like Claude's
+   *  --resume) and typically have far smaller context windows, so this
+   *  bounds it. Claude-only sessions ignore this entirely. */
+  localLlmHistoryTurns: number;
+  setLocalLlmHistoryTurns: (v: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -53,6 +60,8 @@ export const useSettingsStore = create<SettingsState>()(
       setLocalLlmBaseUrl: (v) => set({ localLlmBaseUrl: v }),
       localLlmModel: '',
       setLocalLlmModel: (v) => set({ localLlmModel: v }),
+      localLlmHistoryTurns: 12,
+      setLocalLlmHistoryTurns: (v) => set({ localLlmHistoryTurns: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )

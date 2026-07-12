@@ -51,6 +51,17 @@ fn sessions() -> &'static Mutex<HashMap<String, Vec<ChatMessage>>> {
 
 const LOCAL_OUTPUT_FORMAT_ADDENDUM: &str = "\n\n## Output format (STRICT — local model mode)\nReply with ONLY a single JSON object, no markdown fences, no extra commentary before or after it: {\"narration\": \"<what you say aloud>\", \"actions\": <the dm-actions object described above, using those exact keys, or null>}. Do not wrap it in a code fence. Do not include anything outside this one JSON object.";
 
+/// Local-model-only reinforcement of the highest-stakes rules from
+/// dm_rules.md, in short/blunt form and positioned last (closest to
+/// generation) rather than relying solely on a weaker model to weight them
+/// correctly inside a long imported document. This does not replace
+/// dm_rules.md — that's still fully included via resolve_claude_md_imports
+/// above — it's a recency-biased reminder of the three rules most likely to
+/// get muddled by a smaller model: dice-only HP/death, rejecting invented
+/// player overreach outright, and discretion only running one direction.
+/// Claude's own path (dm.rs) never sees this text.
+const LOCAL_CRITICAL_REMINDERS: &str = "\n\n## Critical reminders (read last, follow exactly)\n- HP, death saves, and attack/damage rolls are decided by dice only — never invent a rescue or override a roll's result. The party can lose characters; that's allowed.\n- If a player declares their own success or invents something not already established (a monster, an item, an event), reject it entirely — don't partially accept it. State plainly what's actually true instead.\n- Only bend the story to make things harder or more interesting — never to bail the party out of trouble they earned.";
+
 /// Resolves a CLAUDE.md's `@relative/path` import lines against files in
 /// `dir`, inlining each referenced file's content in place. Generic — works
 /// for whatever imports actually exist (memory/MEMORY.md, module/index.md,
@@ -75,7 +86,23 @@ fn resolve_claude_md_imports(dir: &Path, claude_md: &str) -> String {
 fn build_system_prompt_at(dir: &Path) -> String {
     let claude_md = read_optional(&dir.join("CLAUDE.md"));
     let resolved = resolve_claude_md_imports(dir, &claude_md);
-    format!("{resolved}{LOCAL_OUTPUT_FORMAT_ADDENDUM}")
+    format!("{resolved}{LOCAL_CRITICAL_REMINDERS}{LOCAL_OUTPUT_FORMAT_ADDENDUM}")
+}
+
+/// Bounds a session's stored history to the most recent `limit_turns` user+
+/// assistant pairs, dropping the oldest first. Local models resend this
+/// history in full every turn (no lightweight --resume token the way Claude
+/// has) and typically have far smaller context windows — left unbounded, a
+/// long session risks silently overflowing the model's window. Safe to trim:
+/// anything that actually needs to survive long-term (NPCs, promises, facts)
+/// already lives in the standing memory files resolved into the system
+/// prompt every turn, not in this raw conversational replay.
+fn trim_history(history: &mut Vec<ChatMessage>, limit_turns: u32) {
+    let max_messages = (limit_turns as usize).saturating_mul(2);
+    if history.len() > max_messages {
+        let excess = history.len() - max_messages;
+        history.drain(0..excess);
+    }
 }
 
 #[derive(Serialize)]
@@ -114,6 +141,49 @@ struct ChatCompletionChoice {
 #[derive(Deserialize)]
 struct ChatCompletionChoiceMessage {
     content: String,
+}
+
+#[derive(Deserialize)]
+struct ModelsListResponse {
+    data: Vec<ModelEntry>,
+}
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// Parses a `/v1/models` response body into a plain list of model ids. Split
+/// out from fetch_local_models so the parsing itself is testable without a
+/// live server — same reasoning as parse_local_reply below.
+fn parse_models_response(body: &str) -> Result<Vec<String>, String> {
+    let parsed: ModelsListResponse =
+        serde_json::from_str(body).map_err(|e| format!("Couldn't parse the model list: {e}"))?;
+    Ok(parsed.data.into_iter().map(|m| m.id).collect())
+}
+
+/// Lists models available on a local OpenAI-compatible server via the
+/// standard `/v1/models` endpoint — supported by Ollama, LM Studio, llama.cpp
+/// server, and koboldcpp alike, same reasoning as call_local_llm below using
+/// `/v1/chat/completions` instead of any one server's own proprietary API.
+fn fetch_local_models(base_url: &str) -> Result<Vec<String>, String> {
+    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+    let resp = ureq::get(&url)
+        .call()
+        .map_err(|e| format!("Couldn't reach the local model server at {url}: {e}"))?;
+    let body = resp
+        .into_string()
+        .map_err(|e| format!("Couldn't read the model list response: {e}"))?;
+    parse_models_response(&body)
+}
+
+/// Tauri command wrapping fetch_local_models — see its doc comment. A plain
+/// blocking HTTP call, so this gets the same spawn_blocking treatment as
+/// every other local-LLM command in this file.
+#[tauri::command]
+pub async fn list_local_llm_models(base_url: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || fetch_local_models(&base_url))
+        .await
+        .map_err(|e| format!("Model list task failed: {e}"))?
 }
 
 #[derive(Deserialize)]
@@ -188,6 +258,7 @@ pub async fn ask_dm_local(
     campaign_id: Option<String>,
     base_url: String,
     model: String,
+    history_limit_turns: u32,
 ) -> Result<DmReply, String> {
     tokio::task::spawn_blocking(move || {
         let system_prompt = match &campaign_id {
@@ -204,6 +275,7 @@ pub async fn ask_dm_local(
         let entry = locked.entry(sid.clone()).or_default();
         entry.push(ChatMessage { role: "user".into(), content: prompt });
         entry.push(ChatMessage { role: "assistant".into(), content: reply_text.clone() });
+        trim_history(entry, history_limit_turns);
         drop(locked);
 
         Ok(DmReply { text: reply_text, session_id: Some(sid) })
@@ -316,5 +388,50 @@ mod tests {
     fn format_as_dm_reply_text_omits_block_when_actions_absent() {
         let text = format_as_dm_reply_text("Nothing happens.", None);
         assert_eq!(text, "Nothing happens.");
+    }
+
+    #[test]
+    fn parse_models_response_extracts_ids_in_order() {
+        let body = r#"{"data":[{"id":"llama3:latest","object":"model"},{"id":"gemma4:latest","object":"model"}]}"#;
+        let models = parse_models_response(body).unwrap();
+        assert_eq!(models, vec!["llama3:latest", "gemma4:latest"]);
+    }
+
+    #[test]
+    fn parse_models_response_tolerates_an_empty_list() {
+        let models = parse_models_response(r#"{"data":[]}"#).unwrap();
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn parse_models_response_rejects_malformed_json() {
+        assert!(parse_models_response("not json at all").is_err());
+    }
+
+    fn msg(content: &str) -> ChatMessage {
+        ChatMessage { role: "user".into(), content: content.into() }
+    }
+
+    #[test]
+    fn trim_history_drops_oldest_pairs_beyond_the_limit() {
+        let mut history = vec![msg("1"), msg("1r"), msg("2"), msg("2r"), msg("3"), msg("3r")];
+        trim_history(&mut history, 2);
+        assert_eq!(history.len(), 4);
+        assert_eq!(history[0].content, "2");
+    }
+
+    #[test]
+    fn trim_history_is_a_noop_when_already_under_the_limit() {
+        let mut history = vec![msg("1"), msg("1r")];
+        trim_history(&mut history, 5);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].content, "1");
+    }
+
+    #[test]
+    fn trim_history_with_zero_limit_clears_everything() {
+        let mut history = vec![msg("1"), msg("1r")];
+        trim_history(&mut history, 0);
+        assert!(history.is_empty());
     }
 }

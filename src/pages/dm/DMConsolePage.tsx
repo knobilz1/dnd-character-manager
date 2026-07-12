@@ -2,8 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Map, ClipboardList, Cpu, Landmark, RotateCcw } from 'lucide-react';
+import { open, save } from '@tauri-apps/plugin-dialog';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -424,7 +424,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -432,6 +432,9 @@ export function DMConsolePage() {
   const [error, setError] = React.useState<string | null>(null);
   const [warning, setWarning] = React.useState<string | null>(null);
   const [dmModelOpen, setDmModelOpen] = React.useState(false);
+  const [localModels, setLocalModels] = React.useState<string[]>([]);
+  const [localModelsLoading, setLocalModelsLoading] = React.useState(false);
+  const [localModelsError, setLocalModelsError] = React.useState<string | null>(null);
   const [lanIp, setLanIp] = React.useState<string | null>(null);
   const [sttReady, setSttReady] = React.useState(false);
 
@@ -467,6 +470,8 @@ export function DMConsolePage() {
   const moduleBusyRef = React.useRef<string | null>(null);
   React.useEffect(() => { moduleBusyRef.current = moduleBusy; }, [moduleBusy]);
   const [creatingCampaign, setCreatingCampaign] = React.useState(false);
+  const [exportingCampaign, setExportingCampaign] = React.useState(false);
+  const [importingCampaign, setImportingCampaign] = React.useState(false);
   // "Claude isn't connected — connect now?" gate (see dm.rs's
   // check_claude_auth/connect_claude doc comments). Without this, a dead
   // `claude` connection only surfaces deep inside an ingestion call or a
@@ -1126,6 +1131,29 @@ export function DMConsolePage() {
     invoke('warmup_tts').catch((e) => console.warn('TTS warmup failed (will retry on first use):', e));
   }, []);
 
+  /** Queries local_llm.rs's /v1/models proxy for the DM Model dialog's model
+   *  dropdown. Called on demand (dialog open, Refresh click) rather than on
+   *  page mount, so an idle DM Console never pings a local server that may
+   *  not even be running. */
+  async function refreshLocalModels() {
+    setLocalModelsLoading(true);
+    setLocalModelsError(null);
+    try {
+      const models = await invoke<string[]>('list_local_llm_models', { baseUrl: localLlmBaseUrl });
+      setLocalModels(models);
+    } catch (e) {
+      setLocalModels([]);
+      setLocalModelsError(String(e));
+    } finally {
+      setLocalModelsLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (dmModelOpen) refreshLocalModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmModelOpen]);
+
   /** Mirrors one character's identity/backstory into the active campaign's
    *  memory/party.md (see buildPartyMemberSummary + campaign.rs's
    *  upsert_party_member). Best-effort fire-and-forget: a failed write just
@@ -1142,12 +1170,27 @@ export function DMConsolePage() {
 
   // Receive characters players push over LAN.
   React.useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<Character>('dm-party-character', (event) => {
+    // Capture the PROMISE itself (not `let unlisten; listen(...).then(fn =>
+    // unlisten = fn)`) so cleanup is safe no matter when it runs relative to
+    // the promise resolving. That older pattern has a real race under
+    // StrictMode's dev-only double-invoke (setup -> cleanup -> setup again,
+    // synchronously): cleanup fires before listen()'s promise has resolved,
+    // so `unlisten` is still undefined and `unlisten?.()` is a silent no-op —
+    // the FIRST subscription is never torn down, and the second setup
+    // registers a SECOND, independent one. Both then stay alive for the rest
+    // of the session, each firing on every event. Confirmed live: this was
+    // exactly why dm-narration-chunk below was double-appending every
+    // streamed chunk into narrationBufferRef, producing the overlapping/
+    // duplicated sentence fragments that made every line sound like it
+    // repeated 2-3 times once F5's slower playback made the gap audible
+    // (Kokoro was doing the same thing, just too fast to notice). Chaining
+    // .then() on the promise directly works regardless of timing — it always
+    // fires exactly once, whenever the promise resolves.
+    const unlisten = listen<Character>('dm-party-character', (event) => {
       upsert(event.payload);
       syncPartyMemberToCampaign(event.payload);
-    }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
+    });
+    return () => { unlisten.then((fn) => fn()); };
   }, [upsert]);
 
   // Streamed narration chunks from the current Claude turn (see dm.rs's
@@ -1155,29 +1198,49 @@ export function DMConsolePage() {
   // gating in handleTalkToggle/drainQueue), so a single shared buffer here is
   // safe. Local LLM turns never fire this event at all.
   React.useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<string>('dm-narration-chunk', (event) => {
+    // See the dm-party-character effect above for why the promise is
+    // captured directly rather than via `let unlisten; ...then(fn => ...)`.
+    const unlisten = listen<string>('dm-narration-chunk', (event) => {
       if (suppressNarrationRef.current) return;
       streamedAnyChunkRef.current = true;
       narrationBufferRef.current += event.payload;
       const { sentences, remainder } = extractCompleteSentences(narrationBufferRef.current);
       narrationBufferRef.current = remainder;
       for (const sentence of sentences) enqueueSentence(sentence);
-    }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
+    });
+    return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Receive spoken lines pushed from a player's own device (TalkToDMButton).
   React.useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<PlayerTurn>('dm-player-turn', (event) => {
+    // See the dm-party-character effect above for why the promise is
+    // captured directly rather than via `let unlisten; ...then(fn => ...)`.
+    const unlisten = listen<PlayerTurn>('dm-player-turn', (event) => {
       queueRef.current.push(event.payload);
       drainQueue();
-    }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
+    });
+    return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** A Claude session id and a local-LLM session id are not interchangeable
+   *  (one only means something to `claude --resume`, the other only to
+   *  local_llm.rs's in-memory SESSIONS map) — resuming across a provider
+   *  switch either silently drops context (Claude session id handed to a
+   *  local server, which just finds no history and starts blank) or errors
+   *  outright (a local session id handed to `claude --resume`, which fails
+   *  with "No conversation found with session ID"). So a provider switch
+   *  always starts a fresh conversation on the newly-selected engine, same
+   *  as ending a session does — end_local_dm_session is a harmless no-op if
+   *  the id wasn't actually a local session. */
+  React.useEffect(() => {
+    if (sessionIdRef.current) {
+      invoke('end_local_dm_session', { sessionId: sessionIdRef.current }).catch(() => {});
+    }
+    sessionIdRef.current = undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmProvider]);
 
   /** Routes one turn to whichever DM engine is configured (see
    *  useSettingsStore's dmProvider) — a locally-hosted LLM (local_llm.rs's
@@ -1195,6 +1258,7 @@ export function DMConsolePage() {
         campaignId,
         baseUrl: localLlmBaseUrl,
         model: localLlmModel,
+        historyLimitTurns: localLlmHistoryTurns,
       });
     }
     return invoke<{ text: string; session_id?: string }>('ask_dm', { prompt, sessionId, campaignId, effort });
@@ -1802,6 +1866,52 @@ export function DMConsolePage() {
     }
   }
 
+  /** Backs up the active campaign's entire on-disk folder to a zip the user
+   *  picks a destination for via the native Save dialog — this app's only
+   *  backup mechanism, so a faithful whole-folder export matters (see
+   *  export_campaign_at in campaign.rs). */
+  async function handleExportCampaign() {
+    if (!activeCampaignId) return;
+    const safeName = (activeCampaignName ?? 'campaign').replace(/[\\/:*?"<>|]/g, '_');
+    const destPath = await save({
+      defaultPath: `${safeName}-backup.zip`,
+      filters: [{ name: 'Campaign backup', extensions: ['zip'] }],
+    });
+    if (!destPath) return;
+    setExportingCampaign(true);
+    try {
+      await invoke('export_campaign', { id: activeCampaignId, destPath });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportingCampaign(false);
+    }
+  }
+
+  /** Restores a campaign from a previously-exported zip as a brand-new
+   *  campaign (see import_campaign_at's collision handling — a name already
+   *  in use is a clear error, never a silent overwrite). */
+  async function handleImportCampaign() {
+    const path = await open({
+      multiple: false,
+      filters: [{ name: 'Campaign backup', extensions: ['zip'] }],
+    });
+    if (!path || typeof path !== 'string') return;
+    setImportingCampaign(true);
+    try {
+      const { renamed_from, ...meta } = await invoke<CampaignMeta & { renamed_from: string | null }>('import_campaign', { zipPath: path });
+      setCampaigns((c) => [...c, meta].sort((a, b) => a.name.localeCompare(b.name)));
+      stopSpeakingAndClearQueue();
+      await wrapUpCurrentSession(); // in case a different campaign was already active/mid-session
+      setActiveCampaignId(meta.id);
+      if (renamed_from) setWarning(`Imported as "${meta.name}" — "${renamed_from}" already existed, so the restored copy got a new name. Nothing about the original was touched.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportingCampaign(false);
+    }
+  }
+
   /** "Import module file…" inside the New Campaign dialog — just extracts and
    *  stashes the text; chapterizing needs a real campaign id, so that happens
    *  in handleCreateCampaign right after the campaign is actually created. */
@@ -2247,6 +2357,14 @@ export function DMConsolePage() {
             <Plus size={14} /> New campaign
           </Button>
 
+          <Button size="sm" variant="ghost" onClick={handleExportCampaign} disabled={!activeCampaignId || exportingCampaign} title="Back up the selected campaign to a zip file you choose the location for">
+            <Download size={14} /> {exportingCampaign ? 'Exporting…' : 'Export'}
+          </Button>
+
+          <Button size="sm" variant="ghost" onClick={handleImportCampaign} disabled={importingCampaign} title="Restore a campaign from a previously-exported zip file, as a new campaign">
+            <Upload size={14} /> {importingCampaign ? 'Importing…' : 'Import'}
+          </Button>
+
           <Button size="sm" variant="ghost" onClick={openTerrain} title="Your catalog of physical terrain pieces (not tied to any one campaign)">
             <Map size={14} /> Terrain
           </Button>
@@ -2376,7 +2494,7 @@ export function DMConsolePage() {
                         />
                       </div>
                       <p className="text-[11px] text-slate-400">{c.currentHP}/{c.maxHP} HP</p>
-                      {c.conditions.length > 0 && (
+                      {(c.conditions?.length ?? 0) > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1">
                           {c.conditions.map((cond) => <Badge key={cond} color="red">{cond}</Badge>)}
                         </div>
@@ -2700,13 +2818,57 @@ export function DMConsolePage() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Model name</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-slate-400">Model</label>
+                  <button
+                    type="button"
+                    onClick={refreshLocalModels}
+                    disabled={localModelsLoading}
+                    className="text-xs text-slate-400 hover:text-white disabled:opacity-50"
+                  >
+                    {localModelsLoading ? 'Checking…' : 'Refresh'}
+                  </button>
+                </div>
+                {localModels.length > 0 ? (
+                  <select
+                    value={localLlmModel}
+                    onChange={(e) => setLocalLlmModel(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-600"
+                  >
+                    {!localModels.includes(localLlmModel) && localLlmModel && (
+                      <option value={localLlmModel}>{localLlmModel} (current)</option>
+                    )}
+                    {!localLlmModel && <option value="">Choose a model…</option>}
+                    {localModels.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={localLlmModel}
+                    onChange={(e) => setLocalLlmModel(e.target.value)}
+                    placeholder="e.g. llama3.2, qwen2.5"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-600"
+                  />
+                )}
+                {localModelsError && (
+                  <p className="text-xs text-amber-500 mt-1">
+                    Couldn't detect models from that server ({localModelsError}) — enter the model name manually.
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Conversation memory (turns)</label>
                 <input
-                  value={localLlmModel}
-                  onChange={(e) => setLocalLlmModel(e.target.value)}
-                  placeholder="e.g. llama3.2, qwen2.5"
+                  type="number"
+                  min={0}
+                  value={localLlmHistoryTurns}
+                  onChange={(e) => setLocalLlmHistoryTurns(Math.max(0, Number(e.target.value) || 0))}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-600"
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  How many past turns get resent to the local model each time. Unlike Claude, a local model has no lightweight session token — it replays the whole conversation every turn, and most local models have a much smaller context window. Lower this if replies get slow, confused, or error out on a long session.
+                </p>
               </div>
             </>
           )}

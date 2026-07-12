@@ -283,6 +283,17 @@ Don't bother assigning a permanent voice (step 1) to someone who'll only ever sa
 
 ## Out-of-character requests
 Sometimes the table steps outside the fiction entirely — testing the microphone, asking you to demo what a voice sounds like, asking how the app works, or otherwise clearly addressing you (the DM/app) rather than acting through their characters. Answer those naturally, but nothing said or invented to satisfy one is part of the campaign: never emit a dm-actions block for it, and never let a name, place, or event you made up purely to fulfill a demo/test bleed into entities.md/locations.md/flagged_facts.md/MEMORY.md — those files are the permanent record of the actual story, and an invented sound-check character or made-up test location has no business surviving in there forever.
+
+## Player-declared outcomes vs. reality
+A player only has authority over what their character *attempts* — never whether it succeeds, what other creatures or NPCs do, or what already exists in the scene. Watch for players narrating past that line: declaring their own action already succeeded, or inventing a monster/NPC/item/event that was never established (e.g. "I fly off and kill a big bat"). When that happens, reject the whole overreach, not just the outcome — don't quietly treat whatever they invented as real while denying them the result (a made-up bat doesn't get to bite back "to be fair"). Just say plainly that isn't what happens, or that thing isn't there, and ask what they actually do — don't let any piece of their invention slip into the scene, entities.md, or your later narration.
+
+## Discretionary story twists
+You're allowed a little narrative discretion for the sake of a better scene — but only in one direction: toward more interesting or harder, never toward bailing the party out. Concretely, that covers things like: ruling that a creative, not-strictly-RAW plan works (or works at a cost) because it's clever and fits the fiction; introducing a complication, rival, or ticking clock that raises the stakes; having an NPC react in a way that deepens the scene. It does not cover rescuing the party from a bad outcome, having help arrive because things look grim, or any other deus-ex-machina "save" — if the dice and the situation say the party is in real trouble, let them be in real trouble. Use this sparingly, for a moment that actually calls for it — not as a running modifier on every scene.
+This discretion never touches anything the dice or rules already decided. Death saves, whether an attack hits, how much damage lands — once rolled, the result is final. There is no story-reason override for any of it, ever. **The party can wipe.** That's always on the table and never yours to prevent.
+
+## Genuine dead ends vs. earned consequences
+Before giving the party any way out of a stuck spot, both of these have to be true — not just one: (1) there's truly no path forward at all, not just that the obvious route is gone or the remaining one is hard, costly, or risky; and (2) the dead end wasn't caused by the party's own deliberate choice. Burning the only ladder out of a pit fails condition 2 — that's on them. Handle it as a real consequence (a hard climb check, time pressure, calling for help), not by undoing the choice or handing them a free way out. Per "Discretionary story twists" above, it stands.
+The narrow case this rule covers: a dead end you created by accident, not one the party earned — a locked door with exactly one key, and that key is now gone for good with no other route ever established. Only when both conditions above genuinely hold, patch it: introduce a detail that gives them a legitimate way through (a crack in the wall you hadn't mentioned, a second route, a costly-but-real alternative) — it doesn't need to be easy or free, it just needs to exist. This is fixing your own authoring mistake, not a rescue, and it should be rare: reach for it only when you're sure no path exists, never just because the party is stuck or frustrated.
 "##;
 
 /// Appended to a pre-existing CLAUDE.md that predates the dm_rules import.
@@ -659,6 +670,82 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
     write_atomic(&dir.join("name.txt"), trimmed)?;
     Ok(CampaignMeta { id, name: trimmed.to_string() })
+}
+
+/// Zips a campaign's entire on-disk folder (CLAUDE.md, memory/, any imported
+/// modules — everything, byte for byte) to `dest_zip_path`. This is also this
+/// app's only backup mechanism: nothing about a campaign lives anywhere else,
+/// so a crashed disk with no export taken means that campaign is gone for
+/// good — see zip_dir_to's doc comment for the archive format itself.
+fn export_campaign_at(root: &Path, id: &str, dest_zip_path: &Path) -> Result<(), String> {
+    let dir = root.join(id);
+    if !dir.exists() {
+        return Err(format!("No campaign found with id \"{id}\"."));
+    }
+    crate::tts::zip_dir_to(&dir, dest_zip_path)
+}
+
+/// Finds a name (and its slug) that doesn't collide with an existing
+/// campaign folder under `root`, appending " (2)", " (3)", etc. to `base`
+/// until one's free — the same duplicate-naming convention most file
+/// managers and browsers already use, so restoring a backup never requires
+/// renaming or removing an existing campaign first. Never touches anything
+/// itself — just searches — so the campaign `base` might collide with is
+/// never at risk from this.
+fn dedupe_campaign_name(root: &Path, base: &str) -> (String, String) {
+    let id = slugify(base);
+    if !root.join(&id).exists() {
+        return (base.to_string(), id);
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{base} ({n})");
+        let candidate_id = slugify(&candidate);
+        if !root.join(&candidate_id).exists() {
+            return (candidate, candidate_id);
+        }
+        n += 1;
+    }
+}
+
+/// Imports a previously-exported campaign zip as a brand-new campaign.
+/// Extracts to a scratch directory OUTSIDE campaigns_root first — never
+/// directly into it — so a bad zip can be caught and cleaned up without ever
+/// leaving a half-written folder next to real campaigns. If the zip's own
+/// name collides with an existing campaign, it's auto-renamed with a
+/// dedupe_campaign_name suffix rather than rejected: the existing campaign
+/// is never touched either way, so there's no data-safety reason to make
+/// restoring a backup depend on the user renaming or removing something
+/// first. Returns the final name alongside the ORIGINAL name from the zip
+/// when a rename actually happened, so the caller can tell the user.
+fn import_campaign_at(root: &Path, zip_path: &Path) -> Result<(CampaignMeta, Option<String>), String> {
+    let scratch = std::env::temp_dir().join(format!(
+        "tavern-sheet-import-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&scratch);
+    let result = (|| {
+        crate::tts::extract_zip_to(zip_path, &scratch)?;
+        let name = fs::read_to_string(scratch.join("name.txt"))
+            .map_err(|_| "That zip doesn't look like a campaign backup (missing name.txt).".to_string())?;
+        let original = name.trim().to_string();
+        if original.is_empty() {
+            return Err("That zip's name.txt is empty.".to_string());
+        }
+        let (final_name, id) = dedupe_campaign_name(root, &original);
+        if final_name != original {
+            write_atomic(&scratch.join("name.txt"), &final_name)?;
+        }
+        let final_dir = root.join(&id);
+        fs::rename(&scratch, &final_dir).map_err(|e| format!("Couldn't move the imported campaign into place: {e}"))?;
+        let renamed_from = if final_name != original { Some(original) } else { None };
+        Ok((CampaignMeta { id, name: final_name }, renamed_from))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&scratch);
+    }
+    result
 }
 
 /// Appends one dated entry to the never-compacted, never-loaded backup log
@@ -1968,6 +2055,45 @@ pub fn create_campaign(app: AppHandle, intake: CampaignIntake) -> Result<Campaig
     create_campaign_at(&campaigns_root(&app)?, &intake)
 }
 
+/// Backs up one campaign to a zip file at `dest_path` (chosen via the
+/// frontend's native Save dialog). Async + spawn_blocking since zipping a
+/// campaign with a lot of imported-module history is real, potentially slow
+/// file I/O — same reasoning as probe_cuda's fix earlier: a sync command can
+/// block whatever thread services IPC and freeze the whole window.
+#[tauri::command]
+pub async fn export_campaign(app: AppHandle, id: String, dest_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        export_campaign_at(&root, &id, Path::new(&dest_path))
+    })
+    .await
+    .map_err(|e| format!("Export task failed: {e}"))?
+}
+
+/// import_campaign's return shape — `renamed_from` is only `Some` when the
+/// zip's own name collided with an existing campaign and dedupe_campaign_name
+/// picked a different one, so the frontend can tell the user what happened.
+#[derive(Serialize)]
+pub struct ImportedCampaign {
+    #[serde(flatten)]
+    pub meta: CampaignMeta,
+    pub renamed_from: Option<String>,
+}
+
+/// Restores a campaign from a previously-exported zip (chosen via the
+/// frontend's native file-open dialog) as a brand-new campaign. See
+/// import_campaign_at's doc comment for collision/rename handling.
+#[tauri::command]
+pub async fn import_campaign(app: AppHandle, zip_path: String) -> Result<ImportedCampaign, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        let (meta, renamed_from) = import_campaign_at(&root, Path::new(&zip_path))?;
+        Ok(ImportedCampaign { meta, renamed_from })
+    })
+    .await
+    .map_err(|e| format!("Import task failed: {e}"))?
+}
+
 /// Establishes memory/campaign_lore.md via a one-time Opus call — see
 /// establish_campaign_lore_at. Called by the frontend as its own step right
 /// after create_campaign succeeds; a failure here does not roll back the
@@ -2666,6 +2792,85 @@ mod tests {
     fn create_campaign_rejects_blank_name() {
         let root = Scratch::new("blank");
         assert!(create_campaign_at(&root.0, &intake("   ")).is_err());
+    }
+
+    #[test]
+    fn export_campaign_at_zips_the_folder_and_import_campaign_at_reads_it_back() {
+        let root = Scratch::new("export-import-src");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine of Phandelver")).unwrap();
+        append_memory_note_at(&root.0, &meta.id, "2026-07-12", "The party promised to return the map.").unwrap();
+
+        let zip_path = root.0.join("backup.zip");
+        export_campaign_at(&root.0, &meta.id, &zip_path).unwrap();
+        assert!(zip_path.exists());
+
+        // Import into a SEPARATE root — simulates restoring on a fresh machine.
+        let other_root = Scratch::new("export-import-dst");
+        let (imported, renamed_from) = import_campaign_at(&other_root.0, &zip_path).unwrap();
+        assert_eq!(imported.id, meta.id);
+        assert_eq!(imported.name, meta.name);
+        assert_eq!(renamed_from, None, "importing into a fresh folder must not trigger a rename");
+
+        let claude_md = fs::read_to_string(other_root.0.join(&imported.id).join("CLAUDE.md")).unwrap();
+        assert!(claude_md.contains("You are the Dungeon Master"));
+        let facts = fs::read_to_string(other_root.0.join(&imported.id).join("memory").join("flagged_facts.md")).unwrap();
+        assert!(facts.contains("promised to return the map"), "imported campaign must carry over its actual memory content, not just CLAUDE.md");
+    }
+
+    #[test]
+    fn export_campaign_at_errors_on_an_unknown_id() {
+        let root = Scratch::new("export-missing");
+        let err = export_campaign_at(&root.0, "does-not-exist", &root.0.join("out.zip")).unwrap_err();
+        assert!(err.contains("No campaign found"));
+    }
+
+    #[test]
+    fn import_campaign_at_auto_renames_on_a_name_collision_without_touching_the_original() {
+        let root = Scratch::new("import-collision");
+        let meta = create_campaign_at(&root.0, &intake("Curse of Strahd")).unwrap();
+        append_memory_note_at(&root.0, &meta.id, "2026-07-12", "Original campaign's own fact.").unwrap();
+        let zip_path = root.0.join("backup.zip");
+        export_campaign_at(&root.0, &meta.id, &zip_path).unwrap();
+
+        let (imported, renamed_from) = import_campaign_at(&root.0, &zip_path).unwrap();
+        assert_eq!(renamed_from, Some("Curse of Strahd".to_string()));
+        assert_eq!(imported.name, "Curse of Strahd (2)");
+        assert_ne!(imported.id, meta.id);
+
+        let original_facts = fs::read_to_string(root.0.join(&meta.id).join("memory").join("flagged_facts.md")).unwrap();
+        assert!(original_facts.contains("Original campaign's own fact."), "the pre-existing campaign must be completely untouched by the rename");
+
+        let campaigns = list_campaigns_at(&root.0).unwrap();
+        assert_eq!(campaigns.len(), 2, "both the original and the renamed import must now exist side by side");
+    }
+
+    #[test]
+    fn import_campaign_at_keeps_incrementing_the_suffix_past_two() {
+        let root = Scratch::new("import-collision-triple");
+        let meta = create_campaign_at(&root.0, &intake("Curse of Strahd")).unwrap();
+        let zip_path = root.0.join("backup.zip");
+        export_campaign_at(&root.0, &meta.id, &zip_path).unwrap();
+
+        let (first_import, _) = import_campaign_at(&root.0, &zip_path).unwrap();
+        assert_eq!(first_import.name, "Curse of Strahd (2)");
+        let (second_import, _) = import_campaign_at(&root.0, &zip_path).unwrap();
+        assert_eq!(second_import.name, "Curse of Strahd (3)");
+    }
+
+    #[test]
+    fn import_campaign_at_rejects_a_zip_that_is_not_a_campaign_backup() {
+        use std::io::Write;
+        let root = Scratch::new("import-garbage");
+        let zip_path = root.0.join("not-a-campaign.zip");
+        let f = fs::File::create(&zip_path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zw.start_file("random.txt", opts).unwrap();
+        zw.write_all(b"not a campaign").unwrap();
+        zw.finish().unwrap();
+
+        let err = import_campaign_at(&root.0, &zip_path).unwrap_err();
+        assert!(err.contains("doesn't look like a campaign backup"));
     }
 
     #[test]

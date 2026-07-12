@@ -242,30 +242,37 @@ export function DriveSync({ open, onClose }: DriveSyncProps) {
 
 // ── Header button (rendered in HomePage) ─────────────────────────────────────
 
-export function DriveSyncButton() {
+/** Just the icon button — deliberately NOT holding its own open/close state
+ *  or rendering <DriveSync> itself. It used to, but it's rendered inside
+ *  HomePage's Settings dialog, which unmounts its whole subtree on close
+ *  (see ui/Dialog: `if (!open) return null`). The click here also bubbles up
+ *  to a wrapper that closes Settings (so the two dialogs don't stack) — with
+ *  the drive dialog's state living IN this same subtree, that close-Settings
+ *  bubble was unmounting this component (and the open=true it had just set)
+ *  in the same tick, before the drive dialog ever got a chance to render.
+ *  Net effect: Settings closes, nothing else visibly happens. Fix: the parent
+ *  now owns the open state and renders <DriveSync> itself, outside Settings'
+ *  Dialog — see HomePage.tsx. */
+export function DriveSyncButton({ onClick }: { onClick: () => void }) {
   const { isConnected, isSyncing } = useDriveStore();
-  const [open, setOpen] = React.useState(false);
 
   return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        title={isConnected ? 'Google Drive sync active' : 'Connect Google Drive'}
-        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors ${
-          isConnected
-            ? 'text-emerald-400 border-emerald-800 hover:border-emerald-600 bg-emerald-900/20'
-            : 'text-slate-400 border-slate-700 hover:border-slate-500 hover:text-slate-200'
-        }`}
-      >
-        {isSyncing ? (
-          <Loader2 size={16} className="animate-spin" />
-        ) : isConnected ? (
-          <Cloud size={16} />
-        ) : (
-          <CloudOff size={16} />
-        )}
-      </button>
-      <DriveSync open={open} onClose={() => setOpen(false)} />
-    </>
+    <button
+      onClick={onClick}
+      title={isConnected ? 'Google Drive sync active' : 'Connect Google Drive'}
+      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors ${
+        isConnected
+          ? 'text-emerald-400 border-emerald-800 hover:border-emerald-600 bg-emerald-900/20'
+          : 'text-slate-400 border-slate-700 hover:border-slate-500 hover:text-slate-200'
+      }`}
+    >
+      {isSyncing ? (
+        <Loader2 size={16} className="animate-spin" />
+      ) : isConnected ? (
+        <Cloud size={16} />
+      ) : (
+        <CloudOff size={16} />
+      )}
+    </button>
   );
 }
