@@ -40,6 +40,15 @@ interface SettingsState {
    *  bounds it. Claude-only sessions ignore this entirely. */
   localLlmHistoryTurns: number;
   setLocalLlmHistoryTurns: (v: number) => void;
+  /** Which engine synthesizes the DM/NPC voices. 'kokoro' (default) is the
+   *  fast, CPU, always-available preset-voice engine; 'f5' is the optional
+   *  high-fidelity GPU voice-cloning engine (see src-tauri/src/tts.rs). ONE-WAY
+   *  by design: once 'f5', it stays 'f5' — future F5-only voices have no Kokoro
+   *  equivalent, so a revert would strand any NPC assigned one (the Voice Engine
+   *  panel enforces this). The Rust side mirrors this via the set_tts_engine
+   *  command; this persisted value is the source of truth, re-synced on mount. */
+  ttsEngine: 'kokoro' | 'f5';
+  setTtsEngine: (v: 'kokoro' | 'f5') => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -62,6 +71,8 @@ export const useSettingsStore = create<SettingsState>()(
       setLocalLlmModel: (v) => set({ localLlmModel: v }),
       localLlmHistoryTurns: 12,
       setLocalLlmHistoryTurns: (v) => set({ localLlmHistoryTurns: v }),
+      ttsEngine: 'kokoro',
+      setTtsEngine: (v) => set({ ttsEngine: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )

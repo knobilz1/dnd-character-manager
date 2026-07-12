@@ -36,6 +36,20 @@ export const VOICE_CATALOG_IDS = new Set([
   'male-gb-1', 'male-gb-2', 'male-gb-3', 'male-gb-4',
   'female-us-1', 'female-us-2', 'female-us-3', 'female-us-4', 'female-us-5', 'female-us-6', 'female-us-7', 'female-us-8', 'female-us-9', 'female-us-10',
   'female-gb-1', 'female-gb-2', 'female-gb-3', 'female-gb-4',
+  // F5-exclusive archetype voices (tts.rs's ARCHETYPE_VOICES, the source of
+  // truth) -- real recorded speakers curated per D&D race/monster archetype,
+  // 5 male + 5 female each. Only resolve to real audio under F5; under
+  // Kokoro (or F5 unavailable) each falls back to its declared nearest
+  // VOICE_CATALOG id, same graceful-degradation shape as everything else
+  // in this set.
+  'orc-m-1', 'orc-m-2', 'orc-m-3', 'orc-m-4', 'orc-m-5', 'orc-f-1', 'orc-f-2', 'orc-f-3', 'orc-f-4', 'orc-f-5',
+  'giant-m-1', 'giant-m-2', 'giant-m-3', 'giant-m-4', 'giant-m-5', 'giant-f-1', 'giant-f-2', 'giant-f-3', 'giant-f-4', 'giant-f-5',
+  'dwarf-m-1', 'dwarf-m-2', 'dwarf-m-3', 'dwarf-m-4', 'dwarf-m-5', 'dwarf-f-1', 'dwarf-f-2', 'dwarf-f-3', 'dwarf-f-4', 'dwarf-f-5',
+  'elf-m-1', 'elf-m-2', 'elf-m-3', 'elf-m-4', 'elf-m-5', 'elf-f-1', 'elf-f-2', 'elf-f-3', 'elf-f-4', 'elf-f-5',
+  'gnome-m-1', 'gnome-m-2', 'gnome-m-3', 'gnome-m-4', 'gnome-m-5', 'gnome-f-1', 'gnome-f-2', 'gnome-f-3', 'gnome-f-4', 'gnome-f-5',
+  'halfling-m-1', 'halfling-m-2', 'halfling-m-3', 'halfling-m-4', 'halfling-m-5', 'halfling-f-1', 'halfling-f-2', 'halfling-f-3', 'halfling-f-4', 'halfling-f-5',
+  'sinister-m-1', 'sinister-m-2', 'sinister-m-3', 'sinister-m-4', 'sinister-m-5', 'sinister-f-1', 'sinister-f-2', 'sinister-f-3', 'sinister-f-4', 'sinister-f-5',
+  'sage-m-1', 'sage-m-2', 'sage-m-3', 'sage-m-4', 'sage-m-5', 'sage-f-1', 'sage-f-2', 'sage-f-3', 'sage-f-4', 'sage-f-5',
 ]);
 
 /** Old Piper-catalog accent ids a pre-Kokoro campaign's npc_voices.json (or an

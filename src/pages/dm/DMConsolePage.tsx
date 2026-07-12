@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2 } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -21,6 +21,14 @@ import { ALL_SUBCLASSES } from '../../data/subclasses';
 import type { Character } from '../../types';
 
 const DM_PORT = 7777;
+
+/** GPU info from tts.rs's probe_cuda (None → no NVIDIA card). */
+interface CudaInfo { name: string; vram_mb: number; }
+
+/** Minimum VRAM (MB) to offer the F5 high-quality voice engine. F5 and the
+ *  WebGL character viewport share the GPU, so a small card would stutter —
+ *  ~6 GB is the floor. Below this the F5 option is shown but disabled. */
+const F5_MIN_VRAM_MB = 6000;
 
 /** How often (in turns) the campaign-arc plan gets re-included in the turn
  *  prompt when nothing else has already triggered a check-in. See dmPrompt.ts
@@ -86,6 +94,89 @@ const VOICE_LABELS: Record<string, string> = {
   'female-gb-2': 'English (female 2)',
   'female-gb-3': 'English (female 3)',
   'female-gb-4': 'English (female 4)',
+  // F5-exclusive archetype voices (tts.rs's ARCHETYPE_VOICES) -- only
+  // resolve to real audio under F5, hence the "HD" suffix; under Kokoro
+  // each falls back to its declared nearest catalog voice.
+  'orc-m-1': 'Orc (male 1) — HD',
+  'orc-m-2': 'Orc (male 2) — HD',
+  'orc-m-3': 'Orc (male 3) — HD',
+  'orc-m-4': 'Orc (male 4) — HD',
+  'orc-m-5': 'Orc (male 5) — HD',
+  'orc-f-1': 'Orc (female 1) — HD',
+  'orc-f-2': 'Orc (female 2) — HD',
+  'orc-f-3': 'Orc (female 3) — HD',
+  'orc-f-4': 'Orc (female 4) — HD',
+  'orc-f-5': 'Orc (female 5) — HD',
+  'giant-m-1': 'Giant-kin (male 1) — HD',
+  'giant-m-2': 'Giant-kin (male 2) — HD',
+  'giant-m-3': 'Giant-kin (male 3) — HD',
+  'giant-m-4': 'Giant-kin (male 4) — HD',
+  'giant-m-5': 'Giant-kin (male 5) — HD',
+  'giant-f-1': 'Giant-kin (female 1) — HD',
+  'giant-f-2': 'Giant-kin (female 2) — HD',
+  'giant-f-3': 'Giant-kin (female 3) — HD',
+  'giant-f-4': 'Giant-kin (female 4) — HD',
+  'giant-f-5': 'Giant-kin (female 5) — HD',
+  'dwarf-m-1': 'Dwarf (male 1) — HD',
+  'dwarf-m-2': 'Dwarf (male 2) — HD',
+  'dwarf-m-3': 'Dwarf (male 3) — HD',
+  'dwarf-m-4': 'Dwarf (male 4) — HD',
+  'dwarf-m-5': 'Dwarf (male 5) — HD',
+  'dwarf-f-1': 'Dwarf (female 1) — HD',
+  'dwarf-f-2': 'Dwarf (female 2) — HD',
+  'dwarf-f-3': 'Dwarf (female 3) — HD',
+  'dwarf-f-4': 'Dwarf (female 4) — HD',
+  'dwarf-f-5': 'Dwarf (female 5) — HD',
+  'elf-m-1': 'Elf (male 1) — HD',
+  'elf-m-2': 'Elf (male 2) — HD',
+  'elf-m-3': 'Elf (male 3) — HD',
+  'elf-m-4': 'Elf (male 4) — HD',
+  'elf-m-5': 'Elf (male 5) — HD',
+  'elf-f-1': 'Elf (female 1) — HD',
+  'elf-f-2': 'Elf (female 2) — HD',
+  'elf-f-3': 'Elf (female 3) — HD',
+  'elf-f-4': 'Elf (female 4) — HD',
+  'elf-f-5': 'Elf (female 5) — HD',
+  'gnome-m-1': 'Gnome (male 1) — HD',
+  'gnome-m-2': 'Gnome (male 2) — HD',
+  'gnome-m-3': 'Gnome (male 3) — HD',
+  'gnome-m-4': 'Gnome (male 4) — HD',
+  'gnome-m-5': 'Gnome (male 5) — HD',
+  'gnome-f-1': 'Gnome (female 1) — HD',
+  'gnome-f-2': 'Gnome (female 2) — HD',
+  'gnome-f-3': 'Gnome (female 3) — HD',
+  'gnome-f-4': 'Gnome (female 4) — HD',
+  'gnome-f-5': 'Gnome (female 5) — HD',
+  'halfling-m-1': 'Halfling (male 1) — HD',
+  'halfling-m-2': 'Halfling (male 2) — HD',
+  'halfling-m-3': 'Halfling (male 3) — HD',
+  'halfling-m-4': 'Halfling (male 4) — HD',
+  'halfling-m-5': 'Halfling (male 5) — HD',
+  'halfling-f-1': 'Halfling (female 1) — HD',
+  'halfling-f-2': 'Halfling (female 2) — HD',
+  'halfling-f-3': 'Halfling (female 3) — HD',
+  'halfling-f-4': 'Halfling (female 4) — HD',
+  'halfling-f-5': 'Halfling (female 5) — HD',
+  'sinister-m-1': 'Sinister (male 1) — HD',
+  'sinister-m-2': 'Sinister (male 2) — HD',
+  'sinister-m-3': 'Sinister (male 3) — HD',
+  'sinister-m-4': 'Sinister (male 4) — HD',
+  'sinister-m-5': 'Sinister (male 5) — HD',
+  'sinister-f-1': 'Sinister (female 1) — HD',
+  'sinister-f-2': 'Sinister (female 2) — HD',
+  'sinister-f-3': 'Sinister (female 3) — HD',
+  'sinister-f-4': 'Sinister (female 4) — HD',
+  'sinister-f-5': 'Sinister (female 5) — HD',
+  'sage-m-1': 'Elderly sage (male 1) — HD',
+  'sage-m-2': 'Elderly sage (male 2) — HD',
+  'sage-m-3': 'Elderly sage (male 3) — HD',
+  'sage-m-4': 'Elderly sage (male 4) — HD',
+  'sage-m-5': 'Elderly sage (male 5) — HD',
+  'sage-f-1': 'Elderly sage (female 1) — HD',
+  'sage-f-2': 'Elderly sage (female 2) — HD',
+  'sage-f-3': 'Elderly sage (female 3) — HD',
+  'sage-f-4': 'Elderly sage (female 4) — HD',
+  'sage-f-5': 'Elderly sage (female 5) — HD',
 };
 
 /** Ordered options for the voice-override panel's dropdown — every catalog
@@ -424,7 +515,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ttsEngine, setTtsEngine } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -435,6 +526,12 @@ export function DMConsolePage() {
   const [localModels, setLocalModels] = React.useState<string[]>([]);
   const [localModelsLoading, setLocalModelsLoading] = React.useState(false);
   const [localModelsError, setLocalModelsError] = React.useState<string | null>(null);
+  const [voiceEngineOpen, setVoiceEngineOpen] = React.useState(false);
+  const [cudaInfo, setCudaInfo] = React.useState<CudaInfo | null>(null);
+  const [f5Installed, setF5Installed] = React.useState(false);
+  const [f5ConfirmOpen, setF5ConfirmOpen] = React.useState(false);
+  const [f5Installing, setF5Installing] = React.useState(false);
+  const [f5Progress, setF5Progress] = React.useState<{ phase: string; downloaded: number; total: number } | null>(null);
   const [lanIp, setLanIp] = React.useState<string | null>(null);
   const [sttReady, setSttReady] = React.useState(false);
 
@@ -1125,10 +1222,30 @@ export function DMConsolePage() {
     invoke<string | null>('local_lan_ip').then(setLanIp).catch(() => setLanIp(null));
     warmupSTT().then(() => setSttReady(true)).catch((e) => setError(`Speech recognition failed to load: ${e.message || e}`));
     invoke<CampaignMeta[]>('list_campaigns').then(setCampaigns).catch((e) => setError(`Couldn't load campaigns: ${e}`));
-    // Starts the persistent Kokoro process ahead of the first real turn, so
-    // that turn doesn't also pay the one-time process-spawn (+ first-ever
-    // model download) cost.
-    invoke('warmup_tts').catch((e) => console.warn('TTS warmup failed (will retry on first use):', e));
+    // Sync the Rust engine selection to the persisted setting, THEN warm that
+    // engine ahead of the first real turn so it doesn't also pay the one-time
+    // spawn (+ first-ever model download, or F5's ~16s model-load) cost.
+    // Chained so warmup always sees the right engine.
+    invoke('set_tts_engine', { engine: useSettingsStore.getState().ttsEngine })
+      .catch(() => {})
+      .finally(() => {
+        invoke('warmup_tts').catch((e) => console.warn('TTS warmup failed (will retry on first use):', e));
+      });
+  }, []);
+
+  // F5 voice engine: probe the GPU (gates the enable control), check whether the
+  // runtime is already installed, and subscribe to install-progress events.
+  React.useEffect(() => {
+    invoke<CudaInfo | null>('probe_cuda').then(setCudaInfo).catch(() => setCudaInfo(null));
+    invoke<boolean>('f5_runtime_installed').then(setF5Installed).catch(() => setF5Installed(false));
+    const unlisten = listen<{ phase: string; downloaded: number; total: number }>(
+      'f5-install-progress',
+      (e) => {
+        setF5Progress(e.payload);
+        if (e.payload.phase === 'done') setF5Installed(true);
+      }
+    );
+    return () => { unlisten.then((f) => f()); };
   }, []);
 
   /** Queries local_llm.rs's /v1/models proxy for the DM Model dialog's model
@@ -1153,6 +1270,32 @@ export function DMConsolePage() {
     if (dmModelOpen) refreshLocalModels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dmModelOpen]);
+
+  /** Whether this machine's GPU clears the bar to even offer F5 (see probe_cuda
+   *  + F5_MIN_VRAM_MB). Below it, the F5 option is shown but disabled. */
+  const f5Capable = cudaInfo != null && cudaInfo.vram_mb >= F5_MIN_VRAM_MB;
+
+  /** Confirmed download → install the F5 runtime (with progress), then flip the
+   *  engine to F5 and mirror it to Rust. One-way: there's no UI path back to
+   *  Kokoro once this succeeds (see useSettingsStore's ttsEngine). install is
+   *  idempotent, so if the runtime's already present this just flips the engine. */
+  const handleConfirmInstallF5 = async () => {
+    setF5ConfirmOpen(false);
+    setF5Installing(true);
+    setF5Progress(null);
+    setError(null);
+    try {
+      await invoke('install_f5_runtime');
+      setF5Installed(true);
+      setTtsEngine('f5');
+      await invoke('set_tts_engine', { engine: 'f5' });
+    } catch (e: any) {
+      setError(`Couldn't install the high-quality voice engine: ${e?.message || e}`);
+    } finally {
+      setF5Installing(false);
+      setF5Progress(null);
+    }
+  };
 
   /** Mirrors one character's identity/backstory into the active campaign's
    *  memory/party.md (see buildPartyMemberSummary + campaign.rs's
@@ -2372,6 +2515,9 @@ export function DMConsolePage() {
           <Button size="sm" variant="ghost" onClick={() => setDmModelOpen(true)} title="Which engine runs the DM — Claude or a local LLM">
             <Cpu size={14} /> DM Model{dmProvider === 'local' ? ' (Local)' : ''}
           </Button>
+          <Button size="sm" variant="ghost" onClick={() => setVoiceEngineOpen(true)} title="Which engine gives the DM its voice — Standard or high-quality">
+            <Volume2 size={14} /> Voice{ttsEngine === 'f5' ? ' (HQ)' : ''}
+          </Button>
 
           {activeCampaignId && (
             <>
@@ -2875,6 +3021,80 @@ export function DMConsolePage() {
         </div>
         <div className="flex justify-end mt-4">
           <Button onClick={() => setDmModelOpen(false)}>Done</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={voiceEngineOpen} onClose={() => setVoiceEngineOpen(false)} title="Voice Engine">
+        <p className="text-xs text-slate-400 mb-3">
+          Which engine gives the DM and its NPCs their voices. <span className="text-slate-200">Standard</span> runs on any computer. <span className="text-slate-200">High-quality</span> is a large, GPU-only upgrade with richer, more natural voices — worth it if you have a strong NVIDIA graphics card.
+        </p>
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
+            <div>
+              <p className="text-sm text-slate-100">Standard voices</p>
+              <p className="text-xs text-slate-500">Fast, runs anywhere. The default.</p>
+            </div>
+            {ttsEngine === 'kokoro' && <Badge>Active</Badge>}
+          </div>
+
+          <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm text-slate-100">High-quality voices</p>
+                <p className="text-xs text-slate-500">{cudaInfo ? `GPU: ${cudaInfo.name}` : 'Requires an NVIDIA GPU'}</p>
+              </div>
+              {ttsEngine === 'f5' && <Badge>Active</Badge>}
+            </div>
+
+            {ttsEngine === 'f5' ? (
+              <p className="text-xs text-emerald-400 mt-2">Enabled. Cannot be disabled once enabled.</p>
+            ) : !f5Capable ? (
+              <p className="text-xs text-amber-400 mt-2">
+                Needs an NVIDIA GPU with at least 6&nbsp;GB of memory{cudaInfo ? ` (this card reports ${(cudaInfo.vram_mb / 1024).toFixed(0)} GB)` : ''}. Not available on this computer.
+              </p>
+            ) : f5Installing ? (
+              <div className="mt-2">
+                <p className="text-xs text-slate-300 mb-1">
+                  {f5Progress?.phase === 'extract'
+                    ? 'Unpacking…'
+                    : f5Progress && f5Progress.total > 0
+                      ? `Downloading… ${(f5Progress.downloaded / 1e9).toFixed(2)} / ${(f5Progress.total / 1e9).toFixed(2)} GB`
+                      : 'Downloading…'}
+                </p>
+                <div className="h-1.5 w-full bg-slate-800 rounded overflow-hidden">
+                  <div
+                    className="h-full bg-red-600 transition-all"
+                    style={{ width: f5Progress && f5Progress.total > 0 ? `${Math.min(100, (f5Progress.downloaded / f5Progress.total) * 100)}%` : '25%' }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => (f5Installed ? handleConfirmInstallF5() : setF5ConfirmOpen(true))}
+                className="mt-2 text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 rounded px-2 py-1 transition-colors"
+              >
+                {/* Already downloaded (rare: installed but never activated) → enable
+                    directly; otherwise gate on the confirm-download modal first. */}
+                {f5Installed ? 'Enable high-quality voices' : 'Enable high-quality voices…'}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-end mt-4">
+          <Button onClick={() => setVoiceEngineOpen(false)}>Done</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={f5ConfirmOpen} onClose={() => setF5ConfirmOpen(false)} title="Download high-quality voices?">
+        <p className="text-sm text-slate-300 mb-3">
+          This downloads about <span className="text-slate-100 font-semibold">4&nbsp;GB</span> — the high-quality voice engine and its model — and installs it on this computer. It runs entirely offline afterward.
+        </p>
+        <p className="text-sm text-amber-400 mb-4">
+          Heads up: this <span className="font-semibold">can't be turned off once enabled.</span> Some high-quality voices have no standard equivalent, so switching back could leave NPCs without their assigned voice.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setF5ConfirmOpen(false)}>Cancel</Button>
+          <Button onClick={handleConfirmInstallF5}>Download &amp; enable</Button>
         </div>
       </Dialog>
 

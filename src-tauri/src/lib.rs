@@ -84,6 +84,10 @@ pub fn run() {
       terrain::save_terrain_catalog,
       tts::speak_text,
       tts::warmup_tts,
+      tts::probe_cuda,
+      tts::set_tts_engine,
+      tts::f5_runtime_installed,
+      tts::install_f5_runtime,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
