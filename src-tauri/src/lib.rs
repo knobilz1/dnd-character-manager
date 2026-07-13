@@ -63,6 +63,7 @@ pub fn run() {
       campaign::resolve_flagged_fact,
       campaign::set_npc_voice,
       campaign::read_npc_voices,
+      campaign::campaign_archetype_voice_count,
       campaign::sync_dm_rules,
       campaign::log_voice_debug,
       campaign::reconcile_npc_voices,

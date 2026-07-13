@@ -532,6 +532,13 @@ export function DMConsolePage() {
   const [f5ConfirmOpen, setF5ConfirmOpen] = React.useState(false);
   const [f5Installing, setF5Installing] = React.useState(false);
   const [f5Progress, setF5Progress] = React.useState<{ phase: string; downloaded: number; total: number } | null>(null);
+  const [hdPromptOpen, setHdPromptOpen] = React.useState(false);
+  const [hdPromptCount, setHdPromptCount] = React.useState(0);
+  /** Campaign ids already checked for archetype voices this app session — so
+   *  switching back to a campaign the user already dismissed the prompt for
+   *  doesn't ask again every time (see the effect below). Resets on restart,
+   *  which is fine: worst case is one repeat prompt per campaign per launch. */
+  const hdPromptedRef = React.useRef<Set<string>>(new Set());
   const [lanIp, setLanIp] = React.useState<string | null>(null);
   const [sttReady, setSttReady] = React.useState(false);
 
@@ -1296,6 +1303,27 @@ export function DMConsolePage() {
       setF5Progress(null);
     }
   };
+
+  /** Detects a campaign that was curated with HD archetype voices (tts.rs's
+   *  ARCHETYPE_VOICES) — e.g. imported from a table that had the engine
+   *  enabled — landing on a machine that isn't using it yet. Never
+   *  auto-enables: F5 is a ~4 GB, GPU-gated, one-way download, so this only
+   *  *offers* it (via the existing confirm-download modal) once per campaign
+   *  per app session, gated on this machine actually being capable at all —
+   *  no point prompting for a feature the hardware can't run. */
+  React.useEffect(() => {
+    if (!activeCampaignId || ttsEngine === 'f5' || !f5Capable) return;
+    if (hdPromptedRef.current.has(activeCampaignId)) return;
+    hdPromptedRef.current.add(activeCampaignId);
+    invoke<number>('campaign_archetype_voice_count', { id: activeCampaignId })
+      .then((count) => {
+        if (count > 0 && campaignIdRef.current === activeCampaignId) {
+          setHdPromptCount(count);
+          setHdPromptOpen(true);
+        }
+      })
+      .catch(() => {});
+  }, [activeCampaignId, ttsEngine, f5Capable]);
 
   /** Mirrors one character's identity/backstory into the active campaign's
    *  memory/party.md (see buildPartyMemberSummary + campaign.rs's
@@ -3099,6 +3127,24 @@ export function DMConsolePage() {
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => setF5ConfirmOpen(false)}>Cancel</Button>
           <Button onClick={handleConfirmInstallF5}>Download &amp; enable</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={hdPromptOpen} onClose={() => setHdPromptOpen(false)} title="This campaign has HD voices">
+        <p className="text-sm text-slate-300 mb-4">
+          {campaigns.find((c) => c.id === activeCampaignId)?.name || 'This campaign'} has {hdPromptCount === 1 ? '1 NPC' : `${hdPromptCount} NPCs`} voiced with the high-quality archetype voices (orcs, dwarves, and the like). Standard voices still work for them, just without the distinct sound they were given.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setHdPromptOpen(false)}>Not now</Button>
+          <Button
+            onClick={() => {
+              setHdPromptOpen(false);
+              if (f5Installed) handleConfirmInstallF5();
+              else setF5ConfirmOpen(true);
+            }}
+          >
+            Enable HD voices…
+          </Button>
         </div>
       </Dialog>
 

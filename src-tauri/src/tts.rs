@@ -257,6 +257,17 @@ const LEGACY_VOICE_ALIASES: &[(&str, &str)] = &[
 /// Callers (speak_text/warmup_tts) treat that failure the same harmless way
 /// an unknown value always has here — falling back to the narrator voice
 /// rather than erroring the whole turn.
+/// Whether `voice_id` is one of the curated archetype voices (ARCHETYPE_VOICES)
+/// rather than a plain catalog id or legacy alias. Exposed (not the table
+/// itself) so campaign.rs can detect whether a campaign would benefit from
+/// the high-quality voice engine — see campaign.rs's
+/// campaign_archetype_voice_count, which offers enabling F5 after importing/
+/// opening a campaign curated with it, rather than the table's fallback
+/// mapping it has no other reason to know about.
+pub(crate) fn is_archetype_voice(voice_id: &str) -> bool {
+    ARCHETYPE_VOICES.iter().any(|(id, _)| *id == voice_id)
+}
+
 fn catalog_kokoro_voice(voice_id: &str) -> Result<&'static str, String> {
     // ARCHETYPE_VOICES ids have no Kokoro voice of their own — resolve to
     // their declared fallback first (a real VOICE_CATALOG id), then fall
@@ -1549,6 +1560,16 @@ mod tests {
         assert_eq!(f5_ref_voice_id("orc-m-1"), "orc-m-1");
         assert_eq!(f5_ref_voice_id("dwarf-f-3"), "dwarf-f-3");
         assert_eq!(f5_ref_voice_id("sage-m-5"), "sage-m-5");
+    }
+
+    #[test]
+    fn is_archetype_voice_distinguishes_archetype_ids_from_everything_else() {
+        assert!(is_archetype_voice("orc-m-1"));
+        assert!(is_archetype_voice("sage-f-5"));
+        assert!(!is_archetype_voice("male-us-4"), "a plain catalog id is not an archetype voice");
+        assert!(!is_archetype_voice("narrator"));
+        assert!(!is_archetype_voice("male-scottish-1"), "a legacy alias is not an archetype voice, even one that now points near a similarly-accented bucket");
+        assert!(!is_archetype_voice("dragon-lord-9000"), "an unrecognized id is not an archetype voice");
     }
 
     #[test]

@@ -2226,6 +2226,24 @@ pub fn read_npc_voices(app: AppHandle, id: String) -> Result<HashMap<String, Npc
     Ok(read_npc_voices_at(&campaigns_root(&app)?, &id))
 }
 
+/// Counts NPCs in this campaign assigned one of tts.rs's curated archetype
+/// voices (is_archetype_voice) — e.g. an `orc-m-1`. `ttsEngine` is a device-
+/// wide setting (useSettingsStore), not a per-campaign one, so there's no
+/// "was the high-quality engine enabled when this campaign was made" fact to
+/// read back on import; this checks the actual voice data instead. Called
+/// once per campaign activation (import or switch) by DMConsolePage — a
+/// non-zero count while the high-quality engine is off is the signal it uses
+/// to *offer* enabling it (existing confirm-download modal), never to force
+/// the large, GPU-gated, one-way download automatically.
+fn campaign_archetype_voice_count_at(root: &Path, id: &str) -> usize {
+    read_npc_voices_at(root, id).values().filter(|a| crate::tts::is_archetype_voice(&a.voice_id)).count()
+}
+
+#[tauri::command]
+pub fn campaign_archetype_voice_count(app: AppHandle, id: String) -> Result<usize, String> {
+    Ok(campaign_archetype_voice_count_at(&campaigns_root(&app)?, &id))
+}
+
 /// Refreshes this campaign's generated DM rules — see sync_dm_rules_at. Called
 /// from DMConsolePage on every campaign load, before the DM session is warmed,
 /// so the very first turn already sees the current rules.
@@ -3096,6 +3114,25 @@ mod tests {
         let assigned = voices.get("squibbins").unwrap();
         assert_eq!(assigned.voice_id, "male-us-2");
         assert_eq!(assigned.pitch.as_deref(), Some("small"));
+    }
+
+    #[test]
+    fn campaign_archetype_voice_count_at_counts_only_archetype_ids() {
+        let root = Scratch::new("archetype-voice-count");
+        fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
+
+        assert_eq!(campaign_archetype_voice_count_at(&root.0, "camp"), 0, "no assignments yet");
+
+        set_npc_voice_at(&root.0, "camp", "Gundren Rockseeker", "dwarf-m-2", None, None, false).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Squibbins", "gnome-m-3", None, None, false).unwrap();
+        set_npc_voice_at(&root.0, "camp", "Elara", "female-us-1", None, None, false).unwrap();
+        assert_eq!(campaign_archetype_voice_count_at(&root.0, "camp"), 2, "Gundren and Squibbins are archetype voices, Elara is a plain catalog id");
+    }
+
+    #[test]
+    fn campaign_archetype_voice_count_at_is_zero_for_an_unknown_campaign() {
+        let root = Scratch::new("archetype-voice-count-missing");
+        assert_eq!(campaign_archetype_voice_count_at(&root.0, "no-such-campaign"), 0);
     }
 
     #[test]
