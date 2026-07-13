@@ -111,11 +111,26 @@ struct ResponseFormat {
     kind: String,
 }
 
+/// Qwen3-family models default to "thinking mode" — a `<think>...</think>`
+/// reasoning block prepended to every reply. Without this, that raw internal
+/// monologue lands straight in `narration` (parse_local_reply doesn't strip
+/// it, it just splits on the JSON contract) and gets spoken by the DM before
+/// the actual in-character line. `enable_thinking: false` is the documented
+/// vLLM/Qwen3 chat-template toggle to suppress it at generation time instead
+/// of parsing it back out after the fact. Harmless on any other backend —
+/// an OpenAI-compatible server that doesn't recognize this field just ignores
+/// it, same as any other unknown JSON key.
+#[derive(Serialize)]
+struct ChatTemplateKwargs {
+    enable_thinking: bool,
+}
+
 #[derive(Serialize)]
 struct ChatCompletionRequest {
     model: String,
     messages: Vec<ChatMessage>,
     response_format: ResponseFormat,
+    chat_template_kwargs: ChatTemplateKwargs,
 }
 
 fn build_request(model: &str, system_prompt: &str, history: &[ChatMessage], user_prompt: &str) -> ChatCompletionRequest {
@@ -127,6 +142,7 @@ fn build_request(model: &str, system_prompt: &str, history: &[ChatMessage], user
         model: model.to_string(),
         messages,
         response_format: ResponseFormat { kind: "json_object".into() },
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
     }
 }
 
@@ -335,6 +351,13 @@ mod tests {
         let resolved = resolve_claude_md_imports(&root.0, claude_md);
         assert!(resolved.contains("Persona text."));
         // missing file resolves to empty content, not an error/panic
+    }
+
+    #[test]
+    fn build_request_disables_qwen3_thinking_mode() {
+        let req = build_request("test-model", "sys prompt", &[], "hi");
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["chat_template_kwargs"]["enable_thinking"], false);
     }
 
     #[test]
