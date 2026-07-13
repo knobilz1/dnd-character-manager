@@ -16,7 +16,8 @@
       python.exe                embeddable CPython (+ python3xx.zip stdlib, DLLs)
       Lib/site-packages/...      torch (cu124), torchaudio, f5-tts, soundfile, ...
       f5_cli.py                  the persistent worker (scripts/f5_cli.py)
-      refs/<voice_id>.wav|.txt    Kokoro-bootstrapped reference clips (gen_f5_refs.py)
+      refs/<voice_id>.wav|.txt    Kokoro-bootstrapped clips (gen_f5_refs.py) plus, if
+                                   -ArchetypeRefsDir is given, curated archetype clips
       model/model.safetensors     the F5 checkpoint      (tts.rs sets F5_CKPT)
       model/vocab.txt             its vocab              (tts.rs sets F5_VOCAB)
 
@@ -59,8 +60,21 @@ param(
     [Parameter(Mandatory = $true)][string]$KokoroOnnx,
     [Parameter(Mandatory = $true)][string]$KokoroVoices,
 
+    # Optional: a directory of curated <id>.wav/<id>.txt pairs (task #91's D&D
+    # archetype voices - see ARCHETYPE_VOICES in tts.rs) merged into refs/
+    # alongside the 28 Kokoro-bootstrapped ones. Omit to build the base-only
+    # runtime.
+    [string]$ArchetypeRefsDir = "",
+
     # F5 checkpoint (.safetensors). Defaults to the HuggingFace cache copy.
     [string]$F5Checkpoint = "",
+
+    # Vocos vocoder dir (config.yaml + pytorch_model.bin). Defaults to the
+    # HuggingFace cache copy. Bundled into the runtime so f5_cli.py never
+    # needs to reach huggingface.co on a user's first synthesis - if this
+    # isn't cached yet, run any F5 synthesis once locally first (it downloads
+    # and caches "charactr/vocos-mel-24khz" automatically).
+    [string]$VocoderDir = "",
 
     # Skip the (multi-GB, slow) final zip - leaves the staging dir for inspection
     # or a direct tts.rs F5_RUNTIME_DIR point-at during dev.
@@ -158,10 +172,51 @@ $vocab = Get-ChildItem (Join-Path $sitePackages "f5_tts") -Recurse -Filter "voca
 if (-not $vocab) { throw "vocab.txt not found under f5_tts in site-packages" }
 Copy-Item $vocab.FullName (Join-Path $modelDir "vocab.txt") -Force
 
+# -- 4b. Vocos vocoder --------------------------------------------------------
+# Bundled (not left to f5_tts's live HF Hub download) so a user's FIRST
+# synthesis after installing this archive needs no network beyond the initial
+# download - matching the "no network needed at runtime" promise above.
+if (-not $VocoderDir) {
+    $VocoderDir = Get-ChildItem "$env:USERPROFILE\.cache\huggingface\hub\models--charactr--vocos-mel-24khz\snapshots\*" -Directory -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $VocoderDir -or -not (Test-Path (Join-Path $VocoderDir "config.yaml"))) {
+    throw "Vocos vocoder files not found - pass -VocoderDir <dir with config.yaml + pytorch_model.bin>, or run any F5 synthesis once locally first so f5-tts downloads and caches it"
+}
+Step "Bundling Vocos vocoder from $VocoderDir"
+$vocoderOutDir = Join-Path $Runtime "vocoder"
+New-Item -ItemType Directory -Path $vocoderOutDir -Force | Out-Null
+Copy-Item (Join-Path $VocoderDir "config.yaml") (Join-Path $vocoderOutDir "config.yaml") -Force
+Copy-Item (Join-Path $VocoderDir "pytorch_model.bin") (Join-Path $vocoderOutDir "pytorch_model.bin") -Force
+
 # -- 5. Reference-clip pack -------------------------------------------------
 Step "Generating Kokoro-bootstrapped reference clips"
 & $Py (Join-Path $PSScriptRoot "gen_f5_refs.py") $KokoroExe $KokoroOnnx $KokoroVoices (Join-Path $Runtime "refs")
 if ($LASTEXITCODE -ne 0) { throw "reference-clip generation failed" }
+
+# -- 5b. Curated archetype reference clips (task #91, optional) -------------
+# 80 hand-picked D&D archetype voices (5 male + 5 female x 8 buckets), cloned
+# from real VCTK Corpus recordings rather than Kokoro-bootstrapped - see
+# ARCHETYPE_VOICES in tts.rs. Collides-with-base-catalog is treated as a hard
+# error (an id must own exactly one clip), not a silent overwrite.
+if ($ArchetypeRefsDir) {
+    Step "Merging curated archetype reference clips from $ArchetypeRefsDir"
+    if (-not (Test-Path $ArchetypeRefsDir)) { throw "ArchetypeRefsDir not found: $ArchetypeRefsDir" }
+    $refsDir = Join-Path $Runtime "refs"
+    $archetypeWavs = Get-ChildItem -Path $ArchetypeRefsDir -Filter "*.wav"
+    if ($archetypeWavs.Count -eq 0) { throw "no .wav files found in $ArchetypeRefsDir" }
+    foreach ($wav in $archetypeWavs) {
+        $destWav = Join-Path $refsDir $wav.Name
+        if (Test-Path $destWav) { throw "archetype id collides with base catalog: $($wav.Name)" }
+        $txtName = [System.IO.Path]::ChangeExtension($wav.Name, ".txt")
+        $srcTxt = Join-Path $ArchetypeRefsDir $txtName
+        if (-not (Test-Path $srcTxt)) { throw "missing transcript for $($wav.Name): $srcTxt" }
+        Copy-Item $wav.FullName $destWav -Force
+        Copy-Item $srcTxt (Join-Path $refsDir $txtName) -Force
+    }
+    $totalRefs = (Get-ChildItem -Path $refsDir -Filter "*.wav").Count
+    Step "Refs pack now has $totalRefs voices ($($archetypeWavs.Count) archetype + $($totalRefs - $archetypeWavs.Count) base)"
+}
 
 # -- 6. Smoke-test the assembled runtime ------------------------------------
 Step "Smoke test: import torch + CUDA visibility from the embeddable interpreter"

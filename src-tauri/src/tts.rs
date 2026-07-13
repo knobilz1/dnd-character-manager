@@ -921,15 +921,19 @@ pub fn set_tts_engine(engine: String) {
 // required just to exercise the plumbing.
 
 /// Everything spawn_f5 needs, resolved from the runtime directory. `ckpt`/
-/// `vocab` are optional: present in a real packaged runtime (passed to the
-/// worker as F5_CKPT/F5_VOCAB), absent only in a stripped dev runtime, where
-/// f5_cli.py falls back to F5TTS()'s own default checkpoint.
+/// `vocab`/`vocoder` are optional: present in a real packaged runtime (passed
+/// to the worker as F5_CKPT/F5_VOCAB/F5_VOCODER), absent only in a stripped
+/// dev runtime, where f5_cli.py falls back to F5TTS()'s own defaults --
+/// for `vocoder` that default is a live download from the HF Hub, so a real
+/// packaged runtime always bundles it (build-f5-runtime.ps1) to keep the
+/// "no network needed at runtime" promise on a user's first synthesis.
 struct F5Runtime {
     python: PathBuf,
     script: PathBuf,
     refs_dir: PathBuf,
     ckpt: Option<PathBuf>,
     vocab: Option<PathBuf>,
+    vocoder: Option<PathBuf>,
 }
 
 /// Resolves the F5 runtime directory: the F5_RUNTIME_DIR dev override if set,
@@ -960,7 +964,8 @@ fn resolve_f5_runtime(app: &AppHandle) -> Option<F5Runtime> {
     let model_dir = dir.join("model");
     let ckpt = Some(model_dir.join("model.safetensors")).filter(|p| p.exists());
     let vocab = Some(model_dir.join("vocab.txt")).filter(|p| p.exists());
-    Some(F5Runtime { python, script, refs_dir, ckpt, vocab })
+    let vocoder = Some(dir.join("vocoder")).filter(|p| p.is_dir());
+    Some(F5Runtime { python, script, refs_dir, ckpt, vocab, vocoder })
 }
 
 /// Pure: maps a stored NPC voice id to the catalog id whose reference clip F5
@@ -1042,6 +1047,9 @@ fn spawn_f5(runtime: &F5Runtime, output_dir: &Path) -> Result<PersistentF5, Stri
     }
     if let Some(vocab) = &runtime.vocab {
         cmd.env("F5_VOCAB", vocab);
+    }
+    if let Some(vocoder) = &runtime.vocoder {
+        cmd.env("F5_VOCODER", vocoder);
     }
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // Same console-flash issue as the Kokoro spawn — this app has no console.
@@ -1717,12 +1725,14 @@ mod tests {
         assert!(rt.join("f5_cli.py").exists(), "f5_cli.py missing");
         assert!(rt.join("model").join("model.safetensors").exists(), "checkpoint missing");
         assert!(rt.join("model").join("vocab.txt").exists(), "vocab missing");
+        assert!(rt.join("vocoder").join("config.yaml").exists(), "bundled vocoder config missing");
+        assert!(rt.join("vocoder").join("pytorch_model.bin").exists(), "bundled vocoder weights missing");
         let ref_wavs = std::fs::read_dir(rt.join("refs"))
             .expect("refs dir must exist")
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().is_some_and(|x| x == "wav"))
             .count();
-        assert_eq!(ref_wavs, 28, "expected 28 reference clips, got {ref_wavs}");
+        assert_eq!(ref_wavs, 108, "expected 28 base + 80 archetype reference clips, got {ref_wavs}");
         let _ = std::fs::remove_dir_all(&dest);
     }
 
@@ -2091,7 +2101,7 @@ mod tests {
     /// of the normal suite (needs a GPU, a multi-GB model, and a live
     /// subprocess). Exercises exactly the new plumbing: spawn_f5's READY-wait
     /// thread, the output-dir file-watch, and warm-process reuse across calls.
-    /// Run (ckpt/vocab left to F5TTS's cached default) with:
+    /// Run (ckpt/vocab/vocoder left to F5TTS's cached default unless set) with:
     ///   F5_TEST_PYTHON=<venv python> F5_TEST_SCRIPT=<scripts/f5_cli.py> \
     ///     F5_TEST_REFS=<refs dir> \
     ///     cargo test --lib -- --ignored --nocapture f5_end_to_end
@@ -2104,6 +2114,7 @@ mod tests {
             refs_dir: PathBuf::from(std::env::var("F5_TEST_REFS").expect("set F5_TEST_REFS")),
             ckpt: std::env::var("F5_TEST_CKPT").ok().map(PathBuf::from),
             vocab: std::env::var("F5_TEST_VOCAB").ok().map(PathBuf::from),
+            vocoder: std::env::var("F5_TEST_VOCODER").ok().map(PathBuf::from),
         };
 
         let request = serde_json::json!({ "text": "Testing the real F five pipeline end to end.", "voice": "male-gb-1", "speed": 1.0 });

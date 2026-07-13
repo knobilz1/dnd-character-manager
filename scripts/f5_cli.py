@@ -17,6 +17,10 @@ Usage: python f5_cli.py <refs_dir> <output_dir>
   catalog voice, generated from Kokoro so identity matches the Kokoro engine
   (see plan §D). Model checkpoint/vocab paths come from the F5_CKPT / F5_VOCAB
   env vars if set (the runtime archive sets them), else F5TTS()'s default.
+  F5_VOCODER, if set, points at a local dir with config.yaml + pytorch_model.bin
+  for the Vocos vocoder (the runtime archive bundles this so first synthesis
+  never silently reaches out to the HF Hub); unset falls back to F5TTS()'s
+  live-download default.
 
 Stdin (one JSON object per line):
   {"text": str, "voice": str, "speed": float,
@@ -91,6 +95,8 @@ def main() -> None:
         kwargs["ckpt_file"] = os.environ["F5_CKPT"]
     if os.environ.get("F5_VOCAB"):
         kwargs["vocab_file"] = os.environ["F5_VOCAB"]
+    if os.environ.get("F5_VOCODER"):
+        kwargs["vocoder_local_path"] = os.environ["F5_VOCODER"]
     f5 = F5TTS(**kwargs)
 
     print("READY", flush=True)
