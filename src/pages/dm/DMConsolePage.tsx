@@ -2624,7 +2624,11 @@ export function DMConsolePage() {
                 {party.map((c) => {
                   const hpPct = c.maxHP > 0 ? Math.round((c.currentHP / c.maxHP) * 100) : 0;
                   return (
-                    <div key={c.id} className="bg-slate-900 border border-slate-700 rounded-lg p-2 group relative">
+                    // party_listener.rs's /character handler only validates name +
+                    // classes before emitting 'dm-party-character', not id — so a
+                    // sent character can land here with no id. Fall back to name
+                    // (which usePartyStore's own upsert already treats as identity).
+                    <div key={c.id || c.name} className="bg-slate-900 border border-slate-700 rounded-lg p-2 group relative">
                       <button
                         onClick={() => remove(c.id)}
                         className="absolute top-1.5 right-1.5 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
