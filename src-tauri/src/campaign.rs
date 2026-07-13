@@ -86,7 +86,7 @@ This is a person talking out loud at a table, not prose on a page — the bigges
 When your narration causes damage, healing, temp HP, a condition, exhaustion, or inspiration change — or something worth remembering long-term happens, or (if this campaign has an imported module) the party's actions clearly conclude the current chapter — end your reply with a fenced code block literally starting with ```dm-actions containing ONLY compact JSON (no comments), e.g.:
 
 ```dm-actions
-{"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"rememberEntity":[{"name":"Gundren Rockseeker","description":"A dwarf merchant, captured by goblins near the Triboar Trail.","voiceId":"male-us-1"},{"name":"Squibbins","description":"A jittery gnome tinkerer who runs the general store.","voiceId":"male-us-2","pitch":"small"}]}
+{"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"rememberEntity":[{"name":"Gundren Rockseeker","description":"A dwarf merchant, captured by goblins near the Triboar Trail.","voiceId":"dwarf-m-2"},{"name":"Squibbins","description":"A jittery gnome tinkerer who runs the general store.","voiceId":"gnome-m-3"}]}
 ```
 
 Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}], position [{name,q,r}], clearPositions (true|false).
@@ -275,7 +275,7 @@ Tavern Sheet rewrites this file every time the campaign loads, so it is always t
 There's a pool of distinct synthesized voices available so players can tell speakers apart by ear instead of everyone (narrator and every NPC alike) sounding the same. The parts:
 1. The first time you introduce a named NPC worth giving a voice to (via `rememberEntity`'s `voiceId`), pick one id from this catalog: `male-us-1` through `male-us-9` / `female-us-1` through `female-us-10` (American); `male-gb-1` through `male-gb-4` / `female-gb-1` through `female-gb-4` (English — reads posher/more formal, good for nobles, officials, scholars). The gender prefix is a hard constraint, not a suggestion: a male NPC MUST get a `male-*` id and a female NPC MUST get a `female-*` id — a wrong-gender voice is the single most jarring mistake this system can make at the table, far worse than a bland-but-correct pick. Don't invent an id outside this list — this catalog only has American and British English, nothing more regionally specific (no Scottish/Irish/Welsh/Australian/South African or similar), so don't imply one in your narration just because an NPC's background suggests it. Several ids exist in each bucket specifically so NPCs don't all blend together — entities.md already shows you the full roster of NPCs introduced so far, so when assigning a new one, actually vary which id you pick rather than defaulting to the same one every time. The assignment is permanent once made — don't reassign the same NPC a different voice later.
    For an NPC whose D&D race or nature strongly suggests a signature voice, reach for one of these race-flavored ids instead of the plain catalog above: `orc-m-1` through `orc-m-5` / `orc-f-1` through `orc-f-5` (orcs and similar monstrous humanoids); `giant-m-1` through `giant-m-5` / `giant-f-1` through `giant-f-5` (ogres, trolls, giants, and other very large creatures); `dwarf-m-1` through `dwarf-m-5` / `dwarf-f-1` through `dwarf-f-5` (thick Scottish accent); `elf-m-1` through `elf-m-5` / `elf-f-1` through `elf-f-5` (refined, light); `gnome-m-1` through `gnome-m-5` / `gnome-f-1` through `gnome-f-5` (quick, high-pitched); `halfling-m-1` through `halfling-m-5` / `halfling-f-1` through `halfling-f-5` (warm, folksy); `sinister-m-1` through `sinister-m-5` / `sinister-f-1` through `sinister-f-5` (cold, calculating — a villain or someone genuinely unsettling); `sage-m-1` through `sage-m-5` / `sage-f-1` through `sage-f-5` (the closest this pool has to a genuinely old-sounding voice, for a venerable elder or sage — still not truly elderly, so don't reach for it just because an NPC is merely "older"). Same hard gender constraint as above. These work automatically regardless of whether this table has the high-quality voice engine enabled — an unsupported table just hears a sensible standard voice instead — so use them freely without checking first; they're an option for a fitting NPC, never a requirement, and the plain catalog above is always correct for anyone who doesn't clearly match one of these.
-2. Also optionally include `pitch` alongside it — three tiers, based on the NPC's actual D&D size and build, not just how imposing they read in flavor text: `"small"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `"large"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `"gruff"` for a Medium-size race that still naturally reads as rougher/deeper-voiced than a human (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `"large"`'s shift, since they aren't mechanically Large. Omit the field entirely for an ordinary Medium NPC with nothing distinctive about their build — most NPCs don't need it. This layers a pitch/pace shift on top of whichever voice you picked in step 1, it doesn't replace that choice.
+2. If (and only if) you picked a **plain** catalog voice in step 1 (not a race-flavored id), you may also optionally include `pitch` alongside it — three tiers, based on the NPC's actual D&D size and build, not just how imposing they read in flavor text: `"small"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `"large"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `"gruff"` for a Medium-size race that still naturally reads as rougher/deeper-voiced than a human (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `"large"`'s shift, since they aren't mechanically Large. Omit the field entirely for an ordinary Medium NPC with nothing distinctive about their build — most NPCs don't need it. This layers a pitch/pace shift on top of whichever plain voice you picked in step 1, it doesn't replace that choice. **Never combine `pitch` with a race-flavored id** (`orc-*`/`giant-*`/`dwarf-*`/`elf-*`/`gnome-*`/`halfling-*`/`sinister-*`/`sage-*`) — those clips are already recorded at the right pitch and accent for their race, so a `pitch` tag on top would over-shoot and distort a voice that's already tuned. Pick a race-flavored id OR a `pitch` tag on a plain voice, never both for the same NPC.
 3. When that NPC actually speaks, prefix the line in your narration with `[Name]:` immediately before it, e.g. `[Gundren]: "Well met, travelers."` — this tag is mechanically stripped before anyone sees or hears it; it only exists to signal which voice speaks that line. The tag is STICKY: once you tag a line with `[Gundren]:`, every following sentence keeps Gundren's voice until you either tag a different speaker or explicitly switch back to narration with `[Narrator]:`. So for a multi-sentence speech by one NPC you only need the tag once, at the start (repeating it is harmless). Crucially, the moment you stop quoting that NPC and go back to describing the scene, you MUST start that narration with `[Narrator]:` — otherwise your description keeps speaking in the NPC's voice. Example: `[Gundren]: "Well met! I've been expecting you. Come, sit." [Narrator]: The old dwarf pulls out a chair, his eyes darting to the door.` Plain narration at the very start of a reply (before any tag) always uses the narrator voice, so you only need `[Narrator]:` to RETURN to narration after an NPC has spoken within the same reply.
 4. **Before you write any NPC's first line of dialogue, ask yourself: is this NPC listed in entities.md?** If they are NOT, they have no voice yet, and you MUST append their gender to the tag with a pipe: `[Ismark|male]: "Come inside, quickly."` — then just `[Ismark]:` for the rest of the scene. This matters because the `dm-actions` block only reaches the app AFTER your narration has already been spoken aloud, so on the very turn you introduce someone, the tag is the ONLY thing that can tell the app what they should sound like; a bare name like `[Ismark]:` carries no gender, and an NPC with no voice yet falls back to the narrator's own voice, making them sound like the narration around them. The `|male`/`|female` marker is stripped before anyone sees or hears it. Once an NPC has a voice (you sent a `voiceId`, or the app derived one from their description), the marker is ignored — so it is always safe to include, and only ever needed on first mention.
 5. Unnamed one-off speakers work the same way, but their descriptive tag can carry the gender by itself: `[Old Man]:`, `[Young Woman]:`, `[Female Guard]:`. Avoid a bare genderless role like `[Innkeeper]:` or `[Guard]:` — either name the gender in the tag (`[Male Innkeeper]:`) or use the pipe marker (`[Innkeeper|male]:`).
@@ -1000,7 +1000,13 @@ const NARRATOR_VOICE_KEY: &str = "__narrator__";
 /// speed just falls back to no shift / the default rate at speak time, same
 /// tolerance as an unrecognized voice_id falling back to the narrator voice.
 /// `#[serde(default)]` on `speed` keeps this backward-compatible with an
-/// npc_voices.json written before this field existed.
+/// npc_voices.json written before this field existed. This struct itself
+/// doesn't enforce it (the manual override panel can still set both if a
+/// human wants to), but the DM's own auto-assignment (BASE_CLAUDE_MD /
+/// build_voice_reconciliation_prompt) is told to never pair `pitch` with a
+/// race-flavored `voice_id` (tts.rs's ARCHETYPE_VOICES) — those clips are
+/// already recorded at the right pitch/accent for their race, so a `pitch`
+/// tag on top would double up and distort an already-tuned voice.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NpcVoiceAssignment {
     pub voice_id: String,
@@ -1138,7 +1144,7 @@ fn build_voice_reconciliation_prompt(unvoiced: &[(String, String)], usage_summar
         "You are assigning text-to-speech voices to Dungeons & Dragons NPCs so players at the table can tell speakers apart by ear. For each NPC below, read their description and pick:\n\n\
         1. `voice_id` — from this catalog: `male-us-1` through `male-us-9` / `female-us-1` through `female-us-10` (American); `male-gb-1` through `male-gb-4` / `female-gb-1` through `female-gb-4` (English, posher/more formal). The gender prefix is a hard constraint: a male NPC MUST get a `male-*` id and a female NPC MUST get a `female-*` id — a wrong-gender voice is the most jarring mistake possible here, far worse than a bland-but-correct pick; if a description leaves gender genuinely ambiguous, pick whichever reading the name/pronouns/context best support rather than ignoring gender. Never invent an id outside this list — only American and British English exist in this catalog, nothing more regionally specific. Several ids exist per bucket specifically so same-gender NPCs don't all sound identical — when assigning several NPCs in this same batch, spread them across the different ids rather than defaulting everyone to the same one or two.\n\
         For an NPC whose D&D race or nature strongly suggests a signature voice, use a race-flavored id instead: `orc-m-1`-`orc-m-5`/`orc-f-1`-`orc-f-5` (orcs, monstrous humanoids); `giant-m-1`-`giant-m-5`/`giant-f-1`-`giant-f-5` (ogres, trolls, giants); `dwarf-m-1`-`dwarf-m-5`/`dwarf-f-1`-`dwarf-f-5` (thick Scottish accent); `elf-m-1`-`elf-m-5`/`elf-f-1`-`elf-f-5` (refined, light); `gnome-m-1`-`gnome-m-5`/`gnome-f-1`-`gnome-f-5` (quick, high-pitched); `halfling-m-1`-`halfling-m-5`/`halfling-f-1`-`halfling-f-5` (warm, folksy); `sinister-m-1`-`sinister-m-5`/`sinister-f-1`-`sinister-f-5` (a cold or villainous character); `sage-m-1`-`sage-m-5`/`sage-f-1`-`sage-f-5` (a venerable elder — the closest this pool has to genuinely old, so don't use it for merely \"older\"). Same hard gender constraint applies. These fall back sensibly if the high-quality engine isn't enabled, so use them freely for a clearly-matching NPC rather than defaulting everyone to the plain catalog.\n\
-        2. `pitch` (optional) — three tiers, based on their actual D&D size and build, NOT gender: `\"small\"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `\"large\"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `\"gruff\"` for a Medium-size race that still naturally reads as rougher/deeper-voiced (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `\"large\"`'s shift, since they aren't mechanically Large. Omit entirely (or use null) for an ordinary Medium NPC with nothing distinctive about their build.\n\
+        2. `pitch` (optional, **plain voices only**) — if and only if you picked a plain catalog id above (not a race-flavored one), you may add a pitch tier based on their actual D&D size and build, NOT gender: `\"small\"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `\"large\"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `\"gruff\"` for a Medium-size race that still naturally reads as rougher/deeper-voiced (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `\"large\"`'s shift, since they aren't mechanically Large. Omit entirely (or use null) for an ordinary Medium NPC with nothing distinctive about their build. **Never set `pitch` alongside a race-flavored voice_id** (`orc-*`/`giant-*`/`dwarf-*`/etc.) — those clips are already recorded at the right pitch and accent for their race, and layering a pitch tag on top over-shoots and distorts an already-tuned voice.\n\
         {usage_block}\n\
         If a description doesn't give you quite enough to judge, make the most reasonable guess rather than skipping the NPC — every name below needs an assignment.\n\n\
         NPCs:\n{listing}\n\n\
@@ -2706,6 +2712,32 @@ mod tests {
         assert_eq!(rules, DM_RULES);
     }
 
+    /// Archetype voice clips (tts.rs's ARCHETYPE_VOICES) are already recorded
+    /// at the right pitch/accent for their race — pairing one with a `pitch`
+    /// tag would double up and distort an already-tuned voice, so the rules
+    /// must steer Claude away from combining them, not just document pitch
+    /// and archetype ids as two independent options.
+    #[test]
+    fn dm_rules_forbids_combining_pitch_with_an_archetype_voice() {
+        assert!(DM_RULES.contains("Never combine `pitch` with a race-flavored id"));
+        assert!(DM_RULES.contains("orc-*"));
+        assert!(DM_RULES.contains("gnome-*"));
+    }
+
+    /// The BASE_CLAUDE_MD few-shot example is the one piece of guidance Claude
+    /// sees on literally every reply (it's not tucked behind the periodic
+    /// voice-rules import) — if it still showed a race-appropriate NPC paired
+    /// with both an archetype id AND a pitch tag, that example would silently
+    /// out-teach the explicit prose rule against doing exactly that.
+    #[test]
+    fn base_claude_md_example_does_not_pair_an_archetype_voice_with_pitch() {
+        let action_block_start = BASE_CLAUDE_MD.find("```dm-actions").expect("example dm-actions block must exist");
+        let action_block_end = BASE_CLAUDE_MD[action_block_start..].find("```\n").expect("block must close") + action_block_start;
+        let example = &BASE_CLAUDE_MD[action_block_start..action_block_end];
+        assert!(example.contains("gnome-m-3"), "Squibbins should demo a race-flavored id");
+        assert!(!example.contains("\"pitch\""), "the example must not pair pitch with the archetype id it demonstrates");
+    }
+
     /// The voice rules must live ONLY in the generated file — if they were also
     /// left inline in BASE_CLAUDE_MD, every new campaign would carry two copies
     /// and old campaigns would see a contradictory pair.
@@ -3113,6 +3145,15 @@ mod tests {
         assert!(prompt.contains("gnome-f-5"));
         assert!(prompt.contains("sage-m-1"));
         assert!(prompt.to_lowercase().contains("spread"), "should ask it to spread picks across the bucket instead of defaulting to one id");
+    }
+
+    /// Same reasoning as dm_rules_forbids_combining_pitch_with_an_archetype_voice
+    /// — this prompt is the other place Claude assigns voice_id + pitch
+    /// together (the batch import pass), so it needs the same guardrail.
+    #[test]
+    fn voice_reconciliation_prompt_forbids_combining_pitch_with_an_archetype_voice() {
+        let prompt = build_voice_reconciliation_prompt(&[], "");
+        assert!(prompt.contains("Never set `pitch` alongside a race-flavored voice_id"));
     }
 
     #[test]

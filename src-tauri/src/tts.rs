@@ -618,7 +618,21 @@ pub async fn warmup_tts(app: AppHandle) -> Result<(), String> {
 /// because it sounds gruffer). Anything else (including plain narration) is
 /// a no-op. See BASE_CLAUDE_MD's "Giving NPCs distinct voices" for how the
 /// DM picks between these.
-fn pitch_factor(pitch: Option<&str>) -> f64 {
+///
+/// `voice_id` is checked FIRST: an archetype id (ARCHETYPE_VOICES) always
+/// wins and forces a no-op regardless of `pitch`. Those reference clips are
+/// already recorded at the right pitch/accent for their race/size, so
+/// layering this WAV-rate hack on top would double up and distort an
+/// already-tuned voice. speak_text is the one place every synthesis path
+/// (DM auto-assignment, the voice-reconciliation batch pass, and a human's
+/// manual override in the History panel) funnels through, so enforcing it
+/// here is airtight without having to police every call site that writes a
+/// (voice_id, pitch) pair — see campaign.rs's DM_RULES for the prompt-side
+/// half of this (steering Claude away from sending the combination at all).
+fn pitch_factor(pitch: Option<&str>, voice_id: &str) -> f64 {
+    if ARCHETYPE_VOICES.iter().any(|(id, _)| *id == voice_id) {
+        return 1.0;
+    }
     match pitch {
         Some("small") => 1.25,
         Some("gruff") => 0.92,
@@ -764,7 +778,8 @@ fn synthesize_kokoro(app: &AppHandle, voice_id: &str, native_speed: f64, text: &
 /// engine (F5's reference clips are bootstrapped one-per-catalog-voice — see
 /// f5_ref_voice_id). `pitch` (`"small"`/`"large"`/absent) is applied as a
 /// post-processing step on the synthesized WAV regardless of engine — see
-/// pitch_factor. `speed` (absent = DEFAULT_PACE_FACTOR) is this app's own
+/// pitch_factor, which ignores `pitch` entirely for an archetype voice_id
+/// (already race/size-tuned at the source). `speed` (absent = DEFAULT_PACE_FACTOR) is this app's own
 /// pace-factor convention (bigger = slower) — see kokoro_speed_from_pace_factor
 /// for the conversion to the engines' shared native scale. See dmSpeech.ts for
 /// the caller, which falls back to browser speechSynthesis (narrator voice
@@ -791,7 +806,7 @@ pub async fn speak_text(app: AppHandle, text: String, voice_id: Option<String>, 
             TtsEngine::Kokoro => synthesize_kokoro(&app, resolved_id, native_speed, &text)?,
         };
         let bytes = fade_wav_edges(&bytes, EDGE_FADE_MS);
-        let bytes = reinterpret_wav_sample_rate(&bytes, pitch_factor(pitch.as_deref()));
+        let bytes = reinterpret_wav_sample_rate(&bytes, pitch_factor(pitch.as_deref(), resolved_id));
         Ok(STANDARD.encode(bytes))
     })
     .await
@@ -1964,11 +1979,23 @@ mod tests {
 
     #[test]
     fn pitch_factor_maps_known_tags_and_defaults_to_unchanged() {
-        assert_eq!(pitch_factor(Some("small")), 1.25);
-        assert_eq!(pitch_factor(Some("gruff")), 0.92);
-        assert_eq!(pitch_factor(Some("large")), 0.82);
-        assert_eq!(pitch_factor(None), 1.0);
-        assert_eq!(pitch_factor(Some("ogre-9000")), 1.0, "unknown tags should fall back to no pitch change, not error");
+        assert_eq!(pitch_factor(Some("small"), "female-us-1"), 1.25);
+        assert_eq!(pitch_factor(Some("gruff"), "female-us-1"), 0.92);
+        assert_eq!(pitch_factor(Some("large"), "female-us-1"), 0.82);
+        assert_eq!(pitch_factor(None, "female-us-1"), 1.0);
+        assert_eq!(pitch_factor(Some("ogre-9000"), "female-us-1"), 1.0, "unknown tags should fall back to no pitch change, not error");
+    }
+
+    #[test]
+    fn pitch_factor_ignores_pitch_entirely_for_an_archetype_voice() {
+        // orc-m-1's reference clip was already tuned deeper at the source
+        // (real VCTK recordings, hand-picked) -- layering "large" on top via
+        // the WAV-rate hack would double up and distort it, so this must stay
+        // a no-op (1.0) no matter what pitch tag is passed alongside it.
+        assert_eq!(pitch_factor(Some("large"), "orc-m-1"), 1.0);
+        assert_eq!(pitch_factor(Some("small"), "gnome-f-3"), 1.0);
+        assert_eq!(pitch_factor(Some("gruff"), "dwarf-m-5"), 1.0);
+        assert_eq!(pitch_factor(None, "orc-m-1"), 1.0);
     }
 
     #[test]
@@ -1977,8 +2004,8 @@ mod tests {
         // "no shift" and "large" (actually Large+ creatures), never at or
         // past large's shift — see pitch_factor's doc comment for why these
         // need to be mechanically distinct, not just two names for one tag.
-        let gruff = pitch_factor(Some("gruff"));
-        let large = pitch_factor(Some("large"));
+        let gruff = pitch_factor(Some("gruff"), "female-us-1");
+        let large = pitch_factor(Some("large"), "female-us-1");
         assert!(large < gruff && gruff < 1.0, "expected 0 < large < gruff < 1.0, got large={large}, gruff={gruff}");
     }
 
@@ -2091,7 +2118,7 @@ mod tests {
         assert!(bytes2.len() > 1000);
 
         let faded = fade_wav_edges(&bytes, EDGE_FADE_MS);
-        let pitched = reinterpret_wav_sample_rate(&faded, pitch_factor(Some("small")));
+        let pitched = reinterpret_wav_sample_rate(&faded, pitch_factor(Some("small"), "female-us-1"));
         assert_eq!(&pitched[0..4], b"RIFF", "post-processing pipeline must still produce a well-formed WAV");
     }
 
@@ -2133,7 +2160,7 @@ mod tests {
 
         // The engine-agnostic post-processing must accept F5's WAV too.
         let faded = fade_wav_edges(&bytes, EDGE_FADE_MS);
-        let pitched = reinterpret_wav_sample_rate(&faded, pitch_factor(Some("gruff")));
+        let pitched = reinterpret_wav_sample_rate(&faded, pitch_factor(Some("gruff"), "male-gb-1"));
         assert_eq!(&pitched[0..4], b"RIFF", "post-processing pipeline must still produce a well-formed WAV from F5 output");
     }
 }
