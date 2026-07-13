@@ -761,6 +761,13 @@ export function DMConsolePage() {
   // trim_resolved_chapter_section_at doc comment for why that matters).
   const activeModuleIdRef = React.useRef(activeModuleId);
   activeModuleIdRef.current = activeModuleId;
+  // Mirrors dmProvider for the campaign-switch effect below, which needs to
+  // read the CURRENT provider at the moment a campaign is picked, not react
+  // to the provider changing on its own — listing dmProvider as a dependency
+  // would re-run the whole (expensive) DM-rules/plan/party sync every time
+  // someone just toggles Claude/Local mid-campaign.
+  const dmProviderRef = React.useRef(dmProvider);
+  dmProviderRef.current = dmProvider;
   // The active campaign's module/plan.md, fetched once per campaign switch —
   // NOT re-read every turn (see dmPrompt.ts's planCheckIn doc comment for why).
   // Starts each sitting/campaign "due" (Infinity) so the very first turn
@@ -1188,7 +1195,7 @@ export function DMConsolePage() {
     // campaign is picked, not when the player actually starts talking — see
     // dm.rs's warmup_dm_session doc comment. Claude-only; the local LLM path
     // has no equivalent prompt-cache cold start to warm.
-    if (dmProvider === 'claude') {
+    if (dmProviderRef.current === 'claude') {
       ensureClaudeConnected().then((connected) => {
         if (!connected) return;
         invoke('warmup_dm_session', { campaignId: activeCampaignId }).catch((e) =>
@@ -1219,6 +1226,12 @@ export function DMConsolePage() {
           .catch((e) => console.warn('NPC voice auto-reconcile on load failed (unvoiced NPCs use the narrator until End Session):', e));
       });
     }
+    // ensureClaudeConnected is a plain function redefined every render (not
+    // useCallback-wrapped) — deliberately not a reactive dependency here,
+    // same reasoning as dmProviderRef above: this effect calls whatever it
+    // currently resolves to at campaign-switch time, and doesn't need (or
+    // want) to re-run just because that reference changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCampaignId]);
 
   // Start the LAN listener + resolve this machine's LAN IP once, on mount.
@@ -1296,8 +1309,9 @@ export function DMConsolePage() {
       setF5Installed(true);
       setTtsEngine('f5');
       await invoke('set_tts_engine', { engine: 'f5' });
-    } catch (e: any) {
-      setError(`Couldn't install the high-quality voice engine: ${e?.message || e}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(`Couldn't install the high-quality voice engine: ${message}`);
     } finally {
       setF5Installing(false);
       setF5Progress(null);
@@ -1410,7 +1424,6 @@ export function DMConsolePage() {
       invoke('end_local_dm_session', { sessionId: sessionIdRef.current }).catch(() => {});
     }
     sessionIdRef.current = undefined;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dmProvider]);
 
   /** Routes one turn to whichever DM engine is configured (see
@@ -1596,12 +1609,33 @@ export function DMConsolePage() {
           }
         }
         if (campaignId && actions.advanceToChapter) {
-          await invoke('set_current_chapter', { id: campaignId, chapterId: actions.advanceToChapter }).catch((e) =>
-            console.warn('Failed to advance chapter:', e)
-          );
-          // A chapter just turned over — make sure the *next* turn re-checks
-          // the plan instead of waiting out the rest of the interval.
-          turnsSincePlanCheckRef.current = Infinity;
+          // Unlike the other dm-action handlers around this one, a failure
+          // here can't stay a console.warn: set_current_chapter validates the
+          // DM's own chapter id against the real manifest (see campaign.rs's
+          // advance_chapter_at) and rejects a mismatch, but the DM has no way
+          // to know its own action silently didn't take — it'll keep talking
+          // as if the party moved on while current.md is still the old
+          // chapter. Surfacing it as a visible warning (same banner as
+          // import-time `concerns`) at least tells a human something's wrong
+          // instead of the party being invisibly stuck. Appends rather than
+          // replacing, since parseWarnings/applyDmActions may have already
+          // set a warning earlier this same turn.
+          const advanced = await invoke('set_current_chapter', { id: campaignId, chapterId: actions.advanceToChapter })
+            .then(() => true)
+            .catch((e) => {
+              const message = e instanceof Error ? e.message : String(e);
+              console.warn('Failed to advance chapter:', e);
+              setWarning((prev) =>
+                (prev ? `${prev} ` : '') +
+                  `The DM tried to move the story to a new chapter, but it didn't take (${message}). Still on the same chapter — switch manually via the Module button if needed.`
+              );
+              return false;
+            });
+          if (advanced) {
+            // A chapter just turned over — make sure the *next* turn re-checks
+            // the plan instead of waiting out the rest of the interval.
+            turnsSincePlanCheckRef.current = Infinity;
+          }
         }
         if (campaignId && actions.resolveChapterSection) {
           // Deliberately NOT awaited — this makes a real LLM call that could
@@ -1618,13 +1652,32 @@ export function DMConsolePage() {
           }
         }
         if (campaignId && actions.switchActiveModule) {
-          await invoke('set_active_module', { id: campaignId, moduleId: actions.switchActiveModule }).catch((e) =>
-            console.warn('Failed to switch active module:', e)
-          );
-          setActiveModuleId(actions.switchActiveModule);
-          // A module switch is at least as big a context shift as a chapter
-          // change — force the next turn to re-check the plan.
-          turnsSincePlanCheckRef.current = Infinity;
+          // Same failure-visibility fix as advanceToChapter above, plus one
+          // more risk this one had that block didn't: setActiveModuleId used
+          // to run UNCONDITIONALLY, so a rejected switch (bad module id)
+          // still left local state claiming the new module was active while
+          // the backend silently kept the old one — a desync where every
+          // subsequent read (activeModuleIdRef, resolve_chapter_section's
+          // moduleId) targets a module the backend disagrees with. Only
+          // commit the local state (and force a plan re-check) once the
+          // backend confirms the switch actually happened.
+          const switched = await invoke('set_active_module', { id: campaignId, moduleId: actions.switchActiveModule })
+            .then(() => true)
+            .catch((e) => {
+              const message = e instanceof Error ? e.message : String(e);
+              console.warn('Failed to switch active module:', e);
+              setWarning((prev) =>
+                (prev ? `${prev} ` : '') +
+                  `The DM tried to switch to a different module, but it didn't take (${message}). Still on the same module — switch manually via the Module button if needed.`
+              );
+              return false;
+            });
+          if (switched) {
+            setActiveModuleId(actions.switchActiveModule);
+            // A module switch is at least as big a context shift as a chapter
+            // change — force the next turn to re-check the plan.
+            turnsSincePlanCheckRef.current = Infinity;
+          }
         }
         if (actions.clearPositions) {
           setBattleMap({});
@@ -3082,7 +3135,7 @@ export function DMConsolePage() {
               <p className="text-xs text-emerald-400 mt-2">Enabled. Cannot be disabled once enabled.</p>
             ) : !f5Capable ? (
               <p className="text-xs text-amber-400 mt-2">
-                Needs an NVIDIA GPU with at least 6&nbsp;GB of memory{cudaInfo ? ` (this card reports ${(cudaInfo.vram_mb / 1024).toFixed(0)} GB)` : ''}. Not available on this computer.
+                Needs an NVIDIA GPU with at least 6 GB of memory{cudaInfo ? ` (this card reports ${(cudaInfo.vram_mb / 1024).toFixed(0)} GB)` : ''}. Not available on this computer.
               </p>
             ) : f5Installing ? (
               <div className="mt-2">

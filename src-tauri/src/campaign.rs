@@ -1566,7 +1566,74 @@ fn suggest_session_plan_at(root: &Path, id: &str, terrain_catalog: &str) -> Resu
 /// a campaign's first-ever import — the prompt degrades to a plain "no wider
 /// context yet" framing rather than an awkward "given the campaign's lore:
 /// (nothing)" block in that case.
-fn build_chapterize_prompt(text: &str, campaign_lore: &str, other_modules_summary: &str) -> String {
+/// Boundary-detection-only pass over the FULL raw document: title, chapter
+/// headings, and a structural self-audit. This call used to ALSO write the
+/// campaign-tie-in plan by reading the whole document in the same breath —
+/// for a genuinely long module (a few hundred pages) that made the one call
+/// doing the highest-judgment synthesis work also the one reading the most
+/// text in a single pass, exactly the shape most likely to lose a detail
+/// mentioned once deep in the document. Plan-writing now happens in
+/// build_plan_synthesis_prompt, reading per-chapter extracts
+/// (build_chapter_extraction_prompt) instead of the raw text a second time —
+/// see chapterize_and_import_module_at. This call keeps only the work that
+/// genuinely needs a single whole-document read (chapter boundaries can't be
+/// found any other way); campaign lore/other-modules context is irrelevant
+/// to finding them, so those params are gone too.
+fn build_chapterize_prompt(text: &str) -> String {
+    format!(
+        "You will be given the full text of a Dungeons & Dragons adventure module or scenario document, extracted from a PDF. Do two things with it, in one reply.\n\n\
+        1. Give the whole module a short, human-readable title (a few words, e.g. \"The Sunless Citadel\" or \"Goblin Ambush at the Old Mill\") — from the document's own title if it has one, otherwise one you invent that fits.\n\n\
+        2. Identify its logical NARRATIVE chapters or major sections — the story beats the party actually plays through in order. Leave out pure-reference material that isn't a story beat (monster/NPC stat-block appendices, item/treasure tables, handout-only pages, maps with no accompanying scene) — those aren't \"chapters\" the party progresses through, so including them just makes chapter sizes wildly uneven and risks one becoming the \"current\" chapter by mistake. For each chapter, give TWO different strings:\n\
+        - \"title\": a short, clean, human-readable name (e.g. \"Chapter 3: The Ambush at Old Mill\") — this is shown directly to players, so it must read as a complete phrase. Never truncate it mid-word or mid-sentence for any reason.\n\
+        - \"heading\": copied EXACTLY character-for-character from a contiguous span of the document text below — including any extraction artifacts like doubled letters, stray spaces between every word, broken ligatures, or OCR garbling (e.g. if the document shows \"CHAPTER  I  I ACQUISITIO:-<S\", copy exactly that, do not clean it up to \"CHAPTER 1: ACQUISITIONS\"). Nobody ever sees this string — it exists purely to find this exact position in the raw text programmatically, so ANY normalization, cleanup, or paraphrasing will make it fail to match. Prefer it to be UNIQUE within the whole document: a short/generic heading word (\"About\", \"Background\", \"Introduction\") likely repeats elsewhere (as a subsection heading, a running header, etc.) and matching the wrong occurrence silently corrupts the split — if the bare heading text looks generic, extend the copied substring with the next few words until it's distinctive, still verbatim.\n\
+        List chapters in the order they appear.\n\n\
+        3. Self-audit your own breakdown above and list any STRUCTURAL concerns as short strings — e.g. a heading you weren't fully confident matched a unique exact point in the source text, or narrative chapters that still came out very uneven in size. The person reading this may be a PLAYER in the game, not the DM, so these strings must never reveal plot content, twists, names of secrets, or anything that would spoil the adventure — describe only the structural problem itself. If you have no concerns, return an empty array.\n\n\
+        Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
+        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"heading\": \"<exact verbatim substring, artifacts included, chosen to be unique>\", \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
+        If the document has no clear internal chapter structure, still return a single chapters entry whose heading is an exact short substring from the very start of the document, whose title is a short readable name for the whole document, and whose summary describes the whole document.\n\n\
+        Document:\n{text}"
+    )
+}
+
+/// Extraction ("map") pass — see build_plan_synthesis_prompt for the
+/// corresponding "reduce" step, and chapterize_and_import_module_at for how
+/// the two fit together. Reads ONE chapter (or, for an oversized chapter,
+/// one sub-chunk of it — see split_into_chunks) and pulls out the concrete
+/// facts a DM must not forget, instead of writing prose about it. Splitting
+/// "find every fact" (small, focused reads, one per chapter) from
+/// "synthesize the plan" (reads only the extracted facts, never the raw text
+/// again) is the actual fix for a genuinely long module: no single call ever
+/// has to hold the whole document's worth of detail in mind while ALSO doing
+/// the highest-judgment writing task.
+fn build_chapter_extraction_prompt(module_title: &str, chapter_title: &str, chapter_text: &str) -> String {
+    format!(
+        "You are reading one chapter/section of the Dungeons & Dragons module \"{module_title}\", titled \"{chapter_title}\", so an AI Dungeon Master can be told the facts it must not forget when running this later. Extract — do not summarize the narrative or write prose.\n\n\
+        List every one of the following that appears in the text below, as short markdown bullets grouped under these headings (omit a heading entirely if nothing in this chapter fits it):\n\
+        ## NPCs\n\
+        Every named NPC: name, role, and anything a DM must play consistently (motivation, secret, personality quirk, what they know or want).\n\
+        ## Factions & organizations\n\
+        Name, goal, and their stance toward the party if stated.\n\
+        ## Items & treasure\n\
+        Any named or magical item, its specific properties/mechanics, and where it's found.\n\
+        ## Threads & hooks\n\
+        Anything planted here that pays off later, any promise made to the party, any foreshadowing — even one sentence's worth.\n\
+        ## Other critical specifics\n\
+        Numbers, conditions, traps, secrets, or rules the text calls out explicitly that a DM improvising later would need to get right (DCs, damage, gold amounts, timers, unique locations).\n\n\
+        Err on the side of including too much rather than too little — a detail left out here is gone for good; one that turns out unimportant later costs nothing. Do not editorialize or add anything not actually in the text.\n\n\
+        Reply with ONLY the markdown bullets described above, no other commentary, no code fences.\n\n\
+        Chapter text:\n{chapter_text}"
+    )
+}
+
+/// Synthesis ("reduce") pass — writes the exact same two-section DM plan
+/// build_chapterize_prompt used to write directly from the raw document, but
+/// reads every chapter's already-extracted facts (build_chapter_extraction_prompt)
+/// instead. Far less text than the raw document, and — the actual point —
+/// it's text that already survived one dedicated, single-topic read instead
+/// of competing for attention against an entire book.
+/// build_plan_critique_prompt still runs unchanged on top of this call's
+/// output.
+fn build_plan_synthesis_prompt(chapter_extracts: &[(String, String)], campaign_lore: &str, other_modules_summary: &str) -> String {
     let context_block = if campaign_lore.trim().is_empty() && other_modules_summary.trim().is_empty() {
         "This is the first module being imported into this campaign — there's no established campaign lore or other modules to tie into yet, so treat this module's own content as the foundation.".to_string()
     } else {
@@ -1578,24 +1645,20 @@ fn build_chapterize_prompt(text: &str, campaign_lore: &str, other_modules_summar
             if other_modules_summary.trim().is_empty() { "(none yet)" } else { other_modules_summary.trim() },
         )
     };
+    let extracts_block = chapter_extracts
+        .iter()
+        .map(|(title, extract)| format!("### {title}\n{extract}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
     format!(
-        "You will be given the full text of a Dungeons & Dragons adventure module or scenario document, extracted from a PDF. Do three things with it, in one reply.\n\n\
-        1. Give the whole module a short, human-readable title (a few words, e.g. \"The Sunless Citadel\" or \"Goblin Ambush at the Old Mill\") — from the document's own title if it has one, otherwise one you invent that fits.\n\n\
-        2. Identify its logical NARRATIVE chapters or major sections — the story beats the party actually plays through in order. Leave out pure-reference material that isn't a story beat (monster/NPC stat-block appendices, item/treasure tables, handout-only pages, maps with no accompanying scene) — those aren't \"chapters\" the party progresses through, so including them just makes chapter sizes wildly uneven and risks one becoming the \"current\" chapter by mistake. For each chapter, give TWO different strings:\n\
-        - \"title\": a short, clean, human-readable name (e.g. \"Chapter 3: The Ambush at Old Mill\") — this is shown directly to players, so it must read as a complete phrase. Never truncate it mid-word or mid-sentence for any reason.\n\
-        - \"heading\": copied EXACTLY character-for-character from a contiguous span of the document text below — including any extraction artifacts like doubled letters, stray spaces between every word, broken ligatures, or OCR garbling (e.g. if the document shows \"CHAPTER  I  I ACQUISITIO:-<S\", copy exactly that, do not clean it up to \"CHAPTER 1: ACQUISITIONS\"). Nobody ever sees this string — it exists purely to find this exact position in the raw text programmatically, so ANY normalization, cleanup, or paraphrasing will make it fail to match. Prefer it to be UNIQUE within the whole document: a short/generic heading word (\"About\", \"Background\", \"Introduction\") likely repeats elsewhere (as a subsection heading, a running header, etc.) and matching the wrong occurrence silently corrupts the split — if the bare heading text looks generic, extend the copied substring with the next few words until it's distinctive, still verbatim.\n\
-        List chapters in the order they appear.\n\n\
-        3. Write a plan for the AI Dungeon Master who will run this live at the table, as a markdown doc with exactly two sections:\n\
+        "Below are the extracted facts (NPCs, factions, items, threads, critical specifics) from every chapter of a Dungeons & Dragons module, chapter by chapter. Write a plan for the AI Dungeon Master who will run this live at the table, as a markdown doc with exactly two sections:\n\
         ## How this fits the campaign\n\
         Given the campaign context below, which existing NPCs/factions/threads (if any) this module's content should tie into, and a natural in-fiction hook for why the party ends up here. If there's no established campaign context yet, say this module can serve as the campaign's foundation instead.\n\
         ## This module's own arc\n\
-        The overall story arc across this module's own chapters, key NPCs/factions worth tracking, threads that should pay off later (foreshadowing), and pacing guidance for how the chapters connect. A module provides a framework and leaves the DM to fill in the gaps — this section IS that framework. Keep the whole plan concise (a few hundred words total is plenty), not a retelling of the text.\n\n\
-        4. Self-audit your own breakdown above and list any STRUCTURAL concerns as short strings — e.g. a heading you weren't fully confident matched a unique exact point in the source text, narrative chapters that still came out very uneven in size, or a campaign tie-in that feels forced. The person reading this may be a PLAYER in the game, not the DM, so these strings must never reveal plot content, twists, names of secrets, or anything that would spoil the adventure — describe only the structural problem itself. If you have no concerns, return an empty array.\n\n\
+        The overall story arc across this module's own chapters, key NPCs/factions worth tracking, threads that should pay off later (foreshadowing), and pacing guidance for how the chapters connect. A module provides a framework and leaves the DM to fill in the gaps — this section IS that framework. Keep the whole plan concise (a few hundred words total is plenty), not a retelling of the extracted facts.\n\n\
         {context_block}\n\n\
-        Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
-        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"heading\": \"<exact verbatim substring, artifacts included, chosen to be unique>\", \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"plan\": \"<markdown plan with both sections above>\", \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
-        If the document has no clear internal chapter structure, still return a single chapters entry whose heading is an exact short substring from the very start of the document, whose title is a short readable name for the whole document, and whose summary describes the whole document — and still include a plan.\n\n\
-        Document:\n{text}"
+        Reply with ONLY the markdown plan described above, no other commentary, no code fences.\n\n\
+        Extracted facts, by chapter:\n{extracts_block}"
     )
 }
 
@@ -1660,10 +1723,8 @@ struct ChapterizeReply {
     #[serde(default)]
     module_title: String,
     chapters: Vec<ChapterHeading>,
-    #[serde(default)]
-    plan: String,
     /// Claude's own spoiler-free structural self-audit of this breakdown —
-    /// see build_chapterize_prompt's point 4. Never plot content, only things
+    /// see build_chapterize_prompt's point 3. Never plot content, only things
     /// like "a heading may not have matched exactly" or "chapters came out
     /// uneven" — safe to show a player without spoiling the adventure.
     #[serde(default)]
@@ -1722,6 +1783,41 @@ fn split_by_headings(text: &str, headings: &[ChapterHeading]) -> Vec<(String, St
             (display_title(h), h.summary.clone(), text[*pos..end].to_string())
         })
         .collect()
+}
+
+/// Per-call ceiling (chars, not tokens — consistent with coverage_concern's
+/// char-based accounting below) for one build_chapter_extraction_prompt call.
+/// ~80K chars is roughly 20K tokens: comfortably inside a single high-
+/// fidelity read for any model, chosen deliberately small since the whole
+/// point of the extraction pass is not losing detail, not saving calls. Most
+/// chapters — even a meaty 25-30 page one — fit in a single call; only an
+/// unusually long chapter (a 60+ page dungeon crawl) gets split further.
+const CHAPTER_EXTRACTION_MAX_CHARS: usize = 80_000;
+
+/// Splits `text` into pieces no longer than `max_chars`, breaking at the
+/// nearest paragraph boundary (`\n\n`) at or before each cut point instead of
+/// mid-sentence, so a sub-chunk's own extraction pass never opens on a
+/// fragment. Falls back to a hard cut only when no paragraph break exists in
+/// the remaining span — still UTF-8-safe, since the cut point always comes
+/// from `char_indices` rather than a raw byte offset. A no-op (returns `text`
+/// unchanged as a single-element vec) when it already fits.
+fn split_into_chunks(text: &str, max_chars: usize) -> Vec<String> {
+    if max_chars == 0 || text.chars().count() <= max_chars {
+        return vec![text.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+    while remaining.chars().count() > max_chars {
+        let boundary = remaining.char_indices().nth(max_chars).map(|(i, _)| i).unwrap_or(remaining.len());
+        let cut = remaining[..boundary].rfind("\n\n").map(|p| p + 2).unwrap_or(boundary);
+        let (piece, rest) = remaining.split_at(cut);
+        chunks.push(piece.to_string());
+        remaining = rest;
+    }
+    if !remaining.is_empty() {
+        chunks.push(remaining.to_string());
+    }
+    chunks
 }
 
 /// Pure, deterministic, zero-spoiler-risk companion to the LLM's own
@@ -2007,26 +2103,39 @@ fn get_module_chapters_at(root: &Path, id: &str, module_id: &str) -> Result<(Vec
     Ok((manifest, current_id))
 }
 
-/// The impure orchestration step: one Opus call asks Claude for a module
-/// title, chapter headings, and an integration-aware draft plan in the same
-/// reply (reading whatever campaign lore + other modules already exist first
-/// so the plan can actually tie into them), a second Opus call critiques and
-/// revises just the plan text (see build_plan_critique_prompt — the
-/// chapters/headings from pass 1 are used as-is, since split_by_headings
-/// needs them to match the raw source text exactly), then the raw text is
-/// split on those headings and everything is written to disk as a new,
-/// independently-tracked module. Only this function (and the
-/// #[tauri::command] wrapping it) touches the network/subprocess —
-/// split_by_headings/write_chapters_to_disk above are pure and covered by
-/// real tests instead. Forced onto `opus` (see dm.rs) since this runs once
-/// per module import, not on every turn. If the critique call fails or comes
-/// back empty, the pass-1 draft plan ships as-is rather than failing the
-/// whole (expensive) import over a secondary refinement step.
+/// The impure orchestration step, now a four-stage pipeline instead of two
+/// calls, specifically so a long module stops losing detail:
+/// 1. One Opus call finds the module title + chapter headings (boundary
+///    detection only now — see build_chapterize_prompt's doc comment for why
+///    plan-writing moved out of this call).
+/// 2. The raw text is split on those headings (split_by_headings, pure/
+///    mechanical — no content is rewritten, just cut).
+/// 3. One Opus call PER CHAPTER (build_chapter_extraction_prompt) extracts
+///    the concrete facts (NPCs, factions, items, threads) from that
+///    chapter's own text alone — oversized chapters are sub-chunked first
+///    (split_into_chunks) so no single call reads more than
+///    CHAPTER_EXTRACTION_MAX_CHARS. This is the "map" step.
+/// 4. One Opus call (build_plan_synthesis_prompt) writes the campaign-
+///    integration plan from ALL the extracted facts, then the existing
+///    critique pass (build_plan_critique_prompt) polishes it exactly as
+///    before. This is the "reduce" step.
+/// Trades call count for fidelity: a several-hundred-page module now costs
+/// roughly one call per chapter instead of two calls total — worth it only
+/// because this runs once per import (see dm.rs), never on the live turn
+/// loop. Steps 1 and 3 are load-bearing (a failure fails the whole import,
+/// same as before) since a hole in the extracted facts would just
+/// reintroduce the exact problem this pipeline exists to fix; only the final
+/// critique polish still degrades gracefully to its pre-critique draft on
+/// failure, same as before. Only this function (and the #[tauri::command]
+/// wrapping it) touches the network/subprocess — split_by_headings/
+/// split_into_chunks/write_chapters_to_disk above are pure and covered by
+/// real tests instead.
 fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Result<ChapterizeImportResult, String> {
     let dir = root.join(id);
     let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
     let other_modules_summary = read_optional(&dir.join("modules_index.md"));
-    let reply = crate::dm::ask_claude_once(build_chapterize_prompt(raw_text, &campaign_lore, &other_modules_summary), Some("opus"))?;
+
+    let reply = crate::dm::ask_claude_once(build_chapterize_prompt(raw_text), Some("opus"))?;
     let parsed = parse_chapterize_reply(&reply)?;
     let chapters = split_by_headings(raw_text, &parsed.chapters);
     let module_title = if parsed.module_title.trim().is_empty() {
@@ -2041,11 +2150,21 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Res
         concerns.push(note);
     }
 
-    let plan = crate::dm::ask_claude_once(build_plan_critique_prompt(&parsed.plan, &campaign_lore, &other_modules_summary), Some("opus"))
+    let mut extracts: Vec<(String, String)> = Vec::with_capacity(chapters.len());
+    for (title, _, body) in &chapters {
+        let mut chunk_extracts = Vec::new();
+        for chunk in split_into_chunks(body, CHAPTER_EXTRACTION_MAX_CHARS) {
+            chunk_extracts.push(crate::dm::ask_claude_once(build_chapter_extraction_prompt(&module_title, title, &chunk), Some("opus"))?);
+        }
+        extracts.push((title.clone(), chunk_extracts.join("\n\n")));
+    }
+
+    let draft_plan = crate::dm::ask_claude_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"))?;
+    let plan = crate::dm::ask_claude_once(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"))
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or(parsed.plan);
+        .unwrap_or(draft_plan);
 
     let (module_id, summaries) = write_chapters_to_disk(root, id, &chapters, &plan, &module_title)?;
     Ok(ChapterizeImportResult { module_id, module_title, chapters: summaries, concerns })
@@ -2444,9 +2563,10 @@ pub fn extract_module_text(path: String) -> Result<ExtractedModuleText, String> 
 
 /// Chapterizes and imports a module's raw text (from extract_module_text) as
 /// a NEW module, coexisting with any already imported — never replaces an
-/// existing one. Runs a real `claude` call to find chapter boundaries, so
-/// this can take a while for a long document; spawn_blocking keeps it off
-/// the async runtime's worker threads.
+/// existing one. Runs a series of real `claude` calls, roughly one per
+/// chapter (see chapterize_and_import_module_at), so this can take several
+/// minutes for a long document; spawn_blocking keeps it off the async
+/// runtime's worker threads.
 #[tauri::command]
 pub async fn chapterize_and_import_module(app: AppHandle, id: String, text: String) -> Result<ChapterizeImportResult, String> {
     tokio::task::spawn_blocking(move || {
@@ -3647,20 +3767,44 @@ mod tests {
     }
 
     #[test]
-    fn build_chapterize_prompt_includes_module_title_instruction_and_degrades_gracefully_with_no_campaign_context() {
-        let prompt = build_chapterize_prompt("Document text.", "", "");
+    fn build_chapterize_prompt_includes_module_title_instruction() {
+        let prompt = build_chapterize_prompt("Document text.");
         assert!(prompt.contains("module_title"));
-        assert!(prompt.to_lowercase().contains("first module being imported"));
-        assert!(!prompt.to_lowercase().contains("given the campaign's lore"));
     }
 
     #[test]
-    fn build_chapterize_prompt_includes_campaign_lore_and_other_modules_when_present() {
-        let prompt = build_chapterize_prompt(
-            "Document text.",
+    fn build_chapterize_prompt_instructs_a_spoiler_free_concerns_self_audit() {
+        let prompt = build_chapterize_prompt("Document text.");
+        assert!(prompt.contains("\"concerns\""));
+        assert!(prompt.to_lowercase().contains("never reveal plot content"));
+    }
+
+    #[test]
+    fn build_chapter_extraction_prompt_asks_for_facts_not_narrative() {
+        let prompt = build_chapter_extraction_prompt("Lost Mine of Phandelver", "Chapter 1: Goblin Arrows", "Sildar Hallwinter is ambushed.");
+        assert!(prompt.contains("Lost Mine of Phandelver"));
+        assert!(prompt.contains("Chapter 1: Goblin Arrows"));
+        assert!(prompt.contains("Sildar Hallwinter is ambushed."));
+        assert!(prompt.contains("## NPCs"));
+        assert!(prompt.contains("## Items & treasure"));
+        assert!(prompt.to_lowercase().contains("do not summarize the narrative"));
+    }
+
+    #[test]
+    fn build_plan_synthesis_prompt_includes_all_chapter_extracts_and_campaign_context() {
+        let extracts = vec![
+            ("Chapter 1: Goblin Arrows".to_string(), "- Sildar Hallwinter: captured NPC.".to_string()),
+            ("Chapter 2: Cragmaw Hideout".to_string(), "- Klarg: goblin boss.".to_string()),
+        ];
+        let prompt = build_plan_synthesis_prompt(
+            &extracts,
             "The party operates out of Phandalin.",
             "1. **The Sunless Citadel** (`the-sunless-citadel`) — a goblin-infested ruin.",
         );
+        assert!(prompt.contains("Sildar Hallwinter"));
+        assert!(prompt.contains("Klarg"));
+        assert!(prompt.contains("Chapter 1: Goblin Arrows"));
+        assert!(prompt.contains("Chapter 2: Cragmaw Hideout"));
         assert!(prompt.contains("The party operates out of Phandalin."));
         assert!(prompt.contains("The Sunless Citadel"));
         assert!(prompt.contains("How this fits the campaign"));
@@ -3668,10 +3812,37 @@ mod tests {
     }
 
     #[test]
-    fn build_chapterize_prompt_instructs_a_spoiler_free_concerns_self_audit() {
-        let prompt = build_chapterize_prompt("Document text.", "", "");
-        assert!(prompt.contains("\"concerns\""));
-        assert!(prompt.to_lowercase().contains("never reveal plot content"));
+    fn build_plan_synthesis_prompt_degrades_gracefully_with_no_campaign_context() {
+        let extracts = vec![("Chapter 1".to_string(), "- Some NPC.".to_string())];
+        let prompt = build_plan_synthesis_prompt(&extracts, "", "");
+        assert!(prompt.to_lowercase().contains("first module being imported"));
+    }
+
+    #[test]
+    fn split_into_chunks_is_a_noop_when_text_already_fits() {
+        assert_eq!(split_into_chunks("short text", 100), vec!["short text".to_string()]);
+    }
+
+    #[test]
+    fn split_into_chunks_breaks_at_paragraph_boundaries() {
+        let text = format!("{}\n\n{}", "a".repeat(50), "b".repeat(50));
+        let chunks = split_into_chunks(&text, 60);
+        assert_eq!(chunks, vec![format!("{}\n\n", "a".repeat(50)), "b".repeat(50)]);
+    }
+
+    #[test]
+    fn split_into_chunks_falls_back_to_a_hard_cut_with_no_paragraph_break() {
+        let text = "a".repeat(150);
+        let chunks = split_into_chunks(&text, 60);
+        assert_eq!(chunks.iter().map(|c| c.chars().count()).collect::<Vec<_>>(), vec![60, 60, 30]);
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn split_into_chunks_never_splits_a_multibyte_char() {
+        let text = format!("{}é", "a".repeat(60));
+        let chunks = split_into_chunks(&text, 60);
+        assert_eq!(chunks.concat(), text); // would have panicked on a bad byte-boundary cut instead
     }
 
     #[test]
@@ -3707,24 +3878,15 @@ mod tests {
 
     #[test]
     fn parse_chapterize_reply_handles_plain_and_fenced_json() {
-        let plain = "{\"chapters\":[{\"heading\":\"Chapter 1: Goblin Arrows\",\"summary\":\"An ambush on the road.\"}],\"plan\":\"# Arc\\nGoblins, then the mine.\"}";
+        let plain = "{\"chapters\":[{\"heading\":\"Chapter 1: Goblin Arrows\",\"summary\":\"An ambush on the road.\"}]}";
         let parsed = parse_chapterize_reply(plain).unwrap();
         assert_eq!(parsed.chapters[0].heading, "Chapter 1: Goblin Arrows");
-        assert!(parsed.plan.contains("Goblins, then the mine."));
 
-        let fenced = "```json\n{\"chapters\":[{\"heading\":\"Chapter 1\",\"summary\":\"Intro.\"}],\"plan\":\"Outline.\"}\n```";
+        let fenced = "```json\n{\"chapters\":[{\"heading\":\"Chapter 1\",\"summary\":\"Intro.\"}]}\n```";
         let parsed2 = parse_chapterize_reply(fenced).unwrap();
         assert_eq!(parsed2.chapters[0].heading, "Chapter 1");
-        assert_eq!(parsed2.plan, "Outline.");
 
         assert!(parse_chapterize_reply("not json at all").is_err());
-    }
-
-    #[test]
-    fn parse_chapterize_reply_defaults_plan_when_absent() {
-        let no_plan = r#"{"chapters":[{"heading":"Chapter 1","summary":"Intro."}]}"#;
-        let parsed = parse_chapterize_reply(no_plan).unwrap();
-        assert_eq!(parsed.plan, "");
     }
 
     #[test]
@@ -3766,7 +3928,7 @@ mod tests {
 
     #[test]
     fn build_chapterize_prompt_instructs_separate_title_and_unique_heading() {
-        let prompt = build_chapterize_prompt("Document text.", "", "");
+        let prompt = build_chapterize_prompt("Document text.");
         assert!(prompt.contains("\"title\""));
         assert!(prompt.to_lowercase().contains("never truncate it mid-word"));
         assert!(prompt.to_lowercase().contains("unique"));
@@ -3850,6 +4012,60 @@ mod tests {
         assert_eq!(reimported.matches("@active_module/current.md").count(), 1);
         // The newly-imported module automatically becomes active.
         assert_eq!(fs::read_to_string(root.0.join(&meta.id).join("modules").join("active_id.txt")).unwrap(), module_id_2);
+    }
+
+    /// Real integration check against the actual `claude` CLI — not run as
+    /// part of the normal `cargo test` suite (needs a live, authenticated
+    /// `claude` on PATH and makes real Opus calls), but exercises the actual
+    /// 4-stage pipeline end-to-end (see chapterize_and_import_module_at's doc
+    /// comment): real subprocess calls, real JSON parsing, real file writes.
+    /// A small synthetic 2-chapter module keeps it cheap (a handful of calls,
+    /// not the ~dozen+ a real module import costs) while still proving the
+    /// map/reduce restructuring didn't break anything only a live run can
+    /// catch — in particular, that a fact from chapter 1's extraction pass
+    /// actually survives into the synthesis pass's plan, rather than the
+    /// pipeline silently producing a hole where the raw-text read used to be.
+    /// Run with:
+    ///   cargo test --lib -- --ignored --nocapture chapterize_and_import_module_at_end_to_end
+    #[test]
+    #[ignore]
+    fn chapterize_and_import_module_at_end_to_end() {
+        let root = Scratch::new("chapterize-e2e");
+        let meta = create_campaign_at(&root.0, &intake("Test Module")).unwrap();
+
+        let raw_text = "\
+INTRODUCTION
+
+This is a short test scenario for verifying the ingestion pipeline end to end.
+
+CHAPTER 1: THE AMBUSH AT REDSTONE BRIDGE
+
+The party is traveling the King's Road when they are ambushed by a group of bandits led by a woman named Vera Blackwood, a disgraced former town guard seeking revenge on the merchant who ruined her family. She wields a magic dagger called the Whisperfang, which can cast Silence once per day. If the party spares her, she reveals that her old commanding officer, Captain Aldric Renn, is secretly working with a smuggling ring based in the town of Millhaven.
+
+CHAPTER 2: MILLHAVEN'S SECRET
+
+The party arrives in Millhaven, a small fishing town of about 200 people. The town is run by Mayor Osric Penn, who is unaware of Captain Renn's smuggling operation. The smugglers meet at the old lighthouse every new moon. Inside the lighthouse, the party finds a locked chest requiring a DC 15 Dexterity check to pick, containing 200 gold pieces and a map showing a hidden cave along the coast — the location of the campaign's next adventure.
+";
+
+        let result = chapterize_and_import_module_at(&root.0, &meta.id, raw_text).unwrap();
+        println!("=== RESULT ===\n{result:#?}");
+        assert_eq!(result.chapters.len(), 2, "should detect exactly 2 narrative chapters, got: {:?}", result.chapters);
+
+        let module_dir = root.0.join(&meta.id).join("modules").join(&result.module_id);
+        let plan = fs::read_to_string(module_dir.join("plan.md")).unwrap();
+        println!("=== PLAN ===\n{plan}\n");
+        assert!(plan.contains("How this fits the campaign"));
+        assert!(plan.contains("This module's own arc"));
+        // The real proof the map->reduce pipeline actually carried a detail
+        // through (not just "didn't crash"): a named NPC from chapter 1 shows
+        // up in a plan synthesized from EXTRACTED FACTS, never the raw text.
+        assert!(
+            plan.contains("Vera") || plan.contains("Blackwood"),
+            "plan should mention chapter 1's named NPC — got:\n{plan}"
+        );
+
+        let chapter1 = fs::read_to_string(module_dir.join(format!("{}.md", result.chapters[0].id))).unwrap();
+        assert!(chapter1.contains("Whisperfang"), "chapter text on disk must be the verbatim original, not a rewrite");
     }
 
     #[test]
