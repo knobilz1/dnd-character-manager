@@ -515,7 +515,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ttsEngine, setTtsEngine } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -1429,6 +1429,21 @@ export function DMConsolePage() {
     }
     sessionIdRef.current = undefined;
   }, [dmProvider]);
+
+  /** Mirrors the ingestion-provider setting (and the local server address/model
+   *  it would use) down to the Rust backend, which holds it in a global that
+   *  every one-shot ingestion call reads (see local_llm.rs's
+   *  set_ingestion_provider/ask_ingest_once). Runs on mount (syncing the
+   *  persisted setting after an app restart, since the backend global resets to
+   *  its Claude default each launch) and on any change to those three values —
+   *  so the backend is always in step with what the UI shows. */
+  React.useEffect(() => {
+    invoke('set_ingestion_provider', {
+      useLocal: ingestionProvider === 'local',
+      baseUrl: localLlmBaseUrl,
+      model: localLlmModel,
+    }).catch((e) => console.warn('Failed to sync the ingestion provider to the backend:', e));
+  }, [ingestionProvider, localLlmBaseUrl, localLlmModel]);
 
   /** Routes one turn to whichever DM engine is configured (see
    *  useSettingsStore's dmProvider) — a locally-hosted LLM (local_llm.rs's
@@ -3074,7 +3089,21 @@ export function DMConsolePage() {
               <option value="local">Local LLM (Ollama / LM Studio / llama.cpp server…)</option>
             </select>
           </div>
-          {dmProvider === 'local' && (
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Ingestion &amp; memory</label>
+            <select
+              value={ingestionProvider}
+              onChange={(e) => setIngestionProvider(e.target.value as 'claude' | 'local')}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600"
+            >
+              <option value="claude">Claude (best quality)</option>
+              <option value="local">Local LLM (free, lower quality)</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              Which engine handles module import, campaign lore, and the end-of-session memory digest — separate from the live-turn engine above. Local keeps these off your Claude budget, but a smaller model is less reliable on big imports; best for small one-shot content.
+            </p>
+          </div>
+          {(dmProvider === 'local' || ingestionProvider === 'local') && (
             <>
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Server address</label>
@@ -3125,6 +3154,10 @@ export function DMConsolePage() {
                   </p>
                 )}
               </div>
+            </>
+          )}
+          {dmProvider === 'local' && (
+            <>
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Conversation memory (turns)</label>
                 <input

@@ -40,6 +40,16 @@ interface SettingsState {
    *  bounds it. Claude-only sessions ignore this entirely. */
   localLlmHistoryTurns: number;
   setLocalLlmHistoryTurns: (v: number) => void;
+  /** Which engine runs one-shot INGESTION/memory work (module import,
+   *  campaign lore, the session digest, compaction) — SEPARATE from dmProvider
+   *  (the live-turn engine), so quality Claude turns can pair with cheap local
+   *  ingestion, or vice versa. 'claude' (default) keeps ingestion on the
+   *  subscription; 'local' routes it to the same local server the live-turn
+   *  local path uses (see local_llm.rs's set_ingestion_provider/ask_ingest_once).
+   *  Best for small throwaway one-shot campaigns where ingestion quality matters
+   *  less than not spending Claude budget. */
+  ingestionProvider: 'claude' | 'local';
+  setIngestionProvider: (v: 'claude' | 'local') => void;
   /** Which engine synthesizes the DM/NPC voices. 'kokoro' (default) is the
    *  fast, CPU, always-available preset-voice engine; 'f5' is the optional
    *  high-fidelity GPU voice-cloning engine (see src-tauri/src/tts.rs). ONE-WAY
@@ -71,6 +81,8 @@ export const useSettingsStore = create<SettingsState>()(
       setLocalLlmModel: (v) => set({ localLlmModel: v }),
       localLlmHistoryTurns: 12,
       setLocalLlmHistoryTurns: (v) => set({ localLlmHistoryTurns: v }),
+      ingestionProvider: 'claude',
+      setIngestionProvider: (v) => set({ ingestionProvider: v }),
       ttsEngine: 'kokoro',
       setTtsEngine: (v) => set({ ttsEngine: v }),
     }),

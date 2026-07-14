@@ -497,7 +497,7 @@ fn build_campaign_lore_critique_prompt(draft: &str, inventory: &str) -> String {
 fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) -> Result<String, String> {
     let inventory = split_into_chunks(&intake.lore, EXTRACTION_CHUNK_MAX_CHARS)
         .iter()
-        .filter_map(|chunk| crate::dm::ask_claude_once(build_inventory_extraction_prompt(chunk), Some("opus")).ok())
+        .filter_map(|chunk| crate::local_llm::ask_ingest_once(build_inventory_extraction_prompt(chunk), Some("opus"), false).ok())
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -510,13 +510,13 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
         let _ = write_atomic(&root.join(id).join("memory").join("campaign_source_inventory.md"), &inventory);
     }
 
-    let draft = crate::dm::ask_claude_once(build_establish_campaign_prompt(intake, &inventory), Some("opus"))?;
+    let draft = crate::local_llm::ask_ingest_once(build_establish_campaign_prompt(intake, &inventory), Some("opus"), false)?;
     let draft = draft.trim().to_string();
     if draft.is_empty() {
         return Err("Campaign-lore establishment returned empty content.".into());
     }
 
-    let final_lore = crate::dm::ask_claude_once(build_campaign_lore_critique_prompt(&draft, &inventory), Some("opus"))
+    let final_lore = crate::local_llm::ask_ingest_once(build_campaign_lore_critique_prompt(&draft, &inventory), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -600,17 +600,17 @@ fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<Stri
 
     let mut chunk_inventories = Vec::new();
     for chunk in split_into_chunks(addition, EXTRACTION_CHUNK_MAX_CHARS) {
-        chunk_inventories.push(crate::dm::ask_claude_once(build_inventory_extraction_prompt(&chunk), Some("opus"))?);
+        chunk_inventories.push(crate::local_llm::ask_ingest_once(build_inventory_extraction_prompt(&chunk), Some("opus"), false)?);
     }
     let inventory = chunk_inventories.join("\n");
 
-    let draft = crate::dm::ask_claude_once(build_update_lore_prompt(&existing, &inventory), Some("opus"))?;
+    let draft = crate::local_llm::ask_ingest_once(build_update_lore_prompt(&existing, &inventory), Some("opus"), false)?;
     let draft = draft.trim().to_string();
     if draft.is_empty() {
         return Err("Campaign-lore update returned empty content; leaving campaign_lore.md untouched.".into());
     }
 
-    let lore = crate::dm::ask_claude_once(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"))
+    let lore = crate::local_llm::ask_ingest_once(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -980,7 +980,7 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
 
     let mut summaries = Vec::new();
     for chunk in split_into_chunks(transcript, EXTRACTION_CHUNK_MAX_CHARS) {
-        let Ok(reply) = crate::dm::ask_claude_once(build_session_digest_prompt(&chunk), Some("opus")) else {
+        let Ok(reply) = crate::local_llm::ask_ingest_once(build_session_digest_prompt(&chunk), Some("opus"), true) else {
             continue;
         };
         let digest = parse_session_digest(&reply);
@@ -1480,7 +1480,7 @@ fn reconcile_npc_voices_at(root: &Path, id: &str) -> Result<usize, String> {
     }
 
     let usage_summary = summarize_voice_usage(&existing);
-    let reply = crate::dm::ask_claude_once(build_voice_reconciliation_prompt(&unvoiced, &usage_summary), Some("opus"))?;
+    let reply = crate::local_llm::ask_ingest_once(build_voice_reconciliation_prompt(&unvoiced, &usage_summary), Some("opus"), true)?;
     let parsed = parse_voice_reconciliation_reply(&reply)?;
 
     let unvoiced_names: HashSet<String> = unvoiced.iter().map(|(n, _)| normalize_name_key(n)).collect();
@@ -1622,7 +1622,7 @@ fn reconcile_campaign_hooks_at(root: &Path, id: &str) -> Result<usize, String> {
     }
 
     let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
-    let reply = crate::dm::ask_claude_once(build_campaign_hooks_prompt(&campaign_lore, &pending), Some("opus"))?;
+    let reply = crate::local_llm::ask_ingest_once(build_campaign_hooks_prompt(&campaign_lore, &pending), Some("opus"), true)?;
     let parsed = parse_campaign_hooks_reply(&reply)?;
 
     let pending_names: HashSet<String> = pending.iter().map(|(n, _)| normalize_name_key(n)).collect();
@@ -1674,7 +1674,7 @@ fn compact_memory_if_needed_at(root: &Path, id: &str) -> Result<bool, String> {
     if !should_compact_memory(&current) {
         return Ok(false);
     }
-    let rewritten = crate::dm::ask_claude_once(build_compact_memory_prompt(&current), Some("sonnet"))?;
+    let rewritten = crate::local_llm::ask_ingest_once(build_compact_memory_prompt(&current), Some("sonnet"), false)?;
     let trimmed = rewritten.trim();
     if trimmed.is_empty() {
         return Err("Memory compaction returned empty content; leaving memory.md untouched.".into());
@@ -1783,9 +1783,10 @@ fn compact_entities_if_needed_at(
     if !should_compact_entities(&current) {
         return Ok(false);
     }
-    let rewritten = crate::dm::ask_claude_once(
+    let rewritten = crate::local_llm::ask_ingest_once(
         build_compact_entities_prompt(file_label, &current, current_chapter_context),
         Some("sonnet"),
+        false,
     )?;
     let trimmed = rewritten.trim();
     if trimmed.is_empty() {
@@ -1845,7 +1846,7 @@ fn suggest_session_plan_at(root: &Path, id: &str, terrain_catalog: &str) -> Resu
     let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
     let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
     let prompt = build_session_plan_prompt(&combined_plan, &current_chapter, &combined_memory, terrain_catalog);
-    crate::dm::ask_claude_once(prompt, Some("sonnet"))
+    crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)
 }
 
 /// `campaign_lore` (memory/campaign_lore.md) and `other_modules_summary`
@@ -2366,7 +2367,7 @@ fn build_trim_chapter_prompt(chapter_text: &str, resolved_description: &str) -> 
 fn trim_resolved_chapter_section_at(root: &Path, id: &str, module_id: &str, resolved_description: &str) -> Result<(), String> {
     let path = root.join(id).join("modules").join(module_id).join("current.md");
     let current = fs::read_to_string(&path).map_err(|e| format!("No active chapter to trim: {e}"))?;
-    let rewritten = crate::dm::ask_claude_once(build_trim_chapter_prompt(&current, resolved_description), Some("sonnet"))?;
+    let rewritten = crate::local_llm::ask_ingest_once(build_trim_chapter_prompt(&current, resolved_description), Some("sonnet"), false)?;
     let trimmed = rewritten.trim();
     if trimmed.is_empty() {
         return Err("Chapter trim returned empty content; leaving current.md untouched.".into());
@@ -2426,7 +2427,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Res
     let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
     let other_modules_summary = read_optional(&dir.join("modules_index.md"));
 
-    let reply = crate::dm::ask_claude_once(build_chapterize_prompt(raw_text), Some("opus"))?;
+    let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(raw_text), Some("opus"), true)?;
     let parsed = parse_chapterize_reply(&reply)?;
     let chapters = split_by_headings(raw_text, &parsed.chapters);
     let module_title = if parsed.module_title.trim().is_empty() {
@@ -2445,13 +2446,13 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Res
     for (title, _, body) in &chapters {
         let mut chunk_extracts = Vec::new();
         for chunk in split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS) {
-            chunk_extracts.push(crate::dm::ask_claude_once(build_chapter_extraction_prompt(&module_title, title, &chunk), Some("opus"))?);
+            chunk_extracts.push(crate::local_llm::ask_ingest_once(build_chapter_extraction_prompt(&module_title, title, &chunk), Some("opus"), false)?);
         }
         extracts.push((title.clone(), chunk_extracts.join("\n\n")));
     }
 
-    let draft_plan = crate::dm::ask_claude_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"))?;
-    let plan = crate::dm::ask_claude_once(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"))
+    let draft_plan = crate::local_llm::ask_ingest_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"), false)?;
+    let plan = crate::local_llm::ask_ingest_once(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())

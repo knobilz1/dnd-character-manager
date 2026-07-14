@@ -39,6 +39,7 @@ pub fn run() {
       local_llm::ask_dm_local,
       local_llm::end_local_dm_session,
       local_llm::list_local_llm_models,
+      local_llm::set_ingestion_provider,
       party_listener::start_party_listener,
       party_listener::party_listener_port,
       party_listener::local_lan_ip,

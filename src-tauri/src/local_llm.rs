@@ -259,6 +259,113 @@ fn call_local_llm(base_url: &str, model: &str, system_prompt: &str, history: &[C
     Ok(format_as_dm_reply_text(&narration, actions.as_ref()))
 }
 
+// ── Ingestion provider (one-shot backend LLM work) ───────────────────────────
+//
+// campaign.rs's ingestion/memory work (module chapterize, campaign lore,
+// session digest, compaction, voice/hooks reconciliation, session-plan) is a
+// series of one-shot LLM calls that historically ALWAYS went to Claude via
+// dm::ask_claude_once. This lets that whole class of work optionally run on the
+// local server instead — useful for small throwaway one-shot campaigns where
+// spending Claude subscription budget on ingestion isn't worth it. It's a
+// SEPARATE choice from the live-turn provider (dmProvider): you can run quality
+// Claude turns with cheap local ingestion, fully local, or any mix.
+
+/// Device-global ingestion-provider config, mirrored down from the frontend's
+/// persisted setting via set_ingestion_provider (on mount and on every change,
+/// see DMConsolePage's ingestion-sync effect). Held in a global rather than
+/// threaded through ~a dozen async command chains because it's a single,
+/// rarely-changed device setting with one source of truth — same
+/// OnceLock<Mutex<>> precedent as SESSIONS above. Defaults to Claude
+/// (use_local=false), so behavior is unchanged until the user opts in.
+#[derive(Clone, Default)]
+struct IngestConfig {
+    use_local: bool,
+    base_url: String,
+    model: String,
+}
+
+fn ingest_config() -> &'static Mutex<IngestConfig> {
+    static CFG: OnceLock<Mutex<IngestConfig>> = OnceLock::new();
+    CFG.get_or_init(|| Mutex::new(IngestConfig::default()))
+}
+
+/// Frontend pushes the persisted ingestion-provider setting down here. The
+/// base_url/model are the same local server the live-turn local path uses
+/// (there's no reason to run two different local servers); both are ignored
+/// when use_local is false.
+#[tauri::command]
+pub fn set_ingestion_provider(use_local: bool, base_url: String, model: String) {
+    *ingest_config().lock().unwrap() = IngestConfig { use_local, base_url, model };
+}
+
+#[derive(Serialize)]
+struct OneShotRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    /// Only sent when the ingestion prompt actually wants a JSON object
+    /// (chapterize/digest/etc.) — forcing json_object on the markdown/plain-
+    /// text prompts (plans, inventories, compaction) would break them, so this
+    /// stays absent for those. Omitted entirely (not null) when None.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat>,
+    chat_template_kwargs: ChatTemplateKwargs,
+}
+
+fn build_oneshot_request(model: &str, prompt: &str, expect_json: bool) -> OneShotRequest {
+    OneShotRequest {
+        model: model.to_string(),
+        messages: vec![ChatMessage { role: "user".into(), content: prompt.to_string() }],
+        response_format: expect_json.then(|| ResponseFormat { kind: "json_object".into() }),
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+    }
+}
+
+/// One-shot completion against a local OpenAI-compatible server — the local
+/// counterpart to dm::ask_claude_once. Unlike call_local_llm (the live DM turn
+/// path) there's no system-prompt/history split and no narration/actions
+/// parsing: the whole ingestion prompt is one user message and the raw reply
+/// text is returned as-is for campaign.rs's own tolerant parsers to handle.
+fn ask_local_once(base_url: &str, model: &str, prompt: &str, expect_json: bool) -> Result<String, String> {
+    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+    let body = build_oneshot_request(model, prompt, expect_json);
+    let resp = match ureq::post(&url).send_json(&body) {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, r)) => {
+            let text = r.into_string().unwrap_or_default();
+            return Err(format!("Local model server returned {code}: {text}"));
+        }
+        Err(e) => return Err(format!("Couldn't reach the local model server at {url}: {e}")),
+    };
+    let parsed: ChatCompletionResponse = resp
+        .into_json()
+        .map_err(|e| format!("Couldn't parse the local model server's response: {e}"))?;
+    parsed
+        .choices
+        .into_iter()
+        .next()
+        .map(|c| c.message.content)
+        .ok_or_else(|| "Local model server returned no choices".to_string())
+}
+
+/// Dispatches one-shot ingestion/memory work to whichever provider the
+/// ingestion setting selects. Claude (the default) uses the subscription CLI at
+/// the given tier (`claude_model`, e.g. "opus"/"sonnet"); local uses the
+/// configured server, ignoring that tier hint (a local server runs whatever
+/// model it was started with). campaign.rs calls this everywhere it used to
+/// call dm::ask_claude_once directly. `expect_json` only affects the local
+/// path (Claude follows the prompt's own format instruction either way).
+pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
+    let cfg = ingest_config().lock().unwrap().clone();
+    if cfg.use_local {
+        if cfg.base_url.trim().is_empty() || cfg.model.trim().is_empty() {
+            return Err("Local ingestion is selected but its server address/model isn't configured (open DM Model settings).".into());
+        }
+        ask_local_once(&cfg.base_url, &cfg.model, &prompt, expect_json)
+    } else {
+        crate::dm::ask_claude_once(prompt, claude_model)
+    }
+}
+
 fn generate_session_id() -> String {
     format!("local-{:016x}", rand::thread_rng().gen::<u64>())
 }
@@ -368,6 +475,37 @@ mod tests {
         assert_eq!(req.messages[0].role, "system");
         assert_eq!(req.messages[1].content, "hi");
         assert_eq!(req.messages[2].content, "new message");
+    }
+
+    #[test]
+    fn build_oneshot_request_sends_one_user_message_and_disables_thinking() {
+        let req = build_oneshot_request("m", "do the thing", false);
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(json["messages"][0]["role"], "user");
+        assert_eq!(json["messages"][0]["content"], "do the thing");
+        assert_eq!(json["chat_template_kwargs"]["enable_thinking"], false);
+    }
+
+    #[test]
+    fn build_oneshot_request_omits_response_format_unless_json_expected() {
+        // Text prompts (plans, inventories) must NOT carry json_object mode —
+        // it would force the markdown reply into JSON and break it.
+        let text = serde_json::to_value(build_oneshot_request("m", "write markdown", false)).unwrap();
+        assert!(text.get("response_format").is_none(), "text prompts must omit response_format entirely");
+
+        let json = serde_json::to_value(build_oneshot_request("m", "return json", true)).unwrap();
+        assert_eq!(json["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn ask_ingest_once_errors_clearly_when_local_selected_but_unconfigured() {
+        // The one test that mutates the process-global ingest config; sets it
+        // explicitly (never relies on the default) and restores it after.
+        set_ingestion_provider(true, "  ".into(), "".into());
+        let err = ask_ingest_once("prompt".into(), Some("opus"), false).unwrap_err();
+        assert!(err.to_lowercase().contains("isn't configured"), "got: {err}");
+        set_ingestion_provider(false, String::new(), String::new()); // restore default
     }
 
     #[test]
