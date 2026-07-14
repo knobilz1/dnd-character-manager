@@ -463,7 +463,7 @@ async function pickAndExtractModuleFile(): Promise<{ name: string; text: string;
  *  exactly the kind of silent loss the memory files are designed to avoid —
  *  a few KB in an always-loaded file is a fair price for the DM knowing it). */
 function buildPartyMemberSummary(c: Character): string {
-  const race = getRace(c.raceId)?.name ?? c.raceId;
+  const race = getRace(c.raceId)?.name ?? c.raceId ?? '';
   const background = getBackground(c.backgroundId)?.name;
   const totalLevel = (c.classes ?? []).reduce((s, cl) => s + (cl.level || 0), 0);
   const classText = (c.classes ?? [])
@@ -475,7 +475,13 @@ function buildPartyMemberSummary(c: Character): string {
     .join(' / ');
   const parts = [
     c.playerName?.trim() ? `Played by ${c.playerName.trim()}.` : undefined,
-    `Level ${totalLevel} ${race} ${classText}`.trim() + (c.alignment?.trim() ? `, ${c.alignment.trim()}` : '') + (background ? `, ${background} background.` : '.'),
+    // Join only the identity parts that actually exist. A character with no
+    // race (or no classes) used to stringify `undefined` straight into the
+    // line — "Level 1 undefined Fighter" — and party.md is a STANDING import,
+    // so the DM was being told that verbatim on every single turn.
+    [`Level ${totalLevel}`, race, classText].filter((p) => p.trim()).join(' ') +
+      (c.alignment?.trim() ? `, ${c.alignment.trim()}` : '') +
+      (background ? `, ${background} background.` : '.'),
     c.notes?.trim() ? `Player-written backstory/notes: ${c.notes.replace(/\s+/g, ' ').trim()}` : undefined,
   ];
   return parts.filter(Boolean).join(' ');
