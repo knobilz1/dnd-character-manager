@@ -211,6 +211,51 @@ struct ModelEntry {
     id: String,
 }
 
+/// Base URLs to try, in order, for a configured local server.
+///
+/// The Windows + WSL2 trap this exists for, found the hard way: WSL2's
+/// localhost-forwarding binds **IPv4 only** (`127.0.0.1:PORT`), while on
+/// Windows the hostname `localhost` commonly resolves to `::1` (IPv6) FIRST.
+/// So a WSL-hosted server (vLLM, llama.cpp, …) that is demonstrably up and
+/// answering `curl` is completely unreachable from here via `http://localhost`
+/// — the connection is refused before a byte is sent, the DM turn hangs, and
+/// nothing in the app can tell you why. Ollama masks the whole problem by
+/// binding both stacks, which makes it look like "only Ollama works".
+///
+/// Rather than make every user discover this, a `localhost` URL that fails to
+/// connect is silently retried against `127.0.0.1`. Never rewrites a URL that
+/// already works, and never touches a real hostname or an explicit IP.
+fn candidate_base_urls(base_url: &str) -> Vec<String> {
+    let base = base_url.trim().trim_end_matches('/').to_string();
+    let mut out = vec![base.clone()];
+    if let Some(ipv4) = base.split_once("//localhost").map(|(scheme, rest)| format!("{scheme}//127.0.0.1{rest}")) {
+        out.push(ipv4);
+    }
+    out
+}
+
+/// Runs one request against each candidate base URL (see candidate_base_urls)
+/// until one actually CONNECTS. A transport failure falls through to the next
+/// candidate; an HTTP-level error (4xx/5xx) is returned immediately, since the
+/// server clearly exists and retrying a different address won't help.
+fn try_each_base_url<T>(
+    base_url: &str,
+    mut send: impl FnMut(&str) -> Result<T, ureq::Error>,
+) -> Result<T, String> {
+    let mut last_transport_err = None;
+    for base in candidate_base_urls(base_url) {
+        match send(&base) {
+            Ok(v) => return Ok(v),
+            Err(ureq::Error::Status(code, r)) => {
+                let text = r.into_string().unwrap_or_default();
+                return Err(format!("Local model server returned {code}: {text}"));
+            }
+            Err(e) => last_transport_err = Some(format!("Couldn't reach the local model server at {base}: {e}")),
+        }
+    }
+    Err(last_transport_err.unwrap_or_else(|| "No local model server address configured.".to_string()))
+}
+
 /// Parses a `/v1/models` response body into a plain list of model ids. Split
 /// out from fetch_local_models so the parsing itself is testable without a
 /// live server — same reasoning as parse_local_reply below.
@@ -225,10 +270,7 @@ fn parse_models_response(body: &str) -> Result<Vec<String>, String> {
 /// server, and koboldcpp alike, same reasoning as call_local_llm below using
 /// `/v1/chat/completions` instead of any one server's own proprietary API.
 fn fetch_local_models(base_url: &str) -> Result<Vec<String>, String> {
-    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
-    let resp = ureq::get(&url)
-        .call()
-        .map_err(|e| format!("Couldn't reach the local model server at {url}: {e}"))?;
+    let resp = try_each_base_url(base_url, |base| ureq::get(&format!("{base}/v1/models")).call())?;
     let body = resp
         .into_string()
         .map_err(|e| format!("Couldn't read the model list response: {e}"))?;
@@ -275,17 +317,10 @@ fn format_as_dm_reply_text(narration: &str, actions: Option<&Value>) -> String {
 }
 
 fn call_local_llm(base_url: &str, model: &str, system_prompt: &str, history: &[ChatMessage], user_prompt: &str) -> Result<String, String> {
-    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
     let body = build_request(model, system_prompt, history, user_prompt);
-
-    let resp = match ureq::post(&url).send_json(&body) {
-        Ok(r) => r,
-        Err(ureq::Error::Status(code, r)) => {
-            let text = r.into_string().unwrap_or_default();
-            return Err(format!("Local model server returned {code}: {text}"));
-        }
-        Err(e) => return Err(format!("Couldn't reach the local model server at {url}: {e}")),
-    };
+    let resp = try_each_base_url(base_url, |base| {
+        ureq::post(&format!("{base}/v1/chat/completions")).send_json(&body)
+    })?;
 
     let parsed: ChatCompletionResponse = resp
         .into_json()
@@ -369,16 +404,10 @@ fn build_oneshot_request(model: &str, prompt: &str, expect_json: bool) -> OneSho
 /// parsing: the whole ingestion prompt is one user message and the raw reply
 /// text is returned as-is for campaign.rs's own tolerant parsers to handle.
 fn ask_local_once(base_url: &str, model: &str, prompt: &str, expect_json: bool) -> Result<String, String> {
-    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
     let body = build_oneshot_request(model, prompt, expect_json);
-    let resp = match ureq::post(&url).send_json(&body) {
-        Ok(r) => r,
-        Err(ureq::Error::Status(code, r)) => {
-            let text = r.into_string().unwrap_or_default();
-            return Err(format!("Local model server returned {code}: {text}"));
-        }
-        Err(e) => return Err(format!("Couldn't reach the local model server at {url}: {e}")),
-    };
+    let resp = try_each_base_url(base_url, |base| {
+        ureq::post(&format!("{base}/v1/chat/completions")).send_json(&body)
+    })?;
     let parsed: ChatCompletionResponse = resp
         .into_json()
         .map_err(|e| format!("Couldn't parse the local model server's response: {e}"))?;
@@ -577,6 +606,50 @@ mod tests {
         assert_eq!(req.messages[0].role, "system");
         assert_eq!(req.messages[1].content, "hi");
         assert_eq!(req.messages[2].content, "new message");
+    }
+
+    /// Proves the IPv4 fallback against a REAL server, which is the only way to
+    /// show it works: on this machine `http://localhost:8000` is genuinely
+    /// unreachable (WSL2 forwards IPv4 only; Windows resolves `localhost` to
+    /// ::1 first and the connection is refused), while `http://127.0.0.1:8000`
+    /// answers instantly. So this test passing means the fallback fired — before
+    /// it existed, this exact call is what made the DM turn hang forever.
+    /// Needs a local server on :8000. Run with:
+    ///   cargo test --lib -- --ignored --nocapture localhost_ipv4_fallback_reaches_a_real_server
+    #[test]
+    #[ignore]
+    fn localhost_ipv4_fallback_reaches_a_real_server() {
+        let models = fetch_local_models("http://localhost:8000")
+            .expect("the IPv4 fallback should have reached the server via 127.0.0.1");
+        println!("models reached through the localhost->127.0.0.1 fallback: {models:?}");
+        assert!(!models.is_empty(), "server answered but listed no models");
+    }
+
+    #[test]
+    fn candidate_base_urls_adds_an_ipv4_fallback_for_localhost() {
+        // The WSL2 trap: WSL forwards ports on IPv4 only (127.0.0.1), but
+        // Windows resolves `localhost` to ::1 (IPv6) first, so the server is
+        // demonstrably up yet totally unreachable. Always offer 127.0.0.1 too.
+        assert_eq!(
+            candidate_base_urls("http://localhost:8000"),
+            vec!["http://localhost:8000".to_string(), "http://127.0.0.1:8000".to_string()]
+        );
+    }
+
+    #[test]
+    fn candidate_base_urls_leaves_explicit_ips_and_real_hosts_alone() {
+        // Nothing to fall back to — don't invent a second attempt.
+        assert_eq!(candidate_base_urls("http://127.0.0.1:8000"), vec!["http://127.0.0.1:8000".to_string()]);
+        assert_eq!(candidate_base_urls("http://192.168.1.50:11434"), vec!["http://192.168.1.50:11434".to_string()]);
+        assert_eq!(candidate_base_urls("http://my-server.lan:8000"), vec!["http://my-server.lan:8000".to_string()]);
+    }
+
+    #[test]
+    fn candidate_base_urls_normalizes_whitespace_and_a_trailing_slash() {
+        assert_eq!(
+            candidate_base_urls("  http://localhost:11434/  "),
+            vec!["http://localhost:11434".to_string(), "http://127.0.0.1:11434".to_string()]
+        );
     }
 
     #[test]
