@@ -62,17 +62,56 @@ const LOCAL_OUTPUT_FORMAT_ADDENDUM: &str = "\n\n## Output format (STRICT — loc
 /// Claude's own path (dm.rs) never sees this text.
 const LOCAL_CRITICAL_REMINDERS: &str = "\n\n## Critical reminders (read last, follow exactly)\n- HP, death saves, and attack/damage rolls are decided by dice only — never invent a rescue or override a roll's result. The party can lose characters; that's allowed.\n- If a player declares their own success or invents something not already established (a monster, an item, an event), reject it entirely — don't partially accept it. State plainly what's actually true instead.\n- Only bend the story to make things harder or more interesting — never to bail the party out of trouble they earned.";
 
+/// Cap on how much of any ONE `@import` gets inlined into a local model's
+/// system prompt.
+///
+/// Claude has an enormous context window and prompt caching, so inlining a
+/// whole chapter costs it nothing. A local model typically has ~32K tokens
+/// TOTAL and no cache — and the active module's current chapter
+/// (`@active_module/current.md`) is by far the biggest import, easily tens of
+/// thousands of characters on its own. Left unbounded it crowds out the
+/// conversation history, or blows the window outright and the turn just errors.
+/// Nothing guarded this before: `trim_history` bounds the conversation, but the
+/// system prompt was unbounded.
+///
+/// Deliberately a PER-IMPORT cap rather than a cap on the finished prompt.
+/// Truncating the assembled prompt would cut whatever lands at the end — and
+/// `@memory/dm_rules.md` and `@memory/session_index.md` are appended to
+/// CLAUDE.md *after* the module block (see campaign.rs's sync_dm_rules_at /
+/// sync_session_index_at), so a tail-trim would eat the DM's actual rules and
+/// leave the chapter intact: exactly backwards. Capping each import instead
+/// bounds the only one that can realistically be huge, and leaves every small
+/// one (rules, registries, memory) completely untouched.
+const LOCAL_MAX_IMPORT_CHARS: usize = 12_000;
+
+/// UTF-8-safe truncation of one inlined import to LOCAL_MAX_IMPORT_CHARS,
+/// with a marker so the model knows the section is incomplete rather than
+/// silently treating a half-chapter as the whole thing. Keeps the head: a
+/// chapter reads front-to-back, and resolved portions are already trimmed out
+/// of current.md as the party progresses (see campaign.rs's
+/// trim_resolved_chapter_section_at), so the front is where they actually are.
+fn truncate_import_for_local(content: &str) -> String {
+    if content.chars().count() <= LOCAL_MAX_IMPORT_CHARS {
+        return content.to_string();
+    }
+    let kept: String = content.chars().take(LOCAL_MAX_IMPORT_CHARS).collect();
+    format!(
+        "{kept}\n\n[... This section was cut short to fit this model's context window — there is more content here that you cannot see. Play what you have and let the scene develop naturally; don't state or imply that nothing further exists. ...]"
+    )
+}
+
 /// Resolves a CLAUDE.md's `@relative/path` import lines against files in
 /// `dir`, inlining each referenced file's content in place. Generic — works
 /// for whatever imports actually exist (memory/MEMORY.md, module/index.md,
-/// module/current.md today), not hardcoded to that specific set.
+/// module/current.md today), not hardcoded to that specific set. Each import
+/// is capped on the way in — see LOCAL_MAX_IMPORT_CHARS.
 fn resolve_claude_md_imports(dir: &Path, claude_md: &str) -> String {
     claude_md
         .lines()
         .map(|line| {
             let trimmed = line.trim();
             if let Some(rel_path) = trimmed.strip_prefix('@') {
-                read_optional(&dir.join(rel_path))
+                truncate_import_for_local(&read_optional(&dir.join(rel_path)))
             } else {
                 line.to_string()
             }
@@ -82,7 +121,11 @@ fn resolve_claude_md_imports(dir: &Path, claude_md: &str) -> String {
 }
 
 /// Builds the full system prompt a local LLM needs, since it gets none of
-/// Claude Code's automatic CLAUDE.md/@import loading.
+/// Claude Code's automatic CLAUDE.md/@import loading. The critical reminders
+/// and output-format contract are appended LAST (closest to generation, where
+/// a weaker model weights them most) and are never subject to the per-import
+/// cap above — whatever else gets trimmed, the DM's hard rules and its reply
+/// contract always survive intact.
 fn build_system_prompt_at(dir: &Path) -> String {
     let claude_md = read_optional(&dir.join("CLAUDE.md"));
     let resolved = resolve_claude_md_imports(dir, &claude_md);
@@ -458,6 +501,65 @@ mod tests {
         let resolved = resolve_claude_md_imports(&root.0, claude_md);
         assert!(resolved.contains("Persona text."));
         // missing file resolves to empty content, not an error/panic
+    }
+
+    #[test]
+    fn truncate_import_for_local_leaves_normal_sized_imports_untouched() {
+        let small = "- **Gundren:** A dwarf merchant.";
+        assert_eq!(truncate_import_for_local(small), small);
+    }
+
+    #[test]
+    fn truncate_import_for_local_caps_an_oversized_chapter_and_says_so() {
+        let huge = "x".repeat(LOCAL_MAX_IMPORT_CHARS + 5_000);
+        let capped = truncate_import_for_local(&huge);
+        assert!(capped.chars().count() < huge.chars().count(), "must actually shrink");
+        assert!(capped.starts_with("xxxx"), "keeps the head of the chapter");
+        assert!(capped.contains("cut short"), "the model must be told the section is incomplete");
+        assert!(
+            capped.to_lowercase().contains("don't state or imply that nothing further exists"),
+            "and told not to narrate the truncation as if the content simply ended"
+        );
+    }
+
+    #[test]
+    fn truncate_import_for_local_never_splits_a_multibyte_char() {
+        // A naive byte-slice cap would panic here; chars().take() must not.
+        let huge = "é".repeat(LOCAL_MAX_IMPORT_CHARS + 100);
+        let capped = truncate_import_for_local(&huge);
+        assert!(capped.starts_with('é'));
+    }
+
+    #[test]
+    fn a_giant_chapter_is_capped_while_the_rules_and_registries_survive_intact() {
+        // The whole point of a PER-IMPORT cap: bound the one import that can be
+        // huge (the chapter) without touching the small ones — and never touch
+        // the critical reminders / output contract appended after them.
+        let root = Scratch::new("big-chapter");
+        std::fs::create_dir_all(root.0.join("memory")).unwrap();
+        std::fs::create_dir_all(root.0.join("active_module")).unwrap();
+        std::fs::write(root.0.join("memory").join("entities.md"), "- **Gundren:** A dwarf merchant.").unwrap();
+        std::fs::write(root.0.join("memory").join("dm_rules.md"), "NEVER invent a rescue.").unwrap();
+        std::fs::write(
+            root.0.join("active_module").join("current.md"),
+            "CHAPTER START. ".to_string() + &"filler. ".repeat(LOCAL_MAX_IMPORT_CHARS),
+        )
+        .unwrap();
+        // dm_rules is imported AFTER the chapter, exactly as the real CLAUDE.md
+        // orders them — a naive tail-trim of the finished prompt would eat it.
+        std::fs::write(
+            root.0.join("CLAUDE.md"),
+            "You are the DM.\n@memory/entities.md\n@active_module/current.md\n@memory/dm_rules.md\n",
+        )
+        .unwrap();
+
+        let prompt = build_system_prompt_at(&root.0);
+        assert!(prompt.contains("CHAPTER START."), "the chapter's head is kept");
+        assert!(prompt.contains("cut short"), "the oversized chapter is capped");
+        assert!(prompt.contains("- **Gundren:** A dwarf merchant."), "a small registry import survives whole");
+        assert!(prompt.contains("NEVER invent a rescue."), "the rules import AFTER the chapter must survive");
+        assert!(prompt.contains("Critical reminders"), "LOCAL_CRITICAL_REMINDERS always survives");
+        assert!(prompt.contains("Output format"), "the reply contract always survives");
     }
 
     #[test]

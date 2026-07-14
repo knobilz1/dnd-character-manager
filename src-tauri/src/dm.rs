@@ -684,6 +684,25 @@ pub fn ask_claude_once(prompt: String, model: Option<&str>) -> Result<String, St
     run_claude(prompt, None, None, model, None).map(|r| r.text)
 }
 
+/// Like `ask_claude_once`, but runs IN a campaign's own directory — so `claude`
+/// auto-loads that campaign's CLAUDE.md and every `@import` it pulls in
+/// (memory, registries, session_index, the active chapter), exactly the context
+/// a real DM turn gets. Session-less, so it doesn't disturb any live `--resume`
+/// chain.
+///
+/// Exists for the retrieval end-to-end test, which can only answer its question
+/// — does the DM actually reach for a `recallSession` action on its own? — from
+/// a turn that genuinely has session_index.md loaded. A cwd-less
+/// `ask_claude_once` would have no idea the index exists.
+///
+/// `#[cfg(test)]` because that's the honest scope today: nothing in production
+/// needs a cwd-aware one-shot (the real turn loop goes through `ask_dm`, which
+/// has its own session/effort handling). Drop the attribute if that changes.
+#[cfg(test)]
+pub fn ask_claude_once_in(prompt: String, cwd: PathBuf, model: Option<&str>) -> Result<String, String> {
+    run_claude(prompt, None, Some(cwd), model, None).map(|r| r.text)
+}
+
 /// Runs `claude auth status` — fast, no model call, no cwd/session needed —
 /// and reports whether the CLI is actually authenticated right now. Exists so
 /// campaign creation and campaign selection can check this UP FRONT and offer

@@ -4829,6 +4829,62 @@ DM: As you crest the hill you see the Gilded Eel is a pillar of flame. Someone t
         assert_eq!(mirrored.trim(), revised.trim(), "active_module/plan.md must carry the revision");
     }
 
+    /// The one question about the retrieval system that NO unit test can answer:
+    /// given a compact session index and a player asking for a detail that lives
+    /// only inside an old session's full record, does the DM actually reach for
+    /// the `recallSession` action on its own? Everything else about retrieval is
+    /// mechanically tested (the record is written, the read is path-guarded, the
+    /// injection compiles) — this is the behavioural seam, and it needs a real
+    /// turn with the campaign's CLAUDE.md + session_index.md genuinely loaded.
+    ///
+    /// The index line is deliberately VAGUE about the specifics the player asks
+    /// for, and those specifics appear nowhere else — not in entities.md, not in
+    /// the index. Recalling the record is the only honest way to answer.
+    /// Run with:
+    ///   cargo test --lib -- --ignored --nocapture recall_session_behavioral_loop
+    #[test]
+    #[ignore]
+    fn recall_session_behavioral_loop() {
+        let root = Scratch::new("recall-e2e");
+        let meta = create_campaign_at(&root.0, &intake("Fogreach")).unwrap();
+        let dir = root.0.join(&meta.id);
+
+        append_session_index_line_at(
+            &root.0,
+            &meta.id,
+            "session-01",
+            "2026-06-01",
+            "The party met a blind elder in Fogreach and learned something about who poisoned the well.",
+        )
+        .unwrap();
+
+        let records = dir.join(SESSION_RECORDS_DIR);
+        fs::create_dir_all(&records).unwrap();
+        fs::write(
+            records.join("session-01.md"),
+            "# session-01 (2026-06-01)\n\n\
+DM: The blind elder, Marta Ashgrove, grips your sleeve. \"The well wasn't poisoned by the Ashfen,\" she whispers. \"It was Reeve Calder. He did it to blame them — and he paid a hedge-witch named Ossic to brew the draught.\"\n\
+Player (Thorin): Who is Ossic?\n\
+DM: \"A hedge-witch out in the fen. Calder paid her forty gold. She kept the receipt — she never trusted him.\"\n",
+        )
+        .unwrap();
+
+        let prompt = "Current party status:\nThorin (Alex) — L3 fighter/3 | HP 20/20 | —\n\n\
+The player playing Thorin says: Hang on — remind me exactly who poisoned the well, and who did they pay to actually brew it? I want the specific names, not a vague recollection.";
+
+        let reply = crate::dm::ask_claude_once_in(prompt.to_string(), dir.clone(), Some("sonnet")).unwrap();
+        println!("=== DM REPLY ===\n{reply}\n");
+
+        assert!(
+            reply.contains("recallSession"),
+            "the DM should reach for recallSession when the index alone can't answer the question — got:\n{reply}"
+        );
+        assert!(
+            reply.contains("session-01"),
+            "and should name the session id straight off the index — got:\n{reply}"
+        );
+    }
+
     /// The other half of the design, and the more dangerous failure: the plan is
     /// expensive ingestion output, and MOST sessions invalidate nothing. A session
     /// that merely advances along the plan must NOT get the still-live arc
