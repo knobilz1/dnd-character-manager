@@ -1,5 +1,6 @@
 import type { Character } from '../types';
 import type { HexPosition } from './dmActions';
+import { hasKnownHp } from './partyHp';
 
 /**
  * dmPrompt.ts — builds what gets sent to the Claude DM each turn.
@@ -25,7 +26,14 @@ function totalLevel(c: Character): number {
 }
 
 function statusLine(c: Character): string {
-  const hp = `${c.currentHP}/${c.maxHP}${c.tempHP ? ` (+${c.tempHP} temp)` : ''}`;
+  // A party member whose sheet arrived without HP (see partyHp.ts) would
+  // otherwise be described to the DM, every single turn, as `HP NaN/undefined`.
+  // Say plainly that it's unknown instead — the one thing that must NOT happen
+  // is inventing a number, least of all 0, which reads as "dying" and gets them
+  // narrated into death saves.
+  const hp = hasKnownHp(c)
+    ? `${c.currentHP}/${c.maxHP}${c.tempHP ? ` (+${c.tempHP} temp)` : ''}`
+    : 'UNKNOWN (their sheet reached the table incomplete — do not guess it, and do not narrate them as hurt or dying; ask them to re-send it)';
   const cond = c.conditions?.length ? c.conditions.join(', ') : '—';
   const exh = c.exhaustionLevel ? ` exhaustion ${c.exhaustionLevel}` : '';
   const ds = c.currentHP === 0

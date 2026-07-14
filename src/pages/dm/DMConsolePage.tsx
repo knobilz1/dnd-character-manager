@@ -9,6 +9,7 @@ import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
+import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, VOICE_CATALOG_IDS, PITCH_TAG_IDS } from '../../utils/dmActions';
 import type { HexPosition } from '../../utils/dmActions';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -2770,7 +2771,11 @@ export function DMConsolePage() {
               )}
               <div className="space-y-2">
                 {party.map((c) => {
-                  const hpPct = c.maxHP > 0 ? Math.round((c.currentHP / c.maxHP) * 100) : 0;
+                  // Not every party member has HP: the LAN handler only checks
+                  // name + classes, so an incomplete send lands here with none
+                  // (see partyHp.ts). Rendered raw that read "NaN/ HP".
+                  const knownHp = hasKnownHp(c);
+                  const hpPct = knownHp && c.maxHP > 0 ? Math.round((c.currentHP / c.maxHP) * 100) : 0;
                   return (
                     // party_listener.rs's /character handler only validates name +
                     // classes before emitting 'dm-party-character', not id — so a
@@ -2785,13 +2790,21 @@ export function DMConsolePage() {
                         <Trash2 size={12} />
                       </button>
                       <p className="text-sm font-bold text-white pr-4">{c.name}</p>
-                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden my-1">
-                        <div
-                          className={`h-full rounded-full ${hpPct > 50 ? 'bg-green-500' : hpPct > 25 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                          style={{ width: `${hpPct}%` }}
-                        />
-                      </div>
-                      <p className="text-[11px] text-slate-400">{c.currentHP}/{c.maxHP} HP</p>
+                      {knownHp ? (
+                        <>
+                          <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden my-1">
+                            <div
+                              className={`h-full rounded-full ${hpPct > 50 ? 'bg-green-500' : hpPct > 25 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                              style={{ width: `${hpPct}%` }}
+                            />
+                          </div>
+                          <p className="text-[11px] text-slate-400">{c.currentHP}/{c.maxHP} HP</p>
+                        </>
+                      ) : (
+                        // No empty HP bar here — an unfilled bar reads as "at 0 HP",
+                        // which is the one thing this must never imply.
+                        <p className="text-[11px] text-amber-400 my-1">HP unknown — ask them to re-send their sheet</p>
+                      )}
                       {(c.conditions?.length ?? 0) > 0 && (
                         <div className="flex flex-wrap gap-1 mt-1">
                           {c.conditions.map((cond) => <Badge key={cond} color="red">{cond}</Badge>)}

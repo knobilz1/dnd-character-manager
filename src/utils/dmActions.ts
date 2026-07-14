@@ -1,4 +1,5 @@
 import type { Character, Condition } from '../types';
+import { hasKnownHp } from './partyHp';
 
 /**
  * dmActions.ts — parses the ```dm-actions block the DM persona is instructed to
@@ -355,9 +356,23 @@ export function applyDmActions(party: Character[], actions: DmActionSet): ApplyD
     return amount;
   };
 
+  /** A party member can reach the store with no HP at all (see partyHp.ts), and
+   *  `undefined - dmg` is NaN — which would then be written back and quietly
+   *  poison every later turn, since the DM is told the party's HP every turn.
+   *  Skip and say so, the same way an unknown name or an implausible amount is
+   *  handled: never silently, never by inventing a number. */
+  const withKnownHp = (name: string, kind: string, fn: (c: Character) => Character) =>
+    mutate(name, (c) => {
+      if (!hasKnownHp(c)) {
+        warnings.push(`Couldn't apply ${kind} to ${c.name} — their sheet arrived with no HP. Ask them to re-send it from their own device.`);
+        return c;
+      }
+      return fn(c);
+    });
+
   for (const { name, amount } of actions.damage ?? []) {
     const dmgAmount = clampAmount(name, 'damage', amount);
-    mutate(name, (c) => {
+    withKnownHp(name, 'damage', (c) => {
       let dmg = dmgAmount;
       let tempHP = c.tempHP ?? 0;
       if (tempHP > 0) { const absorbed = Math.min(tempHP, dmg); tempHP -= absorbed; dmg -= absorbed; }
@@ -367,7 +382,7 @@ export function applyDmActions(party: Character[], actions: DmActionSet): ApplyD
 
   for (const { name, amount } of actions.heal ?? []) {
     const healAmount = clampAmount(name, 'heal', amount);
-    mutate(name, (c) => {
+    withKnownHp(name, 'healing', (c) => {
       const was = c.currentHP;
       const currentHP = Math.min(c.maxHP, c.currentHP + healAmount);
       const deathSaves = was === 0 && currentHP > 0 ? { successes: 0, failures: 0 } : c.deathSaves;

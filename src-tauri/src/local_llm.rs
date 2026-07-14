@@ -213,47 +213,117 @@ struct ModelEntry {
 
 /// Base URLs to try, in order, for a configured local server.
 ///
-/// The Windows + WSL2 trap this exists for, found the hard way: WSL2's
-/// localhost-forwarding binds **IPv4 only** (`127.0.0.1:PORT`), while on
-/// Windows the hostname `localhost` commonly resolves to `::1` (IPv6) FIRST.
-/// So a WSL-hosted server (vLLM, llama.cpp, …) that is demonstrably up and
-/// answering `curl` is completely unreachable from here via `http://localhost`
-/// — the connection is refused before a byte is sent, the DM turn hangs, and
-/// nothing in the app can tell you why. Ollama masks the whole problem by
-/// binding both stacks, which makes it look like "only Ollama works".
+/// The Windows + WSL2 trap this exists for: WSL2's localhost-forwarding binds
+/// **IPv4 only** (`127.0.0.1:PORT`), while on Windows the hostname `localhost`
+/// resolves to `::1` (IPv6) FIRST.
 ///
-/// Rather than make every user discover this, a `localhost` URL that fails to
-/// connect is silently retried against `127.0.0.1`. Never rewrites a URL that
-/// already works, and never touches a real hostname or an explicit IP.
+/// Note this does NOT make the server unreachable — Rust's resolver returns
+/// both addresses and falls through to `127.0.0.1` by itself. What it costs is
+/// *time*: Windows takes ~2s to refuse the doomed `::1` connect before the
+/// fallthrough. Measured against a live WSL-hosted vLLM:
+///
+///     http://localhost:8000/v1/models  ->  ok in 2031 ms
+///     http://127.0.0.1:8000/v1/models  ->  ok in    1.9 ms
+///
+/// A thousandfold difference, paid on every single call — once per DM turn, but
+/// once per CHUNK during map-reduce ingestion, where a 300-page module is a lot
+/// of chunks. So for a `localhost` URL, try the IPv4 address FIRST and keep the
+/// configured one as the fallback (which still covers a server genuinely bound
+/// to IPv6 only). A real hostname or an explicit IP is never rewritten.
 fn candidate_base_urls(base_url: &str) -> Vec<String> {
     let base = base_url.trim().trim_end_matches('/').to_string();
-    let mut out = vec![base.clone()];
-    if let Some(ipv4) = base.split_once("//localhost").map(|(scheme, rest)| format!("{scheme}//127.0.0.1{rest}")) {
-        out.push(ipv4);
+    match base.split_once("//localhost") {
+        Some((scheme, rest)) => vec![format!("{scheme}//127.0.0.1{rest}"), base],
+        None => vec![base],
     }
-    out
+}
+
+/// The candidate that last actually connected, keyed by the *configured* base
+/// URL. Purely a latency cache — correctness never depends on it.
+///
+/// candidate_base_urls probes IPv4 first because that's right for a WSL-hosted
+/// server, but that is still a *guess*. This keeps the guess from being a new
+/// hardcoded assumption: a server genuinely bound to IPv6 only answers on
+/// `localhost` and refuses `127.0.0.1`, and without this it would re-probe that
+/// dead address on every call forever. Whichever address actually connects is
+/// the one tried first next time, so either kind of server converges to its own
+/// fast path.
+fn resolved_base_urls() -> &'static Mutex<HashMap<String, String>> {
+    static RESOLVED: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    RESOLVED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn base_url_key(base_url: &str) -> String {
+    base_url.trim().trim_end_matches('/').to_string()
+}
+
+/// candidate_base_urls, reordered to put whichever address last connected first.
+fn ordered_candidates(base_url: &str) -> Vec<String> {
+    let mut candidates = candidate_base_urls(base_url);
+    let known = resolved_base_urls()
+        .lock()
+        .unwrap()
+        .get(&base_url_key(base_url))
+        .cloned();
+    if let Some(known) = known {
+        if let Some(pos) = candidates.iter().position(|c| *c == known) {
+            candidates.swap(0, pos);
+        }
+    }
+    candidates
+}
+
+fn remember_working_base_url(base_url: &str, working: &str) {
+    resolved_base_urls()
+        .lock()
+        .unwrap()
+        .insert(base_url_key(base_url), working.to_string());
+}
+
+/// Called when EVERY candidate failed to connect: whatever we remembered is
+/// stale (server moved, or was never really there), so drop it rather than
+/// keep starting from a dead address forever.
+fn forget_working_base_url(base_url: &str) {
+    resolved_base_urls()
+        .lock()
+        .unwrap()
+        .remove(&base_url_key(base_url));
 }
 
 /// Runs one request against each candidate base URL (see candidate_base_urls)
-/// until one actually CONNECTS. A transport failure falls through to the next
-/// candidate; an HTTP-level error (4xx/5xx) is returned immediately, since the
-/// server clearly exists and retrying a different address won't help.
+/// until one actually CONNECTS, then remembers which one did so the next call
+/// starts there. A transport failure falls through to the next candidate; an
+/// HTTP-level error (4xx/5xx) is returned immediately, since the server clearly
+/// exists and retrying a different address won't help.
 fn try_each_base_url<T>(
     base_url: &str,
     mut send: impl FnMut(&str) -> Result<T, ureq::Error>,
 ) -> Result<T, String> {
     let mut last_transport_err = None;
-    for base in candidate_base_urls(base_url) {
+    for base in ordered_candidates(base_url) {
         match send(&base) {
-            Ok(v) => return Ok(v),
+            Ok(v) => {
+                remember_working_base_url(base_url, &base);
+                return Ok(v);
+            }
             Err(ureq::Error::Status(code, r)) => {
                 let text = r.into_string().unwrap_or_default();
                 return Err(format!("Local model server returned {code}: {text}"));
             }
-            Err(e) => last_transport_err = Some(format!("Couldn't reach the local model server at {base}: {e}")),
+            Err(e) => last_transport_err = Some(format!("{e}")),
         }
     }
-    Err(last_transport_err.unwrap_or_else(|| "No local model server address configured.".to_string()))
+    forget_working_base_url(base_url);
+    // Names the address the user actually CONFIGURED, not whichever rewrite we
+    // happened to try last — being told we couldn't reach "127.0.0.1:9999" when
+    // you typed "localhost:9999" just reads as a bug in the app.
+    match last_transport_err {
+        Some(e) => Err(format!(
+            "Couldn't reach the local model server at {}: {e}",
+            base_url_key(base_url)
+        )),
+        None => Err("No local model server address configured.".to_string()),
+    }
 }
 
 /// Parses a `/v1/models` response body into a plain list of model ids. Split
@@ -492,6 +562,7 @@ pub fn end_local_dm_session(session_id: String) {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
 
     struct Scratch(PathBuf);
     impl Scratch {
@@ -618,27 +689,29 @@ mod tests {
     ///   cargo test --lib -- --ignored --nocapture localhost_ipv4_fallback_reaches_a_real_server
     #[test]
     #[ignore]
-    fn localhost_ipv4_fallback_reaches_a_real_server() {
+    fn localhost_reaches_a_real_wsl_hosted_server() {
         let models = fetch_local_models("http://localhost:8000")
-            .expect("the IPv4 fallback should have reached the server via 127.0.0.1");
-        println!("models reached through the localhost->127.0.0.1 fallback: {models:?}");
+            .expect("a WSL-hosted server should be reachable over localhost");
+        println!("models: {models:?}");
         assert!(!models.is_empty(), "server answered but listed no models");
     }
 
     #[test]
-    fn candidate_base_urls_adds_an_ipv4_fallback_for_localhost() {
-        // The WSL2 trap: WSL forwards ports on IPv4 only (127.0.0.1), but
-        // Windows resolves `localhost` to ::1 (IPv6) first, so the server is
-        // demonstrably up yet totally unreachable. Always offer 127.0.0.1 too.
+    fn candidate_base_urls_probes_ipv4_before_localhost() {
+        // The WSL2 trap: WSL forwards ports on IPv4 only (127.0.0.1), but Windows
+        // resolves `localhost` to ::1 (IPv6) first. Rust DOES fall through to
+        // IPv4 on its own, so this is a ~2s-vs-2ms latency problem, not a
+        // reachability one (see candidate_base_urls). Hence IPv4 first, with the
+        // configured address kept as the fallback.
         assert_eq!(
             candidate_base_urls("http://localhost:8000"),
-            vec!["http://localhost:8000".to_string(), "http://127.0.0.1:8000".to_string()]
+            vec!["http://127.0.0.1:8000".to_string(), "http://localhost:8000".to_string()]
         );
     }
 
     #[test]
     fn candidate_base_urls_leaves_explicit_ips_and_real_hosts_alone() {
-        // Nothing to fall back to — don't invent a second attempt.
+        // Nothing to reorder — don't invent a second attempt.
         assert_eq!(candidate_base_urls("http://127.0.0.1:8000"), vec!["http://127.0.0.1:8000".to_string()]);
         assert_eq!(candidate_base_urls("http://192.168.1.50:11434"), vec!["http://192.168.1.50:11434".to_string()]);
         assert_eq!(candidate_base_urls("http://my-server.lan:8000"), vec!["http://my-server.lan:8000".to_string()]);
@@ -648,7 +721,77 @@ mod tests {
     fn candidate_base_urls_normalizes_whitespace_and_a_trailing_slash() {
         assert_eq!(
             candidate_base_urls("  http://localhost:11434/  "),
-            vec!["http://localhost:11434".to_string(), "http://127.0.0.1:11434".to_string()]
+            vec!["http://127.0.0.1:11434".to_string(), "http://localhost:11434".to_string()]
+        );
+    }
+
+    // The memo below is process-global, so each test uses its own port to stay
+    // independent of whatever else is running in parallel.
+
+    #[test]
+    fn ordered_candidates_probes_ipv4_first_until_told_otherwise() {
+        assert_eq!(
+            ordered_candidates("http://localhost:18001"),
+            vec!["http://127.0.0.1:18001".to_string(), "http://localhost:18001".to_string()]
+        );
+    }
+
+    #[test]
+    fn ordered_candidates_puts_the_address_that_last_connected_first() {
+        // IPv4-first is right for a WSL-hosted server, but it's still a guess. A
+        // server bound to IPv6 ONLY answers on `localhost` and refuses
+        // 127.0.0.1 — without this it would re-probe the dead address forever.
+        remember_working_base_url("http://localhost:18002", "http://localhost:18002");
+        assert_eq!(
+            ordered_candidates("http://localhost:18002"),
+            vec!["http://localhost:18002".to_string(), "http://127.0.0.1:18002".to_string()],
+            "whichever address actually connected should be tried first next time"
+        );
+    }
+
+    #[test]
+    fn forgetting_a_stale_address_restores_the_default_probe_order() {
+        // A server that moves (or was never really there) must not leave us
+        // permanently starting from a dead address.
+        remember_working_base_url("http://localhost:18003", "http://localhost:18003");
+        forget_working_base_url("http://localhost:18003");
+        assert_eq!(
+            ordered_candidates("http://localhost:18003"),
+            vec!["http://127.0.0.1:18003".to_string(), "http://localhost:18003".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_memo_is_keyed_the_same_way_regardless_of_whitespace_or_trailing_slash() {
+        remember_working_base_url("http://localhost:18004/", "http://localhost:18004");
+        assert_eq!(
+            ordered_candidates("  http://localhost:18004  "),
+            vec!["http://localhost:18004".to_string(), "http://127.0.0.1:18004".to_string()]
+        );
+    }
+
+    /// The regression guard for the actual bug, measured against a REAL server
+    /// rather than asserted. `http://localhost:8000` always *worked* — Rust falls
+    /// through to IPv4 by itself — but it cost ~2031 ms doing it, versus 1.9 ms
+    /// for `http://127.0.0.1:8000`, because Windows takes ~2s to refuse the `::1`
+    /// connect first. Paid once per DM turn and once per CHUNK during ingestion.
+    /// If someone ever re-orders candidate_base_urls back to configured-first,
+    /// this is what catches it.
+    /// Needs a local server on :8000. Run with:
+    ///   cargo test --lib -- --ignored --nocapture reaching_a_wsl_server_over_localhost_is_fast
+    #[test]
+    #[ignore]
+    fn reaching_a_wsl_server_over_localhost_is_fast() {
+        forget_working_base_url("http://localhost:8000");
+
+        let t = Instant::now();
+        fetch_local_models("http://localhost:8000").expect("server should be reachable");
+        let elapsed = t.elapsed();
+
+        println!("localhost:8000 via candidate ordering: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "reaching the server over `localhost` took {elapsed:?} — the doomed ~2s ::1 probe is back"
         );
     }
 
