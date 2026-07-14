@@ -4829,6 +4829,73 @@ DM: As you crest the hill you see the Gilded Eel is a pillar of flame. Someone t
         assert_eq!(mirrored.trim(), revised.trim(), "active_module/plan.md must carry the revision");
     }
 
+    /// Real integration check of the LOCAL ingestion path (local_llm.rs's
+    /// set_ingestion_provider / ask_ingest_once) — the one thing shipped without
+    /// ever being run against a real server. Drives a genuine session digest
+    /// through a local OpenAI-compatible server, which is the HARDEST ingestion
+    /// prompt for a small model: it's the `expect_json` path, so the reply has to
+    /// come back as a parseable JSON object under guided decoding, and the facts
+    /// inside it have to actually be right enough to land in the registries.
+    ///
+    /// Needs a local server up (e.g. vLLM on :8000). Run with:
+    ///   cargo test --lib -- --ignored --nocapture local_ingestion_end_to_end
+    /// Override the defaults with LOCAL_INGEST_URL / LOCAL_INGEST_MODEL.
+    #[test]
+    #[ignore]
+    fn local_ingestion_end_to_end() {
+        let base_url = std::env::var("LOCAL_INGEST_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
+        let model = std::env::var("LOCAL_INGEST_MODEL").unwrap_or_else(|_| "Qwen/Qwen3-30B-A3B-GPTQ-Int4".to_string());
+        println!("=== ingesting via LOCAL model: {model} @ {base_url} ===");
+
+        let root = Scratch::new("local-ingest-e2e");
+        let meta = create_campaign_at(&root.0, &intake("Local Test")).unwrap();
+
+        // Point ALL ingestion at the local server. Restored at the end so this
+        // can't leak into any other test in the same process.
+        crate::local_llm::set_ingestion_provider(true, base_url, model);
+
+        let transcript = "\
+DM: The gate guard, a heavyset woman named Serla Vance, blocks your way into Thornwick. She wants a toll of ten gold, and she is not in a mood to haggle.
+Player (Thorin): I tell her we're here on the baron's business and show her the seal.
+DM: Serla squints at the seal, then waves you through. \"Baron's business,\" she mutters. \"Then you'll want the Brass Lantern — that's where his man drinks.\"
+Player (Thorin): We head for the Brass Lantern.
+DM: The Brass Lantern is a low tavern by the river. Inside, the baron's man — a nervous clerk called Pell Otwin — is already three cups deep, and he flinches when he sees the seal.";
+
+        let result = digest_session_at(&root.0, &meta.id, "2026-07-14", transcript);
+
+        // Always restore the Claude default before asserting, so a failure here
+        // can't poison the process-global config for anything that follows.
+        crate::local_llm::set_ingestion_provider(false, String::new(), String::new());
+
+        let summary = result.expect("local ingestion should complete — is the local server actually running?");
+        println!("=== SUMMARY (from the local model) ===\n{summary}\n");
+
+        let dir = root.0.join(&meta.id);
+        let entities = fs::read_to_string(dir.join("memory").join("entities.md")).unwrap();
+        let locations = fs::read_to_string(dir.join("memory").join("locations.md")).unwrap();
+        println!("=== ENTITIES ===\n{entities}\n=== LOCATIONS ===\n{locations}\n");
+
+        // The real bar: the local model's JSON actually parsed AND its facts
+        // reached the registries. A garbled reply would leave these empty.
+        let lower_entities = entities.to_lowercase();
+        assert!(
+            lower_entities.contains("serla") || lower_entities.contains("pell") || lower_entities.contains("otwin"),
+            "a named NPC from the transcript must reach entities.md — got:\n{entities}"
+        );
+        assert!(
+            !lower_entities.contains("thorin"),
+            "the player character must NOT be logged as an entity — got:\n{entities}"
+        );
+        assert!(
+            fs::read_to_string(dir.join("memory").join("session_index.md")).unwrap().contains("session-01"),
+            "the session index line must still be written on the local path"
+        );
+        assert!(
+            dir.join(SESSION_RECORDS_DIR).join("session-01.md").exists(),
+            "the verbatim record must still be saved on the local path"
+        );
+    }
+
     /// The one question about the retrieval system that NO unit test can answer:
     /// given a compact session index and a player asking for a detail that lives
     /// only inside an old session's full record, does the DM actually reach for
