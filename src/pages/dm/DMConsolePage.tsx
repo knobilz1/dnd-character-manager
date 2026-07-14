@@ -1946,6 +1946,15 @@ export function DMConsolePage() {
           await invoke('append_session_recap', { id: campaignId, date, recap: summary }).catch((e) =>
             console.warn('Failed to append the session recap:', e)
           );
+          // The digest also reconciles the active module's arc plan against what
+          // actually happened (campaign.rs's reconcile_module_plan_at). Re-read it
+          // here or that revision never reaches the DM: campaignPlanRef is only
+          // otherwise fetched on a campaign SWITCH, so a new sitting in this same
+          // campaign would keep injecting the stale pre-reconciliation copy at its
+          // next plan check-in — silently defeating the reconciliation entirely.
+          await invoke<string>('read_campaign_plan', { id: campaignId })
+            .then((plan) => { campaignPlanRef.current = plan; })
+            .catch((e) => console.warn('Failed to re-read the reconciled campaign plan:', e));
         } catch (digestErr) {
           // Fallback for a DM running on a local LLM with no Claude available
           // (the digest uses Opus, same as every other ingestion call): drop

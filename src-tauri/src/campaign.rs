@@ -1006,7 +1006,103 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
 
     let summary = if summaries.is_empty() { "(session recorded — no summary produced)".to_string() } else { summaries.join(" ") };
     append_session_index_line_at(root, id, &session_id, date, &summary)?;
+    // Keep the active module's arc plan honest about what actually happened —
+    // see reconcile_module_plan_at. Best-effort: this must never fail the
+    // digest, since the session's facts are already safely captured above.
+    let _ = reconcile_module_plan_at(root, id, &summary);
     Ok(summary)
+}
+
+/// Revises a module's arc plan against what ACTUALLY happened this session.
+///
+/// The problem this fixes: plan.md is written once at ingestion and, before
+/// this, was never revised again — while DMConsolePage's periodic "campaign-arc
+/// plan check-in" (PLAN_CHECK_INTERVAL) keeps re-injecting it into the DM's
+/// prompt every few turns for the campaign's whole life. That's a one-way
+/// ratchet: MEMORY.md gets compacted as it ages (see build_compact_memory_prompt),
+/// so the record of the party ABANDONING a plotline fades over time, while the
+/// plan's instruction to pursue it stays pristine forever — the stale plan gets
+/// relatively louder as the memory of the divergence gets quieter.
+///
+/// Note what this is NOT for: hard contradictions are already handled without
+/// it. entities.md is upserted with each NPC's *current* state, so a plan
+/// saying "Vera betrays them in chapter 3" against an entities.md saying "Vera:
+/// killed at Redstone Bridge" is a conflict any decent model resolves in favor
+/// of the registry. The gap is that the plan is the ONLY thing in the DM's
+/// entire context that speaks to *direction* — pacing, what to foreshadow,
+/// which NPCs matter — so stale guidance of that kind has nothing to overrule
+/// it. That's an information-architecture problem, not a reasoning one, which
+/// is why a smarter model doesn't fix it and this pass does.
+fn build_plan_reconciliation_prompt(
+    plan: &str,
+    session_summary: &str,
+    entities: &str,
+    locations: &str,
+    flagged_facts: &str,
+) -> String {
+    format!(
+        "Below is the arc plan an AI Dungeon Master has been steering a Dungeons & Dragons module by, followed by what has ACTUALLY happened at the table. The plan was written before play began and is never otherwise updated, so it can drift out of step with the real campaign. Your job is to bring it back in step — conservatively.\n\n\
+        Revise the plan ONLY where the campaign has genuinely moved past it. Specifically:\n\
+        - **Resolved threads:** a thread the plan says to foreshadow or pay off later, which has already been resolved, should be removed (or briefly noted as done) — the DM shouldn't keep foreshadowing something that already happened.\n\
+        - **Abandoned routes:** pacing guidance pointing somewhere the party has clearly chosen not to go should be rewritten to reflect where they actually are and what's plausibly next, rather than steering them back to a path they left.\n\
+        - **Dead or changed NPCs/factions:** anyone the plan tells the DM to track who is dead, gone, or whose situation has fundamentally changed should be dropped or updated to their current state.\n\
+        - **New material from play:** NPCs, factions, or threads that emerged during play and now genuinely matter to this module's arc should be folded in, even though the original plan never mentioned them.\n\n\
+        Be conservative. Most sessions won't invalidate anything, and this plan was expensive to produce: if the session didn't genuinely resolve, invalidate, or add something, reply with the plan COMPLETELY UNCHANGED. Never drop a thread that's merely un-advanced — only one that's actually concluded or dead. When in doubt, keep it.\n\n\
+        Keep the exact same markdown structure and section headings the plan already uses, and the same overall length (a few hundred words) — this is a revision, not a rewrite.\n\n\
+        Reply with ONLY the revised plan document itself, no other commentary, no code fences. Everything under CONTEXT below is reference material — the session's outcome and the campaign's live registries. It is INPUT, not part of the plan: never copy any of it, or its headings, into your reply. The registries are already given to the Dungeon Master separately every turn, so reproducing them here would just duplicate them.\n\n\
+        ===== THE PLAN TO REVISE (this document, and only this, is what you rewrite) =====\n\
+        {plan}\n\n\
+        ===== CONTEXT (reference only — never reproduce any of this) =====\n\n\
+        -- What happened in the session that just ended --\n{session_summary}\n\n\
+        -- Every named NPC/faction and their CURRENT state (authoritative) --\n{entities}\n\n\
+        -- Every named place and its current state --\n{locations}\n\n\
+        -- Promises, secrets and consequences still outstanding --\n{flagged_facts}"
+    )
+}
+
+/// Impure companion to build_plan_reconciliation_prompt — runs at the end of
+/// digest_session_at, once per session. Deliberately conservative and
+/// fail-safe at every step:
+/// - No active module, or no plan written yet → a FREE no-op, no LLM call at
+///   all (a homebrew campaign with no imported module has no arc plan to rot).
+/// - The call failing, or coming back empty, leaves plan.md untouched rather
+///   than erroring — a stale plan is far better than a destroyed one.
+/// - Backs the previous plan up to plan.md.bak before overwriting, same
+///   one-step-revert pattern as every other in-place rewrite here.
+/// Re-syncs the active_module/ indirection afterward, since that mirrored copy
+/// (not the module's own plan.md) is what read_campaign_plan actually feeds to
+/// the turn-level check-in. Returns whether it revised anything.
+fn reconcile_module_plan_at(root: &Path, id: &str, session_summary: &str) -> Result<bool, String> {
+    let Some(module_id) = read_active_module_id_at(root, id) else {
+        return Ok(false);
+    };
+    let dir = root.join(id);
+    let plan_path = dir.join("modules").join(&module_id).join("plan.md");
+    let plan = read_optional(&plan_path);
+    if plan.trim().is_empty() {
+        return Ok(false);
+    }
+
+    let memory_dir = dir.join("memory");
+    let prompt = build_plan_reconciliation_prompt(
+        &plan,
+        session_summary,
+        &read_optional(&memory_dir.join("entities.md")),
+        &read_optional(&memory_dir.join("locations.md")),
+        &read_optional(&memory_dir.join("flagged_facts.md")),
+    );
+    let revised = crate::local_llm::ask_ingest_once(prompt, Some("opus"), false)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let Some(revised) = revised else {
+        return Ok(false);
+    };
+
+    backup_before_overwrite(&plan_path);
+    write_atomic(&plan_path, &revised)?;
+    sync_active_module_indirection_at(root, id, &module_id)?;
+    Ok(true)
 }
 
 /// Reads back one session's lossless verbatim record for the `recallSession`
@@ -3600,6 +3696,50 @@ mod tests {
     }
 
     #[test]
+    fn build_plan_reconciliation_prompt_is_conservative_and_grounds_the_plan_in_reality() {
+        let prompt = build_plan_reconciliation_prompt(
+            "## This module's own arc\nSteer the party to the lighthouse by session 4.",
+            "The party went north instead and never approached the coast.",
+            "- **Vera Blackwood:** Killed at Redstone Bridge.",
+            "- **The Gilded Eel:** Burned down.",
+            "- **2026-07-13:** The party swore to bring Captain Renn in alive.",
+        );
+        assert!(prompt.contains("Steer the party to the lighthouse"));
+        assert!(prompt.contains("went north instead"), "must see where the party ACTUALLY ended up — the divergence signal");
+        assert!(prompt.contains("Killed at Redstone Bridge"));
+        assert!(prompt.contains("Burned down"));
+        assert!(prompt.contains("bring Captain Renn in alive"));
+        assert!(prompt.to_lowercase().contains("abandoned routes"), "must name the stale-pacing failure mode");
+        assert!(prompt.to_lowercase().contains("completely unchanged"), "must be told to no-op when the session diverged from nothing");
+        assert!(prompt.to_lowercase().contains("when in doubt, keep it"));
+        // A live run caught the model echoing the CONTEXT sections back into
+        // plan.md (the registries got copied wholesale into the plan, which then
+        // re-injects them every check-in — they're already standing imports).
+        // The context must be fenced off as input and never share the plan's own
+        // `##` heading level.
+        assert!(prompt.contains("never reproduce any of this"), "context must be explicitly marked as input-only");
+        assert!(!prompt.contains("## What happened"), "context labels must not use the plan's own `##` heading level");
+    }
+
+    // The two no-op paths below are FREE — they must return before ever making
+    // an LLM call. If either regressed into calling out, it would come back
+    // with a revised plan and these `false` assertions would fail.
+    #[test]
+    fn reconcile_module_plan_at_is_a_free_no_op_with_no_active_module() {
+        let root = Scratch::new("reconcile-no-module");
+        let meta = create_campaign_at(&root.0, &intake("Homebrew")).unwrap();
+        assert!(!reconcile_module_plan_at(&root.0, &meta.id, "Stuff happened.").unwrap());
+    }
+
+    #[test]
+    fn reconcile_module_plan_at_is_a_free_no_op_when_the_active_module_has_no_plan() {
+        let root = Scratch::new("reconcile-no-plan");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "", "Lost Mine").unwrap();
+        assert!(!reconcile_module_plan_at(&root.0, &meta.id, "Stuff happened.").unwrap());
+    }
+
+    #[test]
     fn create_campaign_seeds_session_index_and_imports_it() {
         let root = Scratch::new("seed-session-index");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
@@ -4605,6 +4745,121 @@ DM: The deal is struck. Vera melts back into the woods, promising to meet you at
         // (a flagged fact, or folded into Vera's entity description).
         let flagged = fs::read_to_string(dir.join("memory").join("flagged_facts.md")).unwrap();
         println!("=== FLAGGED FACTS ===\n{flagged}\n");
+    }
+
+    /// The stale plan this pair of e2e tests exercises: its entire climax is
+    /// confronting one named NPC at one named place, on a schedule.
+    const E2E_STALE_PLAN: &str = "\
+## How this fits the campaign
+The party operates out of Redstone and is hunting a smuggling ring.
+
+## This module's own arc
+The climax of this module is the confrontation with **Captain Aldric Renn** at the **Gilded Eel** tavern on the night of the new moon — everything else builds toward getting the party there. Key NPC to track: Captain Renn, the smuggler-captain, who must be taken alive at the Gilded Eel so he can confess.
+
+**Pacing:** steer the party toward the Gilded Eel by the end of session 4. Foreshadow the new moon relentlessly.";
+
+    /// Real integration check of the plan-reconciliation pass against the actual
+    /// `claude` CLI — the one thing no unit test can reach, since the whole
+    /// question is whether the model actually NOTICES the campaign has moved past
+    /// the plan. Sets up the exact rot this was built for: a plan whose entire
+    /// climax is confronting an NPC at a place, and a session in which the party
+    /// kills that NPC somewhere else and burns the place to the ground.
+    /// Run with:
+    ///   cargo test --lib -- --ignored --nocapture reconcile_module_plan_at_end_to_end
+    #[test]
+    #[ignore]
+    fn reconcile_module_plan_at_end_to_end() {
+        let root = Scratch::new("reconcile-e2e");
+        let meta = create_campaign_at(&root.0, &intake("Redstone")).unwrap();
+        let (module_id, _) =
+            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), E2E_STALE_PLAN, "Redstone Conspiracy").unwrap();
+
+        // The party goes completely off-plan: Renn dies on the road, nowhere near
+        // the Gilded Eel, and the Gilded Eel itself burns down. Every load-bearing
+        // element of the plan above is now void.
+        let transcript = "\
+DM: You spot Captain Aldric Renn's carriage on the King's Road, far from town — he's fleeing Redstone tonight, not waiting for the new moon.
+Player (Thorin): We ambush the carriage. I put an arrow through him before he can draw.
+DM: Your arrow takes Renn in the throat. He is dead before he hits the gravel — whatever confession you wanted from him died with him.
+Player (Thorin): We search the body, then ride back toward town.
+DM: As you crest the hill you see the Gilded Eel is a pillar of flame. Someone torched it to bury the evidence. By dawn it's a blackened shell: the smuggling ring's meeting place is gone, and so is the man who ran it.";
+
+        let summary = digest_session_at(&root.0, &meta.id, "2026-07-14", transcript).unwrap();
+        println!("=== SESSION SUMMARY ===\n{summary}\n");
+
+        let dir = root.0.join(&meta.id);
+        println!("=== ENTITIES ===\n{}\n", fs::read_to_string(dir.join("memory").join("entities.md")).unwrap());
+
+        let revised = fs::read_to_string(dir.join("modules").join(&module_id).join("plan.md")).unwrap();
+        println!("=== REVISED PLAN ===\n{revised}\n");
+
+        assert_ne!(
+            revised.trim(),
+            E2E_STALE_PLAN.trim(),
+            "the plan must actually change — the party invalidated its entire climax"
+        );
+        let lower = revised.to_lowercase();
+        assert!(
+            ["dead", "killed", "died", "destroyed", "burned", "burnt", "no longer", "resolved"]
+                .iter()
+                .any(|m| lower.contains(m)),
+            "the revised plan should acknowledge Renn's death / the Gilded Eel's destruction — got:\n{revised}"
+        );
+
+        // Regression: a first live run had the model copying the CONTEXT blocks
+        // (the entities/locations/flagged-facts registries) straight into
+        // plan.md. Those are already standing imports loaded every turn, so the
+        // plan would re-inject duplicates of them at every check-in.
+        for leaked in ["# Entities", "# Locations", "# Flagged Facts", "What happened in the session"] {
+            assert!(!revised.contains(leaked), "context leaked into the plan (\"{leaked}\") — got:\n{revised}");
+        }
+        assert!(
+            revised.len() < E2E_STALE_PLAN.len() * 3,
+            "the revised plan ballooned ({} chars vs {} before) — it's a revision, not an append:\n{revised}",
+            revised.len(),
+            E2E_STALE_PLAN.len()
+        );
+
+        // The old plan must stay recoverable, and the MIRRORED copy is the one the
+        // turn-level check-in actually reads (read_campaign_plan) — if that isn't
+        // re-synced, the revision never reaches the DM.
+        let backup = fs::read_to_string(dir.join("modules").join(&module_id).join("plan.md.bak")).unwrap();
+        assert!(backup.contains("Gilded Eel"), "the pre-reconciliation plan must be backed up");
+        let mirrored = fs::read_to_string(dir.join("active_module").join("plan.md")).unwrap();
+        assert_eq!(mirrored.trim(), revised.trim(), "active_module/plan.md must carry the revision");
+    }
+
+    /// The other half of the design, and the more dangerous failure: the plan is
+    /// expensive ingestion output, and MOST sessions invalidate nothing. A session
+    /// that merely advances along the plan must NOT get the still-live arc
+    /// rewritten out from under it.
+    /// Run with:
+    ///   cargo test --lib -- --ignored --nocapture reconcile_module_plan_at_leaves_a_still_live_plan_intact
+    #[test]
+    #[ignore]
+    fn reconcile_module_plan_at_leaves_a_still_live_plan_intact() {
+        let root = Scratch::new("reconcile-e2e-noop");
+        let meta = create_campaign_at(&root.0, &intake("Redstone")).unwrap();
+        let (module_id, _) =
+            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), E2E_STALE_PLAN, "Redstone Conspiracy").unwrap();
+
+        // A session that goes entirely TO plan: Renn is alive, the Gilded Eel
+        // stands, the new moon hasn't come. Nothing is resolved or invalidated.
+        let transcript = "\
+DM: The road to Redstone is quiet. Word in the villages is that Captain Renn hasn't been seen in a week, but the Gilded Eel is still serving every night.
+Player (Thorin): We keep heading for Redstone. How long until the new moon?
+DM: Three nights, by your reckoning. You make camp off the road.
+Player (Thorin): We rest and push on at first light.
+DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded Eel's lantern is lit.";
+
+        digest_session_at(&root.0, &meta.id, "2026-07-14", transcript).unwrap();
+
+        let revised = fs::read_to_string(root.0.join(&meta.id).join("modules").join(&module_id).join("plan.md")).unwrap();
+        println!("=== PLAN AFTER A NON-DIVERGING SESSION ===\n{revised}\n");
+
+        let lower = revised.to_lowercase();
+        assert!(lower.contains("renn"), "a still-live key NPC must survive a session that never touched him — got:\n{revised}");
+        assert!(lower.contains("gilded eel"), "the still-live climax location must survive — got:\n{revised}");
     }
 
     #[test]
