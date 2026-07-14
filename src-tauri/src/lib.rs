@@ -56,6 +56,8 @@ pub fn run() {
       campaign::read_campaign_memory,
       campaign::read_campaign_flagged_facts,
       campaign::append_session_recap,
+      campaign::digest_session,
+      campaign::read_session_record,
       campaign::append_memory_note,
       campaign::append_entity_fact,
       campaign::append_location_fact,

@@ -68,6 +68,7 @@ You are the Dungeon Master for a Dungeons & Dragons game night. The players are 
 You are given the current party status (HP, conditions, etc.) at the top of every message — treat it as ground truth, it may have changed since you last looked. For what's happened in past sessions and any standing facts worth remembering, see the campaign memory below. entities.md and locations.md are standing registries of every named NPC/faction/creature and place you've ever introduced — always check them before treating someone or somewhere as new; if a name you're about to introduce is already there, it means the party has met them/been there before. These registries are YOUR reference, not the party's — knowing a name is in entities.md is not the same as the party having actually learned it in-fiction. Never have a PC or the narration casually use a named NPC's proper name until that name has actually been given to the party in-scene (the NPC introduces themselves, someone else names them, a sign/notice/rumor names them, etc.); before that, refer to them by description only ("the innkeeper", "a hooded figure by the fire", "the guard captain"). This applies even to someone already logged in entities.md from a past session, if the CURRENT scene is genuinely the party's first encounter with them face to face. party.md is the player characters themselves — who plays them, their identity, and their player-written backstory notes, synced automatically from the players' own character sheets. Treat it as read-only ground truth about who these people are (party members are NOT NPCs — never add them to entities.md via rememberEntity), and actively mine it: a character's bonds, flaws, and unresolved backstory threads are the best material for making the story feel personal to this table.
 
 @memory/MEMORY.md
+@memory/session_index.md
 @memory/flagged_facts.md
 @memory/entities.md
 @memory/locations.md
@@ -96,6 +97,7 @@ Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp 
 - `advanceToChapter`: a chapter id (only relevant if the active module has chapters — see active_module/index.md for the current list of valid ids). Include this only when the party's actions have actually concluded the current chapter and moved the story into the next one. Don't skip ahead or advance early just because you're curious what's next.
 - `resolveChapterSection`: a short description of a clearly-concluded, bounded portion of the *current* chapter (e.g. "the party cleared the eastern guard room and looted it") — only when the active module has chapters. This trims that resolved portion out of the chapter text you're given each turn, so it stops taking up space once it's no longer relevant. Be conservative: only flag something as resolved when it's genuinely done and bounded, never anything the party hasn't reached yet — a missed trim just means the text stays a little longer, which is harmless, but flagging unresolved content as done risks losing something you still need.
 - `switchActiveModule`: a module id from modules_index.md — only relevant if this campaign has more than one imported module. Use this when the party's own actions clearly move them from one self-contained module/side-quest to a different already-imported one (e.g. leaving one dungeon to chase a lead that belongs to another module you have on file). Never invent a module id that isn't listed in modules_index.md, and don't switch just because you're curious — only when the party has actually moved on in the fiction.
+- `recallSession`: a `session-NN` id copied exactly from session_index.md above. session_index.md gives you a one-line map of every past session, but not the detail — when a player references something specific from an earlier session and the one-liner (plus entities.md/locations.md/flagged_facts.md) isn't enough to answer confidently, set this to that session's id. The full verbatim record of that session is loaded into your NEXT turn's prompt, so you can answer accurately instead of guessing. Use it sparingly — only when you actually need the detail — and never invent an id that isn't listed in session_index.md. It's a read, not a story change: including it never alters anything, it just fetches your own past record.
 - `position` / `clearPositions`: see "Physical hex-grid positioning" below.
 Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
 
@@ -172,6 +174,29 @@ const DEFAULT_PARTY_MD: &str = "# Party\n\n_The player characters — identity a
 /// if a paraphrase or trim ever loses something that mattered — the DM can
 /// always open this file by hand and check. See `append_to_history_at`.
 const DEFAULT_HISTORY_MD: &str = "# Full History (raw, never summarized)\n\n_A permanent, unedited log of everything ever recorded for this campaign — every session recap, remembered fact, and entity/location change, exactly as originally written. Never loaded by the DM (see MEMORY.md/entities.md/locations.md for what actually gets reloaded each turn) — this file exists purely as a backup in case compaction or trimming ever loses something that mattered._\n";
+
+/// Compact, always-loaded index of every past session — one line each (see
+/// build_session_index_line). Unlike MEMORY.md's session recaps (which get
+/// lossily compacted as they age), this stays one bounded line per session
+/// forever, so the DM always has the whole campaign's arc at a glance even
+/// 40 sessions in. Each line carries a `session-NN` id; the DM pulls the full
+/// verbatim record of any listed session on demand via the `recallSession`
+/// dm-action (see read_session_record_at). This is the "index" half of the
+/// retrieval system — session_records/ holds the lossless detail it points at.
+const DEFAULT_SESSION_INDEX_MD: &str = "# Session Index\n\n_One line per past session — a compact, always-loaded map of the whole campaign's arc, so no session is ever forgotten no matter how long the campaign runs. Each entry has a `session-NN` id; to pull back the full verbatim record of any session listed here, use the `recallSession` dm-action with that id._\n";
+
+/// Standing-import line for session_index.md, appended to an existing
+/// campaign's CLAUDE.md by sync_session_index_at the same way
+/// DM_RULES_IMPORT_LINE is (new campaigns get it inline in BASE_CLAUDE_MD).
+const SESSION_INDEX_IMPORT_LINE: &str = "@memory/session_index.md\n";
+
+/// Subdirectory (under a campaign's own folder) holding one lossless, verbatim
+/// per-session transcript file (`session-NN.md`) — the retrieval target for
+/// the `recallSession` dm-action. Distinct from full_history.md's flat,
+/// cross-cutting archive: these are cleanly separated, self-contained records
+/// keyed by the same `session-NN` id the always-loaded session_index.md lists,
+/// so retrieval is a direct file read rather than parsing a heterogeneous log.
+const SESSION_RECORDS_DIR: &str = "session_records";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -324,36 +349,22 @@ fn format_campaign_setting(intake: &CampaignIntake) -> String {
     s
 }
 
-/// Pass 1 of establish_campaign_lore_at's three-pass pipeline. Asks Claude to
-/// inventory every named NPC, faction, location, and plot thread it can find
-/// in the DM-provided material — which may be a short typed note or the full
-/// extracted text of an official sourcebook running to hundreds of pages — as
-/// a flat list. This is a working artifact, not the final doc, so it's
-/// deliberately allowed to be as long as the source material actually
-/// warrants instead of being squeezed to a fixed length the way the final
-/// campaign_lore.md is. Pass 2 (build_establish_campaign_prompt) drafts from
-/// this, and pass 3 (build_campaign_lore_critique_prompt) checks coverage
-/// against it; the raw result is also saved to disk verbatim (see
-/// establish_campaign_lore_at) as a permanent, never-loaded backup — the same
-/// "cheap insurance against a later pass losing something" reasoning as
-/// DEFAULT_HISTORY_MD.
-fn build_campaign_inventory_prompt(intake: &CampaignIntake) -> String {
-    let lore_block = if intake.lore.trim().is_empty() {
-        "(No lore material was provided.)".to_string()
-    } else {
-        intake.lore.trim().to_string()
-    };
+/// Per-chunk inventory extraction — the "map" step shared by
+/// establish_campaign_lore_at's pass 1 and update_campaign_lore_at, both of
+/// which can be handed anything from a short note to a full sourcebook
+/// running to hundreds of pages. Reading that much material in one call to
+/// both extract an inventory AND synthesize/merge lore from it is exactly
+/// the single-pass-loses-detail shape build_chapterize_prompt's doc comment
+/// describes. Deliberately generic (no campaign name/intake context) since
+/// finding named entities in a chunk of text doesn't need campaign framing —
+/// only the synthesis step that reads the merged inventory does, and it
+/// already has that context supplied separately.
+fn build_inventory_extraction_prompt(chunk: &str) -> String {
     format!(
-        "You're helping set up a new Dungeons & Dragons campaign. Below is whatever material the DM provided for it — this could be a short note, or the full extracted text of an official campaign sourcebook running to hundreds of pages.\n\n\
-        Campaign name: {}\n\
-        Module/scenario noted at creation: {}\n\
-        Other notes: {}\n\n\
-        Material:\n{lore_block}\n\n\
-        List every named NPC, faction, organization, recurring location, and ongoing plot thread you can find in the material above that could plausibly recur across a long campaign (skip one-off, purely incidental mentions). One line per entry, format: \"- **Name/thread** — one clause on what/who they are and why they might matter later.\" Be thorough rather than selective — this is a working inventory, not the final doc, so include anything plausibly recurring even if you're not sure it'll make the final cut. If the material contains little or nothing to inventory, say so plainly rather than inventing entries.\n\n\
-        Reply with ONLY the inventory list (or that one-line note if there's nothing to inventory), no other commentary.",
-        intake.name.trim(),
-        intake.module.trim(),
-        intake.notes.trim(),
+        "Below is one section of source material for a Dungeons & Dragons campaign — this could be a large sourcebook split into pieces, so treat it as a fragment, not the whole picture.\n\n\
+        Material:\n{chunk}\n\n\
+        List every named NPC, faction, organization, recurring location, and ongoing plot thread you can find in the material above that could plausibly recur across a long campaign (skip one-off, purely incidental mentions). One line per entry, format: \"- **Name/thread** — one clause on what/who they are and why they might matter later.\" Be thorough rather than selective — this is a working inventory, not the final doc, so include anything plausibly recurring even if you're not sure it'll make the final cut. If this section contains little or nothing to inventory, say so plainly rather than inventing entries.\n\n\
+        Reply with ONLY the inventory list (or that one-line note if there's nothing to inventory), no other commentary."
     )
 }
 
@@ -463,31 +474,39 @@ fn build_campaign_lore_critique_prompt(draft: &str, inventory: &str) -> String {
     )
 }
 
-/// Impure: three Opus calls (see build_claude_args's doc comment in dm.rs for
-/// why one-time ingestion work gets the quality/latency budget a live turn
-/// can't afford) — inventory, then draft, then a coverage-checking critique —
-/// that together write memory/campaign_lore.md. Returns the final text so the
-/// frontend can display/confirm it. Deliberately a fully separate step from
-/// create_campaign_at (which stays LLM-free and fast) — called by its own
-/// tauri command right after create_campaign succeeds, the same sequential-
-/// chaining shape DMConsolePage.tsx already uses for
-/// chapterize_and_import_module when a module file was picked during creation.
+/// Impure: pass 1 is now itself potentially several Opus calls, not one (see
+/// build_claude_args's doc comment in dm.rs for why one-time ingestion work
+/// gets the quality/latency budget a live turn can't afford) — chunked
+/// inventory extraction (build_inventory_extraction_prompt, one call per
+/// EXTRACTION_CHUNK_MAX_CHARS-sized piece of intake.lore), then draft, then a
+/// coverage-checking critique — that together write memory/campaign_lore.md.
+/// Returns the final text so the frontend can display/confirm it.
+/// Deliberately a fully separate step from create_campaign_at (which stays
+/// LLM-free and fast) — called by its own tauri command right after
+/// create_campaign succeeds, the same sequential-chaining shape
+/// DMConsolePage.tsx already uses for chapterize_and_import_module when a
+/// module file was picked during creation.
 ///
 /// Each later pass tolerates the previous *refinement* step failing or
 /// coming back empty by falling back to what it already has (an inventory
-/// call failing just means pass 2 drafts without one, same as a blank
-/// intake.lore; a critique call failing just means the draft ships as-is) —
-/// only the pass-2 draft itself is required to succeed and be non-empty,
-/// since that's the one piece with no reasonable fallback.
+/// chunk failing just means that chunk's entries are missing — same
+/// tolerance as a blank intake.lore, just applied per-chunk now instead of
+/// to the pass as a whole; a critique call failing just means the draft
+/// ships as-is) — only the pass-2 draft itself is required to succeed and be
+/// non-empty, since that's the one piece with no reasonable fallback.
 fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) -> Result<String, String> {
-    let inventory = crate::dm::ask_claude_once(build_campaign_inventory_prompt(intake), Some("opus"))
-        .unwrap_or_default()
+    let inventory = split_into_chunks(&intake.lore, EXTRACTION_CHUNK_MAX_CHARS)
+        .iter()
+        .filter_map(|chunk| crate::dm::ask_claude_once(build_inventory_extraction_prompt(chunk), Some("opus")).ok())
+        .collect::<Vec<_>>()
+        .join("\n")
         .trim()
         .to_string();
     if !inventory.is_empty() {
-        // Best-effort permanent backup (see build_campaign_inventory_prompt's
-        // doc comment) — a write failure here shouldn't block establishing
-        // the campaign's actual lore doc.
+        // Best-effort permanent, never-loaded backup of the merged inventory —
+        // cheap insurance against pass 2/3 losing something, same reasoning as
+        // DEFAULT_HISTORY_MD. A write failure here shouldn't block
+        // establishing the campaign's actual lore doc.
         let _ = write_atomic(&root.join(id).join("memory").join("campaign_source_inventory.md"), &inventory);
     }
 
@@ -525,35 +544,81 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
 /// and-merge instruction rather than a naive append: campaign_lore.md is a
 /// concise, curated doc (see build_establish_campaign_prompt), and blind
 /// concatenation would let it grow unbounded and lose the "concise outline"
-/// property over many additions.
-fn build_update_lore_prompt(existing_lore: &str, addition: &str) -> String {
+/// property over many additions. Takes an already-extracted inventory
+/// (build_inventory_extraction_prompt) rather than the raw addition text —
+/// see update_campaign_lore_at's doc comment for why.
+fn build_update_lore_prompt(existing_lore: &str, new_inventory: &str) -> String {
     format!(
-        "You previously wrote the overarching campaign-lore doc below for a Dungeons & Dragons campaign. New material has come up that should be folded into it — a sourcebook, a later plot decision, anything the DM wants the persistent frame to account for going forward.\n\n\
+        "You previously wrote the overarching campaign-lore doc below for a Dungeons & Dragons campaign. New material has come up that should be folded into it — a sourcebook, a later plot decision, anything the DM wants the persistent frame to account for going forward. Below is an inventory of the named NPCs/factions/locations/threads found in that new material.\n\n\
         Existing campaign-lore doc:\n{existing_lore}\n\n\
-        New material to fold in:\n{addition}\n\n\
+        Inventory of new material to fold in:\n{new_inventory}\n\n\
         Rewrite the campaign-lore doc so it incorporates the new material naturally alongside what's still relevant from before — don't just append it as a separate section, weave it in where it fits (a new faction goes with the other factions, a new thread goes with the other plot threads, etc.). Keep the same concise markdown-outline style and length guidance as before (a few hundred words is plenty).\n\n\
         Reply with ONLY the full, updated markdown doc, no other commentary, no code fences.",
     )
 }
 
-/// Impure: folds `addition` into an existing campaign's lore doc via one Opus
-/// call, backing up the previous version first (same
-/// backup_before_overwrite + write_atomic pattern used everywhere else
-/// content gets overwritten in place, e.g. trim_resolved_chapter_section_at).
-/// Reads the existing doc itself rather than requiring the caller to pass it
-/// in, so the frontend only ever needs to supply the new text — same shape
-/// as establish_campaign_lore_at needing just the intake answers.
+/// Coverage-checking critique for update_campaign_lore_at's merge — unlike
+/// build_campaign_lore_critique_prompt (which only has an inventory to check
+/// against, since establish_campaign_lore_at is drafting from a blank slate),
+/// a lore UPDATE has two separate things that must survive the merge: every
+/// still-relevant entry from the EXISTING doc, and every entry from the new
+/// inventory. Checks both explicitly rather than assuming a "weave it in"
+/// instruction naturally preserves the old content just because it was told
+/// to.
+fn build_update_lore_critique_prompt(draft: &str, existing_lore: &str, new_inventory: &str) -> String {
+    format!(
+        "You merged new material into the campaign-lore doc below for a Dungeons & Dragons campaign, producing the draft that follows.\n\n\
+        Original doc before the merge:\n{existing_lore}\n\n\
+        Inventory of named entries from the new material that should now be reflected:\n{}\n\n\
+        Merged draft:\n{draft}\n\n\
+        Check specifically: does the draft still cover everything still-relevant from the original doc, and does it now cover every entry from the new inventory above? For each gap, is the omission a defensible prioritization (superseded, resolved, genuinely minor) or an oversight? Also check for generic fantasy-trope phrasing and hooks vague enough that they don't foreshadow anything specific. Then rewrite the doc to fix any real oversights — keep whatever's already working. Keep the same concise markdown-outline style and length guidance (a few hundred words is plenty).\n\n\
+        Reply with ONLY the full, revised markdown doc, no other commentary, no code fences.",
+        if new_inventory.trim().is_empty() { "(none)" } else { new_inventory.trim() },
+    )
+}
+
+/// Impure: folds `addition` into an existing campaign's lore doc via a
+/// three-stage pipeline instead of the single Opus call this used to be:
+/// extract an inventory from `addition` (map — chunked via split_into_chunks
+/// so a large attached sourcebook is never read in one pass, same reasoning
+/// as build_chapterize_prompt's doc comment), merge that inventory into the
+/// existing doc (reduce, build_update_lore_prompt), then a coverage-checking
+/// critique (build_update_lore_critique_prompt) verifying neither the
+/// existing doc's own content nor the new inventory got dropped in the
+/// merge. This was arguably the least-protected of the app's three one-shot-
+/// ingestion calls before this — unlike establish_campaign_lore_at, it had
+/// no inventory pass AND no critique pass at all. Extraction is load-bearing
+/// (a chunk failing fails the whole update, leaving campaign_lore.md
+/// untouched) rather than gracefully degrading like
+/// establish_campaign_lore_at's: silently proceeding with a partial/empty
+/// inventory here would make an update the DM explicitly asked for look like
+/// it succeeded while actually changing nothing, which is worse than a clear
+/// error. Backs up the previous doc before overwriting, same as before.
 fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<String, String> {
     let path = root.join(id).join("memory").join("campaign_lore.md");
     let existing = read_optional(&path);
-    let lore = crate::dm::ask_claude_once(build_update_lore_prompt(&existing, addition), Some("opus"))?;
-    let trimmed = lore.trim();
-    if trimmed.is_empty() {
+
+    let mut chunk_inventories = Vec::new();
+    for chunk in split_into_chunks(addition, EXTRACTION_CHUNK_MAX_CHARS) {
+        chunk_inventories.push(crate::dm::ask_claude_once(build_inventory_extraction_prompt(&chunk), Some("opus"))?);
+    }
+    let inventory = chunk_inventories.join("\n");
+
+    let draft = crate::dm::ask_claude_once(build_update_lore_prompt(&existing, &inventory), Some("opus"))?;
+    let draft = draft.trim().to_string();
+    if draft.is_empty() {
         return Err("Campaign-lore update returned empty content; leaving campaign_lore.md untouched.".into());
     }
+
+    let lore = crate::dm::ask_claude_once(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(draft);
+
     backup_before_overwrite(&path);
-    write_atomic(&path, trimmed)?;
-    Ok(trimmed.to_string())
+    write_atomic(&path, &lore)?;
+    Ok(lore)
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -666,6 +731,7 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     write_atomic(&dir.join("memory").join("locations.md"), DEFAULT_LOCATIONS_MD)?;
     write_atomic(&dir.join("memory").join("party.md"), DEFAULT_PARTY_MD)?;
     write_atomic(&dir.join("memory").join("full_history.md"), DEFAULT_HISTORY_MD)?;
+    write_atomic(&dir.join("memory").join("session_index.md"), DEFAULT_SESSION_INDEX_MD)?;
     // Seeded here too so a brand-new campaign's very first turn already has the
     // rules — sync_dm_rules_at only runs on load, which is after creation.
     write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
@@ -772,6 +838,194 @@ fn append_session_recap_at(root: &Path, id: &str, date: &str, recap: &str) -> Re
     Ok(())
 }
 
+// ── Session digest + retrieval (see the module doc comment) ──────────────────
+//
+// The end-of-session capture path used to be a single sonnet-low call that
+// wrote a 3-4 sentence MEMORY.md recap AND tried to catch any NPC/place a live
+// turn missed — the same "one cheap call doing summarization + extraction
+// together" shape build_chapterize_prompt's doc comment describes as the
+// single-pass-loses-detail failure mode. This replaces it with an Opus
+// map-reduce over the session's VERBATIM transcript: extract durable facts
+// into the always-loaded registries, save the raw transcript losslessly for
+// on-demand retrieval, and emit one compact line into the always-loaded
+// session_index.md so no session is ever fully forgotten.
+
+/// Extraction ("map") pass over ONE chunk of a verbatim session transcript.
+/// Deliberately structured JSON (not prose) — the whole point is reliable
+/// fact capture, not a readable summary, so it returns the same
+/// entity/location/fact shapes the live dm-actions already upsert, plus one
+/// short summary fragment for the session_index line. The transcript labels
+/// player-character lines with their names, so the prompt can tell PCs (which
+/// must NEVER be logged as entities — see BASE_CLAUDE_MD) from NPCs.
+fn build_session_digest_prompt(transcript_chunk: &str) -> String {
+    format!(
+        "Below is the verbatim transcript of one section of a Dungeons & Dragons session — what the DM narrated and what the players said, in order. Player-character lines are labelled with the character's name. Extract the durable facts a DM must not forget, so they can be saved into the campaign's permanent memory. Extract — do not write a narrative retelling.\n\n\
+        Reply with ONLY a single JSON object, no markdown fences, no commentary, in exactly this shape:\n\
+        {{\"entities\": [{{\"name\": \"<NPC/faction/creature name>\", \"description\": \"<short standalone current-state summary: role, what they want, any secret, a speech quirk>\"}}], \"locations\": [{{\"name\": \"<place name>\", \"description\": \"<short standalone summary of the place and its current state>\"}}], \"facts\": [\"<a standalone promise/secret/consequence not tied to one named person or place>\"], \"summary\": \"<ONE sentence: what happened in this section and where the party ended up>\"}}\n\n\
+        Rules:\n\
+        - NEVER include a player character (the people whose lines are labelled with their name in the transcript) as an entity — only NPCs, factions, and creatures.\n\
+        - Include an NPC even if they never gave a proper name but spoke to the party or clearly matters; give them a name specific enough to be unique (anchor it to a place or trait, e.g. \"Blind Elder of Fogreach\", not a bare role like \"Old Man\"), since these are upserted by name and a generic label would overwrite a different NPC.\n\
+        - Err toward including a borderline fact rather than dropping it — a redundant entry is harmless (upserted by name), a missed one is gone.\n\
+        - Use empty arrays for anything with nothing to report. Never invent anything not actually in the transcript.\n\n\
+        Transcript:\n{transcript_chunk}"
+    )
+}
+
+#[derive(Deserialize, Default)]
+struct SessionDigestNamed {
+    name: String,
+    #[serde(default)]
+    description: String,
+}
+
+#[derive(Deserialize, Default)]
+struct SessionDigest {
+    #[serde(default)]
+    entities: Vec<SessionDigestNamed>,
+    #[serde(default)]
+    locations: Vec<SessionDigestNamed>,
+    #[serde(default)]
+    facts: Vec<String>,
+    #[serde(default)]
+    summary: String,
+}
+
+/// Tolerant parse of one digest chunk's reply — strips stray markdown fences
+/// (same defense as parse_chapterize_reply) and, on anything unparseable,
+/// returns an empty digest rather than erroring: a chunk that produced no
+/// usable JSON simply contributes nothing, exactly the per-chunk
+/// graceful-degradation establish_campaign_lore_at's inventory pass uses.
+fn parse_session_digest(reply: &str) -> SessionDigest {
+    let mut s = reply.trim();
+    if let Some(rest) = s.strip_prefix("```json") {
+        s = rest;
+    } else if let Some(rest) = s.strip_prefix("```") {
+        s = rest;
+    }
+    if let Some(rest) = s.strip_suffix("```") {
+        s = rest;
+    }
+    serde_json::from_str(s.trim()).unwrap_or_default()
+}
+
+/// Whether `id` is a well-formed `session-NN` id — the ONLY shape
+/// digest_session_at ever mints and the ONLY shape read_session_record_at
+/// will resolve to a file. Since a `recallSession` id comes from the DM's
+/// (untrusted) output, this is also the path-traversal guard: no slashes,
+/// dots, or `..` can pass, so the id can never escape the session_records
+/// directory when joined to a path.
+fn is_valid_session_id(id: &str) -> bool {
+    id.strip_prefix("session-")
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Next `session-NN` id for this campaign — one past the highest-numbered
+/// existing record file, so ids are stable and monotonic even if a record is
+/// ever manually removed. Zero-padded to two digits for readable ordering
+/// (session-01, session-02, ...), widening naturally past 99.
+fn next_session_id_at(root: &Path, id: &str) -> String {
+    let dir = root.join(id).join(SESSION_RECORDS_DIR);
+    let highest = fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .and_then(|n| n.strip_suffix(".md"))
+                .and_then(|n| n.strip_prefix("session-"))
+                .and_then(|n| n.parse::<u32>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    format!("session-{:02}", highest + 1)
+}
+
+/// Appends one compact line to the always-loaded session_index.md — the
+/// retrieval index's human/DM-facing half. `session-NN` id first so the DM
+/// can copy it verbatim into a `recallSession` action.
+fn append_session_index_line_at(root: &Path, id: &str, session_id: &str, date: &str, summary: &str) -> Result<(), String> {
+    let path = root.join(id).join("memory").join("session_index.md");
+    let mut existing = read_optional(&path);
+    if existing.is_empty() {
+        existing = DEFAULT_SESSION_INDEX_MD.to_string();
+    }
+    existing.push_str(&format!("- **{session_id}** ({date}): {}\n", summary.trim()));
+    write_atomic(&path, &existing)
+}
+
+/// The digest pipeline (see the block comment above). Saves the verbatim
+/// transcript losslessly to session_records/<session-NN>.md (the retrieval
+/// target), runs a chunked Opus extraction over it, upserts every found
+/// entity/location/fact into the always-loaded registries (reusing the exact
+/// same helpers the live dm-actions do, so full_history logging comes for
+/// free), and appends one line to session_index.md. Returns the joined
+/// summary so the caller can also use it for the short MEMORY.md recap.
+///
+/// Per-chunk extraction degrades gracefully (a failed/garbled chunk just
+/// contributes nothing, same as establish_campaign_lore_at) rather than
+/// failing the whole digest — losing a session's capture entirely because one
+/// chunk erred would be worse than a partial capture, and the verbatim
+/// transcript is saved regardless, so nothing is ever truly lost even then.
+fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Result<String, String> {
+    if transcript.trim().is_empty() {
+        return Err("Nothing to digest — the session transcript is empty.".into());
+    }
+    let records_dir = root.join(id).join(SESSION_RECORDS_DIR);
+    fs::create_dir_all(&records_dir).map_err(|e| e.to_string())?;
+    let session_id = next_session_id_at(root, id);
+    // Save the raw transcript first, before any LLM work — this is the
+    // lossless record, so it must exist even if every extraction chunk fails.
+    write_atomic(&records_dir.join(format!("{session_id}.md")), &format!("# {session_id} ({date})\n\n{}\n", transcript.trim()))?;
+
+    let mut summaries = Vec::new();
+    for chunk in split_into_chunks(transcript, EXTRACTION_CHUNK_MAX_CHARS) {
+        let Ok(reply) = crate::dm::ask_claude_once(build_session_digest_prompt(&chunk), Some("opus")) else {
+            continue;
+        };
+        let digest = parse_session_digest(&reply);
+        for e in &digest.entities {
+            if !e.name.trim().is_empty() {
+                let _ = upsert_named_fact_at(root, id, "entities.md", &e.name, &e.description);
+            }
+        }
+        for l in &digest.locations {
+            if !l.name.trim().is_empty() {
+                let _ = upsert_named_fact_at(root, id, "locations.md", &l.name, &l.description);
+            }
+        }
+        for f in &digest.facts {
+            if !f.trim().is_empty() {
+                let _ = append_memory_note_at(root, id, date, f);
+            }
+        }
+        if !digest.summary.trim().is_empty() {
+            summaries.push(digest.summary.trim().to_string());
+        }
+    }
+
+    let summary = if summaries.is_empty() { "(session recorded — no summary produced)".to_string() } else { summaries.join(" ") };
+    append_session_index_line_at(root, id, &session_id, date, &summary)?;
+    Ok(summary)
+}
+
+/// Reads back one session's lossless verbatim record for the `recallSession`
+/// dm-action. Validates `session_id` is a well-formed `session-NN` (the
+/// path-traversal guard — see is_valid_session_id) before touching the
+/// filesystem, and returns a clear, DM-readable message for an unknown id
+/// rather than erroring, so a hallucinated/typo'd id just tells the DM the
+/// record wasn't found instead of failing the turn.
+fn read_session_record_at(root: &Path, id: &str, session_id: &str) -> Result<String, String> {
+    if !is_valid_session_id(session_id) {
+        return Ok(format!("No session record found for \"{session_id}\" (not a valid session id)."));
+    }
+    let path = root.join(id).join(SESSION_RECORDS_DIR).join(format!("{session_id}.md"));
+    match fs::read_to_string(&path) {
+        Ok(content) => Ok(content),
+        Err(_) => Ok(format!("No session record found for \"{session_id}\".")),
+    }
+}
+
 /// A single flagged fact (dm-actions `remember`), appended immediately rather
 /// than waiting for session end — this is the cross-chapter/cross-session
 /// recall mechanism: it lands in memory/flagged_facts.md (see
@@ -809,6 +1063,28 @@ fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
     let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
     if !claude_md.contains("@memory/dm_rules.md") {
         claude_md.push_str(DM_RULES_IMPORT_LINE);
+        write_atomic(&claude_path, &claude_md)?;
+    }
+    Ok(())
+}
+
+/// Brings a campaign created before the session-index/retrieval system existed
+/// up to date, idempotently (safe on every load, same as sync_dm_rules_at).
+/// Two steps: (1) CREATE memory/session_index.md if it's missing — critically,
+/// create-only, NEVER overwrite, since unlike dm_rules.md this file
+/// accumulates real per-session data that must survive; (2) add the
+/// `@memory/session_index.md` standing import to CLAUDE.md if absent. A
+/// missing CLAUDE.md is an error, same reasoning as sync_dm_rules_at.
+fn sync_session_index_at(root: &Path, id: &str) -> Result<(), String> {
+    let dir = root.join(id);
+    let index_path = dir.join("memory").join("session_index.md");
+    if !index_path.exists() {
+        write_atomic(&index_path, DEFAULT_SESSION_INDEX_MD)?;
+    }
+    let claude_path = dir.join("CLAUDE.md");
+    let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    if !claude_md.contains("@memory/session_index.md") {
+        claude_md.push_str(SESSION_INDEX_IMPORT_LINE);
         write_atomic(&claude_path, &claude_md)?;
     }
     Ok(())
@@ -1429,6 +1705,15 @@ fn should_compact_entities(text: &str) -> bool {
 /// never drop a named entry, since the whole point of this registry is that
 /// nothing in it should ever be forgotten.
 ///
+/// The dropped_entity_names enforcement below only guards that the NAMES
+/// survive — it can't tell whether a description got hollowed out. So the
+/// prompt itself has to protect the descriptions' substance: the risk isn't
+/// a name vanishing (that's caught), it's "tighten overly wordy descriptions"
+/// being read as license to strip an NPC's secret/motive/what-they-know down
+/// to a bland role label, keeping the name but losing the person. The
+/// instruction is therefore explicit that only redundant *phrasing* may be
+/// compressed, never a concrete distinguishing fact.
+///
 /// `current_chapter_context` (the active chapter's full text, empty string if
 /// no module or none active) gives the compaction call something to judge
 /// relevance against — entries tied to what's actually happening right now
@@ -1445,7 +1730,9 @@ fn build_compact_entities_prompt(file_label: &str, content: &str, current_chapte
     };
     format!(
         "This is the registry of named {file_label} for an ongoing Dungeons & Dragons campaign — one line per name, each a short current-state description. It has grown large enough that reloading all of it every turn is wasteful.\n\n\
-        Rewrite it more compactly, but you must NEVER remove a named entry — every name currently listed must still be present afterward. Only merge exact or near-duplicate entries for the same name, and tighten overly wordy descriptions. If in doubt, leave an entry as-is rather than risk losing it.\n\n\
+        Rewrite it more compactly, but under two hard rules:\n\
+        1. NEVER remove a named entry — every name currently listed must still be present afterward.\n\
+        2. NEVER drop a concrete distinguishing fact from a description — a secret, a motive, what someone knows or wants, a relationship, a unique trait, a specific number or location. These are the whole point of the registry. You may only compress redundant or wordy *phrasing* (\"who is a person that happens to be\" → nothing), merge exact or near-duplicate entries for the same name, and shorten entries about long-resolved threads. Compressing a rich entry down to a bland role label (\"the village priest\", \"a merchant\") is exactly the failure to avoid — if you can't shorten an entry without losing a real fact, leave it as-is.\n\n\
         Reply with ONLY the rewritten doc in markdown, no other commentary, no code fences. Keep the same '- **Name:** description' format for every entry and the existing heading.\n\n\
         Current registry:\n{content}{context_block}"
     )
@@ -1786,13 +2073,17 @@ fn split_by_headings(text: &str, headings: &[ChapterHeading]) -> Vec<(String, St
 }
 
 /// Per-call ceiling (chars, not tokens — consistent with coverage_concern's
-/// char-based accounting below) for one build_chapter_extraction_prompt call.
-/// ~80K chars is roughly 20K tokens: comfortably inside a single high-
-/// fidelity read for any model, chosen deliberately small since the whole
-/// point of the extraction pass is not losing detail, not saving calls. Most
-/// chapters — even a meaty 25-30 page one — fit in a single call; only an
-/// unusually long chapter (a 60+ page dungeon crawl) gets split further.
-const CHAPTER_EXTRACTION_MAX_CHARS: usize = 80_000;
+/// char-based accounting below) for one map-step extraction call — shared by
+/// build_chapter_extraction_prompt (chapterize_and_import_module_at) and
+/// build_inventory_extraction_prompt (establish_campaign_lore_at,
+/// update_campaign_lore_at): all three read one chunk of a potentially very
+/// long source document and pull structured facts out of it, so they share
+/// the same sizing reasoning. ~80K chars is roughly 20K tokens: comfortably
+/// inside a single high-fidelity read for any model, chosen deliberately
+/// small since the whole point of the extraction pass is not losing detail,
+/// not saving calls. Most chunks — even a meaty 25-30 page chapter — fit in
+/// a single call; only unusually long source material gets split further.
+const EXTRACTION_CHUNK_MAX_CHARS: usize = 80_000;
 
 /// Splits `text` into pieces no longer than `max_chars`, breaking at the
 /// nearest paragraph boundary (`\n\n`) at or before each cut point instead of
@@ -2114,7 +2405,7 @@ fn get_module_chapters_at(root: &Path, id: &str, module_id: &str) -> Result<(Vec
 ///    the concrete facts (NPCs, factions, items, threads) from that
 ///    chapter's own text alone — oversized chapters are sub-chunked first
 ///    (split_into_chunks) so no single call reads more than
-///    CHAPTER_EXTRACTION_MAX_CHARS. This is the "map" step.
+///    EXTRACTION_CHUNK_MAX_CHARS. This is the "map" step.
 /// 4. One Opus call (build_plan_synthesis_prompt) writes the campaign-
 ///    integration plan from ALL the extracted facts, then the existing
 ///    critique pass (build_plan_critique_prompt) polishes it exactly as
@@ -2153,7 +2444,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Res
     let mut extracts: Vec<(String, String)> = Vec::with_capacity(chapters.len());
     for (title, _, body) in &chapters {
         let mut chunk_extracts = Vec::new();
-        for chunk in split_into_chunks(body, CHAPTER_EXTRACTION_MAX_CHARS) {
+        for chunk in split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS) {
             chunk_extracts.push(crate::dm::ask_claude_once(build_chapter_extraction_prompt(&module_title, title, &chunk), Some("opus"))?);
         }
         extracts.push((title.clone(), chunk_extracts.join("\n\n")));
@@ -2288,6 +2579,32 @@ pub fn append_session_recap(app: AppHandle, id: String, date: String, recap: Str
     append_session_recap_at(&campaigns_root(&app)?, &id, &date, &recap)
 }
 
+/// Opus map-reduce digest of a session's verbatim transcript — see
+/// digest_session_at. Called once at session end (DMConsolePage's
+/// wrapUpCurrentSession) with the full transcript of everything said this
+/// sitting. Async + spawn_blocking since it makes real (potentially several,
+/// for a long session) Opus calls and does file I/O — same treatment as every
+/// other ingestion command. Returns the session summary so the frontend can
+/// reuse it for the short MEMORY.md recap without a second call.
+#[tauri::command]
+pub async fn digest_session(app: AppHandle, id: String, date: String, transcript: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        digest_session_at(&root, &id, &date, &transcript)
+    })
+    .await
+    .map_err(|e| format!("Session digest task failed: {e}"))?
+}
+
+/// Reads back one session's verbatim record for a turn's dm-actions
+/// `recallSession` — see read_session_record_at. The frontend injects the
+/// returned text into the DM's NEXT turn prompt so it can answer accurately
+/// about that past session (see DMConsolePage's runTurn + dmPrompt.ts).
+#[tauri::command]
+pub fn read_session_record(app: AppHandle, id: String, session_id: String) -> Result<String, String> {
+    read_session_record_at(&campaigns_root(&app)?, &id, &session_id)
+}
+
 /// Appends one flagged fact from a turn's dm-actions `remember` array — see
 /// DMConsolePage's runTurn.
 #[tauri::command]
@@ -2365,10 +2682,15 @@ pub fn campaign_archetype_voice_count(app: AppHandle, id: String) -> Result<usiz
 
 /// Refreshes this campaign's generated DM rules — see sync_dm_rules_at. Called
 /// from DMConsolePage on every campaign load, before the DM session is warmed,
-/// so the very first turn already sees the current rules.
+/// so the very first turn already sees the current rules. Also brings the
+/// session-index/retrieval files up to date (sync_session_index_at) in the
+/// same pass — both are idempotent per-load upgrades for campaigns created
+/// before these systems existed, so they belong on the same trigger.
 #[tauri::command]
 pub fn sync_dm_rules(app: AppHandle, id: String) -> Result<(), String> {
-    sync_dm_rules_at(&campaigns_root(&app)?, &id)
+    let root = campaigns_root(&app)?;
+    sync_dm_rules_at(&root, &id)?;
+    sync_session_index_at(&root, &id)
 }
 
 /// How much voice_debug.log to keep. It's a diagnostic, not a record — old
@@ -3198,6 +3520,118 @@ mod tests {
     }
 
     #[test]
+    fn build_session_digest_prompt_asks_for_structured_facts_and_protects_pcs() {
+        let prompt = build_session_digest_prompt("DM: A hooded figure approaches.\nPlayer (Thorin): I draw my axe.");
+        assert!(prompt.contains("A hooded figure approaches."));
+        assert!(prompt.contains("\"entities\""));
+        assert!(prompt.contains("\"locations\""));
+        assert!(prompt.contains("\"summary\""));
+        assert!(prompt.to_lowercase().contains("never include a player character"), "must protect PCs from being logged as entities");
+    }
+
+    #[test]
+    fn parse_session_digest_handles_plain_and_fenced_json_and_tolerates_garbage() {
+        let plain = r#"{"entities":[{"name":"Vera","description":"A bandit."}],"locations":[],"facts":["Owes a debt."],"summary":"An ambush."}"#;
+        let d = parse_session_digest(plain);
+        assert_eq!(d.entities.len(), 1);
+        assert_eq!(d.entities[0].name, "Vera");
+        assert_eq!(d.facts, vec!["Owes a debt."]);
+        assert_eq!(d.summary, "An ambush.");
+
+        let fenced = "```json\n{\"entities\":[],\"locations\":[{\"name\":\"Millhaven\",\"description\":\"A fishing town.\"}],\"facts\":[],\"summary\":\"Arrived in town.\"}\n```";
+        let d2 = parse_session_digest(fenced);
+        assert_eq!(d2.locations[0].name, "Millhaven");
+
+        // Garbage degrades to an empty digest rather than panicking/erroring.
+        let d3 = parse_session_digest("not json at all");
+        assert!(d3.entities.is_empty() && d3.locations.is_empty() && d3.facts.is_empty() && d3.summary.is_empty());
+    }
+
+    #[test]
+    fn is_valid_session_id_guards_against_path_traversal() {
+        assert!(is_valid_session_id("session-01"));
+        assert!(is_valid_session_id("session-123"));
+        assert!(!is_valid_session_id("session-"), "must have digits");
+        assert!(!is_valid_session_id("session-1a"), "digits only");
+        assert!(!is_valid_session_id("../secrets"), "no traversal");
+        assert!(!is_valid_session_id("session-01/../../etc"), "no traversal even with a valid prefix");
+        assert!(!is_valid_session_id("nope"));
+    }
+
+    #[test]
+    fn next_session_id_at_increments_past_the_highest_existing_record() {
+        let root = Scratch::new("session-id");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        assert_eq!(next_session_id_at(&root.0, &meta.id), "session-01", "first session when none exist");
+
+        let records = root.0.join(&meta.id).join(SESSION_RECORDS_DIR);
+        fs::create_dir_all(&records).unwrap();
+        fs::write(records.join("session-01.md"), "x").unwrap();
+        fs::write(records.join("session-02.md"), "x").unwrap();
+        assert_eq!(next_session_id_at(&root.0, &meta.id), "session-03");
+    }
+
+    #[test]
+    fn append_session_index_line_at_accumulates_compact_lines_with_ids() {
+        let root = Scratch::new("session-index");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        append_session_index_line_at(&root.0, &meta.id, "session-01", "2026-07-03", "The party entered the goblin cave.").unwrap();
+        append_session_index_line_at(&root.0, &meta.id, "session-02", "2026-07-10", "They freed Sildar.").unwrap();
+
+        let index = fs::read_to_string(root.0.join(&meta.id).join("memory").join("session_index.md")).unwrap();
+        assert!(index.contains("- **session-01** (2026-07-03): The party entered the goblin cave."));
+        assert!(index.contains("- **session-02** (2026-07-10): They freed Sildar."));
+        assert!(index.contains("# Session Index"), "keeps its heading");
+    }
+
+    #[test]
+    fn read_session_record_at_rejects_a_bad_id_and_reads_a_real_one() {
+        let root = Scratch::new("read-record");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        let records = root.0.join(&meta.id).join(SESSION_RECORDS_DIR);
+        fs::create_dir_all(&records).unwrap();
+        fs::write(records.join("session-01.md"), "# session-01\n\nThe party met Gundren.").unwrap();
+
+        assert!(read_session_record_at(&root.0, &meta.id, "session-01").unwrap().contains("The party met Gundren."));
+        assert!(read_session_record_at(&root.0, &meta.id, "session-99").unwrap().contains("No session record found"));
+        // A traversal attempt is refused BEFORE any filesystem access.
+        assert!(read_session_record_at(&root.0, &meta.id, "../../../etc/passwd").unwrap().contains("not a valid session id"));
+    }
+
+    #[test]
+    fn create_campaign_seeds_session_index_and_imports_it() {
+        let root = Scratch::new("seed-session-index");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        assert!(root.0.join(&meta.id).join("memory").join("session_index.md").exists());
+        let claude_md = fs::read_to_string(root.0.join(&meta.id).join("CLAUDE.md")).unwrap();
+        assert!(claude_md.contains("@memory/session_index.md"), "must be a standing import so it always loads");
+    }
+
+    #[test]
+    fn sync_session_index_at_upgrades_an_old_campaign_without_clobbering_accumulated_data() {
+        let root = Scratch::new("upgrade-session-index");
+        let meta = create_campaign_at(&root.0, &intake("Old Campaign")).unwrap();
+        let dir = root.0.join(&meta.id);
+        let index_path = dir.join("memory").join("session_index.md");
+        let claude_path = dir.join("CLAUDE.md");
+
+        // Rewind to a pre-session-index campaign: no import line, but the file
+        // already holds real accumulated data that MUST survive the upgrade.
+        let legacy_claude = fs::read_to_string(&claude_path).unwrap().replace("@memory/session_index.md\n", "");
+        fs::write(&claude_path, &legacy_claude).unwrap();
+        fs::write(&index_path, "# Session Index\n\n- **session-01** (2026-07-01): A precious existing line.\n").unwrap();
+
+        for _ in 0..3 {
+            sync_session_index_at(&root.0, &meta.id).unwrap();
+        }
+
+        let index = fs::read_to_string(&index_path).unwrap();
+        assert!(index.contains("A precious existing line."), "must NEVER overwrite accumulated session data");
+        let claude_md = fs::read_to_string(&claude_path).unwrap();
+        assert_eq!(claude_md.matches("@memory/session_index.md").count(), 1, "import added once, idempotently");
+    }
+
+    #[test]
     fn set_npc_voice_at_persists_and_read_npc_voices_at_is_case_insensitive() {
         let root = Scratch::new("npc-voices-basic");
         fs::create_dir_all(root.0.join("camp").join("memory")).unwrap();
@@ -3564,6 +3998,14 @@ mod tests {
     }
 
     #[test]
+    fn build_compact_entities_prompt_forbids_dropping_distinguishing_facts_not_just_names() {
+        let prompt = build_compact_entities_prompt("entities", "- **Someone:** A note.", "");
+        assert!(prompt.to_lowercase().contains("never drop a concrete distinguishing fact"), "must protect description substance, not only names");
+        assert!(prompt.to_lowercase().contains("secret"));
+        assert!(prompt.to_lowercase().contains("bland role label"), "should name the specific failure mode to avoid");
+    }
+
+    #[test]
     fn build_compact_entities_prompt_includes_current_chapter_context_when_present() {
         let prompt = build_compact_entities_prompt(
             "entities",
@@ -3710,22 +4152,29 @@ mod tests {
     }
 
     #[test]
-    fn build_campaign_inventory_prompt_includes_intake_fields_and_degrades_gracefully_when_lore_is_blank() {
-        let full = CampaignIntake {
-            name: "Curse of Strahd".into(),
-            edition: "2014".into(),
-            players: "Alex — Thorin".into(),
-            module: "Curse of Strahd".into(),
-            notes: "Gothic horror tone.".into(),
-            lore: "The party is drawn into Barovia by the Mists.".into(),
-        };
-        let prompt = build_campaign_inventory_prompt(&full);
-        assert!(prompt.contains("Curse of Strahd"));
+    fn build_inventory_extraction_prompt_includes_the_chunk_and_asks_for_a_flat_list() {
+        let prompt = build_inventory_extraction_prompt("The party is drawn into Barovia by the Mists.");
         assert!(prompt.contains("The party is drawn into Barovia by the Mists."));
         assert!(prompt.to_lowercase().contains("plausibly recur"));
+        assert!(prompt.to_lowercase().contains("fragment, not the whole picture"), "should tell the model it's only seeing one chunk");
+    }
 
-        let blank = build_campaign_inventory_prompt(&intake("Homebrew Test"));
-        assert!(blank.contains("(No lore material was provided.)"), "should still ask for a plain no-material note when lore is blank");
+    #[test]
+    fn build_update_lore_critique_prompt_checks_coverage_of_both_existing_and_new_content() {
+        let prompt = build_update_lore_critique_prompt(
+            "## Hub\nThe party operates out of Phandalin. The Zhentarim have a hidden outpost nearby.",
+            "## Hub\nThe party operates out of Phandalin.",
+            "- **The Zhentarim** — a mercenary company with a hidden outpost nearby.",
+        );
+        assert!(prompt.contains("The party operates out of Phandalin."), "must include the pre-merge original doc");
+        assert!(prompt.contains("The Zhentarim"));
+        assert!(prompt.to_lowercase().contains("oversight"), "should ask whether a missing entry is a defensible cut or an oversight");
+    }
+
+    #[test]
+    fn build_update_lore_critique_prompt_degrades_gracefully_with_an_empty_inventory() {
+        let prompt = build_update_lore_critique_prompt("## Hub\n...", "## Hub\n...", "");
+        assert!(prompt.contains("(none)"));
     }
 
     #[test]
@@ -4066,6 +4515,95 @@ The party arrives in Millhaven, a small fishing town of about 200 people. The to
 
         let chapter1 = fs::read_to_string(module_dir.join(format!("{}.md", result.chapters[0].id))).unwrap();
         assert!(chapter1.contains("Whisperfang"), "chapter text on disk must be the verbatim original, not a rewrite");
+    }
+
+    /// Real integration check against the actual `claude` CLI — same "not run
+    /// as part of the normal suite" reasoning as
+    /// chapterize_and_import_module_at_end_to_end. Seeds an EXISTING
+    /// campaign_lore.md directly (skipping establish_campaign_lore_at) to
+    /// keep this test focused purely on update_campaign_lore_at's own
+    /// pipeline, then folds in a synthetic "addition" containing a new named
+    /// NPC. The one thing this test actually needs to prove: the merged doc
+    /// keeps BOTH the pre-existing named entity AND the new one — the exact
+    /// failure mode a single unprotected merge call was at risk of before
+    /// this had an inventory (map) + coverage-critique step.
+    /// Run with:
+    ///   cargo test --lib -- --ignored --nocapture update_campaign_lore_at_end_to_end
+    #[test]
+    #[ignore]
+    fn update_campaign_lore_at_end_to_end() {
+        let root = Scratch::new("update-lore-e2e");
+        let meta = create_campaign_at(&root.0, &intake("Test Campaign")).unwrap();
+        let lore_path = root.0.join(&meta.id).join("memory").join("campaign_lore.md");
+        write_atomic(
+            &lore_path,
+            "# Campaign Lore\n\n## Hub\nThe party operates out of the town of Redstone, home to the retired adventurer Elowen Vance, who runs the tavern where they meet contacts.\n\n## Threads\nElowen has hinted at a debt owed to a mysterious patron she won't name.",
+        )
+        .unwrap();
+
+        let addition = "\
+A new sourcebook chapter introduces the Ashfen Concord, a coalition of three swamp villages led by Chief Data Reyes, who has been raiding merchant caravans along the Redstone road to fund a ritual meant to hold back an encroaching curse. The Concord is not purely hostile — Chief Reyes will parley if approached with an offering of iron.
+";
+
+        let updated = update_campaign_lore_at(&root.0, &meta.id, addition).unwrap();
+        println!("=== UPDATED LORE ===\n{updated}\n");
+
+        assert!(updated.contains("Elowen") || updated.contains("Vance"), "pre-existing NPC must survive the merge — got:\n{updated}");
+        assert!(updated.contains("Redstone"), "pre-existing hub location must survive the merge — got:\n{updated}");
+        assert!(updated.contains("Reyes") || updated.contains("Ashfen"), "new material's named entity must actually get folded in — got:\n{updated}");
+
+        let on_disk = fs::read_to_string(&lore_path).unwrap();
+        assert_eq!(on_disk, updated, "returned text must match what's actually on disk");
+
+        let backup = fs::read_to_string(lore_path.with_file_name("campaign_lore.md.bak")).unwrap();
+        assert!(backup.contains("Elowen"), "the pre-merge doc must have been backed up before overwriting");
+    }
+
+    /// Real integration check of the whole session-digest pipeline against the
+    /// actual `claude` CLI — same "not in the normal suite" reasoning as the
+    /// other *_end_to_end tests. Feeds a synthetic verbatim transcript and
+    /// proves the three things a live run must get right that no unit test
+    /// can: (1) the raw transcript is saved losslessly for retrieval, (2) a
+    /// named NPC from the transcript is actually extracted into entities.md,
+    /// and (3) a compact line lands in the always-loaded session_index.md —
+    /// AND that a player character is NOT mistakenly logged as an entity.
+    /// Run with:
+    ///   cargo test --lib -- --ignored --nocapture digest_session_at_end_to_end
+    #[test]
+    #[ignore]
+    fn digest_session_at_end_to_end() {
+        let root = Scratch::new("digest-e2e");
+        let meta = create_campaign_at(&root.0, &intake("Test Campaign")).unwrap();
+
+        let transcript = "\
+DM: You're on the road to Redstone when a woman steps from the treeline — Vera Blackwood, a scarred ex-guard with a wolf's-head cloak. She levels a crossbow and demands your cargo.
+Player (Thorin): I keep my hands visible and ask what she really wants.
+DM: Her jaw tightens. 'What I want is Captain Renn's head. He framed my brother.' She lowers the bow a fraction — she's testing you.
+Player (Thorin): I tell her we have no love for Renn either, and offer to hear her out.
+DM: She studies you, then nods toward a cold campfire in the trees. Over the next hour she explains: Renn runs the smuggling ring out of the Gilded Eel tavern in Redstone, and she'll help you reach him if you swear to bring him in alive so he can confess. You give your word.
+Player (Thorin): We shake on it.
+DM: The deal is struck. Vera melts back into the woods, promising to meet you at the Gilded Eel at dusk.";
+
+        let summary = digest_session_at(&root.0, &meta.id, "2026-07-13", transcript).unwrap();
+        println!("=== SUMMARY ===\n{summary}\n");
+
+        let dir = root.0.join(&meta.id);
+        let record = fs::read_to_string(dir.join(SESSION_RECORDS_DIR).join("session-01.md")).unwrap();
+        assert!(record.contains("Vera Blackwood, a scarred ex-guard"), "the verbatim transcript must be saved losslessly");
+
+        let entities = fs::read_to_string(dir.join("memory").join("entities.md")).unwrap();
+        println!("=== ENTITIES ===\n{entities}\n");
+        assert!(entities.contains("Vera") || entities.contains("Blackwood"), "the named NPC must be extracted into entities.md — got:\n{entities}");
+        assert!(!entities.to_lowercase().contains("thorin"), "the player character must NOT be logged as an entity — got:\n{entities}");
+
+        let index = fs::read_to_string(dir.join("memory").join("session_index.md")).unwrap();
+        println!("=== SESSION INDEX ===\n{index}\n");
+        assert!(index.contains("session-01"), "a compact line must land in the always-loaded session index — got:\n{index}");
+
+        // The promise the party made should be captured somewhere durable
+        // (a flagged fact, or folded into Vera's entity description).
+        let flagged = fs::read_to_string(dir.join("memory").join("flagged_facts.md")).unwrap();
+        println!("=== FLAGGED FACTS ===\n{flagged}\n");
     }
 
     #[test]

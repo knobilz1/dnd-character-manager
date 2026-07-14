@@ -774,6 +774,10 @@ export function DMConsolePage() {
   // includes it; reset to due again on a chapter change or a new sitting.
   const campaignPlanRef = React.useRef('');
   const turnsSincePlanCheckRef = React.useRef(Infinity);
+  // Holds a past session's full verbatim record between the turn the DM asks
+  // for it (recallSession dm-action) and the next turn, where buildTurnPrompt
+  // injects it once and clears this. Null the vast majority of the time.
+  const pendingRecalledSessionRef = React.useRef<{ id: string; record: string } | null>(null);
   // name (lowercased) → voice assignment for this campaign's NPCs (see
   // campaign.rs's npc_voices.json) — fetched once per campaign switch, same
   // "not re-read every turn" shape as campaignPlanRef, and updated locally
@@ -1488,11 +1492,17 @@ export function DMConsolePage() {
     interruptedTurnRef.current = null;
     try {
       const dueForPlanCheck = !!campaignPlanRef.current && turnsSincePlanCheckRef.current >= PLAN_CHECK_INTERVAL;
+      // A session the DM asked to recall last turn (recallSession dm-action) —
+      // consumed exactly once here, then cleared, since the full record is
+      // large and only the turn that referenced it needs it.
+      const recalledSession = pendingRecalledSessionRef.current ?? undefined;
+      pendingRecalledSessionRef.current = null;
       const prompt = buildTurnPrompt({
         party: partyRef.current,
         spokenText,
         speaker,
         planCheckIn: dueForPlanCheck ? campaignPlanRef.current : undefined,
+        recalledSession,
         battleMap: battleMapRef.current,
         interruption,
       });
@@ -1678,6 +1688,20 @@ export function DMConsolePage() {
             // change — force the next turn to re-check the plan.
             turnsSincePlanCheckRef.current = Infinity;
           }
+        }
+        if (campaignId && actions.recallSession) {
+          // The DM asked to pull a past session's full record (see campaign.rs's
+          // read_session_record). Fetch it now and stash it for the NEXT turn's
+          // buildTurnPrompt — the backend already returns a friendly "not found"
+          // string for a bad/hallucinated id rather than throwing, so a wrong id
+          // just means the DM gets told the record wasn't there. A fetch failure
+          // is non-fatal: worst case the DM answers from the index line alone,
+          // exactly as it would have without recall.
+          const record = await invoke<string>('read_session_record', { id: campaignId, sessionId: actions.recallSession }).catch((e) => {
+            console.warn('Failed to read a recalled session record:', e);
+            return '';
+          });
+          if (record) pendingRecalledSessionRef.current = { id: actions.recallSession, record };
         }
         if (actions.clearPositions) {
           setBattleMap({});
@@ -1889,48 +1913,61 @@ export function DMConsolePage() {
     if (campaignId && turns.length > 0) {
       setBusy(true);
       try {
-        const prompt = buildRecapPrompt(partyRef.current);
-        // Not part of the live back-and-forth (fires once, at session end),
-        // but a plain summarization task same as an ordinary turn — no
-        // reason to pay for extra deliberation here either.
-        const reply = await callDm(prompt, sessionIdRef.current, campaignId, 'low');
-        const { narration, actions } = parseDmReply(reply.text);
         const date = new Date().toISOString().slice(0, 10);
-        await invoke('append_session_recap', { id: campaignId, date, recap: narration });
-        // Catches any NPC/place this session that a live turn never got
-        // around to calling rememberEntity/rememberLocation for — see
-        // buildRecapPrompt's doc comment for why this last chance exists.
-        // Same application logic as a live turn's dm-actions handling
-        // (runTurn, below), just scoped to these two keys since the recap
-        // prompt only ever asks for them.
-        if (actions?.rememberEntity?.length) {
-          for (const { name, description, voiceId, pitch } of actions.rememberEntity) {
-            await invoke('append_entity_fact', { id: campaignId, name, description }).catch((e) =>
-              console.warn('Failed to save an entity fact:', e)
-            );
-            if (voiceId) {
-              // Machine-chosen id, same as the live turn's path — dedupe it and
-              // cache whatever Rust actually wrote (see runTurn's handling).
-              const writtenVoiceId = await invoke<string>('set_npc_voice', {
-                id: campaignId,
-                name,
-                voiceId,
-                pitch,
-                enforceUnique: true,
-              }).catch((e) => {
-                console.warn('Failed to save an NPC voice assignment:', e);
-                return voiceId;
-              });
-              npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: writtenVoiceId, pitch } };
-              setNpcVoices(npcVoicesRef.current);
+        // The verbatim transcript of everything said this sitting — the input
+        // to the Opus session digest. 'dm' is narration, 'you' the Console's
+        // own mic, anything else a remote player's character name.
+        const transcript = turns
+          .map((t) => (t.who === 'dm' ? `DM: ${t.text}` : t.who === 'you' ? `Player: ${t.text}` : `Player (${t.who}): ${t.text}`))
+          .join('\n');
+        try {
+          // Primary path: one Opus map-reduce over the verbatim transcript
+          // (see campaign.rs's digest_session) extracts durable facts into the
+          // registries, saves the transcript losslessly for later recall,
+          // writes the compact session_index line, and returns a summary we
+          // reuse for the short MEMORY.md recap. Far more reliable capture than
+          // a fast live model deciding mid-turn what's worth remembering.
+          const summary = await invoke<string>('digest_session', { id: campaignId, date, transcript });
+          await invoke('append_session_recap', { id: campaignId, date, recap: summary }).catch((e) =>
+            console.warn('Failed to append the session recap:', e)
+          );
+        } catch (digestErr) {
+          // Fallback for a DM running on a local LLM with no Claude available
+          // (the digest uses Opus, same as every other ingestion call): drop
+          // back to the old provider-respecting recap + best-effort entity/
+          // location catch-up, so a local-only session still gets a MEMORY.md
+          // recap and captures what it can.
+          console.warn('Opus session digest unavailable — falling back to a provider recap:', digestErr);
+          const reply = await callDm(buildRecapPrompt(partyRef.current), sessionIdRef.current, campaignId, 'low');
+          const { narration, actions } = parseDmReply(reply.text);
+          await invoke('append_session_recap', { id: campaignId, date, recap: narration });
+          if (actions?.rememberEntity?.length) {
+            for (const { name, description, voiceId, pitch } of actions.rememberEntity) {
+              await invoke('append_entity_fact', { id: campaignId, name, description }).catch((e) =>
+                console.warn('Failed to save an entity fact:', e)
+              );
+              if (voiceId) {
+                const writtenVoiceId = await invoke<string>('set_npc_voice', {
+                  id: campaignId,
+                  name,
+                  voiceId,
+                  pitch,
+                  enforceUnique: true,
+                }).catch((e) => {
+                  console.warn('Failed to save an NPC voice assignment:', e);
+                  return voiceId;
+                });
+                npcVoicesRef.current = { ...npcVoicesRef.current, [name.toLowerCase()]: { voice_id: writtenVoiceId, pitch } };
+                setNpcVoices(npcVoicesRef.current);
+              }
             }
           }
-        }
-        if (actions?.rememberLocation?.length) {
-          for (const { name, description } of actions.rememberLocation) {
-            await invoke('append_location_fact', { id: campaignId, name, description }).catch((e) =>
-              console.warn('Failed to save a location fact:', e)
-            );
+          if (actions?.rememberLocation?.length) {
+            for (const { name, description } of actions.rememberLocation) {
+              await invoke('append_location_fact', { id: campaignId, name, description }).catch((e) =>
+                console.warn('Failed to save a location fact:', e)
+              );
+            }
           }
         }
         // Only actually does anything once memory.md has grown past a size

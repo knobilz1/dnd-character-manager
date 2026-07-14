@@ -66,6 +66,11 @@ export function battleMapStatusText(positions: Record<string, HexPosition>): str
  *  change, and every few turns otherwise) instead of every turn.
  *  `battleMap`, when non-empty, is the current hex positions — sent every
  *  turn (unlike planCheckIn) since it's tiny and needs to stay exact.
+ *  `recalledSession`, when set, is the full verbatim record of a past session
+ *  the DM asked for last turn via the `recallSession` dm-action (see
+ *  campaign.rs's read_session_record) — injected once into the very next turn
+ *  so the DM can answer a player accurately about that session, then dropped
+ *  (it's large, and only needed for the turn that references it).
  *  `interruption` is set on the first turn after a player barged in mid-
  *  narration: the previous reply was cut off, and `heard` is exactly how much
  *  of it actually finished playing aloud before the cutoff (empty string =
@@ -79,10 +84,11 @@ export function buildTurnPrompt(opts: {
   spokenText: string;
   speaker?: string;
   planCheckIn?: string;
+  recalledSession?: { id: string; record: string };
   battleMap?: Record<string, HexPosition>;
   interruption?: { heard: string };
 }): string {
-  const { party, spokenText, speaker, planCheckIn, battleMap, interruption } = opts;
+  const { party, spokenText, speaker, planCheckIn, recalledSession, battleMap, interruption } = opts;
   const parts: string[] = [];
   if (interruption) {
     parts.push(interruption.heard
@@ -91,6 +97,9 @@ export function buildTurnPrompt(opts: {
   }
   if (planCheckIn) {
     parts.push(`Campaign-arc plan check-in (periodic reminder, not every turn — use it to keep pacing, NPCs, and foreshadowing consistent with the whole story, then continue):\n${planCheckIn}`);
+  }
+  if (recalledSession) {
+    parts.push(`Recalled record of ${recalledSession.id} (you asked to pull this up last turn — the full verbatim transcript of that past session, for your reference only; use it to answer accurately, don't read it aloud):\n${recalledSession.record}`);
   }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
   const battleMapText = battleMap ? battleMapStatusText(battleMap) : '';

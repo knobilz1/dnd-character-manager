@@ -137,6 +137,13 @@ export interface DmActionSet {
    *  set_active_module. Absent unless this campaign has more than one
    *  imported module. */
   switchActiveModule?: string;
+  /** A `session-NN` id from memory/session_index.md — the DM's request to pull
+   *  the full verbatim record of a past session into its NEXT turn, when the
+   *  one-line index entry isn't enough detail to answer a player accurately
+   *  (see campaign.rs's read_session_record + DMConsolePage's runTurn, which
+   *  fetches it and stashes it for the next buildTurnPrompt). A pure read —
+   *  never changes campaign state. Absent on the vast majority of turns. */
+  recallSession?: string;
   /** New or updated hex coordinates for any combatant whose position changed
    *  or who just entered the scene — kept in DMConsolePage's battle-map state
    *  (not in Character, since monsters/NPCs aren't Characters) and fed back
@@ -263,6 +270,8 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   if (resolveChapterSection !== undefined) actions.resolveChapterSection = resolveChapterSection;
   const switchActiveModule = sanitizeScalar(raw.switchActiveModule, 'switchActiveModule', isStr, warnings);
   if (switchActiveModule !== undefined) actions.switchActiveModule = switchActiveModule;
+  const recallSession = sanitizeScalar(raw.recallSession, 'recallSession', isStr, warnings);
+  if (recallSession !== undefined) actions.recallSession = recallSession;
   const clearPositions = sanitizeScalar(raw.clearPositions, 'clearPositions', isBool, warnings);
   if (clearPositions !== undefined) actions.clearPositions = clearPositions;
 
