@@ -2130,6 +2130,14 @@ export function DMConsolePage() {
         await invoke('reconcile_campaign_hooks', { id: campaignId }).catch((e) =>
           console.warn('Campaign-hooks reconciliation failed (PCs will rely on live improv only):', e)
         );
+        // Freeform campaigns (no imported module) never fire
+        // advance_chapter_at's own cached-plan invalidation — "End session"
+        // is the equivalent signal there: tonight's content is behind the
+        // party, so the next "Plan Next Session" open should regenerate
+        // fresh instead of still showing what was just played.
+        await invoke('invalidate_session_plan', { id: campaignId }).catch((e) =>
+          console.warn('Failed to invalidate the cached session plan:', e)
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {

@@ -79,6 +79,7 @@ pub fn run() {
       campaign::read_campaign_locations,
       campaign::compact_campaign_memory,
       campaign::compact_campaign_knowledge,
+      campaign::invalidate_session_plan,
       campaign::extract_module_text,
       campaign::chapterize_and_import_module,
       campaign::get_module_chapters,

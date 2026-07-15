@@ -2081,6 +2081,19 @@ fn write_session_plan_at(root: &Path, id: &str, text: &str) -> Result<(), String
     write_atomic(&path, text)
 }
 
+/// advance_chapter_at already invalidates the cached session plan when a
+/// module-based campaign's chapter changes — but a freeform campaign with no
+/// imported module never fires that. This is the equivalent trigger for
+/// that case: "End session" is the natural signal that tonight's content is
+/// now behind the party, so the next "Plan Next Session" open should
+/// regenerate against whatever's next rather than keep showing what was
+/// just played. Harmless no-op if there's nothing cached yet (never
+/// generated) or the campaign IS module-based (already invalidated on its
+/// own chapter advance).
+fn invalidate_session_plan_at(root: &Path, id: &str) {
+    let _ = fs::remove_file(session_plan_path(root, id));
+}
+
 // ── Battle map generation & storage ─────────────────────────────────────────
 // The DM authors each map as a text spec (an ASCII grid + legend + tactics);
 // the frontend (battleMapRender.ts) renders it deterministically to a printable
@@ -3500,6 +3513,16 @@ pub async fn compact_campaign_knowledge(app: AppHandle, id: String) -> Result<()
     .map_err(|e| format!("Knowledge compaction task failed: {e}"))?
 }
 
+/// Called at "End session" — see invalidate_session_plan_at's doc comment.
+/// A plain sync command (a single fs::remove_file, no LLM call) rather than
+/// spawn_blocking, matching read_battle_map/list_battle_maps' precedent for
+/// fast local-IO-only commands in this file.
+#[tauri::command]
+pub fn invalidate_session_plan(app: AppHandle, id: String) -> Result<(), String> {
+    invalidate_session_plan_at(&campaigns_root(&app)?, &id);
+    Ok(())
+}
+
 /// "Plan mode" — session-prep suggestion PLUS its battle maps in one merged
 /// result, callable any time (not just at session start; a DM can ask days
 /// ahead). Cache-aware (see plan_next_session_at): if a plan's already been
@@ -4114,6 +4137,29 @@ mod tests {
         advance_chapter_at(&root.0, &meta.id, &summaries[1].id).unwrap();
 
         assert!(read_session_plan_at(&root.0, &meta.id).is_none(), "advancing the chapter must clear the stale cached plan");
+    }
+
+    /// The freeform-campaign equivalent of the test above — no imported
+    /// module, so advance_chapter_at never fires; "End session" is the only
+    /// available signal that content has moved on.
+    #[test]
+    fn invalidate_session_plan_at_clears_a_cached_plan_with_no_active_module() {
+        let root = Scratch::new("end-session-invalidates-plan");
+        let meta = create_campaign_at(&root.0, &intake("Freeform")).unwrap();
+        write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Stale Fight — old session.\n").unwrap();
+        assert!(read_session_plan_at(&root.0, &meta.id).is_some());
+
+        invalidate_session_plan_at(&root.0, &meta.id);
+
+        assert!(read_session_plan_at(&root.0, &meta.id).is_none());
+    }
+
+    #[test]
+    fn invalidate_session_plan_at_is_a_harmless_noop_when_nothing_is_cached() {
+        let root = Scratch::new("end-session-invalidate-noop");
+        let meta = create_campaign_at(&root.0, &intake("Fresh")).unwrap();
+        invalidate_session_plan_at(&root.0, &meta.id); // must not panic/error
+        assert!(read_session_plan_at(&root.0, &meta.id).is_none());
     }
 
     /// The empty-encounters branch of generate_battle_maps_for_plan_at never
