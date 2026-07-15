@@ -1964,13 +1964,79 @@ fn build_session_plan_prompt(module_plan: &str, current_chapter: &str, memory: &
         Current chapter (what's coming up):\n{current_chapter}\n\n\
         Recent memory/recaps:\n{memory}\n\n\
         DM's terrain catalog (pieces they already physically own):\n{terrain_catalog}\n\n\
-        Reply in markdown with exactly two sections:\n\
+        Reply in markdown with exactly three sections:\n\
+        ## Encounters\n\
+        A numbered list of what the party will likely reach in the upcoming content. Format EACH line exactly like ONE of these two patterns (pick whichever tag actually applies to that encounter — never write both tags on one line):\n\
+        \"N. [combat] Short Name — one-sentence description.\" for an encounter you expect to involve a fight.\n\
+        \"N. [non-combat] Short Name — one-sentence description.\" for anything else (social, exploration, puzzle).\n\
+        Only list encounters that actually appear in the content above — don't invent filler. If genuinely nothing is coming up, write exactly \"No encounters expected yet.\" and nothing else in this section.\n\n\
         ## Set up from what you own\n\
         Which cataloged pieces to lay out for the upcoming content, and a rough arrangement. If nothing owned clearly fits, say so plainly instead of forcing a suggestion.\n\n\
         ## Consider printing\n\
         Terrain TYPES (not specific marketplace items or brand names — the DM isn't connected to any model marketplace) that would suit the upcoming content but aren't in the catalog yet. Be specific about the gameplay purpose (e.g. \"a marsh/difficult-terrain piece for the bog encounter\"), not vague. If the existing catalog already covers everything needed, say so plainly instead of forcing a suggestion.\n\n\
         Keep it concise — this is a quick prep checklist, not an essay."
     )
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PlanEncounter {
+    name: String,
+    description: String,
+    combat: bool,
+}
+
+/// Parses the `## Encounters` section's numbered lines (see
+/// build_session_plan_prompt's required format) into a structured list, so
+/// battle-map generation can walk it deterministically instead of
+/// independently re-guessing "what's coming up" (see build_battle_maps_prompt_for_encounters).
+/// Pure — no LLM call, so it's fully unit-testable against sample plan text.
+/// A line missing the `[combat|non-combat]` tag defaults to combat: true — a
+/// missed fight-map is worse than one unused extra map.
+fn parse_plan_encounters(plan_text: &str) -> Vec<PlanEncounter> {
+    let mut in_section = false;
+    let mut out = Vec::new();
+    for line in plan_text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "## Encounters" {
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if trimmed.starts_with("## ") {
+            break;
+        }
+        // "N. [combat] Short Name — description" — strip the leading "N. ".
+        let after_number = match trimmed.split_once('.') {
+            Some((n, rest)) if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() => rest.trim(),
+            _ => continue,
+        };
+        // Strip ANY leading `[...]` tag rather than matching only the exact
+        // "[combat]"/"[non-combat]" strings — a model that deviates from the
+        // requested format (e.g. writing "[combat|non-combat]" verbatim
+        // instead of picking one, observed in live testing) still gets its
+        // bracket junk stripped out of the encounter's name instead of that
+        // leaking into the title/slug. Only an exact "non-combat" tag (any
+        // case) turns off combat; anything else defaults to combat: true —
+        // a missed fight-map is worse than one unused extra map.
+        let (combat, after_tag) = match after_number.strip_prefix('[').and_then(|rest| rest.split_once(']')) {
+            Some((tag, rest)) => (!tag.trim().eq_ignore_ascii_case("non-combat"), rest.trim()),
+            None => (true, after_number),
+        };
+        if after_tag.is_empty() {
+            continue;
+        }
+        let (name, description) = match after_tag.split_once('—').or_else(|| after_tag.split_once('-')) {
+            Some((n, d)) => (n.trim().to_string(), d.trim().to_string()),
+            None => (after_tag.to_string(), String::new()),
+        };
+        if name.is_empty() {
+            continue;
+        }
+        out.push(PlanEncounter { name, description, combat });
+    }
+    out
 }
 
 /// Impure orchestration: reads whatever's on disk for this campaign (module/
@@ -1991,6 +2057,28 @@ fn suggest_session_plan_at(root: &Path, id: &str, terrain_catalog: &str) -> Resu
     let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
     let prompt = build_session_plan_prompt(&combined_plan, &current_chapter, &combined_memory, terrain_catalog);
     crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)
+}
+
+fn session_plan_path(root: &Path, id: &str) -> PathBuf {
+    root.join(id).join("active_module").join("session_plan.md")
+}
+
+/// The cached "Plan Next Session" text, if one has been generated for
+/// whatever module/chapter is currently active. `None` when there's no cache
+/// yet (or it's been invalidated — see advance_chapter_at) so the caller
+/// knows to actually ask Claude; this is what stops every dialog-open/
+/// button-click from independently re-asking and getting a different answer.
+fn read_session_plan_at(root: &Path, id: &str) -> Option<String> {
+    let content = read_optional(&session_plan_path(root, id));
+    if content.trim().is_empty() { None } else { Some(content) }
+}
+
+fn write_session_plan_at(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let path = session_plan_path(root, id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    write_atomic(&path, text)
 }
 
 // ── Battle map generation & storage ─────────────────────────────────────────
@@ -2021,18 +2109,51 @@ fn battle_maps_dir(root: &Path, id: &str) -> PathBuf {
     root.join(id).join("memory").join(BATTLE_MAPS_DIR)
 }
 
-fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: Option<&str>) -> String {
-    let focus = match hint {
-        Some(h) => format!("Design ONE battle map for this specific encounter the DM described: {h}\n\n"),
-        None => "Look at what's coming up in the current chapter and design battle maps for the combat encounters the party is most likely to reach next — up to THREE maps, and ONLY for encounters that actually appear in the content below. If nothing coming up calls for a tactical map, return no maps at all rather than inventing filler.\n\n".to_string(),
-    };
+/// On-demand single-map prompt — "describe one encounter" in the merged
+/// dialog. The session-prep BATCH path (one map per combat encounter) is
+/// build_battle_maps_prompt_for_encounters below, which is driven by the
+/// already-decided, already-persisted plan instead of asking the model to
+/// independently re-guess "what's coming up" a second time.
+fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str) -> String {
     format!(
         "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
-        {focus}\
+        Design ONE battle map for this specific encounter the DM described: {hint}\n\n\
         Campaign-arc plan:\n{module_plan}\n\n\
         Current chapter (what's coming up):\n{current_chapter}\n\n\
         Recent memory/recaps:\n{memory}\n\n\
-        Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
+        {}",
+        battle_map_format_instructions()
+    )
+}
+
+/// One map per encounter, in order, each REQUIRED to title itself exactly as
+/// given — the batch/session-prep path (see plan_next_session_at). Unlike the
+/// old "up to THREE, your call" prompt this replaced, the model has zero
+/// discretion over which encounters get a map or how many: the caller
+/// (parse_plan_encounters, filtered to combat) already decided that
+/// deterministically from the cached session plan, so asking twice can never
+/// produce a different answer.
+fn build_battle_maps_prompt_for_encounters(module_plan: &str, current_chapter: &str, memory: &str, encounters: &[PlanEncounter]) -> String {
+    let list = encounters
+        .iter()
+        .enumerate()
+        .map(|(i, e)| format!("{}. {} — {}", i + 1, e.name, e.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
+        Design EXACTLY ONE battle map for EACH of the following encounters — same count, same order, no more, no fewer. Each map's `# ` title line MUST be exactly the encounter's name given below, verbatim:\n{list}\n\n\
+        Campaign-arc plan:\n{module_plan}\n\n\
+        Current chapter (what's coming up):\n{current_chapter}\n\n\
+        Recent memory/recaps:\n{memory}\n\n\
+        {}",
+        battle_map_format_instructions()
+    )
+}
+
+fn battle_map_format_instructions() -> String {
+    format!(
+        "Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
         {MAP_SPEC_DELIMITER}\n\
         # <Short map name>\n\
         Grid: <cols>x<rows>, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
@@ -2045,6 +2166,30 @@ fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &s
         - <choke points, cover, and sightlines, plus concrete suggested enemy start cells and ambush spots, referencing cells like C3 or K1>\n\n\
         Rules for the Map block: size it between 10x10 and 24x18; EVERY row must be the same width; enclose the playable area with `#` walls and use a space for anything outside it; make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction. Output nothing outside the sections shown."
     )
+}
+
+/// Rewrites a spec's `# ` title line to exactly `name` (or prepends one if
+/// missing) — used to force the batch path's stored title/slug to the
+/// encounter's own stable name regardless of exactly how the model phrased
+/// its title line, which is what keeps a regenerate overwriting the SAME
+/// file instead of drifting to a new slug. Pure.
+fn force_map_title(spec: &str, name: &str) -> String {
+    let mut found = false;
+    let mut out: Vec<String> = spec
+        .lines()
+        .map(|l| {
+            if !found && l.starts_with("# ") {
+                found = true;
+                format!("# {name}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if !found {
+        out.insert(0, format!("# {name}"));
+    }
+    out.join("\n")
 }
 
 /// Splits a generation reply into individual raw specs on MAP_SPEC_DELIMITER
@@ -2112,7 +2257,20 @@ fn write_map_spec_at(root: &Path, id: &str, spec: &str) -> Result<(), String> {
     write_atomic(&dir.join(format!("{slug}.md")), &format!("{}\n", spec.trim()))
 }
 
-fn generate_battle_maps_at(root: &Path, id: &str, hint: Option<&str>) -> Result<Vec<BattleMapMeta>, String> {
+/// Same as write_map_spec_at but with a CALLER-PROVIDED slug rather than one
+/// derived from the spec's own title — the batch/session-prep path uses this
+/// so storage is keyed to the plan's stable encounter name, never to
+/// whatever title text the model happened to write this time around.
+fn write_map_spec_with_slug_at(root: &Path, id: &str, slug: &str, spec: &str) -> Result<(), String> {
+    let dir = battle_maps_dir(root, id);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_atomic(&dir.join(format!("{slug}.md")), &format!("{}\n", spec.trim()))
+}
+
+/// On-demand single-map generation ("describe one encounter" in the merged
+/// dialog) — reads live plan/chapter/memory context itself since it's a
+/// standalone ad-hoc request, not tied to the cached session plan.
+fn generate_battle_maps_at(root: &Path, id: &str, hint: &str) -> Result<Vec<BattleMapMeta>, String> {
     let dir = root.join(id);
     let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
     let current_chapter = read_optional(&dir.join("active_module").join("current.md"));
@@ -2131,6 +2289,125 @@ fn generate_battle_maps_at(root: &Path, id: &str, hint: Option<&str>) -> Result<
     // Rebuild over ALL maps (new + pre-existing) so the UI reflects the whole
     // current set, not just this batch.
     rebuild_battle_maps_index_at(root, id)
+}
+
+fn plan_manifest_path(root: &Path, id: &str) -> PathBuf {
+    battle_maps_dir(root, id).join("plan_manifest.json")
+}
+
+/// Slugs of the maps the CURRENT session plan owns — written by
+/// generate_battle_maps_for_plan_at, consulted so a regenerate replaces
+/// exactly this set (never touching hand-crafted or on-demand/hint maps,
+/// which are never listed here) and so a cache hit can list "the plan's
+/// maps" without re-deriving anything.
+fn read_plan_manifest_at(root: &Path, id: &str) -> Vec<String> {
+    let content = read_optional(&plan_manifest_path(root, id));
+    if content.trim().is_empty() {
+        return Vec::new();
+    }
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn write_plan_manifest_at(root: &Path, id: &str, slugs: &[String]) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(slugs).map_err(|e| e.to_string())?;
+    write_atomic(&plan_manifest_path(root, id), &json)
+}
+
+/// The maps the current plan owns, read straight off disk via the manifest —
+/// used on a cache hit (plan_next_session_at) so re-opening the dialog costs
+/// zero LLM calls. Silently skips a manifest entry whose file is gone (e.g.
+/// hand-deleted) rather than erroring.
+fn current_plan_owned_maps_at(root: &Path, id: &str) -> Vec<BattleMapMeta> {
+    let dir = battle_maps_dir(root, id);
+    read_plan_manifest_at(root, id)
+        .into_iter()
+        .filter_map(|slug| {
+            let spec = fs::read_to_string(dir.join(format!("{slug}.md"))).ok()?;
+            Some(BattleMapMeta { name: map_title(&spec), summary: map_summary(&spec), slug })
+        })
+        .collect()
+}
+
+/// The deterministic batch path: exactly one map per combat encounter,
+/// stably keyed to that encounter's name (see build_battle_maps_prompt_for_encounters
+/// / force_map_title), replacing whatever the PREVIOUS plan owned. This is
+/// what removes the randomness reported in the bug this shipped to fix — the
+/// same (cached) encounter list in, the same slugs out, every time, so a
+/// regenerate overwrites instead of accumulating or drifting.
+fn generate_battle_maps_for_plan_at(
+    root: &Path,
+    id: &str,
+    module_plan: &str,
+    current_chapter: &str,
+    memory: &str,
+    encounters: &[PlanEncounter],
+) -> Result<Vec<BattleMapMeta>, String> {
+    let dir = battle_maps_dir(root, id);
+    for old_slug in read_plan_manifest_at(root, id) {
+        let _ = fs::remove_file(dir.join(format!("{old_slug}.md")));
+    }
+
+    if encounters.is_empty() {
+        write_plan_manifest_at(root, id, &[])?;
+        rebuild_battle_maps_index_at(root, id)?;
+        return Ok(Vec::new());
+    }
+
+    let prompt = build_battle_maps_prompt_for_encounters(module_plan, current_chapter, memory, encounters);
+    let reply = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)?;
+    let specs = split_map_specs(&reply);
+
+    let mut new_slugs = Vec::new();
+    let mut metas = Vec::new();
+    for (encounter, spec) in encounters.iter().zip(specs.iter()) {
+        let slug = slugify(&encounter.name);
+        let titled = force_map_title(spec, &encounter.name);
+        write_map_spec_with_slug_at(root, id, &slug, &titled)?;
+        metas.push(BattleMapMeta { slug: slug.clone(), name: encounter.name.clone(), summary: map_summary(&titled) });
+        new_slugs.push(slug);
+    }
+    write_plan_manifest_at(root, id, &new_slugs)?;
+    rebuild_battle_maps_index_at(root, id)?;
+    Ok(metas)
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SessionPlanResult {
+    pub plan_text: String,
+    pub maps: Vec<BattleMapMeta>,
+}
+
+/// Orchestrates "Plan Next Session" end to end — the single entry point both
+/// the cache-aware `suggest_session_plan` command and the always-fresh
+/// `regenerate_session_plan` command call. `force = false` and a cache hit
+/// costs ZERO Claude calls (see read_session_plan_at); otherwise this asks
+/// Claude for the plan text once, persists it, and — because battle maps are
+/// derived from THIS SAME plan rather than independently re-guessed — asks
+/// Claude a second time (only if there's at least one combat encounter) for
+/// exactly the maps that plan calls for.
+fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool) -> Result<SessionPlanResult, String> {
+    if !force {
+        if let Some(cached) = read_session_plan_at(root, id) {
+            return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id) });
+        }
+    }
+
+    let plan_text = suggest_session_plan_at(root, id, terrain_catalog)?;
+    write_session_plan_at(root, id, &plan_text)?;
+
+    let encounters: Vec<PlanEncounter> = parse_plan_encounters(&plan_text).into_iter().filter(|e| e.combat).collect();
+
+    let dir = root.join(id);
+    let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
+    let current_chapter = read_optional(&dir.join("active_module").join("current.md"));
+    let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
+    let combined_plan = [campaign_lore.trim(), module_plan.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
+    let memory = read_optional(&dir.join("memory").join("MEMORY.md"));
+    let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
+    let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
+
+    let maps = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters)?;
+    Ok(SessionPlanResult { plan_text, maps })
 }
 
 fn read_battle_map_at(root: &Path, id: &str, slug: &str) -> Result<String, String> {
@@ -2161,27 +2438,14 @@ fn sync_battle_maps_index_at(root: &Path, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Generate battle maps for whatever's coming up in the current chapter — the
-/// session-prep batch entry point (Battle Maps dialog). Ingestion-side Claude
-/// call (a small local model authors ASCII grids poorly), so spawn_blocking
-/// like suggest_session_plan.
-#[tauri::command]
-pub async fn generate_battle_maps(app: AppHandle, id: String) -> Result<Vec<BattleMapMeta>, String> {
-    tokio::task::spawn_blocking(move || {
-        let root = campaigns_root(&app)?;
-        generate_battle_maps_at(&root, &id, None)
-    })
-    .await
-    .map_err(|e| format!("Battle map generation task failed: {e}"))?
-}
-
 /// Generate one battle map for a specific encounter the DM/operator describes —
-/// the on-demand entry point.
+/// the on-demand entry point, kept alongside the plan-driven batch path (see
+/// plan_next_session_at) for the "I need one more map right now" case.
 #[tauri::command]
 pub async fn generate_battle_map(app: AppHandle, id: String, hint: String) -> Result<Vec<BattleMapMeta>, String> {
     tokio::task::spawn_blocking(move || {
         let root = campaigns_root(&app)?;
-        generate_battle_maps_at(&root, &id, Some(&hint))
+        generate_battle_maps_at(&root, &id, &hint)
     })
     .await
     .map_err(|e| format!("Battle map generation task failed: {e}"))?
@@ -2665,6 +2929,13 @@ fn advance_chapter_at(root: &Path, id: &str, chapter_id: &str) -> Result<(), Str
     write_atomic(&module_dir.join("current_id.txt"), chapter_id)?;
     write_atomic(&module_dir.join("index.md"), &build_index_md(&manifest, chapter_id))?;
     sync_active_module_indirection_at(root, id, &active_id)?;
+    // A cached session plan (see read_session_plan_at) describes "what's
+    // coming up" for the chapter we just left — invalidate it so the next
+    // "Plan Next Session" open regenerates against the new chapter instead
+    // of silently showing stale content. Battle map FILES are left alone
+    // here (a DM mid-session may have already printed them); they're only
+    // replaced the next time the plan is actually regenerated.
+    let _ = fs::remove_file(session_plan_path(root, id));
     Ok(())
 }
 
@@ -3231,14 +3502,33 @@ pub async fn compact_campaign_knowledge(app: AppHandle, id: String) -> Result<()
     .map_err(|e| format!("Knowledge compaction task failed: {e}"))?
 }
 
-/// "Plan mode" — read-only session-prep suggestion, callable any time (not
-/// just at session start; a DM can ask days ahead). See build_session_plan_prompt.
+/// "Plan mode" — session-prep suggestion PLUS its battle maps in one merged
+/// result, callable any time (not just at session start; a DM can ask days
+/// ahead). Cache-aware (see plan_next_session_at): if a plan's already been
+/// generated for whatever chapter is currently active, this returns it
+/// straight from disk with zero Claude calls, so opening the dialog twice
+/// can never show two different answers. Use regenerate_session_plan to
+/// force a fresh one.
 #[tauri::command]
-pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<String, String> {
+pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionPlanResult, String> {
     tokio::task::spawn_blocking(move || {
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
-        suggest_session_plan_at(&root, &id, &terrain_catalog)
+        plan_next_session_at(&root, &id, &terrain_catalog, false)
+    })
+    .await
+    .map_err(|e| format!("Session-plan task failed: {e}"))?
+}
+
+/// Forces a fresh session plan (and, since maps are derived from it, a fresh
+/// battle-map batch replacing whatever the previous plan owned) — the
+/// "Regenerate" button's target.
+#[tauri::command]
+pub async fn regenerate_session_plan(app: AppHandle, id: String) -> Result<SessionPlanResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
+        plan_next_session_at(&root, &id, &terrain_catalog, true)
     })
     .await
     .map_err(|e| format!("Session-plan task failed: {e}"))?
@@ -3692,14 +3982,71 @@ mod tests {
     }
 
     #[test]
-    fn build_battle_maps_prompt_includes_content_and_switches_on_hint() {
-        let batch = build_battle_maps_prompt("arc", "chapter goblins", "memory", None);
-        assert!(batch.contains("chapter goblins"));
-        assert!(batch.contains("up to THREE"));
-        assert!(batch.contains(MAP_SPEC_DELIMITER));
-        let one = build_battle_maps_prompt("arc", "chapter", "memory", Some("a bridge ambush"));
+    fn build_battle_maps_prompt_includes_content_and_hint() {
+        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush");
+        assert!(one.contains("chapter goblins"));
         assert!(one.contains("a bridge ambush"));
         assert!(one.contains("ONE battle map"));
+        assert!(one.contains(MAP_SPEC_DELIMITER));
+    }
+
+    #[test]
+    fn build_battle_maps_prompt_for_encounters_lists_every_encounter_in_order() {
+        let encounters = vec![
+            PlanEncounter { name: "Bridge Ambush".to_string(), description: "Goblins attack from cover.".to_string(), combat: true },
+            PlanEncounter { name: "Watchtower Siege".to_string(), description: "A final assault.".to_string(), combat: true },
+        ];
+        let prompt = build_battle_maps_prompt_for_encounters("arc", "chapter", "memory", &encounters);
+        assert!(prompt.contains("EXACTLY ONE battle map for EACH"));
+        assert!(prompt.contains("1. Bridge Ambush — Goblins attack from cover."));
+        assert!(prompt.contains("2. Watchtower Siege — A final assault."));
+    }
+
+    #[test]
+    fn force_map_title_replaces_an_existing_title_line() {
+        let spec = "# Wrong Name\nGrid: 10x10, 5 ft squares.\nMap:\n##\n##\n";
+        let out = force_map_title(spec, "Bridge Ambush");
+        assert!(out.starts_with("# Bridge Ambush\n"));
+        assert!(!out.contains("Wrong Name"));
+    }
+
+    #[test]
+    fn force_map_title_prepends_a_title_when_none_exists() {
+        let spec = "Grid: 10x10, 5 ft squares.\nMap:\n##\n##\n";
+        let out = force_map_title(spec, "Bridge Ambush");
+        assert!(out.starts_with("# Bridge Ambush\n"));
+    }
+
+    #[test]
+    fn parse_plan_encounters_reads_tagged_numbered_lines_and_stops_at_next_heading() {
+        let plan = "## Encounters\n1. [combat] Bridge Ambush — Goblins attack from cover.\n2. [non-combat] Merchant Haggling — Negotiate for supplies.\n3. Untagged Skirmish — defaults to combat.\n\n## Set up from what you own\n1. [combat] Should not be parsed — wrong section.\n";
+        let encounters = parse_plan_encounters(plan);
+        assert_eq!(encounters.len(), 3);
+        assert_eq!(encounters[0], PlanEncounter { name: "Bridge Ambush".to_string(), description: "Goblins attack from cover.".to_string(), combat: true });
+        assert_eq!(encounters[1].combat, false);
+        assert_eq!(encounters[1].name, "Merchant Haggling");
+        assert_eq!(encounters[2].combat, true, "an untagged line defaults to combat");
+        assert_eq!(encounters[2].name, "Untagged Skirmish");
+    }
+
+    #[test]
+    fn parse_plan_encounters_returns_empty_when_the_section_says_none_or_is_missing() {
+        assert!(parse_plan_encounters("## Encounters\nNo encounters expected yet.\n\n## Set up from what you own\n...").is_empty());
+        assert!(parse_plan_encounters("no encounters section at all here").is_empty());
+    }
+
+    /// Regression: live testing showed the model sometimes echoes the
+    /// prompt's alternation literally instead of picking a tag — this must
+    /// still parse cleanly (defaulting to combat, per the "missed fight-map
+    /// is worse" rule) and, critically, must NOT leak the bracket junk into
+    /// the encounter's name, since that name becomes the map's title/slug.
+    #[test]
+    fn parse_plan_encounters_strips_a_malformed_bracket_tag_instead_of_leaking_it_into_the_name() {
+        let plan = "## Encounters\n1. [combat|non-combat] Watch Arrives at the Tavern — the guard responds.\n";
+        let encounters = parse_plan_encounters(plan);
+        assert_eq!(encounters.len(), 1);
+        assert_eq!(encounters[0].name, "Watch Arrives at the Tavern");
+        assert_eq!(encounters[0].combat, true, "an unrecognized tag defaults to combat");
     }
 
     #[test]
@@ -3729,6 +4076,77 @@ mod tests {
         let claude = fs::read_to_string(&claude_path).unwrap();
         assert_eq!(claude.matches("@memory/battle_maps/index.md").count(), 1, "import must not accumulate");
         assert!(read_battle_map_at(&root.0, &meta.id, "the-goblin-warren").unwrap().contains("The Goblin Warren"), "an existing map must survive the sync");
+    }
+
+    #[test]
+    fn read_and_write_session_plan_round_trip_and_treat_blank_as_uncached() {
+        let root = Scratch::new("session-plan-cache");
+        let meta = create_campaign_at(&root.0, &intake("Cached")).unwrap();
+        assert!(read_session_plan_at(&root.0, &meta.id).is_none(), "no plan generated yet");
+        write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Test Fight — a fight.\n").unwrap();
+        assert_eq!(read_session_plan_at(&root.0, &meta.id).unwrap(), "## Encounters\n1. [combat] Test Fight — a fight.\n");
+    }
+
+    /// The whole point of persisting the plan: a cache hit must never touch
+    /// the LLM. plan_next_session_at(force: false) with a cache present
+    /// short-circuits before ever building a prompt or calling
+    /// ask_ingest_once — this test proves that by never configuring an
+    /// ingestion provider (any accidental live call would error the test).
+    #[test]
+    fn plan_next_session_at_returns_cached_plan_and_owned_maps_without_any_llm_call() {
+        let root = Scratch::new("plan-cache-hit");
+        let meta = create_campaign_at(&root.0, &intake("Cached")).unwrap();
+        write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Bridge Ambush — Goblins attack.\n").unwrap();
+        write_map_spec_with_slug_at(&root.0, &meta.id, "bridge-ambush", SAMPLE_MAP_SPEC).unwrap();
+        write_plan_manifest_at(&root.0, &meta.id, &["bridge-ambush".to_string()]).unwrap();
+
+        let result = plan_next_session_at(&root.0, &meta.id, "", false).unwrap();
+        assert!(result.plan_text.contains("Bridge Ambush"));
+        assert_eq!(result.maps.len(), 1);
+        assert_eq!(result.maps[0].slug, "bridge-ambush");
+    }
+
+    #[test]
+    fn current_plan_owned_maps_at_skips_a_manifest_entry_whose_file_is_gone() {
+        let root = Scratch::new("plan-owned-missing-file");
+        let meta = create_campaign_at(&root.0, &intake("X")).unwrap();
+        write_map_spec_with_slug_at(&root.0, &meta.id, "still-here", SAMPLE_MAP_SPEC).unwrap();
+        write_plan_manifest_at(&root.0, &meta.id, &["still-here".to_string(), "hand-deleted".to_string()]).unwrap();
+        let maps = current_plan_owned_maps_at(&root.0, &meta.id);
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].slug, "still-here");
+    }
+
+    #[test]
+    fn advance_chapter_at_invalidates_the_cached_session_plan() {
+        let root = Scratch::new("advance-invalidates-plan");
+        let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
+        let (_, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.", "Lost Mine").unwrap();
+        write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Stale Fight — old chapter.\n").unwrap();
+        assert!(read_session_plan_at(&root.0, &meta.id).is_some());
+
+        advance_chapter_at(&root.0, &meta.id, &summaries[1].id).unwrap();
+
+        assert!(read_session_plan_at(&root.0, &meta.id).is_none(), "advancing the chapter must clear the stale cached plan");
+    }
+
+    /// The empty-encounters branch of generate_battle_maps_for_plan_at never
+    /// calls the LLM (nothing to ask for), so this exercises the cleanup
+    /// half of the determinism fix without needing a live call: a plan that
+    /// used to have combat encounters, regenerated into one with none, must
+    /// not leave the old maps behind.
+    #[test]
+    fn generate_battle_maps_for_plan_at_with_no_combat_encounters_clears_previously_owned_maps() {
+        let root = Scratch::new("plan-maps-clear-on-empty");
+        let meta = create_campaign_at(&root.0, &intake("X")).unwrap();
+        write_map_spec_with_slug_at(&root.0, &meta.id, "old-fight", SAMPLE_MAP_SPEC).unwrap();
+        write_plan_manifest_at(&root.0, &meta.id, &["old-fight".to_string()]).unwrap();
+
+        let maps = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[]).unwrap();
+
+        assert!(maps.is_empty());
+        assert!(read_plan_manifest_at(&root.0, &meta.id).is_empty());
+        assert!(!battle_maps_dir(&root.0, &meta.id).join("old-fight.md").exists(), "the stale plan-owned map must be deleted");
     }
 
     #[test]

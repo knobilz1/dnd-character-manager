@@ -1,4 +1,5 @@
 mod campaign;
+mod comfyui;
 mod dm;
 mod local_llm;
 mod oauth;
@@ -86,11 +87,12 @@ pub fn run() {
       campaign::read_campaign_plan,
       campaign::resolve_chapter_section,
       campaign::suggest_session_plan,
-      campaign::generate_battle_maps,
+      campaign::regenerate_session_plan,
       campaign::generate_battle_map,
       campaign::list_battle_maps,
       campaign::read_battle_map,
       campaign::save_battle_map,
+      comfyui::comfyui_stylize_map,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tts::speak_text,

@@ -59,6 +59,17 @@ interface SettingsState {
    *  command; this persisted value is the source of truth, re-synced on mount. */
   ttsEngine: 'kokoro' | 'f5';
   setTtsEngine: (v: 'kokoro' | 'f5') => void;
+  /** Battle Map Generator Phase 2: run a local Stable Diffusion img2img
+   *  atmosphere pass (via the user's own ComfyUI install) over the
+   *  deterministic tile render before export. OFF by default — the tile
+   *  render is the source of truth the DM reasons from; this is a purely
+   *  cosmetic finish applied at export time, and falls back cleanly to the
+   *  plain tile render if ComfyUI isn't reachable (see comfyui.rs). */
+  mapAiStyle: boolean;
+  setMapAiStyle: (v: boolean) => void;
+  /** Base URL of the user's local ComfyUI server, e.g. "http://127.0.0.1:8188". */
+  comfyUiBaseUrl: string;
+  setComfyUiBaseUrl: (v: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -85,6 +96,10 @@ export const useSettingsStore = create<SettingsState>()(
       setIngestionProvider: (v) => set({ ingestionProvider: v }),
       ttsEngine: 'kokoro',
       setTtsEngine: (v) => set({ ttsEngine: v }),
+      mapAiStyle: false,
+      setMapAiStyle: (v) => set({ mapAiStyle: v }),
+      comfyUiBaseUrl: 'http://127.0.0.1:8188',
+      setComfyUiBaseUrl: (v) => set({ comfyUiBaseUrl: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )

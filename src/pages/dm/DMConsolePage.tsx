@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Grid3x3 } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -320,6 +320,23 @@ interface BattleMapMeta {
   summary: string;
 }
 
+/** Mirrors campaign.rs's SessionPlanResult — the merged "Plan Next Session"
+ *  response (plan text + the battle maps derived from it). */
+interface SessionPlanResult {
+  plan_text: string;
+  maps: BattleMapMeta[];
+}
+
+/** A battle map card as rendered in the merged Plan Next Session dialog —
+ *  BattleMapMeta plus the full spec text and its rendered preview PNG. */
+interface MapCard {
+  slug: string;
+  name: string;
+  summary: string;
+  spec: string;
+  png: string | null;
+}
+
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
  *  A campaign can have several; exactly one is active at a time. */
 interface ModuleSummary {
@@ -533,7 +550,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, mapAiStyle, setMapAiStyle, comfyUiBaseUrl, setComfyUiBaseUrl } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -744,21 +761,21 @@ export function DMConsolePage() {
   const [terrainOpen, setTerrainOpen] = React.useState(false);
   const [terrainText, setTerrainText] = React.useState('');
   const [terrainSaving, setTerrainSaving] = React.useState(false);
+  // Plan Next Session — merged with battle maps (see campaign.rs's
+  // plan_next_session_at + battleMapRender.ts). `planText` is the cached/fresh
+  // plan; `planMapCards` are the maps the plan itself owns (one per combat
+  // encounter, replaced wholesale on regenerate); `adHocMapCards` are extra
+  // "describe one encounter" maps that survive a plan regenerate untouched.
+  // `planBusy` covers both the plan/maps LLM calls and any per-card
+  // export/save work.
   const [planOpen, setPlanOpen] = React.useState(false);
   const [planText, setPlanText] = React.useState('');
   const [planLoading, setPlanLoading] = React.useState(false);
-  const [modulePlan, setModulePlan] = React.useState('');
-  // Battle Maps dialog — the DM-authored, printable maps for this campaign (see
-  // campaign.rs's battle_maps + battleMapRender.ts). `mapsList` is the picker,
-  // `selectedMap*` is the currently-viewed spec + its rendered preview PNG,
-  // `mapBusy` covers the generation LLM call and the export/render work.
-  const [mapsOpen, setMapsOpen] = React.useState(false);
-  const [mapsList, setMapsList] = React.useState<BattleMapMeta[]>([]);
-  const [selectedMapSlug, setSelectedMapSlug] = React.useState<string | null>(null);
-  const [selectedMapSpec, setSelectedMapSpec] = React.useState('');
-  const [selectedMapPng, setSelectedMapPng] = React.useState<string | null>(null);
-  const [mapBusy, setMapBusy] = React.useState<string | null>(null);
+  const [planBusy, setPlanBusy] = React.useState<string | null>(null);
+  const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
+  const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
+  const [modulePlan, setModulePlan] = React.useState('');
   // Lore dialog — view the established campaign_lore.md and fold in new
   // material any time after creation (a sourcebook picked up mid-campaign, a
   // later plot decision), not just once at creation. Uses moduleBusy/
@@ -2601,70 +2618,40 @@ export function DMConsolePage() {
     }
   }
 
-  // ── Battle Maps ────────────────────────────────────────────────────────────
+  // ── Plan Next Session + its battle maps (merged — see campaign.rs's
+  // plan_next_session_at) ─────────────────────────────────────────────────────
+  // Battle Maps has no independent entry point anymore: it's derived from
+  // whatever the (cached) session plan says is coming up. One card per
+  // combat encounter the plan identified.
 
-  /** Renders a map spec to a preview PNG (null if it doesn't parse). */
-  function renderMapPreview(spec: string) {
-    setSelectedMapPng(battleMapToPngDataUrl(spec));
+  async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
+    const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, png: battleMapToPngDataUrl(spec) };
   }
 
-  async function selectMap(slug: string) {
-    if (!activeCampaignId) return;
-    setSelectedMapSlug(slug);
+  /** Phase 2 — optional ComfyUI atmosphere pass over an already-rendered tile
+   *  PNG (see comfyui.rs's comfyui_stylize_map). Never throws: on any
+   *  failure (ComfyUI not running, no checkpoint installed, timeout) it
+   *  falls back to the plain tile render, which stays the DM's source of
+   *  truth regardless. Only called when the mapAiStyle setting is on. */
+  async function stylizeMapImage(dataUrl: string): Promise<string> {
+    if (!mapAiStyle) return dataUrl;
     try {
-      const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug });
-      setSelectedMapSpec(spec);
-      renderMapPreview(spec);
+      return await invoke<string>('comfyui_stylize_map', { baseUrl: comfyUiBaseUrl, pngDataUrl: dataUrl });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      console.warn('ComfyUI atmosphere pass failed, using the plain tile render instead:', e);
+      return dataUrl;
     }
   }
 
-  async function openBattleMaps() {
-    if (!activeCampaignId) return;
-    setMapsOpen(true);
-    try {
-      const maps = await invoke<BattleMapMeta[]>('list_battle_maps', { id: activeCampaignId });
-      setMapsList(maps);
-      if (maps.length > 0) await selectMap(maps[0].slug);
-      else { setSelectedMapSlug(null); setSelectedMapSpec(''); setSelectedMapPng(null); }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  /** Generate maps — batch for upcoming content (no hint) or one for a described
-   *  encounter. Ingestion-side LLM call, so it can take a while (the DM authors
-   *  the whole grid); the dialog shows a busy label meanwhile. */
-  async function generateMaps(hint?: string) {
-    if (!activeCampaignId) return;
-    if (!(await ensureClaudeConnected())) return;
-    setMapBusy(hint ? 'Designing a map for that encounter…' : 'Designing maps for what’s coming up…');
-    try {
-      const cmd = hint ? 'generate_battle_map' : 'generate_battle_maps';
-      const args = hint ? { id: activeCampaignId, hint } : { id: activeCampaignId };
-      const maps = await withClaudeReconnect(() => invoke<BattleMapMeta[]>(cmd, args));
-      setMapsList(maps);
-      // Select the newest — with a hint that's the just-made one; for a batch,
-      // whichever sorts first is fine as a landing spot.
-      if (maps.length > 0) await selectMap(maps[maps.length - 1].slug);
-      setMapEncounterHint('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMapBusy(null);
-    }
-  }
-
-  async function exportMapPng() {
-    if (!selectedMapSpec) return;
-    const dataUrl = battleMapToPngDataUrl(selectedMapSpec, 96);
-    if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
-    const name = (selectedMapSlug ?? 'battle-map');
-    const dest = await save({ defaultPath: `${name}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
+  async function exportMapPng(card: MapCard) {
+    const rawDataUrl = battleMapToPngDataUrl(card.spec, 96);
+    if (!rawDataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
+    const dest = await save({ defaultPath: `${card.slug}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
     if (!dest) return;
-    setMapBusy('Exporting PNG…');
+    setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting PNG…');
     try {
+      const dataUrl = await stylizeMapImage(rawDataUrl);
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
       const bytes = new Uint8Array(bin.length);
@@ -2674,40 +2661,71 @@ export function DMConsolePage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setMapBusy(null);
+      setPlanBusy(null);
     }
   }
 
-  async function exportMapPdf() {
-    if (!selectedMapSpec) return;
-    const name = (selectedMapSlug ?? 'battle-map');
-    const dest = await save({ defaultPath: `${name}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+  async function exportMapPdf(card: MapCard) {
+    const dest = await save({ defaultPath: `${card.slug}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (!dest) return;
-    setMapBusy('Exporting print-scaled PDF…');
+    setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting print-scaled PDF…');
     try {
-      const bytes = await battleMapToPdfBytes(selectedMapSpec);
+      const bytes = await battleMapToPdfBytes(card.spec, mapAiStyle ? stylizeMapImage : undefined);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setMapBusy(null);
+      setPlanBusy(null);
     }
   }
 
-  /** Persist hand edits to a map spec, then re-render the preview. */
-  async function saveMapEdits() {
-    if (!activeCampaignId || !selectedMapSlug) return;
-    setMapBusy('Saving…');
+  /** Patches one card's spec text in whichever of the two lists it's in
+   *  (plan-owned or ad-hoc), without touching the others. `updatePreview`
+   *  also re-renders the png — set false on every keystroke (cheap text
+   *  update only) and true on "Re-render preview" / after a successful save. */
+  function patchMapCardSpec(slug: string, spec: string, updatePreview: boolean) {
+    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec) : c.png } : c));
+    setPlanMapCards(patch);
+    setAdHocMapCards(patch);
+  }
+
+  /** Persist hand edits to a map spec, then re-render its card's preview. */
+  async function saveMapEdits(card: MapCard) {
+    if (!activeCampaignId) return;
+    setPlanBusy('Saving…');
     try {
-      const maps = await invoke<BattleMapMeta[]>('save_battle_map', { id: activeCampaignId, slug: selectedMapSlug, content: selectedMapSpec });
-      setMapsList(maps);
-      renderMapPreview(selectedMapSpec);
+      await invoke('save_battle_map', { id: activeCampaignId, slug: card.slug, content: card.spec });
+      patchMapCardSpec(card.slug, card.spec, true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setMapBusy(null);
+      setPlanBusy(null);
+    }
+  }
+
+  /** "…or describe one more encounter" — the on-demand secondary path
+   *  (campaign.rs's generate_battle_map). Additive: the new map lands in
+   *  adHocMapCards, never touching the plan's own owned set, so it survives
+   *  the next Regenerate untouched. Diffs the returned (whole-campaign) list
+   *  against what's already known here, since the command itself has no
+   *  concept of "just the new one." */
+  async function generateHintMap() {
+    if (!activeCampaignId || !mapEncounterHint.trim()) return;
+    if (!(await ensureClaudeConnected())) return;
+    const known = new Set([...planMapCards, ...adHocMapCards].map((c) => c.slug));
+    setPlanBusy('Designing a map for that encounter…');
+    try {
+      const all = await withClaudeReconnect(() => invoke<BattleMapMeta[]>('generate_battle_map', { id: activeCampaignId, hint: mapEncounterHint.trim() }));
+      const fresh = all.filter((m) => !known.has(m.slug));
+      const cards = await Promise.all(fresh.map(loadMapCard));
+      setAdHocMapCards((prev) => [...prev, ...cards]);
+      setMapEncounterHint('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
     }
   }
 
@@ -2735,16 +2753,24 @@ export function DMConsolePage() {
   }
 
   /** "Plan mode" — callable any time, not just at session start (e.g. days
-   *  ahead of actually playing). Read-only: makes one Claude call, no state
-   *  changes to the campaign or terrain catalog. */
-  async function openPlanMode() {
+   *  ahead of actually playing). Cache-aware (campaign.rs's plan_next_session_at):
+   *  reopening after a plan's already been generated for the current chapter
+   *  costs no Claude call at all, so this can never show a different answer
+   *  than last time just from being opened twice. `force` (the Regenerate
+   *  button) always asks fresh, and — since the maps are derived from the
+   *  plan — regenerates its battle maps in the same call. */
+  async function openPlanMode(force = false) {
     if (!activeCampaignId) return;
+    if (force && !(await ensureClaudeConnected())) return;
     setPlanOpen(true);
     setPlanLoading(true);
     setPlanText('');
+    setAdHocMapCards([]);
     try {
-      const suggestion = await invoke<string>('suggest_session_plan', { id: activeCampaignId });
-      setPlanText(suggestion);
+      const cmd = force ? 'regenerate_session_plan' : 'suggest_session_plan';
+      const result = await withClaudeReconnect(() => invoke<SessionPlanResult>(cmd, { id: activeCampaignId }));
+      setPlanText(result.plan_text);
+      setPlanMapCards(await Promise.all(result.maps.map(loadMapCard)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPlanOpen(false);
@@ -2868,7 +2894,7 @@ export function DMConsolePage() {
               <Button size="sm" variant="ghost" onClick={openLore} title="The overarching campaign-lore doc, and a way to fold in new material any time">
                 <Landmark size={14} /> Lore
               </Button>
-              <Button size="sm" variant="ghost" onClick={openPlanMode} title="Suggest terrain to set up (or print) for your next session — usable days ahead">
+              <Button size="sm" variant="ghost" onClick={() => openPlanMode(false)} title="Suggest terrain to set up, plus battle maps for any upcoming fights — usable days ahead">
                 <ClipboardList size={14} /> Plan next session
               </Button>
               <label className="flex items-center gap-1.5 text-sm text-slate-300" title="How this table handles combat positioning — the DM narrates placement to match">
@@ -2881,11 +2907,6 @@ export function DMConsolePage() {
                   {BATTLE_MODES.map((m) => <option key={m} value={m}>{BATTLE_MODE_LABELS[m]}</option>)}
                 </select>
               </label>
-              {battleMode !== 'theater' && (
-                <Button size="sm" variant="ghost" onClick={openBattleMaps} title="Design, view, and print battle maps for upcoming encounters">
-                  <Grid3x3 size={14} /> Battle Maps
-                </Button>
-              )}
             </>
           )}
         </div>
@@ -3333,73 +3354,91 @@ export function DMConsolePage() {
         </div>
       </Dialog>
 
-      <Dialog open={mapsOpen} onClose={() => setMapsOpen(false)} title="Battle Maps" wide>
-        <p className="text-xs text-slate-400 mb-3">
-          The DM designs these from your campaign's upcoming content, so it knows the exact layout and can place enemies and plan ambushes on real cells. Print the PDF at 1&nbsp;inch per square for minis, or export a PNG for a virtual tabletop.
+      <Dialog open={planOpen} onClose={() => setPlanOpen(false)} title={`${activeCampaignName ?? 'Campaign'} — Plan Next Session`} wide>
+        <p className="text-xs text-slate-400 mb-2">
+          Cached once generated — reopening this shows the same plan (and the same battle maps) until you Regenerate or the party advances a chapter, based on the upcoming chapter, the campaign's arc plan, recent memory, and your terrain catalog.
         </p>
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <Button size="sm" onClick={() => generateMaps()} disabled={!!mapBusy}>
-            <ClipboardList size={14} /> Generate for next session
-          </Button>
-          <input
-            value={mapEncounterHint}
-            onChange={(e) => setMapEncounterHint(e.target.value)}
-            placeholder="…or describe one encounter (e.g. 'a bridge ambush by goblins')"
-            className="flex-1 min-w-[16rem] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-red-600"
-          />
-          <Button size="sm" variant="outline" onClick={() => generateMaps(mapEncounterHint.trim() || undefined)} disabled={!!mapBusy || !mapEncounterHint.trim()}>
-            Generate this
-          </Button>
-        </div>
-        {mapBusy && <p className="text-xs text-amber-400 mb-3">{mapBusy}</p>}
+        {planLoading ? (
+          <p className="text-sm text-slate-400">Thinking through what's coming up…</p>
+        ) : (
+          <>
+            <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
 
-        <div className="flex gap-4" style={{ minHeight: '50vh' }}>
-          <div className="w-56 shrink-0 border-r border-slate-800 pr-3 space-y-1 overflow-y-auto" style={{ maxHeight: '60vh' }}>
-            {mapsList.length === 0 && !mapBusy && (
-              <p className="text-xs text-slate-500">No maps yet — generate some from your upcoming content above.</p>
-            )}
-            {mapsList.map((m) => (
-              <button
-                key={m.slug}
-                onClick={() => selectMap(m.slug)}
-                className={`w-full text-left rounded-lg px-2 py-1.5 text-xs transition-colors ${selectedMapSlug === m.slug ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
-              >
-                <div className="font-medium">{m.name}</div>
-                {m.summary && <div className="text-slate-500">{m.summary}</div>}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1 min-w-0 overflow-y-auto" style={{ maxHeight: '60vh' }}>
-            {selectedMapSlug ? (
-              <>
-                <div className="flex items-center gap-2 mb-2">
-                  <Button size="sm" variant="outline" onClick={exportMapPdf} disabled={!!mapBusy}><Download size={14} /> Export PDF</Button>
-                  <Button size="sm" variant="outline" onClick={exportMapPng} disabled={!!mapBusy}><Download size={14} /> Export PNG</Button>
+            {battleMode !== 'theater' && (
+              <div className="mb-3">
+                <h4 className="text-xs font-semibold text-slate-300 mb-2">Battle maps for this plan's encounters</h4>
+                <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="checkbox" checked={mapAiStyle} onChange={(e) => setMapAiStyle(e.target.checked)} />
+                    AI atmosphere pass on export (local ComfyUI, off by default — the tile map stays the DM's source of truth either way)
+                  </label>
+                  {mapAiStyle && (
+                    <input
+                      value={comfyUiBaseUrl}
+                      onChange={(e) => setComfyUiBaseUrl(e.target.value)}
+                      placeholder="http://127.0.0.1:8188"
+                      className="w-48 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
+                    />
+                  )}
                 </div>
-                {selectedMapPng ? (
-                  <img src={selectedMapPng} alt="Battle map preview" className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
-                ) : (
-                  <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
-                )}
-                <details className="mt-3">
-                  <summary className="text-xs text-slate-400 cursor-pointer">View / edit the raw spec</summary>
-                  <textarea
-                    value={selectedMapSpec}
-                    onChange={(e) => setSelectedMapSpec(e.target.value)}
-                    spellCheck={false}
-                    className="w-full h-64 mt-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-red-600"
+                {planBusy && <p className="text-xs text-amber-400 mb-2">{planBusy}</p>}
+
+                <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
+                  {[...planMapCards, ...adHocMapCards].length === 0 && !planBusy && (
+                    <p className="text-xs text-slate-500">No combat encounters in this plan called for a map yet.</p>
+                  )}
+                  {[...planMapCards, ...adHocMapCards].map((card) => (
+                    <div key={card.slug} className="border border-slate-800 rounded-lg p-3">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div>
+                          <div className="text-sm font-medium text-slate-100">{card.name}</div>
+                          {card.summary && <div className="text-xs text-slate-500">{card.summary}</div>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>
+                          <Button size="sm" variant="outline" onClick={() => exportMapPng(card)} disabled={!!planBusy}><Download size={14} /> PNG</Button>
+                        </div>
+                      </div>
+                      {card.png ? (
+                        <img src={card.png} alt={`${card.name} preview`} className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
+                      ) : (
+                        <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
+                      )}
+                      <details className="mt-2">
+                        <summary className="text-xs text-slate-400 cursor-pointer">View / edit the raw spec</summary>
+                        <textarea
+                          value={card.spec}
+                          onChange={(e) => patchMapCardSpec(card.slug, e.target.value, false)}
+                          spellCheck={false}
+                          className="w-full h-48 mt-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-red-600"
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                          <Button size="sm" variant="ghost" onClick={() => patchMapCardSpec(card.slug, card.spec, true)} disabled={!!planBusy}>Re-render preview</Button>
+                          <Button size="sm" onClick={() => saveMapEdits(card)} disabled={!!planBusy}>Save edits</Button>
+                        </div>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <input
+                    value={mapEncounterHint}
+                    onChange={(e) => setMapEncounterHint(e.target.value)}
+                    placeholder="…or describe one more encounter (e.g. 'a bridge ambush by goblins')"
+                    className="flex-1 min-w-[16rem] bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-red-600"
                   />
-                  <div className="flex justify-end gap-2 mt-2">
-                    <Button size="sm" variant="ghost" onClick={() => renderMapPreview(selectedMapSpec)} disabled={!!mapBusy}>Re-render preview</Button>
-                    <Button size="sm" onClick={saveMapEdits} disabled={!!mapBusy}>Save edits</Button>
-                  </div>
-                </details>
-              </>
-            ) : (
-              <p className="text-xs text-slate-500">Select a map, or generate one.</p>
+                  <Button size="sm" variant="outline" onClick={generateHintMap} disabled={!!planBusy || !mapEncounterHint.trim()}>
+                    Generate this
+                  </Button>
+                </div>
+              </div>
             )}
-          </div>
+          </>
+        )}
+        <div className="flex justify-end gap-2 mt-3">
+          <Button variant="outline" onClick={() => openPlanMode(true)} disabled={planLoading || !!planBusy}>Regenerate</Button>
+          <Button onClick={() => setPlanOpen(false)}>Close</Button>
         </div>
       </Dialog>
 
@@ -3690,21 +3729,6 @@ export function DMConsolePage() {
           <Button onClick={handleUpdateLore} disabled={!!moduleBusy || (!loreAddition.trim() && !pendingLoreUpdateFile)}>
             {moduleBusyLabel ?? 'Fold into campaign lore'}
           </Button>
-        </div>
-      </Dialog>
-
-      <Dialog open={planOpen} onClose={() => setPlanOpen(false)} title={`${activeCampaignName ?? 'Campaign'} — Plan Next Session`} wide>
-        <p className="text-xs text-slate-400 mb-2">
-          A read-only suggestion based on the upcoming chapter, the campaign's arc plan, recent memory, and your terrain catalog — safe to check days ahead of actually playing.
-        </p>
-        {planLoading ? (
-          <p className="text-sm text-slate-400">Thinking through what's coming up…</p>
-        ) : (
-          <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{planText}</div>
-        )}
-        <div className="flex justify-end gap-2 mt-3">
-          <Button variant="outline" onClick={openPlanMode} disabled={planLoading}>Regenerate</Button>
-          <Button onClick={() => setPlanOpen(false)}>Close</Button>
         </div>
       </Dialog>
     </div>

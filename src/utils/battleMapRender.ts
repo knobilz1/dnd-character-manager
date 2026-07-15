@@ -313,8 +313,20 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 
 /** Builds a print-scaled PDF: every grid square is exactly 1 inch, and a map
  *  bigger than one page is tiled across multiple Letter sheets (with the
- *  coordinate ruler repeated on each) to tape together. */
-export async function battleMapToPdfBytes(spec: string): Promise<Uint8Array | null> {
+ *  coordinate ruler repeated on each) to tape together.
+ *
+ *  `stylize`, if given, is run over each page's rendered PNG (as a data URL)
+ *  before it's embedded — this is the Phase 2 ComfyUI atmosphere-pass hook
+ *  (see DMConsolePage.tsx's stylizeMapImage). It must resolve to a data URL
+ *  and must not throw; a caller that wants a plain-render fallback on
+ *  failure handles that itself before passing the callback in, so this
+ *  function stays decoupled from any particular AI backend. Multi-page maps
+ *  run one stylize call per page — seams between pages are not blended,
+ *  a known limitation of the per-tile pass. */
+export async function battleMapToPdfBytes(
+  spec: string,
+  stylize?: (dataUrl: string) => Promise<string>
+): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
 
@@ -329,7 +341,9 @@ export async function battleMapToPdfBytes(spec: string): Promise<Uint8Array | nu
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
       const canvas = renderBattleMapToCanvas(map, RENDER_PX, win);
-      const png = await pdf.embedPng(dataUrlToBytes(canvas.toDataURL('image/png')));
+      let dataUrl = canvas.toDataURL('image/png');
+      if (stylize) dataUrl = await stylize(dataUrl);
+      const png = await pdf.embedPng(dataUrlToBytes(dataUrl));
       const page = pdf.addPage([PAGE_W, PAGE_H]);
       // The canvas is (ruler + cols*px) wide; scale so ONE square === 72pt.
       const scale = PT_PER_SQUARE / RENDER_PX;

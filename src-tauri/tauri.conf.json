@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Tavern Sheet",
-  "version": "0.22.44",
+  "version": "0.22.45",
   "identifier": "com.nabil.dndsheet",
   "build": {
     "frontendDist": "../dist",
