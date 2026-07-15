@@ -88,6 +88,7 @@ pub fn run() {
       campaign::set_current_chapter,
       campaign::read_campaign_plan,
       campaign::resolve_chapter_section,
+      campaign::read_cached_session_plan,
       campaign::suggest_session_plan,
       campaign::regenerate_session_plan,
       campaign::generate_battle_map,

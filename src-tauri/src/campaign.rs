@@ -3523,6 +3523,25 @@ pub fn invalidate_session_plan(app: AppHandle, id: String) -> Result<(), String>
     Ok(())
 }
 
+/// Read-only peek at whatever's cached — NEVER calls Claude, even on a
+/// cache miss (unlike suggest_session_plan below). This is what "opening"
+/// the Plan Next Session dialog calls: just show whatever's already there
+/// (or nothing) without silently kicking off an LLM call just from a click.
+/// Actually generating — first time or a regenerate — is always an
+/// explicit button press (suggest_session_plan / regenerate_session_plan).
+fn read_cached_session_plan_at(root: &Path, id: &str) -> Option<SessionPlanResult> {
+    read_session_plan_at(root, id).map(|plan_text| SessionPlanResult {
+        plan_text,
+        maps: current_plan_owned_maps_at(root, id),
+        failed_maps: Vec::new(),
+    })
+}
+
+#[tauri::command]
+pub fn read_cached_session_plan(app: AppHandle, id: String) -> Result<Option<SessionPlanResult>, String> {
+    Ok(read_cached_session_plan_at(&campaigns_root(&app)?, &id))
+}
+
 /// "Plan mode" — session-prep suggestion PLUS its battle maps in one merged
 /// result, callable any time (not just at session start; a DM can ask days
 /// ahead). Cache-aware (see plan_next_session_at): if a plan's already been
@@ -4113,6 +4132,22 @@ mod tests {
         assert!(result.plan_text.contains("Bridge Ambush"));
         assert_eq!(result.maps.len(), 1);
         assert_eq!(result.maps[0].slug, "bridge-ambush");
+    }
+
+    #[test]
+    fn read_cached_session_plan_at_returns_none_when_nothing_is_cached_and_some_when_it_is() {
+        let root = Scratch::new("read-cached-plan");
+        let meta = create_campaign_at(&root.0, &intake("Cached")).unwrap();
+        assert!(read_cached_session_plan_at(&root.0, &meta.id).is_none());
+
+        write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Bridge Ambush — Goblins attack.\n").unwrap();
+        write_map_spec_with_slug_at(&root.0, &meta.id, "bridge-ambush", SAMPLE_MAP_SPEC).unwrap();
+        write_plan_manifest_at(&root.0, &meta.id, &["bridge-ambush".to_string()]).unwrap();
+
+        let result = read_cached_session_plan_at(&root.0, &meta.id).unwrap();
+        assert!(result.plan_text.contains("Bridge Ambush"));
+        assert_eq!(result.maps.len(), 1);
+        assert!(result.failed_maps.is_empty());
     }
 
     #[test]

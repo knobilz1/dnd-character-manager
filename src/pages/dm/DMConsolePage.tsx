@@ -2896,18 +2896,39 @@ export function DMConsolePage() {
   }
 
   /** "Plan mode" — callable any time, not just at session start (e.g. days
-   *  ahead of actually playing). Cache-aware (campaign.rs's plan_next_session_at):
-   *  reopening after a plan's already been generated for the current chapter
-   *  costs no Claude call at all, so this can never show a different answer
-   *  than last time just from being opened twice. `force` (the Regenerate
-   *  button) always asks fresh, and — since the maps are derived from the
-   *  plan — regenerates its battle maps in the same call. */
-  async function openPlanMode(force = false) {
+   *  ahead of actually playing). A PURE READ: never calls Claude, just shows
+   *  whatever's cached (campaign.rs's read_cached_session_plan) or nothing.
+   *  Opening the dialog should never silently kick off an LLM call just from
+   *  a click — generating (first time or a regenerate) is always the
+   *  explicit "Generate"/"Regenerate" button (see generatePlan below). */
+  async function openPlanMode() {
     if (!activeCampaignId) return;
-    if (force && !(await ensureClaudeConnected())) return;
     setPlanOpen(true);
-    setPlanLoading(true);
     setPlanText('');
+    setPlanMapCards([]);
+    setAdHocMapCards([]);
+    setFailedMaps([]);
+    try {
+      const cached = await invoke<SessionPlanResult | null>('read_cached_session_plan', { id: activeCampaignId });
+      if (cached) {
+        setPlanText(cached.plan_text);
+        setPlanMapCards(await Promise.all(cached.maps.map(loadMapCard)));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** The explicit "Generate"/"Regenerate" button — the only thing that
+   *  actually calls Claude for the plan/maps. `force` picks which command:
+   *  plain `suggest_session_plan` (first-ever generate — still cache-aware
+   *  server-side, though openPlanMode already established nothing's cached
+   *  by the time this button is even shown) vs `regenerate_session_plan`
+   *  (always fresh, replacing whatever the previous plan owned). */
+  async function generatePlan(force: boolean) {
+    if (!activeCampaignId) return;
+    if (!(await ensureClaudeConnected())) return;
+    setPlanLoading(true);
     setAdHocMapCards([]);
     setFailedMaps([]);
     try {
@@ -2918,7 +2939,6 @@ export function DMConsolePage() {
       setFailedMaps(result.failed_maps ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setPlanOpen(false);
     } finally {
       setPlanLoading(false);
     }
@@ -3039,7 +3059,7 @@ export function DMConsolePage() {
               <Button size="sm" variant="ghost" onClick={openLore} title="The overarching campaign-lore doc, and a way to fold in new material any time">
                 <Landmark size={14} /> Lore
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => openPlanMode(false)} title="Suggest terrain to set up, plus battle maps for any upcoming fights — usable days ahead">
+              <Button size="sm" variant="ghost" onClick={openPlanMode} title="Suggest terrain to set up, plus battle maps for any upcoming fights — usable days ahead">
                 <ClipboardList size={14} /> Plan next session
               </Button>
               <label className="flex items-center gap-1.5 text-sm text-slate-300" title="How this table handles combat positioning — the DM narrates placement to match">
@@ -3505,6 +3525,11 @@ export function DMConsolePage() {
         </p>
         {planLoading ? (
           <p className="text-sm text-slate-400">Thinking through what's coming up…</p>
+        ) : !planText ? (
+          <div className="text-center py-6">
+            <p className="text-sm text-slate-400 mb-3">No plan generated yet for what's coming up.</p>
+            <Button onClick={() => generatePlan(false)}>Generate</Button>
+          </div>
         ) : (
           <>
             <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
@@ -3669,7 +3694,9 @@ export function DMConsolePage() {
           </>
         )}
         <div className="flex justify-end gap-2 mt-3">
-          <Button variant="outline" onClick={() => openPlanMode(true)} disabled={planLoading || !!planBusy}>Regenerate</Button>
+          {planText && (
+            <Button variant="outline" onClick={() => generatePlan(true)} disabled={planLoading || !!planBusy}>Regenerate</Button>
+          )}
           <Button onClick={() => setPlanOpen(false)}>Close</Button>
         </div>
       </Dialog>
