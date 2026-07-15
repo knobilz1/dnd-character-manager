@@ -3,15 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2 } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
-import { parseDmReply, applyDmActions, VOICE_CATALOG_IDS, PITCH_TAG_IDS } from '../../utils/dmActions';
-import type { HexPosition } from '../../utils/dmActions';
+import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
+import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
 import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
@@ -830,14 +830,22 @@ export function DMConsolePage() {
   // Which row's Preview button is currently playing (disables that button
   // and prevents overlapping playback) — null when nothing's previewing.
   const [previewingKey, setPreviewingKey] = React.useState<string | null>(null);
-  // Ephemeral hex-position tracking for the current encounter (axial q,r per
-  // combatant, PC or monster/NPC — not stored in Character, not persisted to
-  // disk). Claude reports updates via dm-actions `position`/`clearPositions`
-  // (see dmActions.ts, campaign.rs's "Physical hex-grid positioning" section);
-  // fed back every turn as ground truth via dmPrompt.ts's battleMapStatusText.
-  const [battleMap, setBattleMap] = React.useState<Record<string, HexPosition>>({});
-  const battleMapRef = React.useRef(battleMap);
-  battleMapRef.current = battleMap;
+  // The Active Battle Log for the current encounter — full combat state (round,
+  // initiative, per-combatant status, positions, environment) held here as
+  // ground truth, NOT stored in Character and NOT persisted to disk (per-sitting;
+  // only the outcome is saved, on endBattle). The DM updates it via the
+  // `battleLog`/`removeCombatant` dm-actions (merged by applyBattleLog) and
+  // `endBattle`; it's fed back every turn via dmPrompt.ts's battleLogStatusText
+  // so a long fight can't lose state when the model's context compacts.
+  const [battleLog, setBattleLog] = React.useState<BattleLog | null>(null);
+  const battleLogRef = React.useRef(battleLog);
+  battleLogRef.current = battleLog;
+  // The campaign's positioning style (theater / grid / hex), loaded per campaign
+  // from the backend (read_battle_mode) and sent to the DM every turn. Ref so
+  // runTurn/drainQueue (which close over refs, not state) read the live value.
+  const [battleMode, setBattleMode] = React.useState<BattleMode>('theater');
+  const battleModeRef = React.useRef(battleMode);
+  battleModeRef.current = battleMode;
 
   // Streamed-narration playback pipeline (see dm.rs's run_claude_streaming
   // and the dm-narration-chunk event it emits). Claude's reply streams in
@@ -1173,6 +1181,7 @@ export function DMConsolePage() {
       campaignPlanRef.current = '';
       npcVoicesRef.current = {};
       setNpcVoices({});
+      setBattleMode('theater');
       return;
     }
     // Refresh the campaign's generated DM rules (memory/dm_rules.md) before
@@ -1186,6 +1195,11 @@ export function DMConsolePage() {
     invoke<string>('read_campaign_plan', { id: activeCampaignId })
       .then((plan) => { campaignPlanRef.current = plan; })
       .catch(() => { campaignPlanRef.current = ''; });
+    // The campaign's saved positioning style (defaults to theater for any
+    // campaign that predates this feature — see campaign.rs's read_battle_mode).
+    invoke<string>('read_battle_mode', { id: activeCampaignId })
+      .then((mode) => { if (isBattleMode(mode)) setBattleMode(mode); })
+      .catch(() => { setBattleMode('theater'); });
     invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId })
       .then((voices) => {
         npcVoicesRef.current = voices;
@@ -1522,10 +1536,11 @@ export function DMConsolePage() {
       const prompt = buildTurnPrompt({
         party: partyRef.current,
         spokenText,
+        battleMode: battleModeRef.current,
         speaker,
         planCheckIn: dueForPlanCheck ? campaignPlanRef.current : undefined,
         recalledSession,
-        battleMap: battleMapRef.current,
+        battleLog: battleLogRef.current,
         interruption,
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
@@ -1725,14 +1740,20 @@ export function DMConsolePage() {
           });
           if (record) pendingRecalledSessionRef.current = { id: actions.recallSession, record };
         }
-        if (actions.clearPositions) {
-          setBattleMap({});
-        } else if (actions.position?.length) {
-          setBattleMap((bm) => {
-            const next = { ...bm };
-            for (const p of actions.position!) next[p.name] = { q: p.q, r: p.r };
-            return next;
-          });
+        // Active Battle Log: endBattle wins (save the outcome, then wipe);
+        // otherwise merge any battleLog update + removeCombatant into the
+        // running log. Kept as one authoritative object the app owns and feeds
+        // back every turn, so a fight's state survives context compaction.
+        if (actions.endBattle) {
+          if (campaignId && actions.battleResult?.trim()) {
+            const date = new Date().toISOString().slice(0, 10);
+            await invoke('append_memory_note', { id: campaignId, date, note: actions.battleResult.trim() }).catch((e) =>
+              console.warn('Failed to save a battle result:', e)
+            );
+          }
+          setBattleLog(null);
+        } else if (actions.battleLog || actions.removeCombatant?.length) {
+          setBattleLog((prev) => applyBattleLog(prev, actions.battleLog, actions.removeCombatant));
         }
       }
 
@@ -2045,7 +2066,7 @@ export function DMConsolePage() {
     queueRef.current = [];
     setTurns([]);
     setWarning(null);
-    setBattleMap({}); // positions are per-sitting/per-campaign, never persisted to disk
+    setBattleLog(null); // the battle log is per-sitting/per-campaign, never persisted to disk
   }
 
   /** Stops whatever's currently playing AND clears any sentences still
@@ -2525,6 +2546,21 @@ export function DMConsolePage() {
     );
   }
 
+  /** Persist the campaign's positioning style when the DM picks one. Optimistic:
+   *  the dropdown updates immediately; a write failure reverts and surfaces. */
+  async function handleChangeBattleMode(mode: BattleMode) {
+    const campaignId = activeCampaignId;
+    if (!campaignId) return;
+    const prev = battleModeRef.current;
+    setBattleMode(mode);
+    try {
+      await invoke('set_battle_mode', { id: campaignId, mode });
+    } catch (e) {
+      setBattleMode(prev);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   /** Global — not tied to any campaign, so this button is always available. */
   async function openTerrain() {
     try {
@@ -2685,6 +2721,16 @@ export function DMConsolePage() {
               <Button size="sm" variant="ghost" onClick={openPlanMode} title="Suggest terrain to set up (or print) for your next session — usable days ahead">
                 <ClipboardList size={14} /> Plan next session
               </Button>
+              <label className="flex items-center gap-1.5 text-sm text-slate-300" title="How this table handles combat positioning — the DM narrates placement to match">
+                <Swords size={14} />
+                <select
+                  value={battleMode}
+                  onChange={(e) => handleChangeBattleMode(e.target.value as BattleMode)}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-red-600"
+                >
+                  {BATTLE_MODES.map((m) => <option key={m} value={m}>{BATTLE_MODE_LABELS[m]}</option>)}
+                </select>
+              </label>
             </>
           )}
         </div>
@@ -2816,23 +2862,54 @@ export function DMConsolePage() {
               </div>
             </Card>
 
-            {Object.keys(battleMap).length > 0 && (
+            {battleLog && battleLog.combatants.length > 0 && (
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5"><Map size={14} /> Battle Map</h2>
-                  <button onClick={() => setBattleMap({})} title="Clear tracked positions" className="text-slate-500 hover:text-red-400 transition-colors">
+                  <h2 className="text-sm font-bold text-slate-300 flex items-center gap-1.5">
+                    <Swords size={14} /> Active Battle Log
+                    {battleLog.round !== undefined && <span className="text-[11px] font-normal text-slate-500">round {battleLog.round}</span>}
+                  </h2>
+                  <button onClick={() => setBattleLog(null)} title="End battle (clears the log)" className="text-slate-500 hover:text-red-400 transition-colors">
                     <Trash2 size={14} />
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-500 mb-2">Claude's own hex bookkeeping (axial q,r) — for your reference only; it narrates placement in relative terms, not these coordinates.</p>
-                <div className="space-y-1">
-                  {Object.entries(battleMap).map(([name, { q, r }]) => (
-                    <div key={name} className="flex justify-between text-xs">
-                      <span className="text-slate-300">{name}</span>
-                      <span className="text-slate-500 font-mono">({q},{r})</span>
-                    </div>
-                  ))}
+                {battleLog.initiative && battleLog.initiative.length > 0 && (
+                  <p className="text-[11px] text-slate-500 mb-2">Initiative: {battleLog.initiative.join(' → ')}</p>
+                )}
+                <div className="space-y-1.5">
+                  {battleLog.combatants.map((c) => {
+                    const sideColor = c.side === 'party' ? 'text-green-400'
+                      : c.side === 'enemy' ? 'text-red-400'
+                      : c.side === 'ally' ? 'text-sky-400' : 'text-slate-300';
+                    const isActive = !!battleLog.active && c.name.trim().toLowerCase() === battleLog.active.trim().toLowerCase();
+                    const place = c.position ?? (c.coord ? `(${c.coord.q},${c.coord.r})` : '');
+                    return (
+                      <div key={c.name} className={`text-xs ${isActive ? 'bg-slate-800 rounded px-1.5 py-1' : ''}`}>
+                        <div className="flex justify-between gap-2">
+                          <span className={`font-medium ${sideColor}`}>{isActive ? '▶ ' : ''}{c.name}</span>
+                          {c.hp && <span className="text-slate-500 whitespace-nowrap">{c.hp}</span>}
+                        </div>
+                        {(place || c.notes) && (
+                          <div className="text-slate-500">{place}{place && c.notes ? ' — ' : ''}{c.notes ?? ''}</div>
+                        )}
+                        {c.conditions && c.conditions.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {c.conditions.map((cond) => <Badge key={cond} color="red">{cond}</Badge>)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
+                {battleLog.environment && (
+                  <p className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-800">{battleLog.environment}</p>
+                )}
+                <button
+                  onClick={() => setBattleLog(null)}
+                  className="mt-3 w-full text-xs text-slate-400 hover:text-red-400 border border-slate-700 rounded-lg py-1.5 transition-colors"
+                >
+                  End battle
+                </button>
               </Card>
             )}
           </div>

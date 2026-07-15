@@ -16,14 +16,66 @@ interface NameCondition { name: string; condition: string }
 interface NameLevel { name: string; level: number }
 interface NameBool { name: string; value: boolean }
 
-/** Axial hex coordinates for one combatant (PC or monster/NPC — not limited to
- *  the tracked party, since monsters aren't Character objects). Raw numbers
- *  are internal bookkeeping the DM uses for exact hex-distance math; they are
- *  never meant to be read aloud (see BASE_CLAUDE_MD's positioning section) —
- *  narration always describes placement in relative human terms a player can
- *  act on by eye-counting hexes on unlabeled physical terrain. */
+/** The three combat-positioning styles, chosen per campaign (persisted by the
+ *  backend's read_battle_mode/set_battle_mode) and sent to the DM every turn.
+ *  See campaign.rs's DM_RULES "Running combat & positioning" for what each
+ *  means; must stay in sync with that BATTLE_MODES list. */
+export type BattleMode = 'theater' | 'grid' | 'hex';
+export const BATTLE_MODE_LABELS: Record<BattleMode, string> = {
+  theater: 'Theater of the Mind',
+  grid: 'Grid (minis, no terrain)',
+  hex: 'Hex terrain (3D-printed)',
+};
+export const BATTLE_MODES = Object.keys(BATTLE_MODE_LABELS) as BattleMode[];
+export const isBattleMode = (x: unknown): x is BattleMode =>
+  typeof x === 'string' && (BATTLE_MODES as string[]).includes(x);
+
+/** A numeric map coordinate for a combatant — axial (q,r) in hex mode, square
+ *  offsets in grid mode, unused in Theater of the Mind. Internal bookkeeping
+ *  only: never read aloud (see DM_RULES) — narration always translates it to a
+ *  count from a named anchor. */
 export interface HexPosition { q: number; r: number }
-interface NamePosition extends HexPosition { name: string }
+
+/** One combatant's live state within the Active Battle Log. Not a Character:
+ *  monsters/NPCs aren't Characters, and the DM tracks all sides here. Every
+ *  field but `name` is optional so the DM can send only what changed (see
+ *  applyBattleLog's upsert-by-name). */
+export interface BattleCombatant {
+  name: string;
+  /** For grouping/coloring in the sidebar; not load-bearing. */
+  side?: 'party' | 'enemy' | 'ally' | 'neutral';
+  /** Free-text health band — "healthy" | "bloodied" | "12/28" | "down" — the
+   *  DM's call, deliberately not a strict number (it also covers monsters with
+   *  no sheet). */
+  hp?: string;
+  conditions?: string[];
+  /** Narrative placement (Theater of the Mind): "flanking Thorin in the doorway". */
+  position?: string;
+  /** Numeric placement (grid/hex). */
+  coord?: HexPosition;
+  /** Ongoing effects / readied actions — "concentrating on Bless". */
+  notes?: string;
+}
+
+/** The whole running state of the current fight — held authoritatively by the
+ *  app and fed back to the DM every turn as ground truth (see dmPrompt.ts's
+ *  battleLogStatusText), so nothing about a fight is lost when the model's
+ *  context compacts. Ephemeral: lives for the encounter, never persisted to
+ *  disk (only the `battleResult` outcome is saved, on endBattle). */
+export interface BattleLog {
+  round?: number;
+  active?: string;         // whose turn it is right now
+  initiative?: string[];   // names in initiative order
+  environment?: string;    // lighting, hazards, cover, terrain that matters
+  notes?: string;          // free-form running scene notes
+  combatants: BattleCombatant[];
+}
+
+/** The `battleLog` dm-action: a PARTIAL update (any combatant listed is
+ *  upserted by name; scalar fields replace only when present) — see
+ *  applyBattleLog. `combatants` is optional so a turn can update just `active`
+ *  or `environment`. */
+export type BattleLogUpdate = Partial<Omit<BattleLog, 'combatants'>> & { combatants?: BattleCombatant[] };
 
 /** Every valid `voiceId` for `rememberEntity` (see tts.rs's VOICE_CATALOG,
  *  which is the source of truth this must stay in sync with) plus
@@ -145,16 +197,24 @@ export interface DmActionSet {
    *  fetches it and stashes it for the next buildTurnPrompt). A pure read —
    *  never changes campaign state. Absent on the vast majority of turns. */
   recallSession?: string;
-  /** New or updated hex coordinates for any combatant whose position changed
-   *  or who just entered the scene — kept in DMConsolePage's battle-map state
-   *  (not in Character, since monsters/NPCs aren't Characters) and fed back
-   *  to Claude every turn as ground truth (see dmPrompt.ts's battleMapStatusText). */
-  position?: NamePosition[];
-  /** The DM's own signal that a battle map is no longer relevant (combat
-   *  ended, or a brand-new encounter is starting) — wipes DMConsolePage's
-   *  tracked positions so stale coordinates from a previous fight don't bleed
-   *  into the next one. */
-  clearPositions?: boolean;
+  /** A partial update to the Active Battle Log — any combatant listed is
+   *  upserted by name, scalar fields (round/active/initiative/environment/
+   *  notes) replace only when present. Merged into DMConsolePage's battleLog
+   *  state via applyBattleLog and fed back every turn as ground truth (see
+   *  dmPrompt.ts's battleLogStatusText). Replaces the old hex-only `position`. */
+  battleLog?: BattleLogUpdate;
+  /** Names of combatants who've left the fight for good (dead and gone, fled
+   *  off-scene) — dropped from the battle log. A downed-but-present PC stays
+   *  in the log with hp:"down" rather than being removed. */
+  removeCombatant?: string[];
+  /** The DM's signal that the fight is over — wipes the live battle log so
+   *  stale state from one encounter can't bleed into the next. Replaces the
+   *  old `clearPositions`. */
+  endBattle?: boolean;
+  /** A one-or-two-sentence outcome saved to campaign memory when `endBattle`
+   *  fires (see DMConsolePage's runTurn → append_memory_note) — the ONLY part
+   *  of a fight that's persisted; the blow-by-blow log is discarded. */
+  battleResult?: string;
 }
 
 const ACTIONS_BLOCK = /```dm-actions\s*([\s\S]*?)```/i;
@@ -208,8 +268,70 @@ const isNamedFact = (x: unknown): x is { name: string; description: string } =>
 const isNamedEntityFact = (x: unknown): x is NamedEntityFact =>
   isPlainObject(x) && isStr(x.name) && isStr(x.description) &&
   (x.voiceId === undefined || isStr(x.voiceId)) && (x.pitch === undefined || isStr(x.pitch));
-const isNamePosition = (x: unknown): x is NamePosition =>
-  isPlainObject(x) && isStr(x.name) && isFiniteNum(x.q) && isFiniteNum(x.r);
+const isStrArray = (x: unknown): x is string[] => Array.isArray(x) && x.every(isStr);
+const isHexPosition = (x: unknown): x is HexPosition =>
+  isPlainObject(x) && isFiniteNum(x.q) && isFiniteNum(x.r);
+const BATTLE_SIDES = new Set(['party', 'enemy', 'ally', 'neutral']);
+/** Requires a name; any present optional must be the correct type, else the
+ *  whole combatant is dropped (with a warning) — same per-entry tolerance as
+ *  sanitizeArray. Value-level cleaning (an out-of-set `side`) happens in
+ *  cleanCombatant. */
+const isBattleCombatant = (x: unknown): x is BattleCombatant =>
+  isPlainObject(x) && isStr(x.name) &&
+  (x.side === undefined || isStr(x.side)) &&
+  (x.hp === undefined || isStr(x.hp)) &&
+  (x.conditions === undefined || isStrArray(x.conditions)) &&
+  (x.position === undefined || isStr(x.position)) &&
+  (x.coord === undefined || isHexPosition(x.coord)) &&
+  (x.notes === undefined || isStr(x.notes));
+
+/** Copies only known fields, dropping an out-of-set `side` (with a warning)
+ *  rather than the whole combatant — same shape as rememberEntity's voiceId
+ *  cleaning. */
+function cleanCombatant(c: BattleCombatant, warnings: string[]): BattleCombatant {
+  const out: BattleCombatant = { name: c.name };
+  if (c.side !== undefined) {
+    if (BATTLE_SIDES.has(c.side)) out.side = c.side;
+    else warnings.push(`Ignored unknown combatant side "${c.side}" for "${c.name}".`);
+  }
+  if (c.hp !== undefined) out.hp = c.hp;
+  if (c.conditions !== undefined) out.conditions = c.conditions;
+  if (c.position !== undefined) out.position = c.position;
+  if (c.coord !== undefined) out.coord = { q: c.coord.q, r: c.coord.r };
+  if (c.notes !== undefined) out.notes = c.notes;
+  return out;
+}
+
+/** Validates a `battleLog` partial update field-by-field. Scalars are dropped
+ *  if wrong-typed; combatants are filtered per-entry (a malformed one is
+ *  dropped, not the whole update). Returns undefined only when the value isn't
+ *  an object at all. */
+function sanitizeBattleLogUpdate(raw: unknown, warnings: string[]): BattleLogUpdate | undefined {
+  if (!isPlainObject(raw)) {
+    warnings.push('Ignored dm-actions "battleLog": expected an object.');
+    return undefined;
+  }
+  const update: BattleLogUpdate = {};
+  const round = sanitizeScalar(raw.round, 'battleLog.round', isFiniteNum, warnings);
+  if (round !== undefined) update.round = round;
+  const active = sanitizeScalar(raw.active, 'battleLog.active', isStr, warnings);
+  if (active !== undefined) update.active = active;
+  const environment = sanitizeScalar(raw.environment, 'battleLog.environment', isStr, warnings);
+  if (environment !== undefined) update.environment = environment;
+  const notes = sanitizeScalar(raw.notes, 'battleLog.notes', isStr, warnings);
+  if (notes !== undefined) update.notes = notes;
+  // Only treat initiative/combatants as "sent" when they're actually arrays, so
+  // a wrong-typed value warns-and-ignores rather than clobbering existing state
+  // with an empty list.
+  if (raw.initiative !== undefined) {
+    update.initiative = sanitizeArray(raw.initiative, 'battleLog.initiative', isStr, warnings);
+  }
+  if (raw.combatants !== undefined) {
+    update.combatants = sanitizeArray(raw.combatants, 'battleLog.combatants', isBattleCombatant, warnings)
+      .map((c) => cleanCombatant(c, warnings));
+  }
+  return update;
+}
 
 /** Validates a scalar (non-array) field's type, warning and dropping it if
  *  wrong rather than passing a wrongly-typed value through. */
@@ -257,8 +379,12 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   if (rememberEntity.length) actions.rememberEntity = rememberEntity;
   const rememberLocation = sanitizeArray(raw.rememberLocation, 'rememberLocation', isNamedFact, warnings);
   if (rememberLocation.length) actions.rememberLocation = rememberLocation;
-  const position = sanitizeArray(raw.position, 'position', isNamePosition, warnings);
-  if (position.length) actions.position = position;
+  if (raw.battleLog !== undefined) {
+    const battleLog = sanitizeBattleLogUpdate(raw.battleLog, warnings);
+    if (battleLog) actions.battleLog = battleLog;
+  }
+  const removeCombatant = sanitizeArray(raw.removeCombatant, 'removeCombatant', isStr, warnings);
+  if (removeCombatant.length) actions.removeCombatant = removeCombatant;
 
   const remember = sanitizeArray(raw.remember, 'remember', isStr, warnings);
   if (remember.length) actions.remember = remember;
@@ -273,8 +399,10 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   if (switchActiveModule !== undefined) actions.switchActiveModule = switchActiveModule;
   const recallSession = sanitizeScalar(raw.recallSession, 'recallSession', isStr, warnings);
   if (recallSession !== undefined) actions.recallSession = recallSession;
-  const clearPositions = sanitizeScalar(raw.clearPositions, 'clearPositions', isBool, warnings);
-  if (clearPositions !== undefined) actions.clearPositions = clearPositions;
+  const endBattle = sanitizeScalar(raw.endBattle, 'endBattle', isBool, warnings);
+  if (endBattle !== undefined) actions.endBattle = endBattle;
+  const battleResult = sanitizeScalar(raw.battleResult, 'battleResult', isStr, warnings);
+  if (battleResult !== undefined) actions.battleResult = battleResult;
 
   return { actions, warnings };
 }
@@ -419,4 +547,47 @@ export function applyDmActions(party: Character[], actions: DmActionSet): ApplyD
   }
 
   return { updated: next, warnings };
+}
+
+/** Merges a partial `battleLog` dm-action (and any `removeCombatant` names)
+ *  into the running Active Battle Log. This is the anti-drift core: the app
+ *  holds the authoritative combat state and the DM sends only what changed, so
+ *  a combatant the DM DOESN'T mention this turn is preserved unchanged rather
+ *  than lost when the model's context compacts. Pure — returns a new BattleLog,
+ *  never mutates `prev`.
+ *
+ *  - scalar fields (round/active/initiative/environment/notes) replace the
+ *    previous value only when the update carries them;
+ *  - combatants are upserted by name (case-insensitive, exact — so "Goblin 2"
+ *    never clobbers "Goblin 1"), new fields shallow-merged over the old so a
+ *    partial update (just `hp`, say) keeps the rest of that combatant's state;
+ *  - names in `remove` are dropped. */
+export function applyBattleLog(
+  prev: BattleLog | null,
+  update?: BattleLogUpdate,
+  remove?: string[],
+): BattleLog {
+  const base: BattleLog = prev ?? { combatants: [] };
+  const next: BattleLog = { ...base, combatants: [...base.combatants] };
+
+  if (update) {
+    if (update.round !== undefined) next.round = update.round;
+    if (update.active !== undefined) next.active = update.active;
+    if (update.initiative !== undefined) next.initiative = update.initiative;
+    if (update.environment !== undefined) next.environment = update.environment;
+    if (update.notes !== undefined) next.notes = update.notes;
+    for (const c of update.combatants ?? []) {
+      const key = c.name.trim().toLowerCase();
+      const idx = next.combatants.findIndex((x) => x.name.trim().toLowerCase() === key);
+      if (idx === -1) next.combatants.push(c);
+      else next.combatants[idx] = { ...next.combatants[idx], ...c };
+    }
+  }
+
+  if (remove?.length) {
+    const drop = new Set(remove.map((n) => n.trim().toLowerCase()));
+    next.combatants = next.combatants.filter((c) => !drop.has(c.name.trim().toLowerCase()));
+  }
+
+  return next;
 }

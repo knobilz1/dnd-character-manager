@@ -90,7 +90,7 @@ When your narration causes damage, healing, temp HP, a condition, exhaustion, or
 {"damage":[{"name":"Thorin","amount":12}],"addCondition":[{"name":"Mira","condition":"Prone"}],"rememberEntity":[{"name":"Gundren Rockseeker","description":"A dwarf merchant, captured by goblins near the Triboar Trail.","voiceId":"dwarf-m-2"},{"name":"Squibbins","description":"A jittery gnome tinkerer who runs the general store.","voiceId":"gnome-m-3"}]}
 ```
 
-Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}], position [{name,q,r}], clearPositions (true|false).
+Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}], battleLog {round?, active?, initiative? [names], environment?, notes?, combatants? [{name, side?, hp?, conditions? [..], position?, coord? {q,r}, notes?}]}, removeCombatant [names], endBattle (true|false), battleResult ("...").
 - `rememberEntity` / `rememberLocation`: `[{name, description, voiceId?, pitch?}]` — use these for any named NPC, faction, creature (`rememberEntity`), or place (`rememberLocation`) worth recalling much later. Each is *upserted by name*: if the name already exists in entities.md/locations.md, your description **replaces** the old one (rewrite it to reflect what's changed, e.g. "captured by goblins" becoming "rescued, now allied with the party" — don't just restate the original), so keep the description as a short, current, standalone summary rather than a running diary. If the name is new, it's added fresh. These are the DM's long-term "who/where" memory and are never summarized away, so this is the reliable way to make sure someone met in session 3 is still recognized in session 100. `voiceId`/`pitch` are `rememberEntity`-only (see "Giving NPCs distinct voices" below) — include them the first time you introduce an NPC worth voicing; once assigned they're permanent, so no need to repeat them on later updates to the same NPC's description. For an NPC worth remembering, also fold a short speech quirk or mannerism into the description the first time (e.g. "gruff, clipped sentences" or "nervous giggle, over-explains") — the voice makes them sound distinct in the moment, but a written quirk is what lets you keep playing them consistently many sessions later, long after the specific scene is forgotten.
 - `remember`: array of short, standalone facts worth recalling much later that AREN'T about one specific named entity or location — a promise made, a secret learned, a general consequence that should echo later. These go in flagged_facts.md, which — like entities.md/locations.md — is never summarized or compressed away, so prefer `rememberEntity`/`rememberLocation` whenever a fact is really about a specific person or place, and `remember` for everything else worth permanently keeping.
 - `resolveFact`: array of strings — each one a fact from flagged_facts.md whose story has now fully concluded (the promise was fulfilled or definitively broken, the secret came out, the consequence played out). Copy the fact's text as it appears in flagged_facts.md (verbatim or its distinctive part) so it can be matched. The fact is archived, not deleted — but be conservative, exactly like `resolveChapterSection`: only flag something genuinely, completely concluded. A fact left unresolved a little too long is harmless; a still-live promise wrongly resolved stops being shown to you.
@@ -98,19 +98,11 @@ Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp 
 - `resolveChapterSection`: a short description of a clearly-concluded, bounded portion of the *current* chapter (e.g. "the party cleared the eastern guard room and looted it") — only when the active module has chapters. This trims that resolved portion out of the chapter text you're given each turn, so it stops taking up space once it's no longer relevant. Be conservative: only flag something as resolved when it's genuinely done and bounded, never anything the party hasn't reached yet — a missed trim just means the text stays a little longer, which is harmless, but flagging unresolved content as done risks losing something you still need.
 - `switchActiveModule`: a module id from modules_index.md — only relevant if this campaign has more than one imported module. Use this when the party's own actions clearly move them from one self-contained module/side-quest to a different already-imported one (e.g. leaving one dungeon to chase a lead that belongs to another module you have on file). Never invent a module id that isn't listed in modules_index.md, and don't switch just because you're curious — only when the party has actually moved on in the fiction.
 - `recallSession`: a `session-NN` id copied exactly from session_index.md above. session_index.md gives you a one-line map of every past session, but not the detail — when a player references something specific from an earlier session and the one-liner (plus entities.md/locations.md/flagged_facts.md) isn't enough to answer confidently, set this to that session's id. The full verbatim record of that session is loaded into your NEXT turn's prompt, so you can answer accurately instead of guessing. Use it sparingly — only when you actually need the detail — and never invent an id that isn't listed in session_index.md. It's a read, not a story change: including it never alters anything, it just fetches your own past record.
-- `position` / `clearPositions`: see "Physical hex-grid positioning" below.
+- `battleLog` / `removeCombatant` / `endBattle` / `battleResult`: how you keep the Active Battle Log current during a fight, and save only the outcome when it ends — see "Running combat & positioning" in the DM rules for the full protocol.
 Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
 
 ## Campaign-arc plan check-ins
 Most turns you'll just see the active module's current chapter text (if any) and won't see the overarching campaign lore or the active module's own arc plan — that's intentional, it's not repeated every turn. Every so often (session start, right after a chapter or module change, and periodically otherwise) your prompt will start with a "Campaign-arc plan check-in" section containing the campaign's overarching lore and/or the active module's arc plan again. When you see it, use it to steer pacing, keep foreshadowed threads and NPCs consistent with the wider story, and then continue narrating normally — don't call attention to it or treat it as new information from the players.
-
-## Physical hex-grid positioning
-This table plays on physical 3D-printed hex terrain — uniform hexagonal cells with no printed coordinates or landmarks, so you must never speak a raw coordinate or compass direction aloud (there's no shared "north" between your bookkeeping and the physical table). Instead:
-- Track every combatant's (PCs, monsters, NPCs) position as axial hex coordinates (q, r). When any exist, your prompt starts with a line like "Current hex positions (axial q,r — internal bookkeeping only, never read aloud): Thorin: (0,0), Goblin1: (3,-2)" — treat this as ground truth, it's tracked outside your own memory and given fresh every turn.
-- Hex distance between two axial coordinates: (|q1-q2| + |q1+r1-q2-r2| + |r1-r2|) / 2. Use this to reason about range, adjacency, and movement, but always translate the result into something a human can act on by eye-counting hexes on the table: a hex count plus a named anchor plus a natural relative direction (e.g. "place the goblin 3 hexes past Thorin, roughly toward the cave mouth" or "that's 2 hexes — well within your movement"). Never say "(3,-2)" or "northeast" out loud.
-- When a combatant is newly placed or moves, report it via the `position` key: `{"position":[{"name":"Goblin1","q":3,"r":-2}]}`. Assign new coordinates relative to whoever's already tracked (or, if nothing is tracked yet, ask where the party currently stands and assign them coordinates clustered near (0,0) to establish the starting reference).
-- When combat ends or a genuinely new encounter is about to start, include `"clearPositions":true` so stale coordinates from the last fight don't bleed into the next one — then re-establish starting positions as above.
-- If no hex-position line appears in your prompt, there's no active battle map — don't invent one; just narrate normally until positioning actually starts mattering.
 
 ## How to DM
 - Track initiative yourself. Each round: narrate enemies, resolve actions, prompt the next player by name.
@@ -320,6 +312,24 @@ This discretion never touches anything the dice or rules already decided. Death 
 ## Genuine dead ends vs. earned consequences
 Before giving the party any way out of a stuck spot, both of these have to be true — not just one: (1) there's truly no path forward at all, not just that the obvious route is gone or the remaining one is hard, costly, or risky; and (2) the dead end wasn't caused by the party's own deliberate choice. Burning the only ladder out of a pit fails condition 2 — that's on them. Handle it as a real consequence (a hard climb check, time pressure, calling for help), not by undoing the choice or handing them a free way out. Per "Discretionary story twists" above, it stands.
 The narrow case this rule covers: a dead end you created by accident, not one the party earned — a locked door with exactly one key, and that key is now gone for good with no other route ever established. Only when both conditions above genuinely hold, patch it: introduce a detail that gives them a legitimate way through (a crack in the wall you hadn't mentioned, a second route, a costly-but-real alternative) — it doesn't need to be easy or free, it just needs to exist. This is fixing your own authoring mistake, not a rescue, and it should be rare: reach for it only when you're sure no path exists, never just because the party is stuck or frustrated.
+
+## Running combat & positioning
+This section fully supersedes any older "Physical hex-grid positioning" text or `position`/`clearPositions` keys still shown elsewhere — ignore those; use the Active Battle Log described here.
+
+### Battle mode
+Each turn your prompt states one line, `Battle mode: <name>.`, telling you how this table handles positioning. It's one of three, and it changes how you narrate placement — nothing else:
+- **Theater of the Mind** — there is NO battle map, NO grid, and NO miniatures on the table. Never tell a player to move a mini, never reference a square/hex, a coordinate, or an exact map. Positioning lives entirely in the fiction: describe range in rough terms a listener can picture and act on ("about 30 feet, across the chasm", "right beside you", "the archers are up on the ledge, out of easy reach"), and adjudicate reach/cover/line-of-sight by what makes sense in the scene, not by counting cells. When you note a combatant's position in the battle log, use the `position` field as a short plain-English phrase ("flanking Thorin in the doorway", "prone behind the altar").
+- **Grid** — the table uses miniatures on a plain square grid with no terrain pieces. You may track exact placement in each combatant's `coord` as `{q, r}` (treat them as square offsets; distance is the larger of |Δq| and |Δr| in squares, diagonals counting as one), but never say a raw coordinate aloud — translate to squares from a named anchor ("two squares left of Mira, up against the crates"). There are no elevation or cover features unless you introduce them in the fiction.
+- **Hex terrain** — the table uses physical 3D-printed hex terrain: uniform hex cells with real elevation, cover and difficult-terrain pieces, but no printed coordinates or shared compass. Track placement in `coord` as axial `{q, r}`; hex distance is (|Δq| + |Δq+Δr| + |Δr|) / 2. Never speak a raw coordinate or compass direction — translate to a hex count plus a named anchor plus a natural relative direction ("three hexes past Thorin, toward the cave mouth"). Use the printed terrain's elevation/cover in your rulings.
+
+If you're unsure of the mode, look at the `Battle mode:` line; when in doubt, narrate positioning in plain fictional terms (Theater of the Mind) rather than inventing a grid.
+
+### The Active Battle Log — never lose the state of a fight
+Combat state — round, initiative order, whose turn it is, each combatant's rough health and conditions, where everyone is, and any ongoing effects or hazards — is tracked OUTSIDE your own memory, by the app, and handed back to you fresh every turn as an "Active battle log" block. Treat that block as ground truth: it is authoritative over your own recollection, and it survives even if you lose track of the conversation. Your job is to keep it current.
+- When a fight starts, open the log: send a `battleLog` with the `combatants` you're placing (PCs, monsters, NPCs — each with a `name`, a `side` of "party"/"enemy"/"ally"/"neutral", a rough `hp` band like "healthy"/"bloodied"/"12/28"/"down", any `conditions`, and a `position` (Theater) or `coord` (Grid/Hex)), plus `round`, `initiative` (names in order), and `active` (whose turn it is). Set `environment` for lighting, hazards, cover, or terrain that matters.
+- Each following turn, send a `battleLog` with ONLY what changed — a combatant is upserted by name, so anyone you don't mention is left exactly as-is (you never have to restate the whole roster to avoid losing someone). Update `active`/`round` as the turn order advances, and a combatant's `hp`/`conditions`/`position` as they take hits, gain conditions, or move.
+- Use `removeCombatant: ["Goblin2"]` when someone leaves the fight for good (dead and gone, fled off the scene). A downed-but-present PC should stay in the log with `hp: "down"`, not be removed.
+- When the fight is over, send `endBattle: true` together with a one- or two-sentence `battleResult` — who won, any casualties or lasting conditions, and notable loot or consequences. Only that result is saved to the campaign's memory; the blow-by-blow log is wiped. Don't separately `remember` the same outcome — `battleResult` already records it (do still use `rememberEntity`/`rememberLocation` for a new NPC or place that combat introduced).
 "##;
 
 /// Appended to a pre-existing CLAUDE.md that predates the dm_rules import.
@@ -2709,6 +2719,57 @@ pub fn append_memory_note(app: AppHandle, id: String, date: String, note: String
     append_memory_note_at(&campaigns_root(&app)?, &id, &date, &note)
 }
 
+/// The three combat-positioning styles a campaign can be played in, chosen per
+/// campaign in the DM Console toolbar and remembered in `battle_mode.txt`. The
+/// active one is sent to the DM every turn (see DMConsolePage/buildTurnPrompt's
+/// `Battle mode:` line) and governs how positioning is narrated — see DM_RULES'
+/// "Running combat & positioning". `theater` is the default: it needs no
+/// physical map or minis and is the common home-game style, and it is what
+/// existing campaigns (which have no battle_mode.txt yet) fall back to.
+const BATTLE_MODES: [&str; 3] = ["theater", "grid", "hex"];
+const DEFAULT_BATTLE_MODE: &str = "theater";
+
+/// Any unrecognized value (a missing file reads as "", an old/garbled file, a
+/// bad command arg) resolves to the default rather than erroring — a wrong mode
+/// is harmless (it only changes how positioning is narrated), so tolerate it.
+fn normalize_battle_mode(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if BATTLE_MODES.contains(&trimmed) {
+        trimmed.to_string()
+    } else {
+        DEFAULT_BATTLE_MODE.to_string()
+    }
+}
+
+/// Pure: reads a campaign's saved battle mode, defaulting to `theater` when the
+/// file is missing (every campaign created before this feature) or holds
+/// anything unrecognized.
+fn read_battle_mode_at(root: &Path, id: &str) -> String {
+    normalize_battle_mode(&read_optional(&root.join(id).join("battle_mode.txt")))
+}
+
+/// Pure: persists a campaign's battle mode, normalizing first so the file only
+/// ever contains one of the three known values. Returns the value actually
+/// written so the caller's UI reflects any normalization.
+fn set_battle_mode_at(root: &Path, id: &str, mode: &str) -> Result<String, String> {
+    let normalized = normalize_battle_mode(mode);
+    write_atomic(&root.join(id).join("battle_mode.txt"), &normalized)?;
+    Ok(normalized)
+}
+
+/// Read the campaign's battle mode — fetched once per campaign switch by
+/// DMConsolePage, same pattern as read_campaign_plan / read_npc_voices.
+#[tauri::command]
+pub fn read_battle_mode(app: AppHandle, id: String) -> Result<String, String> {
+    Ok(read_battle_mode_at(&campaigns_root(&app)?, &id))
+}
+
+/// Persist the campaign's battle mode when the DM picks one in the toolbar.
+#[tauri::command]
+pub fn set_battle_mode(app: AppHandle, id: String, mode: String) -> Result<String, String> {
+    set_battle_mode_at(&campaigns_root(&app)?, &id, &mode)
+}
+
 /// Upserts one named NPC/faction/creature from a turn's dm-actions
 /// `rememberEntity` array — see DMConsolePage's runTurn.
 #[tauri::command]
@@ -3267,6 +3328,68 @@ mod tests {
         let rules = fs::read_to_string(&rules_path).unwrap();
         assert!(!rules.contains("ancient rules"), "stale generated rules must be overwritten");
         assert_eq!(rules, DM_RULES);
+    }
+
+    #[test]
+    fn read_battle_mode_at_defaults_to_theater_when_unset() {
+        let root = Scratch::new("battle_mode_default");
+        let meta = create_campaign_at(&root.0, &intake("No Mode Yet")).unwrap();
+        // No battle_mode.txt is ever written by create_campaign_at, so an
+        // existing campaign that predates this feature reads as theater.
+        assert_eq!(read_battle_mode_at(&root.0, &meta.id), "theater");
+    }
+
+    #[test]
+    fn set_then_read_battle_mode_roundtrips_each_mode() {
+        let root = Scratch::new("battle_mode_roundtrip");
+        let meta = create_campaign_at(&root.0, &intake("Modes")).unwrap();
+        for mode in ["hex", "grid", "theater"] {
+            let written = set_battle_mode_at(&root.0, &meta.id, mode).unwrap();
+            assert_eq!(written, mode);
+            assert_eq!(read_battle_mode_at(&root.0, &meta.id), mode);
+        }
+    }
+
+    #[test]
+    fn battle_mode_normalizes_unknown_values_to_theater() {
+        let root = Scratch::new("battle_mode_bad");
+        let meta = create_campaign_at(&root.0, &intake("Garbage")).unwrap();
+        // A bad command arg is clamped on write...
+        assert_eq!(set_battle_mode_at(&root.0, &meta.id, "isometric").unwrap(), "theater");
+        // ...and a hand-corrupted file is clamped on read.
+        fs::write(root.0.join(&meta.id).join("battle_mode.txt"), "  HEX-ish  ").unwrap();
+        assert_eq!(read_battle_mode_at(&root.0, &meta.id), "theater");
+    }
+
+    #[test]
+    fn battle_mode_tolerates_surrounding_whitespace() {
+        let root = Scratch::new("battle_mode_ws");
+        let meta = create_campaign_at(&root.0, &intake("Whitespace")).unwrap();
+        fs::write(root.0.join(&meta.id).join("battle_mode.txt"), "  grid\n").unwrap();
+        assert_eq!(read_battle_mode_at(&root.0, &meta.id), "grid");
+    }
+
+    /// The combat/positioning rules moved OUT of BASE_CLAUDE_MD (baked once at
+    /// creation) and INTO DM_RULES (rewritten every load) specifically so
+    /// existing campaigns pick up the three-mode battle-log protocol. If a
+    /// refactor ever drops it from DM_RULES, old campaigns would silently lose
+    /// combat tracking — so pin its presence here, and make sure the stale hex
+    /// section is gone from BASE_CLAUDE_MD.
+    #[test]
+    fn dm_rules_carry_the_battle_log_protocol_and_base_claude_md_dropped_the_old_hex_section() {
+        assert!(DM_RULES.contains("## Running combat & positioning"));
+        assert!(DM_RULES.contains("Active Battle Log"));
+        assert!(DM_RULES.contains("Theater of the Mind"));
+        assert!(DM_RULES.contains("endBattle"));
+        assert!(DM_RULES.contains("battleResult"));
+        assert!(
+            !BASE_CLAUDE_MD.contains("## Physical hex-grid positioning"),
+            "the hex-only positioning section must be gone from BASE_CLAUDE_MD"
+        );
+        assert!(
+            !BASE_CLAUDE_MD.contains("clearPositions"),
+            "the old position/clearPositions keys must be gone from BASE_CLAUDE_MD"
+        );
     }
 
     /// Archetype voice clips (tts.rs's ARCHETYPE_VOICES) are already recorded

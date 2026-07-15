@@ -1,5 +1,6 @@
 import type { Character } from '../types';
-import type { HexPosition } from './dmActions';
+import type { BattleLog, BattleMode } from './dmActions';
+import { BATTLE_MODE_LABELS } from './dmActions';
 import { hasKnownHp } from './partyHp';
 
 /**
@@ -48,16 +49,35 @@ export function partyStatusText(party: Character[]): string {
   return party.map(statusLine).join('\n');
 }
 
-/** Renders the current battle map (axial hex coordinates per combatant) as
- *  ground truth fed back to Claude every turn — small enough that, unlike the
- *  campaign plan, there's no reason to withhold it. Empty when no encounter
- *  is active (positions cleared, or none ever set). See dmActions.ts's
- *  `HexPosition`/`position`/`clearPositions` and BASE_CLAUDE_MD's positioning
- *  section for the full convention (never read coordinates aloud). */
-export function battleMapStatusText(positions: Record<string, HexPosition>): string {
-  const entries = Object.entries(positions);
-  if (entries.length === 0) return '';
-  return entries.map(([name, { q, r }]) => `${name}: (${q},${r})`).join(', ');
+/** Renders the Active Battle Log as ground truth fed back to the DM every turn
+ *  (see dmActions.ts's `BattleLog`/`applyBattleLog` and campaign.rs's DM_RULES
+ *  "Running combat & positioning"). The whole point is anti-drift: this is
+ *  tracked outside the model's own memory, so a long fight can't lose state
+ *  when context compacts. Returns '' when no fight is active (no combatants),
+ *  so buildTurnPrompt omits the section entirely. Coordinates are internal —
+ *  the DM translates them to a count-from-anchor, never reads them aloud. */
+export function battleLogStatusText(log: BattleLog): string {
+  if (!log.combatants || log.combatants.length === 0) return '';
+  const header: string[] = [];
+  if (log.round !== undefined) header.push(`Round ${log.round}`);
+  if (log.active) header.push(`active: ${log.active}`);
+  if (log.initiative?.length) header.push(`initiative: ${log.initiative.join(' → ')}`);
+  const lines = log.combatants.map((c) => {
+    const bits: string[] = [];
+    if (c.side) bits.push(c.side);
+    if (c.hp) bits.push(`HP ${c.hp}`);
+    if (c.conditions?.length) bits.push(c.conditions.join(', '));
+    if (c.position) bits.push(c.position);
+    if (c.coord) bits.push(`(${c.coord.q},${c.coord.r})`);
+    if (c.notes) bits.push(c.notes);
+    return `- ${c.name}${bits.length ? ` — ${bits.join(' | ')}` : ''}`;
+  });
+  const parts: string[] = [];
+  if (header.length) parts.push(header.join(' · '));
+  parts.push(lines.join('\n'));
+  if (log.environment) parts.push(`Environment: ${log.environment}`);
+  if (log.notes) parts.push(`Notes: ${log.notes}`);
+  return parts.join('\n');
 }
 
 /** Builds the text sent to `ask_dm` for one turn.
@@ -72,8 +92,12 @@ export function battleMapStatusText(positions: Record<string, HexPosition>): str
  *  something that needs re-reading every line, so DMConsolePage only passes
  *  it here periodically (first turn of a sitting, right after a chapter
  *  change, and every few turns otherwise) instead of every turn.
- *  `battleMap`, when non-empty, is the current hex positions — sent every
- *  turn (unlike planCheckIn) since it's tiny and needs to stay exact.
+ *  `battleMode` is the campaign's positioning style (see dmActions.ts's
+ *  BattleMode / campaign.rs's battle_mode) — sent every turn as a one-liner so
+ *  the DM narrates placement the way this table plays, and knows the mode the
+ *  moment a fight starts. `battleLog`, when it has combatants, is the current
+ *  Active Battle Log — sent every turn (unlike planCheckIn) as ground truth so
+ *  a fight's state can't drift or be lost when context compacts.
  *  `recalledSession`, when set, is the full verbatim record of a past session
  *  the DM asked for last turn via the `recallSession` dm-action (see
  *  campaign.rs's read_session_record) — injected once into the very next turn
@@ -90,13 +114,14 @@ export function battleMapStatusText(positions: Record<string, HexPosition>): str
 export function buildTurnPrompt(opts: {
   party: Character[];
   spokenText: string;
+  battleMode: BattleMode;
   speaker?: string;
   planCheckIn?: string;
   recalledSession?: { id: string; record: string };
-  battleMap?: Record<string, HexPosition>;
+  battleLog?: BattleLog | null;
   interruption?: { heard: string };
 }): string {
-  const { party, spokenText, speaker, planCheckIn, recalledSession, battleMap, interruption } = opts;
+  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, battleLog, interruption } = opts;
   const parts: string[] = [];
   if (interruption) {
     parts.push(interruption.heard
@@ -110,9 +135,10 @@ export function buildTurnPrompt(opts: {
     parts.push(`Recalled record of ${recalledSession.id} (you asked to pull this up last turn — the full verbatim transcript of that past session, for your reference only; use it to answer accurately, don't read it aloud):\n${recalledSession.record}`);
   }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
-  const battleMapText = battleMap ? battleMapStatusText(battleMap) : '';
-  if (battleMapText) {
-    parts.push(`Current hex positions (axial q,r — internal bookkeeping only, never read aloud): ${battleMapText}`);
+  parts.push(`Battle mode: ${BATTLE_MODE_LABELS[battleMode]}.`);
+  const battleLogText = battleLog ? battleLogStatusText(battleLog) : '';
+  if (battleLogText) {
+    parts.push(`Active battle log (tracked outside your memory, ground truth, given fresh every turn — keep it current via the \`battleLog\` action):\n${battleLogText}`);
   }
   parts.push(speaker
     ? `The player playing ${speaker} says: ${spokenText}`

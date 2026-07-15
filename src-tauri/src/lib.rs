@@ -60,6 +60,8 @@ pub fn run() {
       campaign::digest_session,
       campaign::read_session_record,
       campaign::append_memory_note,
+      campaign::read_battle_mode,
+      campaign::set_battle_mode,
       campaign::append_entity_fact,
       campaign::append_location_fact,
       campaign::upsert_party_member,
