@@ -118,10 +118,11 @@ export function buildTurnPrompt(opts: {
   speaker?: string;
   planCheckIn?: string;
   recalledSession?: { id: string; record: string };
+  recalledMap?: { slug: string; spec: string };
   battleLog?: BattleLog | null;
   interruption?: { heard: string };
 }): string {
-  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, battleLog, interruption } = opts;
+  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, battleLog, interruption } = opts;
   const parts: string[] = [];
   if (interruption) {
     parts.push(interruption.heard
@@ -133,6 +134,9 @@ export function buildTurnPrompt(opts: {
   }
   if (recalledSession) {
     parts.push(`Recalled record of ${recalledSession.id} (you asked to pull this up last turn — the full verbatim transcript of that past session, for your reference only; use it to answer accurately, don't read it aloud):\n${recalledSession.record}`);
+  }
+  if (recalledMap) {
+    parts.push(`Recalled battle map "${recalledMap.slug}" (you asked to pull this up last turn — its full layout and tactics, for your reference; place enemies on these cells and describe positions by them, don't read the raw grid aloud):\n${recalledMap.spec}`);
   }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
   parts.push(`Battle mode: ${BATTLE_MODE_LABELS[battleMode]}.`);

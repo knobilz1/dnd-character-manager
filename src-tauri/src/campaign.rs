@@ -73,6 +73,7 @@ You are given the current party status (HP, conditions, etc.) at the top of ever
 @memory/entities.md
 @memory/locations.md
 @memory/party.md
+@memory/battle_maps/index.md
 @memory/dm_rules.md
 
 ## Sound like a person talking, not a document
@@ -98,6 +99,7 @@ Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp 
 - `resolveChapterSection`: a short description of a clearly-concluded, bounded portion of the *current* chapter (e.g. "the party cleared the eastern guard room and looted it") — only when the active module has chapters. This trims that resolved portion out of the chapter text you're given each turn, so it stops taking up space once it's no longer relevant. Be conservative: only flag something as resolved when it's genuinely done and bounded, never anything the party hasn't reached yet — a missed trim just means the text stays a little longer, which is harmless, but flagging unresolved content as done risks losing something you still need.
 - `switchActiveModule`: a module id from modules_index.md — only relevant if this campaign has more than one imported module. Use this when the party's own actions clearly move them from one self-contained module/side-quest to a different already-imported one (e.g. leaving one dungeon to chase a lead that belongs to another module you have on file). Never invent a module id that isn't listed in modules_index.md, and don't switch just because you're curious — only when the party has actually moved on in the fiction.
 - `recallSession`: a `session-NN` id copied exactly from session_index.md above. session_index.md gives you a one-line map of every past session, but not the detail — when a player references something specific from an earlier session and the one-liner (plus entities.md/locations.md/flagged_facts.md) isn't enough to answer confidently, set this to that session's id. The full verbatim record of that session is loaded into your NEXT turn's prompt, so you can answer accurately instead of guessing. Use it sparingly — only when you actually need the detail — and never invent an id that isn't listed in session_index.md. It's a read, not a story change: including it never alters anything, it just fetches your own past record.
+- `recallMap`: a battle-map slug copied exactly from battle_maps/index.md above. The index lists each prepared map's name and size but not its layout — when a fight is about to happen on a location you have a map for, set this to that map's slug and its full grid + tactics loads into your NEXT turn so you can place enemies on the real cells (see "Prepared battle maps" in the DM rules). Like `recallSession` it's a read that changes nothing; never invent a slug that isn't in the index.
 - `battleLog` / `removeCombatant` / `endBattle` / `battleResult`: how you keep the Active Battle Log current during a fight, and save only the outcome when it ends — see "Running combat & positioning" in the DM rules for the full protocol.
 Only include this block when something actually changed. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
 
@@ -189,6 +191,35 @@ const SESSION_INDEX_IMPORT_LINE: &str = "@memory/session_index.md\n";
 /// keyed by the same `session-NN` id the always-loaded session_index.md lists,
 /// so retrieval is a direct file read rather than parsing a heterogeneous log.
 const SESSION_RECORDS_DIR: &str = "session_records";
+
+/// Subdirectory (under a campaign's `memory/`) holding one `<slug>.md` per
+/// prepared battle map — the DM-authored ASCII grid + legend + tactics, which
+/// is both the printable source of truth (rendered by battleMapRender.ts) and
+/// the DM's own memory of exactly what each map looks like. `index.md` here is
+/// the always-loaded one-line-per-map list (see DEFAULT_BATTLE_MAPS_INDEX_MD),
+/// and `recallMap` pulls a full spec back the same way `recallSession` pulls a
+/// session record.
+const BATTLE_MAPS_DIR: &str = "battle_maps";
+
+const DEFAULT_BATTLE_MAPS_INDEX_MD: &str = "# Battle Maps\n\n_One line per prepared battle map — a compact, always-loaded list of the maps made for this campaign, so during a Grid/Hex-mode fight you know exactly which maps exist and their rough layout. Each entry has a slug; to pull back a full map spec (the ASCII grid + tactics), use the `recallMap` dm-action with that slug._\n";
+
+/// Standing-import line for battle_maps/index.md — appended to an existing
+/// campaign's CLAUDE.md by sync_battle_maps_index_at, exactly like the session
+/// index. New campaigns get it inline in BASE_CLAUDE_MD.
+const BATTLE_MAPS_INDEX_IMPORT_LINE: &str = "@memory/battle_maps/index.md\n";
+
+/// Delimiter the DM puts between successive maps in one generation reply — a
+/// line containing only this. Deliberately NOT a markdown heading or a `---`
+/// rule: an ASCII map's own wall rows are runs of `#`, and `---` could be a
+/// legend or tactics separator, so the split token has to be something that
+/// never appears inside a map. See build_battle_maps_prompt / split_map_specs.
+const MAP_SPEC_DELIMITER: &str = "===MAP===";
+
+/// The canonical tile legend shared by the generation prompt and the renderer
+/// (battleMapRender.ts must use the same codes). The model is told to use ONLY
+/// these so it never invents a code the renderer can't draw; the renderer has a
+/// fallback tile for anything unexpected anyway.
+const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ difficult terrain (rubble)  = furniture/altar  T tree/foliage  _ stairs  * hazard (fire/brazier)  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -330,6 +361,11 @@ Combat state — round, initiative order, whose turn it is, each combatant's rou
 - Each following turn, send a `battleLog` with ONLY what changed — a combatant is upserted by name, so anyone you don't mention is left exactly as-is (you never have to restate the whole roster to avoid losing someone). Update `active`/`round` as the turn order advances, and a combatant's `hp`/`conditions`/`position` as they take hits, gain conditions, or move.
 - Use `removeCombatant: ["Goblin2"]` when someone leaves the fight for good (dead and gone, fled off the scene). A downed-but-present PC should stay in the log with `hp: "down"`, not be removed.
 - When the fight is over, send `endBattle: true` together with a one- or two-sentence `battleResult` — who won, any casualties or lasting conditions, and notable loot or consequences. Only that result is saved to the campaign's memory; the blow-by-blow log is wiped. Don't separately `remember` the same outcome — `battleResult` already records it (do still use `rememberEntity`/`rememberLocation` for a new NPC or place that combat introduced).
+
+### Prepared battle maps
+The DM (or you, ahead of time) may have prepared printable battle maps for this campaign's encounters. They're listed one per line in battle_maps/index.md above, each with a slug. Each map is a precise top-down grid with a coordinate system — columns labelled A, B, C… left to right and rows numbered 1, 2, 3… top to bottom, the SAME coordinate space as the Active Battle Log — so a cell like "C3" or "K1" means one exact square on the printed map.
+- In Grid or Hex mode, when a fight happens on a location you have a prepared map for, use that map's real layout: place enemies, set ambushes, and judge cover/choke points by its actual cells, and put those same cell references into the battle log's `position`/`coord` and your spoken directions ("the goblins are dug in behind the pillars at C3 and D3"). This is the payoff of preparing the map — everyone at the table is looking at the exact same grid you are.
+- The index only gives you each map's name and size. To see a map's full layout before running a fight on it, use the `recallMap` dm-action with its slug (copied exactly from the index) — the full grid + tactics is loaded into your next turn, just like `recallSession`. It's a read; it never changes anything. Never invent a slug that isn't in the index.
 "##;
 
 /// Appended to a pre-existing CLAUDE.md that predates the dm_rules import.
@@ -742,6 +778,8 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     write_atomic(&dir.join("memory").join("party.md"), DEFAULT_PARTY_MD)?;
     write_atomic(&dir.join("memory").join("full_history.md"), DEFAULT_HISTORY_MD)?;
     write_atomic(&dir.join("memory").join("session_index.md"), DEFAULT_SESSION_INDEX_MD)?;
+    fs::create_dir_all(dir.join("memory").join(BATTLE_MAPS_DIR)).map_err(|e| e.to_string())?;
+    write_atomic(&dir.join("memory").join(BATTLE_MAPS_DIR).join("index.md"), DEFAULT_BATTLE_MAPS_INDEX_MD)?;
     // Seeded here too so a brand-new campaign's very first turn already has the
     // rules — sync_dm_rules_at only runs on load, which is after creation.
     write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
@@ -1955,6 +1993,227 @@ fn suggest_session_plan_at(root: &Path, id: &str, terrain_catalog: &str) -> Resu
     crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)
 }
 
+// ── Battle map generation & storage ─────────────────────────────────────────
+// The DM authors each map as a text spec (an ASCII grid + legend + tactics);
+// the frontend (battleMapRender.ts) renders it deterministically to a printable
+// PDF/PNG. The spec is BOTH the printable source of truth AND the DM's memory
+// of exactly what the map looks like, which is what lets it plan enemy
+// placement and ambushes against a precise, known layout.
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct BattleMapMeta {
+    pub slug: String,
+    pub name: String,
+    /// One-line summary for the index / picker (the grid's dimensions).
+    pub summary: String,
+}
+
+/// Path-traversal guard for a slug that reaches the filesystem — slugify only
+/// ever produces `[a-z0-9-]`, so a generated slug always passes; anything else
+/// (`../`, an absolute path) is rejected. Mirrors is_valid_session_id.
+fn is_valid_map_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 80
+        && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn battle_maps_dir(root: &Path, id: &str) -> PathBuf {
+    root.join(id).join("memory").join(BATTLE_MAPS_DIR)
+}
+
+fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: Option<&str>) -> String {
+    let focus = match hint {
+        Some(h) => format!("Design ONE battle map for this specific encounter the DM described: {h}\n\n"),
+        None => "Look at what's coming up in the current chapter and design battle maps for the combat encounters the party is most likely to reach next — up to THREE maps, and ONLY for encounters that actually appear in the content below. If nothing coming up calls for a tactical map, return no maps at all rather than inventing filler.\n\n".to_string(),
+    };
+    format!(
+        "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
+        {focus}\
+        Campaign-arc plan:\n{module_plan}\n\n\
+        Current chapter (what's coming up):\n{current_chapter}\n\n\
+        Recent memory/recaps:\n{memory}\n\n\
+        Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # <Short map name>\n\
+        Grid: <cols>x<rows>, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        <exactly <rows> lines, each exactly <cols> characters wide, using ONLY the single-character legend codes above>\n\
+        Features:\n\
+        - <notable things and the cell they're in, e.g. \"Altar at J8\">\n\
+        Tactics:\n\
+        - <choke points, cover, and sightlines, plus concrete suggested enemy start cells and ambush spots, referencing cells like C3 or K1>\n\n\
+        Rules for the Map block: size it between 10x10 and 24x18; EVERY row must be the same width; enclose the playable area with `#` walls and use a space for anything outside it; make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction. Output nothing outside the sections shown."
+    )
+}
+
+/// Splits a generation reply into individual raw specs on MAP_SPEC_DELIMITER
+/// lines, keeping only chunks that actually contain a `Map:` block. Pure.
+fn split_map_specs(reply: &str) -> Vec<String> {
+    reply
+        .split(MAP_SPEC_DELIMITER)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && s.contains("Map:"))
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// The `# Title` line, or a stable fallback so a title-less spec still slugs.
+fn map_title(spec: &str) -> String {
+    spec.lines()
+        .find_map(|l| l.strip_prefix("# "))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "Battle Map".to_string())
+}
+
+/// The `Grid:` line's dimensions, for the one-line index/picker summary.
+fn map_summary(spec: &str) -> String {
+    spec.lines()
+        .find_map(|l| l.trim().strip_prefix("Grid:"))
+        .map(|g| g.trim().trim_end_matches('.').to_string())
+        .unwrap_or_default()
+}
+
+/// Rebuilds index.md fresh from whatever `<slug>.md` files exist (sorted by
+/// name), so regenerating or deleting a map never leaves a stale index line —
+/// the reason this doesn't append-in-place like the session index does.
+fn rebuild_battle_maps_index_at(root: &Path, id: &str) -> Result<Vec<BattleMapMeta>, String> {
+    let dir = battle_maps_dir(root, id);
+    let mut metas: Vec<BattleMapMeta> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+            let slug = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(s) if s != "index" && is_valid_map_slug(s) => s.to_string(),
+                _ => continue,
+            };
+            let spec = read_optional(&path);
+            metas.push(BattleMapMeta { slug, name: map_title(&spec), summary: map_summary(&spec) });
+        }
+    }
+    metas.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    let mut index = DEFAULT_BATTLE_MAPS_INDEX_MD.to_string();
+    for m in &metas {
+        let summary = if m.summary.is_empty() { String::new() } else { format!(" — {}", m.summary) };
+        index.push_str(&format!("- **{}**: {}{}\n", m.slug, m.name, summary));
+    }
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_atomic(&dir.join("index.md"), &index)?;
+    Ok(metas)
+}
+
+fn write_map_spec_at(root: &Path, id: &str, spec: &str) -> Result<(), String> {
+    let slug = slugify(&map_title(spec));
+    let dir = battle_maps_dir(root, id);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_atomic(&dir.join(format!("{slug}.md")), &format!("{}\n", spec.trim()))
+}
+
+fn generate_battle_maps_at(root: &Path, id: &str, hint: Option<&str>) -> Result<Vec<BattleMapMeta>, String> {
+    let dir = root.join(id);
+    let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
+    let current_chapter = read_optional(&dir.join("active_module").join("current.md"));
+    let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
+    let combined_plan = [campaign_lore.trim(), module_plan.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
+    let memory = read_optional(&dir.join("memory").join("MEMORY.md"));
+    let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
+    let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
+
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint);
+    let reply = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)?;
+
+    for spec in split_map_specs(&reply) {
+        write_map_spec_at(root, id, &spec)?;
+    }
+    // Rebuild over ALL maps (new + pre-existing) so the UI reflects the whole
+    // current set, not just this batch.
+    rebuild_battle_maps_index_at(root, id)
+}
+
+fn read_battle_map_at(root: &Path, id: &str, slug: &str) -> Result<String, String> {
+    if !is_valid_map_slug(slug) {
+        return Ok(format!("No battle map found for \"{slug}\" (not a valid map id)."));
+    }
+    let path = battle_maps_dir(root, id).join(format!("{slug}.md"));
+    Ok(fs::read_to_string(&path).unwrap_or_else(|_| format!("No battle map found for \"{slug}\".")))
+}
+
+/// Create-only sibling of sync_dm_rules/sync_session_index — gives an existing
+/// campaign the battle_maps/ dir, a seeded index.md, and the standing CLAUDE.md
+/// import, never clobbering maps already saved.
+fn sync_battle_maps_index_at(root: &Path, id: &str) -> Result<(), String> {
+    let dir = root.join(id);
+    let maps_dir = dir.join("memory").join(BATTLE_MAPS_DIR);
+    fs::create_dir_all(&maps_dir).map_err(|e| e.to_string())?;
+    let index_path = maps_dir.join("index.md");
+    if !index_path.exists() {
+        write_atomic(&index_path, DEFAULT_BATTLE_MAPS_INDEX_MD)?;
+    }
+    let claude_path = dir.join("CLAUDE.md");
+    let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    if !claude_md.contains("@memory/battle_maps/index.md") {
+        claude_md.push_str(BATTLE_MAPS_INDEX_IMPORT_LINE);
+        write_atomic(&claude_path, &claude_md)?;
+    }
+    Ok(())
+}
+
+/// Generate battle maps for whatever's coming up in the current chapter — the
+/// session-prep batch entry point (Battle Maps dialog). Ingestion-side Claude
+/// call (a small local model authors ASCII grids poorly), so spawn_blocking
+/// like suggest_session_plan.
+#[tauri::command]
+pub async fn generate_battle_maps(app: AppHandle, id: String) -> Result<Vec<BattleMapMeta>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        generate_battle_maps_at(&root, &id, None)
+    })
+    .await
+    .map_err(|e| format!("Battle map generation task failed: {e}"))?
+}
+
+/// Generate one battle map for a specific encounter the DM/operator describes —
+/// the on-demand entry point.
+#[tauri::command]
+pub async fn generate_battle_map(app: AppHandle, id: String, hint: String) -> Result<Vec<BattleMapMeta>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        generate_battle_maps_at(&root, &id, Some(&hint))
+    })
+    .await
+    .map_err(|e| format!("Battle map generation task failed: {e}"))?
+}
+
+/// List a campaign's saved maps (also refreshes index.md as a side effect —
+/// one code path with rebuild_battle_maps_index_at).
+#[tauri::command]
+pub fn list_battle_maps(app: AppHandle, id: String) -> Result<Vec<BattleMapMeta>, String> {
+    Ok(rebuild_battle_maps_index_at(&campaigns_root(&app)?, &id).unwrap_or_default())
+}
+
+/// Read one map's full spec — the render source, and the `recallMap` retrieval
+/// target (a friendly "not found" string, never an error, for a bad slug).
+#[tauri::command]
+pub fn read_battle_map(app: AppHandle, id: String, slug: String) -> Result<String, String> {
+    read_battle_map_at(&campaigns_root(&app)?, &id, &slug)
+}
+
+/// Overwrite one map's spec (hand edits from the dialog) and refresh the index.
+#[tauri::command]
+pub fn save_battle_map(app: AppHandle, id: String, slug: String, content: String) -> Result<Vec<BattleMapMeta>, String> {
+    if !is_valid_map_slug(&slug) {
+        return Err(format!("Invalid map id \"{slug}\"."));
+    }
+    let root = campaigns_root(&app)?;
+    let dir = battle_maps_dir(&root, &id);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_atomic(&dir.join(format!("{slug}.md")), &format!("{}\n", content.trim()))?;
+    rebuild_battle_maps_index_at(&root, &id)
+}
+
 /// `campaign_lore` (memory/campaign_lore.md) and `other_modules_summary`
 /// (modules_index.md's listing of already-imported modules) are both `""` for
 /// a campaign's first-ever import — the prompt degrades to a plain "no wider
@@ -2848,7 +3107,8 @@ pub fn campaign_archetype_voice_count(app: AppHandle, id: String) -> Result<usiz
 pub fn sync_dm_rules(app: AppHandle, id: String) -> Result<(), String> {
     let root = campaigns_root(&app)?;
     sync_dm_rules_at(&root, &id)?;
-    sync_session_index_at(&root, &id)
+    sync_session_index_at(&root, &id)?;
+    sync_battle_maps_index_at(&root, &id)
 }
 
 /// How much voice_debug.log to keep. It's a diagnostic, not a record — old
@@ -3375,6 +3635,102 @@ mod tests {
     /// refactor ever drops it from DM_RULES, old campaigns would silently lose
     /// combat tracking — so pin its presence here, and make sure the stale hex
     /// section is gone from BASE_CLAUDE_MD.
+    const SAMPLE_MAP_SPEC: &str = "# The Goblin Warren\nGrid: 12x10, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\nLegend: . floor  # wall  + door  o pillar\nMap:\n############\n#..........#\n#..oo......#\n#..oo......#\n#..........#\n#..........#\n#........+.#\n#..........#\n#..........#\n############\nFeatures:\n- Pillars at C3/D3.\nTactics:\n- Ambush from behind the pillars at C3/D3; choke point at the door I7.";
+
+    #[test]
+    fn split_map_specs_splits_on_the_delimiter_and_skips_non_map_chunks() {
+        let reply = format!("some preamble\n{d}\n{a}\n{d}\nnot a map, no grid here\n{d}\n{a}", d = MAP_SPEC_DELIMITER, a = SAMPLE_MAP_SPEC);
+        let specs = split_map_specs(&reply);
+        assert_eq!(specs.len(), 2, "preamble and the no-Map chunk must be dropped");
+        assert!(specs[0].starts_with("# The Goblin Warren"));
+    }
+
+    #[test]
+    fn map_title_and_summary_are_extracted_and_slugged() {
+        assert_eq!(map_title(SAMPLE_MAP_SPEC), "The Goblin Warren");
+        assert_eq!(slugify(&map_title(SAMPLE_MAP_SPEC)), "the-goblin-warren");
+        assert!(map_summary(SAMPLE_MAP_SPEC).starts_with("12x10"));
+        assert_eq!(map_title("no heading here\nMap:\n##"), "Battle Map");
+    }
+
+    #[test]
+    fn writing_a_spec_then_reading_it_back_roundtrips_by_slug() {
+        let root = Scratch::new("map-roundtrip");
+        let meta = create_campaign_at(&root.0, &intake("Warrens")).unwrap();
+        write_map_spec_at(&root.0, &meta.id, SAMPLE_MAP_SPEC).unwrap();
+        let back = read_battle_map_at(&root.0, &meta.id, "the-goblin-warren").unwrap();
+        assert!(back.contains("The Goblin Warren"));
+        assert!(back.contains("############"));
+    }
+
+    #[test]
+    fn read_battle_map_at_rejects_a_traversal_slug_and_a_missing_one() {
+        let root = Scratch::new("map-bad-slug");
+        let meta = create_campaign_at(&root.0, &intake("X")).unwrap();
+        assert!(read_battle_map_at(&root.0, &meta.id, "../../secrets").unwrap().contains("not a valid map id"));
+        assert!(read_battle_map_at(&root.0, &meta.id, "nope").unwrap().contains("No battle map found"));
+    }
+
+    #[test]
+    fn rebuild_index_lists_one_line_per_map_and_drops_stale_entries() {
+        let root = Scratch::new("map-index");
+        let meta = create_campaign_at(&root.0, &intake("Dungeon")).unwrap();
+        write_map_spec_at(&root.0, &meta.id, SAMPLE_MAP_SPEC).unwrap();
+        write_map_spec_at(&root.0, &meta.id, "# The Flooded Vault\nGrid: 15x12, 5 ft squares.\nLegend: . floor  # wall\nMap:\n###\n#.#\n###\nFeatures:\n-\nTactics:\n-").unwrap();
+        let metas = rebuild_battle_maps_index_at(&root.0, &meta.id).unwrap();
+        assert_eq!(metas.len(), 2);
+        let index = fs::read_to_string(battle_maps_dir(&root.0, &meta.id).join("index.md")).unwrap();
+        assert_eq!(index.matches("- **").count(), 2, "one line per map, no dup");
+        assert!(index.contains("**the-goblin-warren**"));
+        assert!(index.contains("**the-flooded-vault**"));
+
+        // Regenerating the SAME map (same title/slug) overwrites in place — the
+        // index must not grow.
+        write_map_spec_at(&root.0, &meta.id, SAMPLE_MAP_SPEC).unwrap();
+        let metas2 = rebuild_battle_maps_index_at(&root.0, &meta.id).unwrap();
+        assert_eq!(metas2.len(), 2, "re-saving an existing map must not add a new entry");
+    }
+
+    #[test]
+    fn build_battle_maps_prompt_includes_content_and_switches_on_hint() {
+        let batch = build_battle_maps_prompt("arc", "chapter goblins", "memory", None);
+        assert!(batch.contains("chapter goblins"));
+        assert!(batch.contains("up to THREE"));
+        assert!(batch.contains(MAP_SPEC_DELIMITER));
+        let one = build_battle_maps_prompt("arc", "chapter", "memory", Some("a bridge ambush"));
+        assert!(one.contains("a bridge ambush"));
+        assert!(one.contains("ONE battle map"));
+    }
+
+    #[test]
+    fn new_campaigns_get_the_maps_index_import_and_a_seeded_index() {
+        let root = Scratch::new("map-seed");
+        let meta = create_campaign_at(&root.0, &intake("Fresh")).unwrap();
+        let dir = root.0.join(&meta.id);
+        assert!(dir.join("memory").join(BATTLE_MAPS_DIR).join("index.md").exists());
+        let claude = fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("@memory/battle_maps/index.md"), "new campaigns import the maps index");
+    }
+
+    #[test]
+    fn sync_battle_maps_index_at_upgrades_an_old_campaign_without_clobbering() {
+        let root = Scratch::new("map-upgrade");
+        let meta = create_campaign_at(&root.0, &intake("Old")).unwrap();
+        // Simulate a pre-feature campaign: remove the import line and a saved map
+        // must survive the sync.
+        write_map_spec_at(&root.0, &meta.id, SAMPLE_MAP_SPEC).unwrap();
+        let claude_path = root.0.join(&meta.id).join("CLAUDE.md");
+        let stripped = fs::read_to_string(&claude_path).unwrap().replace("@memory/battle_maps/index.md\n", "");
+        fs::write(&claude_path, &stripped).unwrap();
+
+        sync_battle_maps_index_at(&root.0, &meta.id).unwrap();
+        sync_battle_maps_index_at(&root.0, &meta.id).unwrap(); // idempotent
+
+        let claude = fs::read_to_string(&claude_path).unwrap();
+        assert_eq!(claude.matches("@memory/battle_maps/index.md").count(), 1, "import must not accumulate");
+        assert!(read_battle_map_at(&root.0, &meta.id, "the-goblin-warren").unwrap().contains("The Goblin Warren"), "an existing map must survive the sync");
+    }
+
     #[test]
     fn dm_rules_carry_the_battle_log_protocol_and_base_claude_md_dropped_the_old_hex_section() {
         assert!(DM_RULES.contains("## Running combat & positioning"));

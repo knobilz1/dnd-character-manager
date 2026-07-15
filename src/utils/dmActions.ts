@@ -197,6 +197,13 @@ export interface DmActionSet {
    *  fetches it and stashes it for the next buildTurnPrompt). A pure read —
    *  never changes campaign state. Absent on the vast majority of turns. */
   recallSession?: string;
+  /** A battle-map slug from memory/battle_maps/index.md — the DM's request to
+   *  pull that map's full ASCII layout + tactics into its NEXT turn, so it can
+   *  place enemies on the real cells before running a fight there (see
+   *  campaign.rs's read_battle_map + DMConsolePage's runTurn, which fetches it
+   *  and stashes it for the next buildTurnPrompt). A pure read, like
+   *  recallSession — never changes campaign state. */
+  recallMap?: string;
   /** A partial update to the Active Battle Log — any combatant listed is
    *  upserted by name, scalar fields (round/active/initiative/environment/
    *  notes) replace only when present. Merged into DMConsolePage's battleLog
@@ -399,6 +406,8 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   if (switchActiveModule !== undefined) actions.switchActiveModule = switchActiveModule;
   const recallSession = sanitizeScalar(raw.recallSession, 'recallSession', isStr, warnings);
   if (recallSession !== undefined) actions.recallSession = recallSession;
+  const recallMap = sanitizeScalar(raw.recallMap, 'recallMap', isStr, warnings);
+  if (recallMap !== undefined) actions.recallMap = recallMap;
   const endBattle = sanitizeScalar(raw.endBattle, 'endBattle', isBool, warnings);
   if (endBattle !== undefined) actions.endBattle = endBattle;
   const battleResult = sanitizeScalar(raw.battleResult, 'battleResult', isStr, warnings);
