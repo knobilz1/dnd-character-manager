@@ -29,7 +29,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-http = "2"
 tauri-plugin-opener = "2"
-keyring = "3"
+# v3 has NO default credential-store backend — it must be requested per
+# platform via features, or Entry::new()'s set/get_password calls silently
+# no-op (this app ships macOS + Windows only per the CI release matrix, see
+# .github/workflows/release.yml — no sync-secret-service/Linux needed).
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
 # OAuth helpers — all run inside Rust, credentials never touch the JS bundle
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"

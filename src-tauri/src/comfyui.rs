@@ -92,13 +92,13 @@ fn pick_checkpoint(base: &str) -> Result<String, String> {
         })
 }
 
-fn build_workflow(ckpt_name: &str, image_name: &str) -> Value {
+fn build_workflow(ckpt_name: &str, image_name: &str, prompt: &str, denoise: f64) -> Value {
     let seed: u64 = rand::thread_rng().gen();
     json!({
         "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": ckpt_name } },
         "10": { "class_type": "LoadImage", "inputs": { "image": image_name } },
         "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["4", 2] } },
-        "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": POSITIVE_PROMPT } },
+        "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": prompt } },
         "7": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": NEGATIVE_PROMPT } },
         "3": {
             "class_type": "KSampler",
@@ -108,7 +108,7 @@ fn build_workflow(ckpt_name: &str, image_name: &str) -> Value {
                 "cfg": 7,
                 "sampler_name": "euler",
                 "scheduler": "normal",
-                "denoise": DENOISE,
+                "denoise": denoise,
                 "model": ["4", 0],
                 "positive": ["6", 0],
                 "negative": ["7", 0],
@@ -210,7 +210,7 @@ fn fetch_view(base: &str, filename: &str, subfolder: &str, img_type: &str) -> Re
     Ok(bytes)
 }
 
-fn stylize_blocking(base_url: &str, png_data_url: &str) -> Result<String, String> {
+fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f64) -> Result<String, String> {
     let base = base_url.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err("No ComfyUI address configured.".to_string());
@@ -219,7 +219,7 @@ fn stylize_blocking(base_url: &str, png_data_url: &str) -> Result<String, String
     let image_name = upload_image(base, &png)?;
     let ckpt_name = pick_checkpoint(base)?;
     let client_id = random_client_id();
-    let workflow = build_workflow(&ckpt_name, &image_name);
+    let workflow = build_workflow(&ckpt_name, &image_name, prompt, denoise);
     let prompt_id = queue_prompt(base, workflow, &client_id)?;
     let history_entry = poll_history(base, &prompt_id)?;
     let (filename, subfolder, img_type) = extract_image_ref(&history_entry)?;
@@ -234,11 +234,25 @@ fn stylize_blocking(base_url: &str, png_data_url: &str) -> Result<String, String
 /// battleMapRender.ts). Errors are returned, never panics, so the caller can
 /// fall back to the vector render cleanly when ComfyUI is unreachable or
 /// misconfigured.
+///
+/// `prompt`/`denoise` are optional overrides for the manual "AI Export…"
+/// path (a DM-written prompt and a chosen strength); the automatic
+/// "AI atmosphere pass on export" checkbox calls this with neither, so it
+/// keeps using the fixed POSITIVE_PROMPT/DENOISE defaults unchanged.
 #[tauri::command]
-pub async fn comfyui_stylize_map(base_url: String, png_data_url: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || stylize_blocking(&base_url, &png_data_url))
-        .await
-        .map_err(|e| format!("Stylize task failed: {e}"))?
+pub async fn comfyui_stylize_map(
+    base_url: String,
+    png_data_url: String,
+    prompt: Option<String>,
+    denoise: Option<f64>,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let prompt = prompt.unwrap_or_else(|| POSITIVE_PROMPT.to_string());
+        let denoise = denoise.unwrap_or(DENOISE);
+        stylize_blocking(&base_url, &png_data_url, &prompt, denoise)
+    })
+    .await
+    .map_err(|e| format!("Stylize task failed: {e}"))?
 }
 
 #[cfg(test)]
@@ -287,7 +301,7 @@ mod tests {
 
     #[test]
     fn build_workflow_wires_uploaded_image_and_checkpoint_through_the_graph() {
-        let wf = build_workflow("my-checkpoint.safetensors", "uploaded123.png");
+        let wf = build_workflow("my-checkpoint.safetensors", "uploaded123.png", POSITIVE_PROMPT, DENOISE);
         assert_eq!(wf["4"]["inputs"]["ckpt_name"], "my-checkpoint.safetensors");
         assert_eq!(wf["10"]["inputs"]["image"], "uploaded123.png");
         assert_eq!(wf["3"]["inputs"]["denoise"], DENOISE);
@@ -295,8 +309,15 @@ mod tests {
     }
 
     #[test]
+    fn build_workflow_uses_the_given_prompt_and_denoise_overrides() {
+        let wf = build_workflow("ckpt.safetensors", "img.png", "a custom style prompt", 0.8);
+        assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
+        assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
+    }
+
+    #[test]
     fn stylize_blocking_rejects_an_empty_base_url() {
-        let err = stylize_blocking("   ", "data:image/png;base64,AAAA").unwrap_err();
+        let err = stylize_blocking("   ", "data:image/png;base64,AAAA", POSITIVE_PROMPT, DENOISE).unwrap_err();
         assert!(err.contains("No ComfyUI address configured"));
     }
 }

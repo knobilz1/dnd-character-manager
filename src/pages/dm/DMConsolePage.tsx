@@ -550,7 +550,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, mapAiStyle, setMapAiStyle, comfyUiBaseUrl, setComfyUiBaseUrl } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, mapAiStyle, setMapAiStyle, comfyUiBaseUrl, setComfyUiBaseUrl, manualStyleProvider, setManualStyleProvider, manualStylePrompt, setManualStylePrompt, manualStyleStrength, setManualStyleStrength } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -775,6 +775,14 @@ export function DMConsolePage() {
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
+  // "AI Export…" — a manual, per-card style pass (custom prompt/provider),
+  // separate from the automatic mapAiStyle checkbox above. Only one card's
+  // panel is open at a time (`aiExportSlug`); `aiExportPreview` is that
+  // panel's own preview image, independent of the card's saved tile PNG.
+  const [aiExportSlug, setAiExportSlug] = React.useState<string | null>(null);
+  const [aiExportPreview, setAiExportPreview] = React.useState<string | null>(null);
+  const [geminiKeyConfigured, setGeminiKeyConfigured] = React.useState<boolean | null>(null);
+  const [geminiKeyInput, setGeminiKeyInput] = React.useState('');
   const [modulePlan, setModulePlan] = React.useState('');
   // Lore dialog — view the established campaign_lore.md and fold in new
   // material any time after creation (a sourcebook picked up mid-campaign, a
@@ -2681,6 +2689,110 @@ export function DMConsolePage() {
     }
   }
 
+  // ── AI Export… (manual, per-card style pass — separate from the automatic
+  // mapAiStyle checkbox above, which stays ComfyUI-only with a fixed
+  // prompt/denoise) ───────────────────────────────────────────────────────
+
+  async function toggleAiExport(slug: string) {
+    if (aiExportSlug === slug) { setAiExportSlug(null); return; }
+    setAiExportSlug(slug);
+    setAiExportPreview(null);
+    setGeminiKeyInput('');
+    try {
+      setGeminiKeyConfigured(await invoke<boolean>('has_gemini_api_key'));
+    } catch {
+      setGeminiKeyConfigured(false);
+    }
+  }
+
+  async function saveGeminiKey() {
+    if (!geminiKeyInput.trim()) return;
+    try {
+      await invoke('save_gemini_api_key', { key: geminiKeyInput.trim() });
+      setGeminiKeyConfigured(true);
+      setGeminiKeyInput('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function clearGeminiKey() {
+    try {
+      await invoke('clear_gemini_api_key');
+      setGeminiKeyConfigured(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Runs whichever provider is selected in the AI Export panel, with the
+   *  DM's own prompt (and, for ComfyUI, strength). Unlike stylizeMapImage
+   *  (the automatic checkbox path), this throws on failure rather than
+   *  falling back silently — an explicit "AI Export" click should surface a
+   *  clear error, not quietly hand back the plain tile render. */
+  async function manualStylizeImage(dataUrl: string): Promise<string> {
+    if (manualStyleProvider === 'gemini') {
+      return await invoke<string>('gemini_stylize_map', { prompt: manualStylePrompt, pngDataUrl: dataUrl });
+    }
+    return await invoke<string>('comfyui_stylize_map', {
+      baseUrl: comfyUiBaseUrl,
+      pngDataUrl: dataUrl,
+      prompt: manualStylePrompt,
+      denoise: manualStyleStrength,
+    });
+  }
+
+  async function previewAiExport(card: MapCard) {
+    const raw = battleMapToPngDataUrl(card.spec, 96);
+    if (!raw) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
+    setPlanBusy(manualStyleProvider === 'gemini' ? 'Asking Gemini to restyle the map…' : 'Running the ComfyUI pass…');
+    try {
+      setAiExportPreview(await manualStylizeImage(raw));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
+    }
+  }
+
+  async function exportAiStyledPng(card: MapCard) {
+    const dest = await save({ defaultPath: `${card.slug}-ai.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    if (!dest) return;
+    setPlanBusy('Generating and exporting PNG…');
+    try {
+      const raw = battleMapToPngDataUrl(card.spec, 96);
+      if (!raw) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
+      const dataUrl = await manualStylizeImage(raw);
+      setAiExportPreview(dataUrl);
+      const b64 = dataUrl.split(',')[1];
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      await writeFile(dest, bytes);
+      await openPath(dest);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
+    }
+  }
+
+  async function exportAiStyledPdf(card: MapCard) {
+    const dest = await save({ defaultPath: `${card.slug}-ai.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (!dest) return;
+    setPlanBusy('Generating and exporting PDF…');
+    try {
+      const bytes = await battleMapToPdfBytes(card.spec, manualStylizeImage);
+      if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
+      await writeFile(dest, bytes);
+      await openPath(dest);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
+    }
+  }
+
   /** Patches one card's spec text in whichever of the two lists it's in
    *  (plan-owned or ad-hoc), without touching the others. `updatePreview`
    *  also re-renders the png — set false on every keystroke (cheap text
@@ -3397,6 +3509,9 @@ export function DMConsolePage() {
                         <div className="flex items-center gap-2 shrink-0">
                           <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>
                           <Button size="sm" variant="outline" onClick={() => exportMapPng(card)} disabled={!!planBusy}><Download size={14} /> PNG</Button>
+                          <Button size="sm" variant="ghost" onClick={() => toggleAiExport(card.slug)} disabled={!!planBusy}>
+                            {aiExportSlug === card.slug ? 'Close AI Export' : 'AI Export…'}
+                          </Button>
                         </div>
                       </div>
                       {card.png ? (
@@ -3404,6 +3519,77 @@ export function DMConsolePage() {
                       ) : (
                         <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
                       )}
+
+                      {aiExportSlug === card.slug && (
+                        <div className="mt-2 p-3 bg-slate-900/60 border border-slate-700 rounded-lg space-y-2">
+                          <p className="text-xs text-slate-400">
+                            A manual, one-off restyle with your own prompt — separate from the automatic pass above. {manualStyleProvider === 'gemini' ? 'Gemini has no denoise dial; grid preservation is prompt-only, so it’s less exact than the ComfyUI path.' : 'Low denoise keeps the grid legible.'}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={manualStyleProvider}
+                              onChange={(e) => setManualStyleProvider(e.target.value as 'comfyui' | 'gemini')}
+                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-red-600"
+                            >
+                              <option value="comfyui">ComfyUI (local)</option>
+                              <option value="gemini">Gemini (cloud)</option>
+                            </select>
+                            {manualStyleProvider === 'comfyui' ? (
+                              <input
+                                value={comfyUiBaseUrl}
+                                onChange={(e) => setComfyUiBaseUrl(e.target.value)}
+                                placeholder="http://127.0.0.1:8188"
+                                className="w-44 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
+                              />
+                            ) : geminiKeyConfigured ? (
+                              <span className="flex items-center gap-2 text-xs text-emerald-400">
+                                Key saved ✓
+                                <button type="button" onClick={clearGeminiKey} className="text-slate-500 hover:text-slate-300 underline">Change</button>
+                              </span>
+                            ) : (
+                              <>
+                                <input
+                                  type="password"
+                                  value={geminiKeyInput}
+                                  onChange={(e) => setGeminiKeyInput(e.target.value)}
+                                  placeholder="Gemini API key"
+                                  className="w-44 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
+                                />
+                                <Button size="sm" variant="ghost" onClick={saveGeminiKey} disabled={!geminiKeyInput.trim()}>Save key</Button>
+                              </>
+                            )}
+                          </div>
+                          {manualStyleProvider === 'comfyui' && (
+                            <label className="flex items-center gap-2 text-xs text-slate-400">
+                              Strength {manualStyleStrength.toFixed(2)}
+                              <input
+                                type="range"
+                                min={0.1}
+                                max={0.9}
+                                step={0.05}
+                                value={manualStyleStrength}
+                                onChange={(e) => setManualStyleStrength(parseFloat(e.target.value))}
+                                className="flex-1"
+                              />
+                            </label>
+                          )}
+                          <textarea
+                            value={manualStylePrompt}
+                            onChange={(e) => setManualStylePrompt(e.target.value)}
+                            spellCheck={false}
+                            className="w-full h-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-red-600"
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => previewAiExport(card)} disabled={!!planBusy}>Preview</Button>
+                            <Button size="sm" variant="outline" onClick={() => exportAiStyledPdf(card)} disabled={!!planBusy}><Download size={14} /> Export PDF</Button>
+                            <Button size="sm" variant="outline" onClick={() => exportAiStyledPng(card)} disabled={!!planBusy}><Download size={14} /> Export PNG</Button>
+                          </div>
+                          {aiExportPreview && (
+                            <img src={aiExportPreview} alt={`${card.name} AI export preview`} className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
+                          )}
+                        </div>
+                      )}
+
                       <details className="mt-2">
                         <summary className="text-xs text-slate-400 cursor-pointer">View / edit the raw spec</summary>
                         <textarea

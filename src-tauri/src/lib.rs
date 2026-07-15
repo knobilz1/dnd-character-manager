@@ -1,6 +1,7 @@
 mod campaign;
 mod comfyui;
 mod dm;
+mod gemini_image;
 mod local_llm;
 mod oauth;
 mod party_listener;
@@ -93,6 +94,10 @@ pub fn run() {
       campaign::read_battle_map,
       campaign::save_battle_map,
       comfyui::comfyui_stylize_map,
+      gemini_image::save_gemini_api_key,
+      gemini_image::has_gemini_api_key,
+      gemini_image::clear_gemini_api_key,
+      gemini_image::gemini_stylize_map,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tts::speak_text,

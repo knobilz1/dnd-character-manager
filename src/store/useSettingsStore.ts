@@ -70,6 +70,19 @@ interface SettingsState {
   /** Base URL of the user's local ComfyUI server, e.g. "http://127.0.0.1:8188". */
   comfyUiBaseUrl: string;
   setComfyUiBaseUrl: (v: string) => void;
+  /** Per-card "AI Export…" manual style pass (separate from the automatic
+   *  mapAiStyle checkbox above, which stays ComfyUI-only with a fixed
+   *  prompt/denoise). These three are just remembered starting points —
+   *  freely edited per export, not enforced anywhere. The Gemini API key
+   *  itself is NOT here: it lives in the OS keychain (see gemini_image.rs),
+   *  never in localStorage. */
+  manualStyleProvider: 'comfyui' | 'gemini';
+  setManualStyleProvider: (v: 'comfyui' | 'gemini') => void;
+  manualStylePrompt: string;
+  setManualStylePrompt: (v: string) => void;
+  /** ComfyUI-only (img2img denoise, 0–1); Gemini has no equivalent dial. */
+  manualStyleStrength: number;
+  setManualStyleStrength: (v: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -100,6 +113,12 @@ export const useSettingsStore = create<SettingsState>()(
       setMapAiStyle: (v) => set({ mapAiStyle: v }),
       comfyUiBaseUrl: 'http://127.0.0.1:8188',
       setComfyUiBaseUrl: (v) => set({ comfyUiBaseUrl: v }),
+      manualStyleProvider: 'comfyui',
+      setManualStyleProvider: (v) => set({ manualStyleProvider: v }),
+      manualStylePrompt: 'top-down tabletop RPG battle map, detailed dungeon floor texture, atmospheric lighting, dramatic shadows, digital painting, high detail, no text, no UI',
+      setManualStylePrompt: (v) => set({ manualStylePrompt: v }),
+      manualStyleStrength: 0.55,
+      setManualStyleStrength: (v) => set({ manualStyleStrength: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )
