@@ -337,6 +337,15 @@ interface MapCard {
   png: string | null;
 }
 
+/** Mirrors tts.rs's GpuMemoryInfo — a live "how much VRAM is free right now"
+ *  reading, shown as a heads-up next to the ComfyUI option in AI Export
+ *  (a local LLM like vLLM may already be holding most of the card). */
+interface GpuMemoryInfo {
+  total_mb: number;
+  used_mb: number;
+  free_mb: number;
+}
+
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
  *  A campaign can have several; exactly one is active at a time. */
 interface ModuleSummary {
@@ -783,6 +792,7 @@ export function DMConsolePage() {
   const [aiExportPreview, setAiExportPreview] = React.useState<string | null>(null);
   const [geminiKeyConfigured, setGeminiKeyConfigured] = React.useState<boolean | null>(null);
   const [geminiKeyInput, setGeminiKeyInput] = React.useState('');
+  const [aiExportGpuMemory, setAiExportGpuMemory] = React.useState<GpuMemoryInfo | null>(null);
   const [modulePlan, setModulePlan] = React.useState('');
   // Lore dialog — view the established campaign_lore.md and fold in new
   // material any time after creation (a sourcebook picked up mid-campaign, a
@@ -2698,10 +2708,18 @@ export function DMConsolePage() {
     setAiExportSlug(slug);
     setAiExportPreview(null);
     setGeminiKeyInput('');
+    setAiExportGpuMemory(null);
     try {
       setGeminiKeyConfigured(await invoke<boolean>('has_gemini_api_key'));
     } catch {
       setGeminiKeyConfigured(false);
+    }
+    // Informational only — None on any non-NVIDIA/driverless machine, same
+    // as probe_cuda; the panel just omits the hint rather than erroring.
+    try {
+      setAiExportGpuMemory(await invoke<GpuMemoryInfo | null>('probe_gpu_memory'));
+    } catch {
+      setAiExportGpuMemory(null);
     }
   }
 
@@ -3535,12 +3553,20 @@ export function DMConsolePage() {
                               <option value="gemini">Gemini (cloud)</option>
                             </select>
                             {manualStyleProvider === 'comfyui' ? (
-                              <input
-                                value={comfyUiBaseUrl}
-                                onChange={(e) => setComfyUiBaseUrl(e.target.value)}
-                                placeholder="http://127.0.0.1:8188"
-                                className="w-44 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
-                              />
+                              <>
+                                <input
+                                  value={comfyUiBaseUrl}
+                                  onChange={(e) => setComfyUiBaseUrl(e.target.value)}
+                                  placeholder="http://127.0.0.1:8188"
+                                  className="w-44 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
+                                />
+                                {aiExportGpuMemory && (
+                                  <span className={`text-xs ${aiExportGpuMemory.free_mb < 2048 ? 'text-amber-400' : 'text-slate-500'}`}>
+                                    ≈{(aiExportGpuMemory.free_mb / 1024).toFixed(1)}GB VRAM free
+                                    {aiExportGpuMemory.free_mb < 2048 && ' — may be tight alongside a local LLM'}
+                                  </span>
+                                )}
+                              </>
                             ) : geminiKeyConfigured ? (
                               <span className="flex items-center gap-2 text-xs text-emerald-400">
                                 Key saved ✓

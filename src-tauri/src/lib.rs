@@ -103,6 +103,7 @@ pub fn run() {
       tts::speak_text,
       tts::warmup_tts,
       tts::probe_cuda,
+      tts::probe_gpu_memory,
       tts::set_tts_engine,
       tts::f5_runtime_installed,
       tts::install_f5_runtime,

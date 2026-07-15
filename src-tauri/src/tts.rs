@@ -889,6 +889,53 @@ pub async fn probe_cuda() -> Option<CudaInfo> {
     .unwrap_or(None)
 }
 
+/// Live free/used VRAM — separate from CudaInfo/probe_cuda above (which only
+/// ever reports `memory.total`, once, to gate the F5-TTS checkbox on
+/// install-time capability). This is for a DIFFERENT question asked live,
+/// repeatedly: "how much VRAM is free RIGHT NOW" — e.g. the Battle Map
+/// Generator's AI Export panel showing a heads-up next to the ComfyUI option
+/// when a local LLM (vLLM etc.) is already holding most of the card. Kept as
+/// its own struct/parser/command rather than extending CudaInfo so the
+/// shipped F5 gate is untouched.
+#[derive(serde::Serialize)]
+pub struct GpuMemoryInfo {
+    pub total_mb: u64,
+    pub used_mb: u64,
+    pub free_mb: u64,
+}
+
+/// Pure: parses the first non-empty line of `nvidia-smi
+/// --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits`,
+/// e.g. `24576, 21000, 3576`. None on anything unparseable.
+fn parse_nvidia_smi_memory_csv(out: &str) -> Option<GpuMemoryInfo> {
+    let line = out.lines().find(|l| !l.trim().is_empty())?;
+    let mut fields = line.split(',').map(|f| f.trim().parse::<u64>().ok());
+    let total_mb = fields.next()??;
+    let used_mb = fields.next()??;
+    let free_mb = fields.next()??;
+    Some(GpuMemoryInfo { total_mb, used_mb, free_mb })
+}
+
+#[tauri::command]
+pub async fn probe_gpu_memory() -> Option<GpuMemoryInfo> {
+    tokio::task::spawn_blocking(|| {
+        let mut cmd = Command::new("nvidia-smi");
+        cmd.args(["--query-gpu=memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // no console flash
+        }
+        let out = cmd.output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        parse_nvidia_smi_memory_csv(&String::from_utf8_lossy(&out.stdout))
+    })
+    .await
+    .unwrap_or(None)
+}
+
 // ── TTS engine selection ──────────────────────────────────────────────────
 //
 // Kokoro is the default and the only engine on machines without a capable GPU.
@@ -1538,6 +1585,22 @@ mod tests {
         assert!(parse_nvidia_smi_csv("no comma here").is_none());
         assert!(parse_nvidia_smi_csv(", 8192").is_none()); // empty name
         assert!(parse_nvidia_smi_csv("Card, notanumber").is_none());
+    }
+
+    #[test]
+    fn parse_nvidia_smi_memory_csv_reads_total_used_and_free() {
+        let info = parse_nvidia_smi_memory_csv("24576, 21000, 3576\n").unwrap();
+        assert_eq!(info.total_mb, 24576);
+        assert_eq!(info.used_mb, 21000);
+        assert_eq!(info.free_mb, 3576);
+    }
+
+    #[test]
+    fn parse_nvidia_smi_memory_csv_rejects_junk() {
+        assert!(parse_nvidia_smi_memory_csv("").is_none());
+        assert!(parse_nvidia_smi_memory_csv("\n\n").is_none());
+        assert!(parse_nvidia_smi_memory_csv("24576, 21000").is_none()); // missing free
+        assert!(parse_nvidia_smi_memory_csv("24576, notanumber, 3576").is_none());
     }
 
     #[test]
