@@ -1988,7 +1988,7 @@ struct PlanEncounter {
 /// Parses the `## Encounters` section's numbered lines (see
 /// build_session_plan_prompt's required format) into a structured list, so
 /// battle-map generation can walk it deterministically instead of
-/// independently re-guessing "what's coming up" (see build_battle_maps_prompt_for_encounters).
+/// independently re-guessing "what's coming up" (see generate_battle_maps_for_plan_at).
 /// Pure — no LLM call, so it's fully unit-testable against sample plan text.
 /// A line missing the `[combat|non-combat]` tag defaults to combat: true — a
 /// missed fight-map is worse than one unused extra map.
@@ -2109,40 +2109,15 @@ fn battle_maps_dir(root: &Path, id: &str) -> PathBuf {
     root.join(id).join("memory").join(BATTLE_MAPS_DIR)
 }
 
-/// On-demand single-map prompt — "describe one encounter" in the merged
-/// dialog. The session-prep BATCH path (one map per combat encounter) is
-/// build_battle_maps_prompt_for_encounters below, which is driven by the
+/// Single-map prompt — used both by the on-demand "describe one encounter"
+/// path AND, looped once per combat encounter, by the session-prep batch
+/// path (generate_battle_maps_for_plan_at), which is driven by the
 /// already-decided, already-persisted plan instead of asking the model to
 /// independently re-guess "what's coming up" a second time.
 fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str) -> String {
     format!(
         "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
         Design ONE battle map for this specific encounter the DM described: {hint}\n\n\
-        Campaign-arc plan:\n{module_plan}\n\n\
-        Current chapter (what's coming up):\n{current_chapter}\n\n\
-        Recent memory/recaps:\n{memory}\n\n\
-        {}",
-        battle_map_format_instructions()
-    )
-}
-
-/// One map per encounter, in order, each REQUIRED to title itself exactly as
-/// given — the batch/session-prep path (see plan_next_session_at). Unlike the
-/// old "up to THREE, your call" prompt this replaced, the model has zero
-/// discretion over which encounters get a map or how many: the caller
-/// (parse_plan_encounters, filtered to combat) already decided that
-/// deterministically from the cached session plan, so asking twice can never
-/// produce a different answer.
-fn build_battle_maps_prompt_for_encounters(module_plan: &str, current_chapter: &str, memory: &str, encounters: &[PlanEncounter]) -> String {
-    let list = encounters
-        .iter()
-        .enumerate()
-        .map(|(i, e)| format!("{}. {} — {}", i + 1, e.name, e.description))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
-        Design EXACTLY ONE battle map for EACH of the following encounters — same count, same order, no more, no fewer. Each map's `# ` title line MUST be exactly the encounter's name given below, verbatim:\n{list}\n\n\
         Campaign-arc plan:\n{module_plan}\n\n\
         Current chapter (what's coming up):\n{current_chapter}\n\n\
         Recent memory/recaps:\n{memory}\n\n\
@@ -2329,11 +2304,23 @@ fn current_plan_owned_maps_at(root: &Path, id: &str) -> Vec<BattleMapMeta> {
 }
 
 /// The deterministic batch path: exactly one map per combat encounter,
-/// stably keyed to that encounter's name (see build_battle_maps_prompt_for_encounters
-/// / force_map_title), replacing whatever the PREVIOUS plan owned. This is
-/// what removes the randomness reported in the bug this shipped to fix — the
-/// same (cached) encounter list in, the same slugs out, every time, so a
-/// regenerate overwrites instead of accumulating or drifting.
+/// stably keyed to that encounter's name (see force_map_title), replacing
+/// whatever the PREVIOUS plan owned. This is what removes the randomness
+/// reported in the bug this shipped to fix — the same (cached) encounter
+/// list in, the same slugs out, every time, so a regenerate overwrites
+/// instead of accumulating or drifting.
+///
+/// One Claude/local-LLM call PER encounter (reusing build_battle_maps_prompt,
+/// the same single-map prompt the on-demand "describe one encounter" path
+/// already uses reliably) — NOT one combined call asking for every map at
+/// once. An early version asked for all of them in a single reply and
+/// silently truncated to however many the model actually completed (long
+/// multi-map ASCII-grid replies reliably drop or malform later maps, or
+/// forget the delimiter between them), which is exactly what made "only 1
+/// map shows, regenerate to see a different one" happen — the DM had no way
+/// to know the batch was partial. Per-encounter calls make each individual
+/// generation as reliable as the on-demand path, and a genuine per-encounter
+/// failure is now reported back (`failed`) instead of silently vanishing.
 fn generate_battle_maps_for_plan_at(
     root: &Path,
     id: &str,
@@ -2341,7 +2328,7 @@ fn generate_battle_maps_for_plan_at(
     current_chapter: &str,
     memory: &str,
     encounters: &[PlanEncounter],
-) -> Result<Vec<BattleMapMeta>, String> {
+) -> Result<(Vec<BattleMapMeta>, Vec<String>), String> {
     let dir = battle_maps_dir(root, id);
     for old_slug in read_plan_manifest_at(root, id) {
         let _ = fs::remove_file(dir.join(format!("{old_slug}.md")));
@@ -2350,31 +2337,42 @@ fn generate_battle_maps_for_plan_at(
     if encounters.is_empty() {
         write_plan_manifest_at(root, id, &[])?;
         rebuild_battle_maps_index_at(root, id)?;
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
-
-    let prompt = build_battle_maps_prompt_for_encounters(module_plan, current_chapter, memory, encounters);
-    let reply = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)?;
-    let specs = split_map_specs(&reply);
 
     let mut new_slugs = Vec::new();
     let mut metas = Vec::new();
-    for (encounter, spec) in encounters.iter().zip(specs.iter()) {
+    let mut failed = Vec::new();
+    for encounter in encounters {
+        let hint = format!("{} — {}", encounter.name, encounter.description);
+        let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint);
+        let spec = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)
+            .ok()
+            .and_then(|reply| split_map_specs(&reply).into_iter().next());
+        let Some(spec) = spec else {
+            failed.push(encounter.name.clone());
+            continue;
+        };
         let slug = slugify(&encounter.name);
-        let titled = force_map_title(spec, &encounter.name);
+        let titled = force_map_title(&spec, &encounter.name);
         write_map_spec_with_slug_at(root, id, &slug, &titled)?;
         metas.push(BattleMapMeta { slug: slug.clone(), name: encounter.name.clone(), summary: map_summary(&titled) });
         new_slugs.push(slug);
     }
     write_plan_manifest_at(root, id, &new_slugs)?;
     rebuild_battle_maps_index_at(root, id)?;
-    Ok(metas)
+    Ok((metas, failed))
 }
 
 #[derive(Serialize, Clone, Debug)]
 pub struct SessionPlanResult {
     pub plan_text: String,
     pub maps: Vec<BattleMapMeta>,
+    /// Names of combat encounters whose map generation call failed (or
+    /// produced no usable spec) — surfaced so the DM knows the set is
+    /// partial rather than silently seeing fewer cards than encounters.
+    /// Always empty on a cache hit.
+    pub failed_maps: Vec<String>,
 }
 
 /// Orchestrates "Plan Next Session" end to end — the single entry point both
@@ -2383,12 +2381,12 @@ pub struct SessionPlanResult {
 /// costs ZERO Claude calls (see read_session_plan_at); otherwise this asks
 /// Claude for the plan text once, persists it, and — because battle maps are
 /// derived from THIS SAME plan rather than independently re-guessed — asks
-/// Claude a second time (only if there's at least one combat encounter) for
-/// exactly the maps that plan calls for.
+/// Claude once per combat encounter (see generate_battle_maps_for_plan_at)
+/// for exactly the maps that plan calls for.
 fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool) -> Result<SessionPlanResult, String> {
     if !force {
         if let Some(cached) = read_session_plan_at(root, id) {
-            return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id) });
+            return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id), failed_maps: Vec::new() });
         }
     }
 
@@ -2406,8 +2404,8 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
     let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
     let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
 
-    let maps = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters)?;
-    Ok(SessionPlanResult { plan_text, maps })
+    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters)?;
+    Ok(SessionPlanResult { plan_text, maps, failed_maps })
 }
 
 fn read_battle_map_at(root: &Path, id: &str, slug: &str) -> Result<String, String> {
@@ -3991,18 +3989,6 @@ mod tests {
     }
 
     #[test]
-    fn build_battle_maps_prompt_for_encounters_lists_every_encounter_in_order() {
-        let encounters = vec![
-            PlanEncounter { name: "Bridge Ambush".to_string(), description: "Goblins attack from cover.".to_string(), combat: true },
-            PlanEncounter { name: "Watchtower Siege".to_string(), description: "A final assault.".to_string(), combat: true },
-        ];
-        let prompt = build_battle_maps_prompt_for_encounters("arc", "chapter", "memory", &encounters);
-        assert!(prompt.contains("EXACTLY ONE battle map for EACH"));
-        assert!(prompt.contains("1. Bridge Ambush — Goblins attack from cover."));
-        assert!(prompt.contains("2. Watchtower Siege — A final assault."));
-    }
-
-    #[test]
     fn force_map_title_replaces_an_existing_title_line() {
         let spec = "# Wrong Name\nGrid: 10x10, 5 ft squares.\nMap:\n##\n##\n";
         let out = force_map_title(spec, "Bridge Ambush");
@@ -4142,9 +4128,10 @@ mod tests {
         write_map_spec_with_slug_at(&root.0, &meta.id, "old-fight", SAMPLE_MAP_SPEC).unwrap();
         write_plan_manifest_at(&root.0, &meta.id, &["old-fight".to_string()]).unwrap();
 
-        let maps = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[]).unwrap();
+        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[]).unwrap();
 
         assert!(maps.is_empty());
+        assert!(failed.is_empty());
         assert!(read_plan_manifest_at(&root.0, &meta.id).is_empty());
         assert!(!battle_maps_dir(&root.0, &meta.id).join("old-fight.md").exists(), "the stale plan-owned map must be deleted");
     }

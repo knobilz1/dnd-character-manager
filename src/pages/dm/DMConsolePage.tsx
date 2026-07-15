@@ -325,6 +325,10 @@ interface BattleMapMeta {
 interface SessionPlanResult {
   plan_text: string;
   maps: BattleMapMeta[];
+  /** Combat encounters whose map generation failed — see campaign.rs's
+   *  generate_battle_maps_for_plan_at. Shown as a warning so a partial set
+   *  is never mistaken for "that's all the maps there are." */
+  failed_maps: string[];
 }
 
 /** A battle map card as rendered in the merged Plan Next Session dialog —
@@ -783,6 +787,7 @@ export function DMConsolePage() {
   const [planBusy, setPlanBusy] = React.useState<string | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
+  const [failedMaps, setFailedMaps] = React.useState<string[]>([]);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
   // "AI Export…" — a manual, per-card style pass (custom prompt/provider),
   // separate from the automatic mapAiStyle checkbox above. Only one card's
@@ -2896,11 +2901,13 @@ export function DMConsolePage() {
     setPlanLoading(true);
     setPlanText('');
     setAdHocMapCards([]);
+    setFailedMaps([]);
     try {
       const cmd = force ? 'regenerate_session_plan' : 'suggest_session_plan';
       const result = await withClaudeReconnect(() => invoke<SessionPlanResult>(cmd, { id: activeCampaignId }));
       setPlanText(result.plan_text);
       setPlanMapCards(await Promise.all(result.maps.map(loadMapCard)));
+      setFailedMaps(result.failed_maps ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPlanOpen(false);
@@ -3497,6 +3504,11 @@ export function DMConsolePage() {
             {battleMode !== 'theater' && (
               <div className="mb-3">
                 <h4 className="text-xs font-semibold text-slate-300 mb-2">Battle maps for this plan's encounters</h4>
+                {failedMaps.length > 0 && (
+                  <p className="text-xs text-amber-400 mb-2">
+                    {failedMaps.length} map{failedMaps.length > 1 ? 's' : ''} didn't generate ({failedMaps.join(', ')}) — this set is partial. Try Regenerate.
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input type="checkbox" checked={mapAiStyle} onChange={(e) => setMapAiStyle(e.target.checked)} />
