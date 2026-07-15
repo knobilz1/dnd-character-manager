@@ -2406,7 +2406,18 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
     let plan_text = suggest_session_plan_at(root, id, terrain_catalog)?;
     write_session_plan_at(root, id, &plan_text)?;
 
-    let encounters: Vec<PlanEncounter> = parse_plan_encounters(&plan_text).into_iter().filter(|e| e.combat).collect();
+    // Battle maps are meaningless in Theater of the Mind — there's no grid,
+    // no minis, no printed layout to place anyone on (see DM_RULES: "If
+    // you're unsure of the mode... narrate in plain fictional terms rather
+    // than inventing a grid"). Treat it the same as "no combat encounters"
+    // so generate_battle_maps_for_plan_at's existing empty-list path clears
+    // any previously-owned maps and returns without a single Claude call —
+    // no wasted compute for DMs who never use Grid/Hex mode.
+    let encounters: Vec<PlanEncounter> = if read_battle_mode_at(root, id) == "theater" {
+        Vec::new()
+    } else {
+        parse_plan_encounters(&plan_text).into_iter().filter(|e| e.combat).collect()
+    };
 
     let dir = root.join(id);
     let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
