@@ -3023,6 +3023,16 @@ fn trim_resolved_chapter_section_at(root: &Path, id: &str, module_id: &str, reso
     write_atomic(&path, trimmed)?;
     if read_active_module_id_at(root, id).as_deref() == Some(module_id) {
         sync_active_module_indirection_at(root, id, module_id)?;
+        // A cached session plan (see read_session_plan_at) was written
+        // against the PREVIOUS current.md — a resolved-section trim means
+        // the story has genuinely moved within this same chapter (this is
+        // the within-chapter equivalent of advance_chapter_at's own
+        // invalidation, for the "story advanced but we're not out of the
+        // chapter yet" case), so it's stale in the same way a chapter
+        // change makes it stale. Only when this trim is for the module
+        // that's actually active — a trim for some other module doesn't
+        // change what the DM would plan for next.
+        invalidate_session_plan_at(root, id);
     }
     Ok(())
 }
