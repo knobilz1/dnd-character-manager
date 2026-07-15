@@ -3534,7 +3534,7 @@ export function DMConsolePage() {
           <>
             <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
 
-            {battleMode !== 'theater' && (
+            {battleMode === 'grid' && (
               <div className="mb-3">
                 <h4 className="text-xs font-semibold text-slate-300 mb-2">Battle maps for this plan's encounters</h4>
                 {failedMaps.length > 0 && (

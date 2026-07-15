@@ -201,7 +201,7 @@ const SESSION_RECORDS_DIR: &str = "session_records";
 /// session record.
 const BATTLE_MAPS_DIR: &str = "battle_maps";
 
-const DEFAULT_BATTLE_MAPS_INDEX_MD: &str = "# Battle Maps\n\n_One line per prepared battle map — a compact, always-loaded list of the maps made for this campaign, so during a Grid/Hex-mode fight you know exactly which maps exist and their rough layout. Each entry has a slug; to pull back a full map spec (the ASCII grid + tactics), use the `recallMap` dm-action with that slug._\n";
+const DEFAULT_BATTLE_MAPS_INDEX_MD: &str = "# Battle Maps\n\n_One line per prepared battle map — a compact, always-loaded list of the maps made for this campaign, so during a Grid-mode fight you know exactly which maps exist and their rough layout. Each entry has a slug; to pull back a full map spec (the ASCII grid + tactics), use the `recallMap` dm-action with that slug._\n";
 
 /// Standing-import line for battle_maps/index.md — appended to an existing
 /// campaign's CLAUDE.md by sync_battle_maps_index_at, exactly like the session
@@ -362,9 +362,10 @@ Combat state — round, initiative order, whose turn it is, each combatant's rou
 - Use `removeCombatant: ["Goblin2"]` when someone leaves the fight for good (dead and gone, fled off the scene). A downed-but-present PC should stay in the log with `hp: "down"`, not be removed.
 - When the fight is over, send `endBattle: true` together with a one- or two-sentence `battleResult` — who won, any casualties or lasting conditions, and notable loot or consequences. Only that result is saved to the campaign's memory; the blow-by-blow log is wiped. Don't separately `remember` the same outcome — `battleResult` already records it (do still use `rememberEntity`/`rememberLocation` for a new NPC or place that combat introduced).
 
-### Prepared battle maps
-The DM (or you, ahead of time) may have prepared printable battle maps for this campaign's encounters. They're listed one per line in battle_maps/index.md above, each with a slug. Each map is a precise top-down grid with a coordinate system — columns labelled A, B, C… left to right and rows numbered 1, 2, 3… top to bottom, the SAME coordinate space as the Active Battle Log — so a cell like "C3" or "K1" means one exact square on the printed map.
-- In Grid or Hex mode, when a fight happens on a location you have a prepared map for, use that map's real layout: place enemies, set ambushes, and judge cover/choke points by its actual cells, and put those same cell references into the battle log's `position`/`coord` and your spoken directions ("the goblins are dug in behind the pillars at C3 and D3"). This is the payoff of preparing the map — everyone at the table is looking at the exact same grid you are.
+### Prepared battle maps (Grid mode only)
+The DM (or you, ahead of time) may have prepared printable battle maps for this campaign's Grid-mode encounters. They're listed one per line in battle_maps/index.md above, each with a slug. Each map is a precise top-down grid with a coordinate system — columns labelled A, B, C… left to right and rows numbered 1, 2, 3… top to bottom, the SAME coordinate space as Grid mode's own `{q, r}` square coordinates in the Active Battle Log — so a cell like "C3" or "K1" means one exact square on the printed map.
+- In Grid mode, when a fight happens on a location you have a prepared map for, use that map's real layout: place enemies, set ambushes, and judge cover/choke points by its actual cells, and put those same cell references into the battle log's `coord` and your spoken directions ("the goblins are dug in behind the pillars at C3 and D3"). This is the payoff of preparing the map — everyone at the table is looking at the exact same grid you are.
+- Hex mode doesn't use prepared maps — its physical 3D-printed terrain has no printed coordinates to line up with a map's lettered grid, so battle_maps/index.md will stay empty there. Keep using the terrain catalog and axial hex tracking described above instead.
 - The index only gives you each map's name and size. To see a map's full layout before running a fight on it, use the `recallMap` dm-action with its slug (copied exactly from the index) — the full grid + tactics is loaded into your next turn, just like `recallSession`. It's a read; it never changes anything. Never invent a slug that isn't in the index.
 "##;
 
@@ -2406,14 +2407,16 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
     let plan_text = suggest_session_plan_at(root, id, terrain_catalog)?;
     write_session_plan_at(root, id, &plan_text)?;
 
-    // Battle maps are meaningless in Theater of the Mind — there's no grid,
-    // no minis, no printed layout to place anyone on (see DM_RULES: "If
-    // you're unsure of the mode... narrate in plain fictional terms rather
-    // than inventing a grid"). Treat it the same as "no combat encounters"
-    // so generate_battle_maps_for_plan_at's existing empty-list path clears
-    // any previously-owned maps and returns without a single Claude call —
-    // no wasted compute for DMs who never use Grid/Hex mode.
-    let encounters: Vec<PlanEncounter> = if read_battle_mode_at(root, id) == "theater" {
+    // Battle maps only make sense in Grid mode. Theater has no grid/minis at
+    // all; Hex mode's physical 3D-printed terrain has no printed coordinates
+    // to line up with a map's lettered grid — its own axial {q,r} tracking
+    // is a genuinely different coordinate system, not just a different
+    // presentation of the same one (see DM_RULES' "Prepared battle maps
+    // (Grid mode only)"). Treat anything but Grid the same as "no combat
+    // encounters" so generate_battle_maps_for_plan_at's existing empty-list
+    // path clears any previously-owned maps and returns without a single
+    // Claude call — no wasted compute for DMs who don't use Grid mode.
+    let encounters: Vec<PlanEncounter> = if read_battle_mode_at(root, id) != "grid" {
         Vec::new()
     } else {
         parse_plan_encounters(&plan_text).into_iter().filter(|e| e.combat).collect()
