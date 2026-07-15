@@ -35,8 +35,10 @@ const ACCOUNT: &str = "gemini_api_key";
 const MODEL: &str = "gemini-2.5-flash-image";
 const GRID_PRESERVATION_PREAMBLE: &str = "This is a Dungeons & Dragons battle map grid. Keep the \
 exact grid layout, cell boundaries, and every element's position completely unchanged — do not \
-redraw, shift, resize, or reinterpret the layout. Only apply the following stylistic/atmospheric \
-treatment on top of it: ";
+redraw, shift, resize, or reinterpret the layout. The image already has a coordinate ruler baked \
+in (row numbers and column letters along the top and left edges) — keep those labels exactly as \
+shown and fully legible; do not remove, blur, or redraw them, and do not add any other text or \
+UI elements. Only apply the following stylistic/atmospheric treatment on top of it: ";
 
 fn store_key(key: &str) -> Result<(), String> {
     keyring::Entry::new(SERVICE, ACCOUNT)

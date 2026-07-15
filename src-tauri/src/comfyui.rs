@@ -23,10 +23,20 @@ use serde_json::{json, Value};
 use std::io::Read;
 use std::time::{Duration, Instant};
 
+// The rendered tile PNG this pass stylizes ALREADY has real text baked in —
+// the coordinate ruler (column letters / row numbers) drawn around the
+// grid's edges by renderBattleMapToCanvas (battleMapRender.ts). A blanket
+// "no text" instruction would tell the model to erase exactly the labels
+// the DM needs to read cells off the printed map, so this asks it to keep
+// them instead of suppressing text outright.
 const POSITIVE_PROMPT: &str = "top-down tabletop RPG battle map, detailed dungeon floor texture, \
-atmospheric lighting, dramatic shadows, digital painting, high detail, no text, no UI";
-const NEGATIVE_PROMPT: &str = "blurry, text, watermark, UI, characters, miniatures, people, photo, \
-distorted grid, illegible, warped geometry";
+atmospheric lighting, dramatic shadows, digital painting, high detail. Keep the coordinate ruler \
+(the row numbers and column letters along the top and left edges) exactly as shown and fully \
+legible — do not remove, blur, or redraw them. Do not add any other text, watermarks, or UI \
+elements.";
+const NEGATIVE_PROMPT: &str = "blurry, watermark, invented captions, extra decorative text, UI \
+chrome, characters, miniatures, people, photo, distorted grid, illegible coordinate labels, \
+warped geometry";
 const DENOISE: f64 = 0.55;
 const POLL_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
