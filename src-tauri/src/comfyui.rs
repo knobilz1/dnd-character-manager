@@ -35,8 +35,13 @@ use std::time::{Duration, Instant};
 const POSITIVE_PROMPT: &str = "top-down tabletop RPG battle map, detailed dungeon floor texture, \
 atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, \
 watermarks, or UI elements.";
+// No "photo" here on purpose — the manual AI Export panel offers a
+// "Realistic"/photorealistic style preset (see mapStylePresets.ts), and
+// negating "photo" would fight that request. "characters/miniatures/people"
+// already covers the real concern (a literal photo of a tabletop with
+// plastic minis showing up instead of a stylized render).
 const NEGATIVE_PROMPT: &str = "blurry, watermark, text, letters, numbers, UI chrome, characters, \
-miniatures, people, photo, distorted grid, warped geometry";
+miniatures, people, distorted grid, warped geometry";
 const DENOISE: f64 = 0.55;
 const POLL_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);

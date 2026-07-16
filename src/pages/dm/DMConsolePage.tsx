@@ -15,6 +15,7 @@ import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { battleMapToPngDataUrl, battleMapToStylizedPngDataUrl, battleMapToPdfBytes } from '../../utils/battleMapRender';
+import { MAP_STYLE_PRESETS } from '../../data/mapStylePresets';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
 import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
@@ -3642,6 +3643,22 @@ export function DMConsolePage() {
                               />
                             </label>
                           )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {MAP_STYLE_PRESETS.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                onClick={() => setManualStylePrompt(preset.prompt)}
+                                className={`px-2 py-1 rounded-full text-xs border transition-colors ${
+                                  manualStylePrompt === preset.prompt
+                                    ? 'bg-red-600 border-red-600 text-white'
+                                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                                }`}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
                           <textarea
                             value={manualStylePrompt}
                             onChange={(e) => setManualStylePrompt(e.target.value)}
