@@ -2697,14 +2697,6 @@ export function DMConsolePage() {
     return featureLines.length > 0 ? featureLines.join('; ') : card.name;
   }
 
-  /** Every AI stylize call now runs over ONE tile swatch, not the whole
-   *  scene (see battleMapRender.ts's "Per-tile-type stylization" comment) —
-   *  this folds the map's overall context together with which specific
-   *  legend tile is being generated, so the provider knows both "this is a
-   *  tavern" and "this exact swatch is a stone pillar, not the whole room". */
-  function tileSceneContext(sceneContext: string, tileLabel: string): string {
-    return `${sceneContext}. This image is ONE small repeating tile texture, not the whole room — it depicts: ${tileLabel}.`;
-  }
 
   /** Phase 2 — optional ComfyUI atmosphere pass over ONE tile swatch (see the
    *  "Per-tile-type stylization" comment in battleMapRender.ts, and
@@ -2720,8 +2712,9 @@ export function DMConsolePage() {
       return await invoke<string>('comfyui_stylize_map', {
         baseUrl: comfyUiBaseUrl,
         pngDataUrl: tileDataUrl,
-        depthMapDataUrl,
-        sceneContext: tileSceneContext(sceneContext, tileLabel),
+        depthMapDataUrl: depthMapDataUrl || undefined,
+        sceneContext,
+        tileLabel,
         isBackground,
       });
     } catch (e) {
@@ -2832,19 +2825,19 @@ export function DMConsolePage() {
   async function manualStylizeImage(
     tileDataUrl: string, depthMapDataUrl: string, sceneContext: string, tileLabel: string, isBackground: boolean
   ): Promise<string> {
-    const context = tileSceneContext(sceneContext, tileLabel);
     if (manualStyleProvider === 'gemini') {
       return await invoke<string>('gemini_stylize_map', {
-        prompt: manualStylePrompt, pngDataUrl: tileDataUrl, sceneContext: context, isBackground,
+        prompt: manualStylePrompt, pngDataUrl: tileDataUrl, sceneContext, tileLabel, isBackground,
       });
     }
     return await invoke<string>('comfyui_stylize_map', {
       baseUrl: comfyUiBaseUrl,
       pngDataUrl: tileDataUrl,
-      depthMapDataUrl,
+      depthMapDataUrl: depthMapDataUrl || undefined,
       prompt: manualStylePrompt,
       denoise: manualStyleStrength,
-      sceneContext: context,
+      sceneContext,
+      tileLabel,
       isBackground,
     });
   }

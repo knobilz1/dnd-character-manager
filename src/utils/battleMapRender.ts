@@ -304,21 +304,38 @@ function isRaisedCell(code: string): boolean {
 // not by asking the model nicely. A repeated code (eight barrels, a long
 // wall run) costs one AI call total, not one per instance, since the same
 // stylized swatch is reused everywhere that code appears.
-const TILE_SAMPLE_PX = 192; // resolution sent to the AI per swatch, independent of print cellPx
+// Resolution sent to the AI per swatch, independent of print cellPx. Flux is
+// trained at ~1024px; at the old 192px it effectively ignored the input and
+// regenerated from the prompt (so "top-down table" became a whole scene). 512
+// is high enough that it actually stylizes the swatch we send instead.
+const TILE_SAMPLE_PX = 512;
+
+// Object swatches are drawn on THIS plain neutral backdrop instead of on floor.
+// A small object sitting on a floor-colored square reads to the model as "a
+// room floor with empty space to furnish" — the direct cause of objects coming
+// back as rooms. A neutral studio backdrop + an object-only prompt makes it a
+// product shot instead; we key this backdrop out afterward and composite the
+// object over the real stylized floor. Mid-grey, distinct from any floor/object
+// color so the edge flood-fill in `keyOutBackdrop` separates cleanly.
+const OBJECT_BG = '#8a8f96';
 
 // Short descriptive phrase per legend code, for the stylize prompt — see
 // campaign.rs's MAP_LEGEND for the canonical meaning of each character.
+// Clean, singular object names matter: the model renders a specific named
+// object well ("a wooden door" came out great) but a vague or dual label
+// ("furniture or an altar") comes back as an ambiguous shape. Keep each object
+// code to one concrete thing.
 const TILE_LABELS: Record<string, string> = {
   '.': 'plain floor',
   '#': 'a stone wall block',
-  '+': 'a wooden door',
+  '+': 'a heavy wooden door',
   '~': 'water',
-  o: 'a stone pillar',
-  '^': 'rubble and difficult terrain',
-  '=': 'a piece of furniture or an altar',
-  T: 'a tree or foliage',
-  _: 'stone stairs',
-  '*': 'a fire hazard or brazier',
+  o: 'a round stone pillar',
+  '^': 'a pile of rubble',
+  '=': 'a sturdy wooden table',
+  T: 'a leafy tree',
+  _: 'stone steps',
+  '*': 'a lit iron brazier',
 };
 
 function tileLabelFor(code: string): string {
@@ -369,124 +386,148 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
-// The floor + grout colors an object tile is drawn on top of (see drawFloor),
-// so the silhouette pass below can tell "this pixel is flat floor" from "this
-// pixel is the object."
+// The floor + grout colors the procedural art draws an object on top of, so a
+// key pass can tell "this pixel is flat floor" from "this pixel is the object."
 const FLOOR_RGBS: [number, number, number][] = [hexToRgb(COLORS.floor), hexToRgb(COLORS.floorGrout)];
 
+/** An OBJECT swatch for the AI: the object on a plain neutral backdrop rather
+ *  than on floor (see OBJECT_BG). We take the procedural tile (floor + object)
+ *  and repaint every floor pixel to the backdrop colour, leaving just the
+ *  object floating on neutral grey — a product-shot setup the model won't try
+ *  to turn into a room. */
+function renderObjectSwatch(code: string): HTMLCanvasElement {
+  const canvas = renderTileSwatch(code); // drawFloor + the object on top
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
+  const d = img.data;
+  const [br, bg, bb] = hexToRgb(OBJECT_BG);
+  for (let i = 0; i < d.length; i += 4) {
+    const isFloor = FLOOR_RGBS.some(([fr, fg, fb]) => {
+      const dr = d[i] - fr, dg = d[i + 1] - fg, db = d[i + 2] - fb;
+      return dr * dr + dg * dg + db * db < 900;
+    });
+    if (isFloor) { d[i] = br; d[i + 1] = bg; d[i + 2] = bb; }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/** A flat depth map for a BACKGROUND/material tile — floor = far (dark), wall =
+ *  near (bright). Only background tiles use ControlNet now (objects are handled
+ *  as keyed product shots, no structural conditioning needed), so this no
+ *  longer needs an object-silhouette branch. */
 function renderTileDepthSwatch(code: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = TILE_SAMPLE_PX;
   canvas.height = TILE_SAMPLE_PX;
   const ctx = canvas.getContext('2d')!;
-  // A background/material tile fills the whole cell with its material, so a
-  // flat depth (floor = far, wall = near) is exactly right. But an OBJECT tile
-  // (door, pillar, furniture, tree, hazard) occupies only a small centered
-  // footprint sitting on flat floor — filling its whole depth square with the
-  // "raised/near" value tells ControlNet "this entire cell is a tall object,"
-  // which is precisely what made the model build a whole 3D room to justify
-  // filling the frame (confirmed live: a grid of identical miniature rooms).
-  // For object tiles we instead trace the object's actual silhouette from its
-  // procedural art — bright/near ON the object, dark/flat-floor everywhere
-  // else — so ControlNet constrains structure to the footprint and reads the
-  // surround as empty flat ground.
-  if (isBackgroundTile(code)) {
-    ctx.fillStyle = isRaisedCell(code) ? DEPTH_RAISED : DEPTH_FLOOR;
-    ctx.fillRect(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
-    return canvas;
-  }
-
-  const src = renderTileSwatch(code); // drawFloor + the object on top of it
-  const img = src.getContext('2d')!.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
-  const data = img.data;
-  const near = hexToRgb(DEPTH_RAISED);
-  const far = hexToRgb(DEPTH_FLOOR);
-  for (let i = 0; i < data.length; i += 4) {
-    // Anything that isn't (close to) the underlying floor/grout color is the
-    // object. Squared-distance threshold ~30/channel tolerates anti-aliasing.
-    const isFloor = FLOOR_RGBS.some(([fr, fg, fb]) => {
-      const dr = data[i] - fr, dg = data[i + 1] - fg, db = data[i + 2] - fb;
-      return dr * dr + dg * dg + db * db < 900;
-    });
-    const [r, g, b] = isFloor ? far : near;
-    data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
-  }
-  const mask = document.createElement('canvas');
-  mask.width = TILE_SAMPLE_PX;
-  mask.height = TILE_SAMPLE_PX;
-  mask.getContext('2d')!.putImageData(img, 0, 0);
-  // A slight blur turns the 1px cutout into a soft depth falloff, which is the
-  // smooth gradient depth-conditioned ControlNet models actually expect.
-  ctx.filter = 'blur(3px)';
-  ctx.drawImage(mask, 0, 0);
+  ctx.fillStyle = isRaisedCell(code) ? DEPTH_RAISED : DEPTH_FLOOR;
+  ctx.fillRect(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
   return canvas;
 }
 
-/** Reduces a stylized OBJECT swatch to just the object on transparency, by
- *  keying out every pixel that was flat floor in the code's ORIGINAL
- *  procedural art (object = keep, floor = transparent). The mask comes from
- *  the procedural swatch, not the stylized one, because after stylization the
- *  swatch's floor background is some AI-painted color we can't reliably
- *  detect — but the procedural silhouette is exact. Used so an object cell
- *  can be composited as `stylized floor + this object on top`, giving it the
- *  same floor surround as its neighbors instead of a mismatched "card" patch
- *  the model painted behind the object. */
-function maskStylizedObject(stylized: HTMLImageElement, code: string): HTMLCanvasElement {
-  const out = document.createElement('canvas');
-  out.width = TILE_SAMPLE_PX;
-  out.height = TILE_SAMPLE_PX;
-  const octx = out.getContext('2d')!;
-  octx.drawImage(stylized, 0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
-
-  const proc = renderTileSwatch(code)
-    .getContext('2d')!
-    .getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX).data;
-  const img = octx.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
+/** Removes the neutral studio backdrop from a stylized OBJECT swatch, leaving
+ *  just the object on transparency, via a flood fill inward from all four
+ *  edges: every pixel reachable from an edge and close to the corner colour is
+ *  cleared. The object sits centred and doesn't touch the edges, so it
+ *  survives whatever colour the backdrop became after stylization (a soft cast
+ *  shadow near the object is kept, which helps ground it). `source` is the
+ *  stylized swatch — or, on a failed stylize call, the plain object swatch,
+ *  which has the same neutral backdrop and keys out identically. */
+function keyOutBackdrop(source: CanvasImageSource): HTMLCanvasElement {
+  const px = TILE_SAMPLE_PX;
+  const canvas = document.createElement('canvas');
+  canvas.width = px;
+  canvas.height = px;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(source, 0, 0, px, px);
+  const img = ctx.getImageData(0, 0, px, px);
   const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const isFloor = FLOOR_RGBS.some(([fr, fg, fb]) => {
-      const dr = proc[i] - fr, dg = proc[i + 1] - fg, db = proc[i + 2] - fb;
-      return dr * dr + dg * dg + db * db < 900;
-    });
-    if (isFloor) d[i + 3] = 0;
+
+  // Reference backdrop colour = average of the four corners.
+  const cornerIdx = [0, (px - 1) * 4, (px * (px - 1)) * 4, (px * px - 1) * 4];
+  let rr = 0, gg = 0, bb = 0;
+  for (const c of cornerIdx) { rr += d[c]; gg += d[c + 1]; bb += d[c + 2]; }
+  rr /= 4; gg /= 4; bb /= 4;
+  const tol = 52 * 52 * 3; // squared per-pixel colour distance to count as backdrop
+
+  const visited = new Uint8Array(px * px);
+  const stack: number[] = [];
+  const push = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= px || y >= px) return;
+    const p = y * px + x;
+    if (visited[p]) return;
+    visited[p] = 1;
+    stack.push(p);
+  };
+  for (let x = 0; x < px; x++) { push(x, 0); push(x, px - 1); }
+  for (let y = 0; y < px; y++) { push(0, y); push(px - 1, y); }
+  while (stack.length) {
+    const p = stack.pop()!;
+    const i = p * 4;
+    const dr = d[i] - rr, dg = d[i + 1] - gg, db = d[i + 2] - bb;
+    if (dr * dr + dg * dg + db * db > tol) continue; // hit the object edge — stop
+    d[i + 3] = 0;
+    const x = p % px, y = (p / px) | 0;
+    push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
   }
-  octx.putImageData(img, 0, 0);
-  return out;
+  ctx.putImageData(img, 0, 0);
+  return canvas;
 }
 
-/** A stylize call for ONE tile swatch: the swatch itself, its depth map, a
- *  short label of what the tile depicts (e.g. "a stone pillar") so the
- *  provider's prompt can name the object instead of guessing from pixels,
- *  and whether this code is a background/material tile vs a discrete-object
- *  tile — see `isBackgroundTile`, and comfyui.rs's comfyui_stylize_map doc
- *  comment for why that distinction changes how the provider prompts it. */
+/** A stylize call for ONE tile swatch: the swatch itself, its depth map (empty
+ *  string for object tiles, which don't use ControlNet), a short label of what
+ *  the tile depicts (e.g. "a stone pillar") so the provider can prompt it as a
+ *  named product shot, and whether this code is a background/material tile vs a
+ *  discrete-object tile — see `isBackgroundTile`, and comfyui.rs's
+ *  comfyui_stylize_map doc comment for why the two are prompted differently. */
 export type TileStylizeFn = (
   tileDataUrl: string, depthMapDataUrl: string, tileLabel: string, isBackground: boolean
 ) => Promise<string>;
 
-/** Runs `stylize` once per distinct code in `codes` (sequentially — this is
- *  one local GPU running one job at a time regardless of how many requests
- *  arrive concurrently, so there's no throughput to gain from firing them in
- *  parallel, and sequential keeps "which tile is running" legible to the
- *  caller). A code whose stylize call fails falls back to its plain
- *  procedural swatch rather than aborting the whole set — matches the
- *  existing per-card fallback behavior of the automatic checkbox path. */
-async function stylizeTileSet(codes: Set<string>, stylize: TileStylizeFn): Promise<Map<string, HTMLImageElement>> {
-  const tiles = new Map<string, HTMLImageElement>();
+/** Stylized tiles split by kind: `backgrounds` are opaque material textures
+ *  drawn edge-to-edge in their cells; `objects` are keyed to transparency and
+ *  composited over the stylized floor at their footprint. */
+interface StylizedTiles {
+  backgrounds: Map<string, HTMLImageElement>;
+  objects: Map<string, HTMLCanvasElement>;
+}
+
+/** Runs `stylize` once per distinct code (sequentially — one local GPU runs one
+ *  job at a time regardless, and sequential keeps "which tile is running"
+ *  legible). Background tiles are stylized as seamless textures with a flat
+ *  depth map for ControlNet; object tiles are stylized as product shots on a
+ *  neutral backdrop (no depth/ControlNet) and then keyed to transparency. A
+ *  code whose stylize call fails falls back to its plain procedural art. */
+async function stylizeTileSet(codes: Set<string>, stylize: TileStylizeFn): Promise<StylizedTiles> {
+  const backgrounds = new Map<string, HTMLImageElement>();
+  const objects = new Map<string, HTMLCanvasElement>();
   for (const code of codes) {
-    const swatch = renderTileSwatch(code);
-    const depth = renderTileDepthSwatch(code);
-    try {
-      const stylizedDataUrl = await stylize(
-        swatch.toDataURL('image/png'), depth.toDataURL('image/png'), tileLabelFor(code), isBackgroundTile(code)
-      );
-      tiles.set(code, await loadImage(stylizedDataUrl));
-    } catch (e) {
-      console.warn(`Stylizing the "${code}" tile failed, using its plain render instead:`, e);
-      tiles.set(code, await loadImage(swatch.toDataURL('image/png')));
+    const label = tileLabelFor(code);
+    if (isBackgroundTile(code)) {
+      const swatch = renderTileSwatch(code);
+      const depth = renderTileDepthSwatch(code);
+      try {
+        const out = await stylize(swatch.toDataURL('image/png'), depth.toDataURL('image/png'), label, true);
+        backgrounds.set(code, await loadImage(out));
+      } catch (e) {
+        console.warn(`Stylizing the "${code}" tile failed, using its plain render instead:`, e);
+        backgrounds.set(code, await loadImage(swatch.toDataURL('image/png')));
+      }
+    } else {
+      const swatch = renderObjectSwatch(code);
+      try {
+        // No depth map for objects (empty string) → the backend skips ControlNet
+        // and prompts it as an isolated product shot; we key the backdrop out.
+        const out = await stylize(swatch.toDataURL('image/png'), '', label, false);
+        objects.set(code, keyOutBackdrop(await loadImage(out)));
+      } catch (e) {
+        console.warn(`Stylizing the "${code}" object failed, using its plain render instead:`, e);
+        objects.set(code, keyOutBackdrop(swatch));
+      }
     }
   }
-  return tiles;
+  return { backgrounds, objects };
 }
 
 /** Composites a stylized map from pre-stylized per-code tile swatches — the
@@ -498,7 +539,7 @@ async function stylizeTileSet(codes: Set<string>, stylize: TileStylizeFn): Promi
  *  final vignette unifies tone across swatches that were stylized in
  *  separate, independently-seeded AI calls. */
 function renderStylizedContentFromTiles(
-  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, tiles: Map<string, HTMLImageElement>
+  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, tiles: StylizedTiles
 ): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
@@ -511,42 +552,37 @@ function renderStylizedContentFromTiles(
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // An object cell is composited as `stylized floor + object on top`, so its
-  // surround matches neighboring floor cells exactly rather than showing the
-  // pale/mismatched patch the model paints behind an isolated object. Needs a
-  // floor swatch to lay down first — the map's own '.' floor if present, else
-  // any other background/material tile as a fallback base.
+  // An object cell is composited as `stylized floor + keyed object on top`, so
+  // its surround matches neighboring floor cells exactly instead of showing a
+  // patch. Needs a floor to lay down first — the map's own '.' floor if
+  // present, else any other background/material tile as a fallback base.
   const floorBase =
-    tiles.get('.') ?? [...tiles].find(([code]) => isBackgroundTile(code))?.[1] ?? null;
-  const maskedObjects = new Map<string, HTMLCanvasElement>();
-  if (floorBase) {
-    for (const [code, img] of tiles) {
-      if (!isBackgroundTile(code)) maskedObjects.set(code, maskStylizedObject(img, code));
-    }
-  }
+    tiles.backgrounds.get('.') ?? [...tiles.backgrounds.values()][0] ?? null;
+  // Keyed object art has transparent margins, so it's inset slightly within the
+  // cell (never bleeding past the grid line) and grounded with a contact shadow.
+  const inset = cellPx * 0.06;
 
   for (let r = 0; r < wRows; r++) {
     for (let c = 0; c < wCols; c++) {
       const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
       if (code === ' ') continue;
       const x = c * cellPx, y = r * cellPx;
-      const maskedObject = maskedObjects.get(code);
-      // Object cell: floor underneath first, so it blends with its neighbors.
-      if (maskedObject && floorBase) ctx.drawImage(floorBase, x, y, cellPx, cellPx);
-      if (isRaisedCell(code)) {
+      const objectTile = tiles.objects.get(code);
+
+      if (objectTile) {
+        if (floorBase) ctx.drawImage(floorBase, x, y, cellPx, cellPx);
+        else drawFloor(ctx, x, y, cellPx);
         ctx.save();
         ctx.fillStyle = 'rgba(0,0,0,0.28)';
         ctx.filter = `blur(${Math.max(1, cellPx * 0.06)}px)`;
         ctx.beginPath();
-        ctx.ellipse(x + cellPx * 0.5, y + cellPx * 0.72, cellPx * 0.36, cellPx * 0.16, 0, 0, Math.PI * 2);
+        ctx.ellipse(x + cellPx * 0.5, y + cellPx * 0.74, cellPx * 0.34, cellPx * 0.15, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-      }
-      if (maskedObject && floorBase) {
-        ctx.drawImage(maskedObject, x, y, cellPx, cellPx);
+        ctx.drawImage(objectTile, x + inset, y + inset, cellPx - inset * 2, cellPx - inset * 2);
       } else {
-        const tile = tiles.get(code);
-        if (tile) ctx.drawImage(tile, x, y, cellPx, cellPx);
+        const bg = tiles.backgrounds.get(code);
+        if (bg) ctx.drawImage(bg, x, y, cellPx, cellPx);
         else drawTile(ctx, code, x, y, cellPx);
       }
     }

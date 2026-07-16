@@ -53,13 +53,21 @@ or UI elements of any kind. Only apply the following stylistic/atmospheric treat
 const BACKGROUND_SUFFIX: &str = " This must be a seamless, edge-to-edge material surface texture only, \
 like a fabric swatch — do not include any furniture, beams, pillars, doors, statues, crates, or other \
 discrete objects anywhere in the frame.";
-// The object-tile counterpart — see comfyui.rs's OBJECT_POSITIVE_SUFFIX for
-// why this exists (small icon + atmospheric prompt → the model paints a whole
-// little room around the object, which then repeats into every cell).
-const OBJECT_SUFFIX: &str = " Render ONLY this single object by itself, centered and viewed straight \
-down from directly overhead, on a small bare patch of flat floor. There is no room here — no walls, no \
-window, no doorway, no background scenery, no other objects, no 3D perspective — just the one isolated \
-object on flat ground, like a single game-asset sprite on a plain background.";
+/// The object-tile prompt — see comfyui.rs's build_object_prompt for why the
+/// object path drops all scene/battle-map framing (the frontend sends the
+/// object on a plain neutral backdrop and keys it out; the model's only job is
+/// to render one nice isolated object). `scene` is folded in as a flagged
+/// material hint only.
+fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String {
+    let hint = scene
+        .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
+        .unwrap_or_default();
+    format!(
+        "{style} Top-down orthographic product shot of a single {label}, centered and filling the \
+         frame on a plain flat neutral studio background. One isolated object only — no room, no \
+         walls, no floor, no other objects, no scenery, no environment, no 3D perspective.{hint}"
+    )
+}
 
 fn store_key(key: &str) -> Result<(), String> {
     keyring::Entry::new(SERVICE, ACCOUNT)
@@ -189,19 +197,32 @@ pub fn clear_gemini_api_key() -> Result<(), String> {
 /// actually depicts (a tavern, a ship deck, ...), only a generic style
 /// description, and drifts toward whatever's most common in its training
 /// data for "battle map."
-/// `is_background` — see comfyui.rs's comfyui_stylize_map doc comment for
-/// what this marks and why it matters; BACKGROUND_SUFFIX is this module's
-/// equivalent of comfyui.rs's BACKGROUND_POSITIVE_SUFFIX + BACKGROUND_EXTRA_NEGATIVE
-/// combined into one instruction, since Gemini has no separate negative channel.
+/// `is_background`/`tile_label` — see comfyui.rs's comfyui_stylize_map doc
+/// comment. Object tiles (`Some(false)`) get an isolated product-shot prompt
+/// (build_object_prompt) with no scene framing; background tiles get the
+/// seamless-texture BACKGROUND_SUFFIX (Gemini has no separate negative channel,
+/// so it's one combined instruction).
 #[tauri::command]
 pub async fn gemini_stylize_map(
     prompt: String,
     png_data_url: String,
     scene_context: Option<String>,
     is_background: Option<bool>,
+    tile_label: Option<String>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let mut prompt = match scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let scene = scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+        // OBJECT: isolated product shot, no scene/battle-map framing.
+        if is_background == Some(false) {
+            let label = tile_label.as_deref().unwrap_or("object");
+            let full = build_object_prompt(&prompt, label, scene);
+            let key = read_key()?;
+            return stylize_blocking(&key, &full, &png_data_url);
+        }
+
+        // BACKGROUND or unclassified: scene-context + empty-room framing.
+        let mut prompt = match scene {
             // "(reference only, do not render this as visible text)" is
             // load-bearing — see comfyui.rs's identical comment for what
             // happens without it.
@@ -212,10 +233,8 @@ pub async fn gemini_stylize_map(
         // have no people/creatures painted in; stating it in-prompt reduces
         // how often the model adds them anyway.
         prompt.push_str(" The room is completely empty and unoccupied — no people, characters, or creatures present.");
-        match is_background {
-            Some(true) => prompt.push_str(BACKGROUND_SUFFIX),
-            Some(false) => prompt.push_str(OBJECT_SUFFIX),
-            None => {}
+        if is_background == Some(true) {
+            prompt.push_str(BACKGROUND_SUFFIX);
         }
         let key = read_key()?;
         stylize_blocking(&key, &prompt, &png_data_url)

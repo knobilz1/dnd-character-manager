@@ -78,33 +78,35 @@ statue, crate, barrel, prop, decorative object, architectural detail, discrete i
 // model's full freedom to invent new geometry, regardless of what denoise the
 // DM chose for the "hero" object tiles.
 const BACKGROUND_DENOISE_CAP: f64 = 0.45;
-// The mirror of the BACKGROUND_* pair for OBJECT tiles (door, pillar,
-// furniture, tree, hazard). Given a small icon and an atmospheric prompt, the
-// model's prior for a "top-down D&D tile" is to paint a whole little room
-// around the object — walls, a window, receding perspective — which then
-// repeats into every cell of that type (confirmed live: a grid of identical
-// miniature rooms). These force it to render ONLY the one object, isolated,
-// straight overhead, on a bare patch of floor — a game-asset sprite, not a
-// scene. Appended only when the caller marks a tile as an object (is_background
-// == Some(false)).
-const OBJECT_POSITIVE_SUFFIX: &str = " Render ONLY this single object by itself, centered and viewed \
-straight down from directly overhead, resting on a small bare patch of flat floor. There is no room \
-here — absolutely no walls, no window, no doorway, no corridor, no background scenery, no other \
-objects, and no 3D perspective. Just the one isolated object on flat ground, like a single \
-game-asset sprite on a plain background.";
-const OBJECT_EXTRA_NEGATIVE: &str = ", room, interior, walls, wall, window, doorway, corridor, \
-background scenery, environment, diorama, multiple objects, furniture set, perspective view, \
-vanishing point, 3D room, tilted view, empty space, blank canvas, off-center, cropped";
-// Object tiles get a denoise cap too, but a looser one than background tiles.
-// At high denoise the model stops *stylizing the icon in place* and starts
-// *recomposing the little canvas* — painting the object off to one side and
-// leaving the rest blank (confirmed live: a bench rendered in the right half
-// of the swatch with the left half empty cream, which our footprint mask then
-// preserved as a blank patch). Capping denoise keeps the stylized object
-// anchored to — and filling — the procedural footprint the mask expects,
-// while still leaving more restyling latitude than the seamless-texture
-// background cap allows.
-const OBJECT_DENOISE_CAP: f64 = 0.5;
+// OBJECT tiles (door, pillar, furniture, tree, hazard) are stylized as an
+// isolated PRODUCT SHOT, not as a battle-map cell. The frontend sends the
+// object on a plain neutral backdrop (not floor — see battleMapRender.ts's
+// renderObjectSwatch) and keys that backdrop out afterward, so the model's job
+// here is purely "make one nice isolated object." build_object_prompt frames
+// it that way and deliberately drops the scene/battle-map wording that made the
+// model paint a whole room around the object (confirmed live: a grid of
+// identical miniature rooms). The scene context is passed only as a brief
+// material/style hint, explicitly flagged as "not a scene to draw."
+const OBJECT_EXTRA_NEGATIVE: &str = ", room, interior, walls, wall, window, doorway, corridor, floor \
+tiles, background scenery, environment, diorama, multiple objects, furniture set, perspective view, \
+vanishing point, 3D room, tilted view, cropped";
+
+/// Builds the isolated-object product-shot prompt for an object tile. `style`
+/// is the DM's chosen look (preset/manual prompt, or POSITIVE_PROMPT); `label`
+/// names the object ("a wooden door"); `scene`, if present, is folded in only
+/// as a material/setting hint (a bar table vs a dungeon table), flagged so the
+/// model doesn't render it as a scene.
+fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String {
+    let hint = scene
+        .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
+        .unwrap_or_default();
+    format!(
+        "{style} Top-down orthographic product shot of a single {label}, centered and filling the \
+         frame on a plain flat neutral studio background. One isolated object only — no room, no \
+         walls, no floor, no other objects, no scenery, no environment, no 3D perspective.{hint}"
+    )
+}
+
 const DENOISE: f64 = 0.55;
 const POLL_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
@@ -480,30 +482,16 @@ fn fetch_view(base: &str, filename: &str, subfolder: &str, img_type: &str) -> Re
     Ok(bytes)
 }
 
-/// Pure helper behind comfyui_stylize_map's `is_background` handling — pulled
+/// Pure helper for the BACKGROUND/material path: a seamless texture that
+/// repeats into many cells, so it's pushed toward a plain surface (extra
+/// positive/negative reinforcement) and its denoise capped so it can't invent
+/// a discrete object that then gets stamped everywhere. Mutates
+/// `prompt`/`negative` in place and returns the denoise to actually use. Pulled
 /// out so it's directly testable without a live ComfyUI/network round trip.
-/// Mutates `prompt`/`negative` in place (both already carry scene context and
-/// EMPTY_ROOM_SUFFIX by the time this runs) and returns the denoise to
-/// actually use.
-///
-/// `Some(true)` = a background/material swatch that repeats into many cells
-/// (keep it a seamless texture, cap denoise); `Some(false)` = a discrete
-/// object swatch (force it to be one isolated object, no room around it);
-/// `None` = neither adjustment (a caller that didn't classify the tile).
-fn apply_tile_adjustments(prompt: &mut String, negative: &mut String, denoise: f64, is_background: Option<bool>) -> f64 {
-    match is_background {
-        Some(true) => {
-            prompt.push_str(BACKGROUND_POSITIVE_SUFFIX);
-            negative.push_str(BACKGROUND_EXTRA_NEGATIVE);
-            denoise.min(BACKGROUND_DENOISE_CAP)
-        }
-        Some(false) => {
-            prompt.push_str(OBJECT_POSITIVE_SUFFIX);
-            negative.push_str(OBJECT_EXTRA_NEGATIVE);
-            denoise.min(OBJECT_DENOISE_CAP)
-        }
-        None => denoise,
-    }
+fn apply_background_adjustments(prompt: &mut String, negative: &mut String, denoise: f64) -> f64 {
+    prompt.push_str(BACKGROUND_POSITIVE_SUFFIX);
+    negative.push_str(BACKGROUND_EXTRA_NEGATIVE);
+    denoise.min(BACKGROUND_DENOISE_CAP)
 }
 
 fn stylize_blocking(
@@ -561,14 +549,20 @@ fn stylize_blocking(
 /// is used as ControlNet structural guidance when a controlnet model is
 /// installed; ignored otherwise.
 ///
-/// `is_background` marks a call as stylizing a background/material tile
-/// (floor, wall, water, rubble, stairs — see battleMapRender.ts's
-/// isBackgroundTile) rather than a discrete-object tile (door, pillar,
-/// furniture, tree, hazard). Background swatches get repeated into every
-/// matching cell across the whole map, so they're pushed toward a plain
-/// seamless texture (extra positive/negative reinforcement, capped denoise)
-/// instead of the full creative freedom an object tile gets — see
-/// BACKGROUND_POSITIVE_SUFFIX's doc comment for why this exists.
+/// `is_background` splits the two paths. `Some(false)` = a discrete-object tile
+/// (door, pillar, furniture, tree, hazard): the frontend sent the object on a
+/// plain neutral backdrop and will key it out, so this builds an isolated
+/// product-shot prompt (see build_object_prompt) with NO scene/battle-map
+/// framing and no denoise cap — that framing is what made the model paint a
+/// whole room around the object. `Some(true)` = a background/material tile
+/// (floor, wall, water, rubble, stairs) that repeats into many cells: kept a
+/// seamless texture with scene context, extra reinforcement, and a denoise cap.
+/// `None` = legacy/unclassified: the old scene-context flow.
+///
+/// `tile_label` names the object for the product-shot prompt ("a wooden door");
+/// `scene_context` is the map's authored features, used as scene framing for
+/// backgrounds and only as a brief material hint for objects. `depth_map_data_url`
+/// drives ControlNet for backgrounds; objects send none.
 #[tauri::command]
 pub async fn comfyui_stylize_map(
     base_url: String,
@@ -578,10 +572,26 @@ pub async fn comfyui_stylize_map(
     scene_context: Option<String>,
     depth_map_data_url: Option<String>,
     is_background: Option<bool>,
+    tile_label: Option<String>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let mut prompt = prompt.unwrap_or_else(|| POSITIVE_PROMPT.to_string());
-        if let Some(ctx) = scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let style = prompt.unwrap_or_else(|| POSITIVE_PROMPT.to_string());
+        let scene = scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let denoise = denoise.unwrap_or(DENOISE);
+
+        if is_background == Some(false) {
+            // OBJECT: isolated product shot, no scene/battle-map framing, no cap.
+            let label = tile_label.as_deref().unwrap_or("object");
+            let prompt = build_object_prompt(&style, label, scene);
+            let negative = format!("{NEGATIVE_PROMPT}{OBJECT_EXTRA_NEGATIVE}");
+            return stylize_blocking(
+                &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative,
+            );
+        }
+
+        // BACKGROUND or unclassified: scene-context + empty-room framing.
+        let mut prompt = style;
+        if let Some(ctx) = scene {
             // "(reference only, do not render this as visible text)" is load-
             // bearing — without it, a scene description containing coordinate-
             // shaped tokens got painted onto the map as a garbled title and
@@ -591,9 +601,11 @@ pub async fn comfyui_stylize_map(
         }
         prompt.push_str(EMPTY_ROOM_SUFFIX);
         let mut negative = NEGATIVE_PROMPT.to_string();
-        let denoise = apply_tile_adjustments(
-            &mut prompt, &mut negative, denoise.unwrap_or(DENOISE), is_background,
-        );
+        let denoise = if is_background == Some(true) {
+            apply_background_adjustments(&mut prompt, &mut negative, denoise)
+        } else {
+            denoise
+        };
         stylize_blocking(&base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative)
     })
     .await
@@ -759,29 +771,30 @@ mod tests {
     }
 
     #[test]
-    fn apply_tile_adjustments_forces_object_tiles_to_be_a_lone_isolated_object() {
-        let mut prompt = "a stone pillar".to_string();
-        let mut negative = NEGATIVE_PROMPT.to_string();
-        let denoise = apply_tile_adjustments(&mut prompt, &mut negative, 0.7, Some(false));
-        // The object suffix forbids a room/walls; the extra negatives push
-        // against the whole-scene "miniature room" the model otherwise paints.
-        assert!(prompt.contains("no walls"));
-        assert!(negative.contains("room"));
-        // Object tiles are capped (looser than background) so a high denoise
-        // can't make the model recompose the swatch — painting the object
-        // off-center with blank canvas that the footprint mask then keeps.
-        assert_eq!(denoise, OBJECT_DENOISE_CAP);
-        assert!(denoise < 0.7);
-        // ...but the object cap is looser than the background one, since an
-        // object tile is meant to show one detailed thing, not a flat texture.
-        assert!(OBJECT_DENOISE_CAP > BACKGROUND_DENOISE_CAP);
+    fn build_object_prompt_frames_an_isolated_product_shot_without_scene_words() {
+        let p = build_object_prompt("photorealistic, dramatic lighting.", "a wooden table", Some("Bar; Fire pit"));
+        // Names the object, forbids a room/scene, and folds scene in only as a
+        // flagged material hint — never as something to render.
+        assert!(p.contains("a wooden table"));
+        assert!(p.contains("photorealistic, dramatic lighting."));
+        assert!(p.contains("no room"));
+        assert!(p.contains("isolated object"));
+        assert!(p.contains("do NOT draw this as a scene"));
+        assert!(p.contains("Bar; Fire pit"));
     }
 
     #[test]
-    fn apply_tile_adjustments_reinforces_and_caps_denoise_for_background_tiles() {
+    fn build_object_prompt_omits_the_hint_when_there_is_no_scene() {
+        let p = build_object_prompt("anime style.", "a barrel", None);
+        assert!(p.contains("a barrel"));
+        assert!(!p.contains("hint"));
+    }
+
+    #[test]
+    fn apply_background_adjustments_reinforces_and_caps_denoise() {
         let mut prompt = "plain floor".to_string();
         let mut negative = NEGATIVE_PROMPT.to_string();
-        let denoise = apply_tile_adjustments(&mut prompt, &mut negative, 0.7, Some(true));
+        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.7);
         assert!(prompt.contains("seamless"));
         assert!(negative.contains("furniture"));
         // 0.7 requested, but background tiles are capped below it so a
@@ -792,23 +805,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_tile_adjustments_never_raises_denoise_above_the_cap() {
+    fn apply_background_adjustments_never_raises_denoise_above_the_cap() {
         let mut prompt = String::new();
         let mut negative = String::new();
         // A DM-chosen strength already below the cap should pass through
         // unchanged, not get pulled UP to the cap.
-        let denoise = apply_tile_adjustments(&mut prompt, &mut negative, 0.2, Some(true));
+        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.2);
         assert_eq!(denoise, 0.2);
-    }
-
-    #[test]
-    fn apply_tile_adjustments_is_a_no_op_when_the_tile_is_unclassified() {
-        let mut prompt = "some prompt".to_string();
-        let mut negative = NEGATIVE_PROMPT.to_string();
-        let denoise = apply_tile_adjustments(&mut prompt, &mut negative, 0.7, None);
-        assert_eq!(prompt, "some prompt");
-        assert_eq!(negative, NEGATIVE_PROMPT);
-        assert_eq!(denoise, 0.7);
     }
 
     #[test]
