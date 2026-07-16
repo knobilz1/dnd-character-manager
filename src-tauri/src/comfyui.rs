@@ -83,54 +83,146 @@ fn upload_image(base: &str, png: &[u8]) -> Result<String, String> {
         .ok_or_else(|| "ComfyUI's upload response didn't include an image name.".to_string())
 }
 
-fn pick_checkpoint(base: &str) -> Result<String, String> {
-    let resp = ureq::get(&format!("{base}/object_info/CheckpointLoaderSimple"))
+/// Where the diffusion model actually lives. ComfyUI Desktop's newer model
+/// families (Flux, Flux 2, ...) ship as separate UNet/CLIP/VAE files instead
+/// of one merged checkpoint — `models/checkpoints` can be entirely empty on
+/// an otherwise fully-installed instance, which used to make `pick_checkpoint`
+/// fail outright ("no checkpoint installed") even though a perfectly good
+/// model was sitting right there under `models/diffusion_models`.
+enum ModelSource {
+    Checkpoint(String),
+    Split { unet_name: String, clip_names: Vec<String>, clip_type: String, dual_clip: bool, vae_name: String },
+}
+
+fn list_models_in_folder(base: &str, folder: &str) -> Result<Vec<String>, String> {
+    let resp = ureq::get(&format!("{base}/models/{folder}"))
         .call()
         .map_err(|e| format!("Couldn't reach ComfyUI at {base}: {e}"))?;
     let parsed: Value = resp
         .into_json()
-        .map_err(|e| format!("Couldn't parse ComfyUI's checkpoint list: {e}"))?;
-    parsed["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+        .map_err(|e| format!("Couldn't parse ComfyUI's {folder} model list: {e}"))?;
+    Ok(parsed
         .as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            "ComfyUI has no Stable Diffusion checkpoint installed — add one under \
-             models/checkpoints and try again."
-                .to_string()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default())
 }
 
-fn build_workflow(ckpt_name: &str, image_name: &str, prompt: &str, denoise: f64) -> Value {
-    let seed: u64 = rand::thread_rng().gen();
-    json!({
-        "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": ckpt_name } },
-        "10": { "class_type": "LoadImage", "inputs": { "image": image_name } },
-        "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["4", 2] } },
-        "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": prompt } },
-        "7": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": NEGATIVE_PROMPT } },
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "seed": seed,
-                "steps": 20,
-                "cfg": 7,
-                "sampler_name": "euler",
-                "scheduler": "normal",
-                "denoise": denoise,
-                "model": ["4", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["12", 0]
-            }
-        },
-        "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": { "filename_prefix": "tavern_sheet_battle_map", "images": ["8", 0] }
-        }
+fn no_model_installed_err() -> String {
+    "ComfyUI has no image model installed — add a Stable Diffusion checkpoint under \
+     models/checkpoints, or a split model (diffusion model + CLIP + VAE) under \
+     models/diffusion_models, models/text_encoders, and models/vae, then try again."
+        .to_string()
+}
+
+fn pick_model_source(base: &str) -> Result<ModelSource, String> {
+    let checkpoints = list_models_in_folder(base, "checkpoints")?;
+    if let Some(name) = checkpoints.first() {
+        return Ok(ModelSource::Checkpoint(name.clone()));
+    }
+    let unets = list_models_in_folder(base, "diffusion_models")?;
+    let clips = list_models_in_folder(base, "text_encoders")?;
+    let vaes = list_models_in_folder(base, "vae")?;
+    let (Some(unet_name), Some(vae_name)) = (unets.first(), vaes.first()) else {
+        return Err(no_model_installed_err());
+    };
+    if clips.is_empty() {
+        return Err(no_model_installed_err());
+    }
+    // Best-effort family detection from the UNet filename — Flux 2 uses a
+    // single text encoder via CLIPLoader(type="flux2"); Flux 1 uses a pair
+    // via DualCLIPLoader(type="flux"). Good enough to auto-wire the two
+    // families ComfyUI Desktop actually ships without asking the DM to
+    // configure anything.
+    let lower = unet_name.to_lowercase();
+    let is_flux2 = lower.contains("flux2") || lower.contains("flux-2") || lower.contains("flux_2");
+    let clip_type = if is_flux2 { "flux2" } else { "flux" };
+    let dual_clip = !is_flux2 && clips.len() >= 2;
+    Ok(ModelSource::Split {
+        unet_name: unet_name.clone(),
+        clip_names: clips,
+        clip_type: clip_type.to_string(),
+        dual_clip,
+        vae_name: vae_name.clone(),
     })
+}
+
+fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise: f64) -> Value {
+    let seed: u64 = rand::thread_rng().gen();
+    match source {
+        ModelSource::Checkpoint(ckpt_name) => json!({
+            "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": ckpt_name } },
+            "10": { "class_type": "LoadImage", "inputs": { "image": image_name } },
+            "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["4", 2] } },
+            "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": prompt } },
+            "7": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": NEGATIVE_PROMPT } },
+            "3": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed,
+                    "steps": 20,
+                    "cfg": 7,
+                    "sampler_name": "euler",
+                    "scheduler": "normal",
+                    "denoise": denoise,
+                    "model": ["4", 0],
+                    "positive": ["6", 0],
+                    "negative": ["7", 0],
+                    "latent_image": ["12", 0]
+                }
+            },
+            "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
+            "9": {
+                "class_type": "SaveImage",
+                "inputs": { "filename_prefix": "tavern_sheet_battle_map", "images": ["8", 0] }
+            }
+        }),
+        ModelSource::Split { unet_name, clip_names, clip_type, dual_clip, vae_name } => {
+            let clip_node = if *dual_clip {
+                json!({
+                    "class_type": "DualCLIPLoader",
+                    "inputs": { "clip_name1": clip_names[0], "clip_name2": clip_names[1], "type": clip_type }
+                })
+            } else {
+                json!({
+                    "class_type": "CLIPLoader",
+                    "inputs": { "clip_name": clip_names[0], "type": clip_type }
+                })
+            };
+            // Flux models are guidance-distilled rather than CFG-driven: cfg
+            // stays at 1.0 and strength comes from FluxGuidance instead, with
+            // a zeroed-out negative (KSampler still requires one).
+            json!({
+                "4": { "class_type": "UNETLoader", "inputs": { "unet_name": unet_name, "weight_dtype": "default" } },
+                "5": clip_node,
+                "14": { "class_type": "VAELoader", "inputs": { "vae_name": vae_name } },
+                "10": { "class_type": "LoadImage", "inputs": { "image": image_name } },
+                "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["14", 0] } },
+                "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["5", 0], "text": prompt } },
+                "15": { "class_type": "FluxGuidance", "inputs": { "conditioning": ["6", 0], "guidance": 3.5 } },
+                "16": { "class_type": "ConditioningZeroOut", "inputs": { "conditioning": ["6", 0] } },
+                "3": {
+                    "class_type": "KSampler",
+                    "inputs": {
+                        "seed": seed,
+                        "steps": 20,
+                        "cfg": 1.0,
+                        "sampler_name": "euler",
+                        "scheduler": "simple",
+                        "denoise": denoise,
+                        "model": ["4", 0],
+                        "positive": ["15", 0],
+                        "negative": ["16", 0],
+                        "latent_image": ["12", 0]
+                    }
+                },
+                "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["14", 0] } },
+                "9": {
+                    "class_type": "SaveImage",
+                    "inputs": { "filename_prefix": "tavern_sheet_battle_map", "images": ["8", 0] }
+                }
+            })
+        }
+    }
 }
 
 fn queue_prompt(base: &str, workflow: Value, client_id: &str) -> Result<String, String> {
@@ -227,9 +319,9 @@ fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f
     }
     let png = data_url_to_png_bytes(png_data_url)?;
     let image_name = upload_image(base, &png)?;
-    let ckpt_name = pick_checkpoint(base)?;
+    let source = pick_model_source(base)?;
     let client_id = random_client_id();
-    let workflow = build_workflow(&ckpt_name, &image_name, prompt, denoise);
+    let workflow = build_workflow(&source, &image_name, prompt, denoise);
     let prompt_id = queue_prompt(base, workflow, &client_id)?;
     let history_entry = poll_history(base, &prompt_id)?;
     let (filename, subfolder, img_type) = extract_image_ref(&history_entry)?;
@@ -311,7 +403,8 @@ mod tests {
 
     #[test]
     fn build_workflow_wires_uploaded_image_and_checkpoint_through_the_graph() {
-        let wf = build_workflow("my-checkpoint.safetensors", "uploaded123.png", POSITIVE_PROMPT, DENOISE);
+        let source = ModelSource::Checkpoint("my-checkpoint.safetensors".to_string());
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE);
         assert_eq!(wf["4"]["inputs"]["ckpt_name"], "my-checkpoint.safetensors");
         assert_eq!(wf["10"]["inputs"]["image"], "uploaded123.png");
         assert_eq!(wf["3"]["inputs"]["denoise"], DENOISE);
@@ -320,9 +413,51 @@ mod tests {
 
     #[test]
     fn build_workflow_uses_the_given_prompt_and_denoise_overrides() {
-        let wf = build_workflow("ckpt.safetensors", "img.png", "a custom style prompt", 0.8);
+        let source = ModelSource::Checkpoint("ckpt.safetensors".to_string());
+        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8);
         assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
         assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
+    }
+
+    #[test]
+    fn build_workflow_wires_a_split_flux2_model_through_clip_loader() {
+        let source = ModelSource::Split {
+            unet_name: "flux-2-klein-4b-fp8.safetensors".to_string(),
+            clip_names: vec!["qwen_3_4b.safetensors".to_string()],
+            clip_type: "flux2".to_string(),
+            dual_clip: false,
+            vae_name: "flux2-vae.safetensors".to_string(),
+        };
+        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8);
+        assert_eq!(wf["4"]["class_type"], "UNETLoader");
+        assert_eq!(wf["4"]["inputs"]["unet_name"], "flux-2-klein-4b-fp8.safetensors");
+        assert_eq!(wf["5"]["class_type"], "CLIPLoader");
+        assert_eq!(wf["5"]["inputs"]["clip_name"], "qwen_3_4b.safetensors");
+        assert_eq!(wf["5"]["inputs"]["type"], "flux2");
+        assert_eq!(wf["14"]["inputs"]["vae_name"], "flux2-vae.safetensors");
+        assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
+        assert_eq!(wf["15"]["class_type"], "FluxGuidance");
+        assert_eq!(wf["3"]["inputs"]["cfg"], 1.0);
+        assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
+        assert_eq!(wf["3"]["inputs"]["positive"][0], "15");
+        assert_eq!(wf["3"]["inputs"]["negative"][0], "16");
+        assert_eq!(wf["8"]["inputs"]["vae"][0], "14");
+    }
+
+    #[test]
+    fn build_workflow_wires_a_split_flux1_model_through_dual_clip_loader() {
+        let source = ModelSource::Split {
+            unet_name: "flux1-dev.safetensors".to_string(),
+            clip_names: vec!["clip_l.safetensors".to_string(), "t5xxl.safetensors".to_string()],
+            clip_type: "flux".to_string(),
+            dual_clip: true,
+            vae_name: "ae.safetensors".to_string(),
+        };
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE);
+        assert_eq!(wf["5"]["class_type"], "DualCLIPLoader");
+        assert_eq!(wf["5"]["inputs"]["clip_name1"], "clip_l.safetensors");
+        assert_eq!(wf["5"]["inputs"]["clip_name2"], "t5xxl.safetensors");
+        assert_eq!(wf["5"]["inputs"]["type"], "flux");
     }
 
     #[test]
