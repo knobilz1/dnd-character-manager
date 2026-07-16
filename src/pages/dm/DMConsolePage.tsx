@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, HelpCircle } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -795,6 +795,7 @@ export function DMConsolePage() {
   // panel is open at a time (`aiExportSlug`); `aiExportPreview` is that
   // panel's own preview image, independent of the card's saved tile PNG.
   const [aiExportSlug, setAiExportSlug] = React.useState<string | null>(null);
+  const [showComfyUiGuide, setShowComfyUiGuide] = React.useState(false);
   const [aiExportPreview, setAiExportPreview] = React.useState<string | null>(null);
   const [geminiKeyConfigured, setGeminiKeyConfigured] = React.useState<boolean | null>(null);
   const [geminiKeyInput, setGeminiKeyInput] = React.useState('');
@@ -3588,14 +3589,70 @@ export function DMConsolePage() {
                     AI atmosphere pass on export (local ComfyUI, off by default — the tile map stays the DM's source of truth either way)
                   </label>
                   {mapAiStyle && (
-                    <input
-                      value={comfyUiBaseUrl}
-                      onChange={(e) => setComfyUiBaseUrl(e.target.value)}
-                      placeholder="http://127.0.0.1:8188"
-                      className="w-48 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
-                    />
+                    <>
+                      <input
+                        value={comfyUiBaseUrl}
+                        onChange={(e) => setComfyUiBaseUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:8188"
+                        className="w-48 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowComfyUiGuide((v) => !v)}
+                        title="What ComfyUI setup was this tested with?"
+                        className="text-slate-500 hover:text-slate-300"
+                      >
+                        <HelpCircle size={15} />
+                      </button>
+                    </>
                   )}
                 </div>
+                {mapAiStyle && showComfyUiGuide && (
+                  <div className="mb-2 p-3 bg-slate-900/60 border border-slate-700 rounded-lg text-xs text-slate-300 space-y-2">
+                    <p>
+                      <strong className="text-slate-100">Tested with:</strong> ComfyUI Desktop + Flux 2 Klein 4B
+                      (<code className="text-slate-400">flux-2-klein-4b-fp8.safetensors</code>). Any Flux/Flux 2
+                      split model or classic SD checkpoint works out of the box for a plain atmosphere pass — no
+                      extra setup needed for that.
+                    </p>
+                    <p>
+                      <strong className="text-slate-100">For structure-locked results</strong> (walls/furniture stay
+                      put instead of drifting), install a ControlNet — this app auto-detects and uses one if
+                      present, otherwise it just runs the plain pass:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-400">
+                      <li>
+                        Clone{' '}
+                        <code className="text-slate-300">github.com/bryanmcguire/comfyui-flux2fun-controlnet</code>{' '}
+                        into ComfyUI's <code className="text-slate-300">custom_nodes/</code>, restart ComfyUI.
+                      </li>
+                      <li>
+                        Download <code className="text-slate-300">FLUX.2-dev-Fun-Controlnet-Union.safetensors</code>{' '}
+                        (~8GB, from <code className="text-slate-300">alibaba-pai/FLUX.2-dev-Fun-Controlnet-Union</code>{' '}
+                        on Hugging Face) into <code className="text-slate-300">models/controlnet/</code>.
+                      </li>
+                      <li>
+                        On a newer ComfyUI core you may hit <code className="text-slate-300">AttributeError:
+                        'ControlNetWrapper' object has no attribute 'multigpu_clones'</code> or{' '}
+                        <code className="text-slate-300">TypeError: patched_forward_orig() got an unexpected
+                        keyword argument 'timestep_zero_index'</code> the first time you generate — both are the
+                        node package lagging behind ComfyUI's own internals, not a real conflict. Fix: in the node
+                        package's <code className="text-slate-300">nodes.py</code>, add{' '}
+                        <code className="text-slate-300">self.multigpu_clones = {'{}'}</code> to{' '}
+                        <code className="text-slate-300">ControlNetWrapper.__init__</code>; in{' '}
+                        <code className="text-slate-300">flux_patch.py</code>, add{' '}
+                        <code className="text-slate-300">timestep_zero_index=None</code> to{' '}
+                        <code className="text-slate-300">patched_forward_orig</code>'s parameters. Restart ComfyUI
+                        after editing either file.
+                      </li>
+                    </ol>
+                    <p>
+                      Recommended Strength: <strong className="text-slate-100">0.6–0.75</strong>. Even with all of
+                      this, expect the occasional stray hallucinated person/text — regenerating (a fresh random
+                      seed each time) usually clears it.
+                    </p>
+                  </div>
+                )}
                 {planBusy && <p className="text-xs text-amber-400 mb-2">{planBusy}</p>}
 
                 <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
