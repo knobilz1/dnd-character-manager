@@ -322,20 +322,21 @@ const OBJECT_BG = '#8a8f96';
 // Short descriptive phrase per legend code, for the stylize prompt — see
 // campaign.rs's MAP_LEGEND for the canonical meaning of each character.
 // Clean, singular object names matter: the model renders a specific named
-// object well ("a wooden door" came out great) but a vague or dual label
+// object well ("wooden door" came out great) but a vague or dual label
 // ("furniture or an altar") comes back as an ambiguous shape. Keep each object
-// code to one concrete thing.
+// code to one concrete thing, WITHOUT a leading article — build_object_prompt
+// (comfyui.rs) supplies "a single …" itself, so an article here would double up.
 const TILE_LABELS: Record<string, string> = {
   '.': 'plain floor',
-  '#': 'a stone wall block',
-  '+': 'a heavy wooden door',
+  '#': 'stone wall block',
+  '+': 'heavy wooden door',
   '~': 'water',
-  o: 'a round stone pillar',
-  '^': 'a pile of rubble',
-  '=': 'a sturdy wooden table',
-  T: 'a leafy tree',
+  o: 'round stone pillar',
+  '^': 'pile of rubble',
+  '=': 'sturdy wooden table',
+  T: 'leafy tree',
   _: 'stone steps',
-  '*': 'a lit iron brazier',
+  '*': 'lit iron brazier',
 };
 
 function tileLabelFor(code: string): string {

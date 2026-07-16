@@ -100,10 +100,16 @@ fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String 
     let hint = scene
         .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
         .unwrap_or_default();
+    // Lead with the camera angle + the named object: diffusion models weight
+    // the start of the prompt most, and "seen from straight overhead" is the
+    // single most important constraint for a battle-map asset (it stops the
+    // model rendering the object at its default 3/4 photography angle). Style
+    // words follow; the isolation constraints and material hint come last.
     format!(
-        "{style} Top-down orthographic product shot of a single {label}, centered and filling the \
-         frame on a plain flat neutral studio background. One isolated object only — no room, no \
-         walls, no floor, no other objects, no scenery, no environment, no 3D perspective.{hint}"
+        "A direct top-down view, seen from straight overhead, of a single {label}. {style} The object \
+         is centered and fills the frame on a plain flat neutral studio background — one isolated \
+         object only, no room, no walls, no floor, no other objects, no scenery, no environment, no \
+         3D perspective, no side view.{hint}"
     )
 }
 
@@ -772,10 +778,12 @@ mod tests {
 
     #[test]
     fn build_object_prompt_frames_an_isolated_product_shot_without_scene_words() {
-        let p = build_object_prompt("photorealistic, dramatic lighting.", "a wooden table", Some("Bar; Fire pit"));
-        // Names the object, forbids a room/scene, and folds scene in only as a
-        // flagged material hint — never as something to render.
-        assert!(p.contains("a wooden table"));
+        let p = build_object_prompt("photorealistic, dramatic lighting.", "wooden table", Some("Bar; Fire pit"));
+        // Leads with the camera angle + the named object, applies the style,
+        // forbids a room/scene, and folds scene in only as a flagged material
+        // hint — never as something to render.
+        assert!(p.starts_with("A direct top-down view"));
+        assert!(p.contains("a single wooden table"));
         assert!(p.contains("photorealistic, dramatic lighting."));
         assert!(p.contains("no room"));
         assert!(p.contains("isolated object"));
@@ -785,8 +793,8 @@ mod tests {
 
     #[test]
     fn build_object_prompt_omits_the_hint_when_there_is_no_scene() {
-        let p = build_object_prompt("anime style.", "a barrel", None);
-        assert!(p.contains("a barrel"));
+        let p = build_object_prompt("anime style.", "barrel", None);
+        assert!(p.contains("a single barrel"));
         assert!(!p.contains("hint"));
     }
 

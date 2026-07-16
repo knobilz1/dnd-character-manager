@@ -63,9 +63,10 @@ fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String 
         .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
         .unwrap_or_default();
     format!(
-        "{style} Top-down orthographic product shot of a single {label}, centered and filling the \
-         frame on a plain flat neutral studio background. One isolated object only — no room, no \
-         walls, no floor, no other objects, no scenery, no environment, no 3D perspective.{hint}"
+        "A direct top-down view, seen from straight overhead, of a single {label}. {style} The object \
+         is centered and fills the frame on a plain flat neutral studio background — one isolated \
+         object only, no room, no walls, no floor, no other objects, no scenery, no environment, no \
+         3D perspective, no side view.{hint}"
     )
 }
 
