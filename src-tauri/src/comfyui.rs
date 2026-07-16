@@ -18,6 +18,7 @@
 //!   5. GET /view — downloads the finished PNG.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::DynamicImage;
 use rand::Rng;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -43,6 +44,14 @@ use std::time::{Duration, Instant};
 const POSITIVE_PROMPT: &str = "top-down tabletop RPG battle map, detailed floor texture, \
 atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, \
 watermarks, or UI elements.";
+// A battle map is a static scene the DM places tokens onto themselves —
+// any people/creatures the model paints in are pure noise. NEGATIVE_PROMPT
+// alone wasn't enough to reliably suppress them (confirmed live, worse with
+// the ControlNet path's structural conditioning active), so this states it
+// directly in the positive prompt too, appended to every stylize call
+// regardless of provider/preset.
+const EMPTY_ROOM_SUFFIX: &str =
+    " The room is completely empty and unoccupied — no people, characters, or creatures present.";
 // No "photo" here on purpose — the manual AI Export panel offers a
 // "Realistic"/photorealistic style preset (see mapStylePresets.ts), and
 // negating "photo" would fight that request. "characters/miniatures/people"
@@ -71,12 +80,36 @@ fn png_bytes_to_data_url(bytes: &[u8]) -> String {
     format!("data:image/png;base64,{}", STANDARD.encode(bytes))
 }
 
-fn upload_image(base: &str, png: &[u8]) -> Result<String, String> {
+/// Runs Canny edge detection over the content-layer PNG and re-encodes the
+/// result as its own PNG (white edges on black) — the control_image a
+/// Flux2Fun ControlNet expects. Our content layer is procedurally drawn flat-
+/// color art with crisp black outlines around every wall/furniture/door, not
+/// a noisy photo, so these thresholds are tuned low/permissive rather than
+/// the higher defaults common for photographic input: missing a real
+/// architectural edge here would defeat the whole point of this pass —
+/// letting the model reinterpret exactly the geometry we're trying to lock.
+fn canny_edge_png(png: &[u8]) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(png)
+        .map_err(|e| format!("Couldn't decode the map image for edge detection: {e}"))?;
+    let edges = imageproc::edges::canny(&img.to_luma8(), 30.0, 90.0);
+    let mut out = Vec::new();
+    DynamicImage::ImageLuma8(edges)
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .map_err(|e| format!("Couldn't encode the edge map: {e}"))?;
+    Ok(out)
+}
+
+/// `filename` must be distinct across the two images uploaded per request
+/// (content + edge map, when ControlNet is in play) — ComfyUI's upload
+/// endpoint writes by name with overwrite=true, so reusing one filename for
+/// both would let the second upload silently clobber the first on disk
+/// before the workflow ever reads it.
+fn upload_image(base: &str, png: &[u8], filename: &str) -> Result<String, String> {
     let boundary = "TavernSheetComfyBoundary";
     let mut body = Vec::new();
     body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
     body.extend_from_slice(
-        b"Content-Disposition: form-data; name=\"image\"; filename=\"battle_map.png\"\r\n",
+        format!("Content-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\n").as_bytes(),
     );
     body.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
     body.extend_from_slice(png);
@@ -121,6 +154,20 @@ fn list_models_in_folder(base: &str, folder: &str) -> Result<Vec<String>, String
         .unwrap_or_default())
 }
 
+/// A Flux2Fun ControlNet, if the user has installed one under
+/// models/controlnet — see comfyui-flux2fun-controlnet, the third-party
+/// node package this pairs with (not a stock ComfyUI node). Structural
+/// guidance is opt-in: no model installed just means the plain img2img
+/// workflow runs, same as before this existed.
+struct ControlNetConfig<'a> {
+    model_name: &'a str,
+    edge_image_name: &'a str,
+}
+
+fn pick_controlnet(base: &str) -> Option<String> {
+    list_models_in_folder(base, "controlnet").ok()?.into_iter().next()
+}
+
 fn no_model_installed_err() -> String {
     "ComfyUI has no image model installed — add a Stable Diffusion checkpoint under \
      models/checkpoints, or a split model (diffusion model + CLIP + VAE) under \
@@ -160,7 +207,11 @@ fn pick_model_source(base: &str) -> Result<ModelSource, String> {
     })
 }
 
-fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise: f64) -> Value {
+const CONTROLNET_STRENGTH: f64 = 0.75;
+
+fn build_workflow(
+    source: &ModelSource, image_name: &str, prompt: &str, denoise: f64, controlnet: Option<&ControlNetConfig>,
+) -> Value {
     let seed: u64 = rand::thread_rng().gen();
     match source {
         ModelSource::Checkpoint(ckpt_name) => json!({
@@ -215,7 +266,7 @@ fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise:
             // denoise strengths (confirmed live), so this is 3.0, a
             // stronger "true CFG" value that trades a little quality for
             // the negative prompt actually being obeyed.
-            json!({
+            let mut graph = json!({
                 "4": { "class_type": "UNETLoader", "inputs": { "unet_name": unet_name, "weight_dtype": "default" } },
                 "5": clip_node,
                 "14": { "class_type": "VAELoader", "inputs": { "vae_name": vae_name } },
@@ -244,7 +295,68 @@ fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise:
                     "class_type": "SaveImage",
                     "inputs": { "filename_prefix": "tavern_sheet_battle_map", "images": ["8", 0] }
                 }
-            })
+            });
+
+            // comfyui-flux2fun-controlnet is built specifically for the
+            // Flux.2 family (single CLIPLoader) — skip it for Flux 1's
+            // DualCLIPLoader path, which this node package was never
+            // trained/tested against. Structural guidance keeps walls,
+            // furniture, and doors locked to the source layout regardless
+            // of denoise, instead of the model freely reinterpreting them
+            // (confirmed live: without this, higher denoise both
+            // relocated furniture and occasionally invented new walls).
+            if let (false, Some(cn)) = (*dual_clip, controlnet) {
+                graph["17"] = json!({ "class_type": "LoadImage", "inputs": { "image": cn.edge_image_name } });
+                graph["18"] = json!({
+                    "class_type": "Flux2FunControlNetLoader",
+                    "inputs": { "controlnet_name": cn.model_name }
+                });
+                graph["19"] = json!({
+                    "class_type": "Flux2FunControlNetApply",
+                    "inputs": {
+                        "conditioning": ["15", 0],
+                        "controlnet": ["18", 0],
+                        "vae": ["14", 0],
+                        "strength": CONTROLNET_STRENGTH,
+                        "control_image": ["17", 0]
+                    }
+                });
+                // Flux2FunControlNetApply's CONDITIONING output isn't
+                // compatible with the classic KSampler node — confirmed
+                // live: "'ControlNetWrapper' object has no attribute
+                // 'multigpu_clones'". The node package's own example only
+                // ever runs it through ComfyUI's newer split guider/sampler
+                // pipeline, so the ControlNet path swaps KSampler out for
+                // that (CFGGuider still carries the same negative-prompt
+                // mechanism this file relies on elsewhere). cfg is higher
+                // here than the plain KSampler path's 3.0 — confirmed live
+                // that ControlNet's structural conditioning fights negative-
+                // prompt suppression harder than the base model alone (more
+                // hallucinated people came through at cfg 3.0 with
+                // ControlNet active than without it), so this path needs
+                // more negative-conditioning weight to land at a similar
+                // suppression rate.
+                graph["20"] = json!({
+                    "class_type": "CFGGuider",
+                    "inputs": { "model": ["4", 0], "positive": ["19", 0], "negative": ["16", 0], "cfg": 5.0 }
+                });
+                graph["21"] = json!({ "class_type": "KSamplerSelect", "inputs": { "sampler_name": "euler" } });
+                graph["22"] = json!({
+                    "class_type": "BasicScheduler",
+                    "inputs": { "model": ["4", 0], "scheduler": "simple", "steps": 20, "denoise": denoise }
+                });
+                graph["23"] = json!({ "class_type": "RandomNoise", "inputs": { "noise_seed": seed } });
+                graph["24"] = json!({
+                    "class_type": "SamplerCustomAdvanced",
+                    "inputs": {
+                        "noise": ["23", 0], "guider": ["20", 0], "sampler": ["21", 0],
+                        "sigmas": ["22", 0], "latent_image": ["12", 0]
+                    }
+                });
+                graph.as_object_mut().unwrap().remove("3");
+                graph["8"]["inputs"]["samples"] = json!(["24", 0]);
+            }
+            graph
         }
     }
 }
@@ -342,10 +454,21 @@ fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f
         return Err("No ComfyUI address configured.".to_string());
     }
     let png = data_url_to_png_bytes(png_data_url)?;
-    let image_name = upload_image(base, &png)?;
+    let image_name = upload_image(base, &png, "battle_map.png")?;
     let source = pick_model_source(base)?;
+    let controlnet_model = pick_controlnet(base);
+    let controlnet_upload = controlnet_model
+        .map(|model_name| -> Result<(String, String), String> {
+            let edge_png = canny_edge_png(&png)?;
+            let edge_image_name = upload_image(base, &edge_png, "battle_map_edges.png")?;
+            Ok((model_name, edge_image_name))
+        })
+        .transpose()?;
+    let controlnet = controlnet_upload
+        .as_ref()
+        .map(|(model_name, edge_image_name)| ControlNetConfig { model_name, edge_image_name });
     let client_id = random_client_id();
-    let workflow = build_workflow(&source, &image_name, prompt, denoise);
+    let workflow = build_workflow(&source, &image_name, prompt, denoise, controlnet.as_ref());
     let prompt_id = queue_prompt(base, workflow, &client_id)?;
     let history_entry = poll_history(base, &prompt_id)?;
     let (filename, subfolder, img_type) = extract_image_ref(&history_entry)?;
@@ -389,6 +512,7 @@ pub async fn comfyui_stylize_map(
             // them as annotations to reproduce rather than context to infer from.
             prompt = format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}");
         }
+        prompt.push_str(EMPTY_ROOM_SUFFIX);
         let denoise = denoise.unwrap_or(DENOISE);
         stylize_blocking(&base_url, &png_data_url, &prompt, denoise)
     })
@@ -406,6 +530,30 @@ mod tests {
         assert!(original.starts_with("data:image/png;base64,"));
         let bytes = data_url_to_png_bytes(&original).unwrap();
         assert_eq!(bytes, b"not really a png but fine for a round trip");
+    }
+
+    #[test]
+    fn canny_edge_png_finds_the_boundary_of_a_high_contrast_square() {
+        let mut img = image::RgbImage::new(40, 40);
+        for p in img.pixels_mut() {
+            *p = image::Rgb([230, 220, 200]);
+        }
+        for y in 10..30 {
+            for x in 10..30 {
+                img.put_pixel(x, y, image::Rgb([20, 20, 20]));
+            }
+        }
+        let mut png = Vec::new();
+        DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        let edges_png = canny_edge_png(&png).unwrap();
+        let edges = image::load_from_memory(&edges_png).unwrap().to_luma8();
+        assert_eq!(edges.dimensions(), (40, 40));
+        // The square's crisp boundary should register as real edge pixels —
+        // a flat/empty edge map would mean detection silently found nothing.
+        assert!(edges.pixels().any(|p| p.0[0] > 0));
     }
 
     #[test]
@@ -443,7 +591,7 @@ mod tests {
     #[test]
     fn build_workflow_wires_uploaded_image_and_checkpoint_through_the_graph() {
         let source = ModelSource::Checkpoint("my-checkpoint.safetensors".to_string());
-        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE);
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None);
         assert_eq!(wf["4"]["inputs"]["ckpt_name"], "my-checkpoint.safetensors");
         assert_eq!(wf["10"]["inputs"]["image"], "uploaded123.png");
         assert_eq!(wf["3"]["inputs"]["denoise"], DENOISE);
@@ -453,7 +601,7 @@ mod tests {
     #[test]
     fn build_workflow_uses_the_given_prompt_and_denoise_overrides() {
         let source = ModelSource::Checkpoint("ckpt.safetensors".to_string());
-        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8);
+        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8, None);
         assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
         assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
     }
@@ -467,7 +615,7 @@ mod tests {
             dual_clip: false,
             vae_name: "flux2-vae.safetensors".to_string(),
         };
-        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8);
+        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8, None);
         assert_eq!(wf["4"]["class_type"], "UNETLoader");
         assert_eq!(wf["4"]["inputs"]["unet_name"], "flux-2-klein-4b-fp8.safetensors");
         assert_eq!(wf["5"]["class_type"], "CLIPLoader");
@@ -494,11 +642,64 @@ mod tests {
             dual_clip: true,
             vae_name: "ae.safetensors".to_string(),
         };
-        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE);
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None);
         assert_eq!(wf["5"]["class_type"], "DualCLIPLoader");
         assert_eq!(wf["5"]["inputs"]["clip_name1"], "clip_l.safetensors");
         assert_eq!(wf["5"]["inputs"]["clip_name2"], "t5xxl.safetensors");
         assert_eq!(wf["5"]["inputs"]["type"], "flux");
+    }
+
+    #[test]
+    fn build_workflow_wires_a_controlnet_through_the_modern_sampler_pipeline_for_flux2_only() {
+        let flux2 = ModelSource::Split {
+            unet_name: "flux-2-klein-4b-fp8.safetensors".to_string(),
+            clip_names: vec!["qwen_3_4b.safetensors".to_string()],
+            clip_type: "flux2".to_string(),
+            dual_clip: false,
+            vae_name: "flux2-vae.safetensors".to_string(),
+        };
+        let cn = ControlNetConfig {
+            model_name: "FLUX.2-dev-Fun-Controlnet-Union.safetensors",
+            edge_image_name: "edges123.png",
+        };
+        let wf = build_workflow(&flux2, "uploaded123.png", POSITIVE_PROMPT, 0.8, Some(&cn));
+        assert_eq!(wf["18"]["class_type"], "Flux2FunControlNetLoader");
+        assert_eq!(wf["18"]["inputs"]["controlnet_name"], "FLUX.2-dev-Fun-Controlnet-Union.safetensors");
+        assert_eq!(wf["17"]["inputs"]["image"], "edges123.png");
+        assert_eq!(wf["19"]["class_type"], "Flux2FunControlNetApply");
+        assert_eq!(wf["19"]["inputs"]["conditioning"][0], "15");
+        assert_eq!(wf["19"]["inputs"]["control_image"][0], "17");
+        // Classic KSampler (node "3") is dropped entirely for this path —
+        // Flux2FunControlNetApply's output isn't compatible with it — in
+        // favor of CFGGuider + SamplerCustomAdvanced, which still carries
+        // the real negative prompt through at the same cfg.
+        assert!(wf.get("3").is_none());
+        assert_eq!(wf["20"]["class_type"], "CFGGuider");
+        assert_eq!(wf["20"]["inputs"]["positive"][0], "19");
+        assert_eq!(wf["20"]["inputs"]["negative"][0], "16");
+        assert_eq!(wf["20"]["inputs"]["cfg"], 5.0);
+        assert_eq!(wf["22"]["class_type"], "BasicScheduler");
+        assert_eq!(wf["22"]["inputs"]["denoise"], 0.8);
+        assert_eq!(wf["24"]["class_type"], "SamplerCustomAdvanced");
+        assert_eq!(wf["24"]["inputs"]["guider"][0], "20");
+        assert_eq!(wf["24"]["inputs"]["latent_image"][0], "12");
+        assert_eq!(wf["8"]["inputs"]["samples"][0], "24");
+
+        // Flux 1 (dual CLIP) skips the ControlNet entirely — the node
+        // package is Flux.2-specific and untested against Flux 1 — and
+        // keeps the classic KSampler path unchanged.
+        let flux1 = ModelSource::Split {
+            unet_name: "flux1-dev.safetensors".to_string(),
+            clip_names: vec!["clip_l.safetensors".to_string(), "t5xxl.safetensors".to_string()],
+            clip_type: "flux".to_string(),
+            dual_clip: true,
+            vae_name: "ae.safetensors".to_string(),
+        };
+        let wf1 = build_workflow(&flux1, "uploaded123.png", POSITIVE_PROMPT, DENOISE, Some(&cn));
+        assert!(wf1.get("18").is_none());
+        assert_eq!(wf1["3"]["class_type"], "KSampler");
+        assert_eq!(wf1["3"]["inputs"]["positive"][0], "15");
+        assert_eq!(wf1["8"]["inputs"]["samples"][0], "3");
     }
 
     #[test]

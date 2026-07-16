@@ -2665,15 +2665,23 @@ export function DMConsolePage() {
    *  with no idea what the map actually depicts — the content layer just
    *  shows abstract colored rectangles for furniture, so a tavern map came
    *  back as a generic ruined dungeon courtyard with no hint it was ever a
-   *  barroom. This pulls the map's name and a couple of authored Features
-   *  lines (e.g. "Bar", "Fire pit") out of its spec so the stylize pass has
-   *  real scene context to work from, for both providers.
+   *  barroom. This pulls a couple of authored Features lines (e.g. "Bar",
+   *  "Fire pit") out of its spec so the stylize pass has real scene context
+   *  to work from, for both providers.
    *
    *  Grid-coordinate tokens ("at A2", "C4, G4") are stripped from those
    *  lines first — feeding them through verbatim once got a real fantasy
-   *  tavern render back, but with "C4"/"G4"/a garbled map title painted
-   *  onto the floor as decorative labels, the model apparently reading the
-   *  coordinates as annotations to reproduce. */
+   *  tavern render back, but with "C4"/"G4" painted onto the floor as
+   *  decorative labels, the model apparently reading the coordinates as
+   *  annotations to reproduce.
+   *
+   *  The map's own NAME is deliberately never included here (it used to
+   *  be) — every text-hallucination incident during testing painted a
+   *  near-verbatim garbled copy of the literal name string onto the map as
+   *  a big decorative title, even with the coordinate fix and an explicit
+   *  "do not render this as visible text" instruction in place. The
+   *  Features text alone already reads as "tavern" (bar, fire pit) without
+   *  handing the model a quoted title to copy. */
   function sceneContextFor(card: MapCard): string {
     const map = parseBattleMap(card.spec);
     const featureLines = (map?.features ?? '')
@@ -2685,7 +2693,7 @@ export function DMConsolePage() {
         .trim())
       .filter(Boolean)
       .slice(0, 3);
-    return featureLines.length > 0 ? `"${card.name}" — ${featureLines.join('; ')}` : card.name;
+    return featureLines.length > 0 ? featureLines.join('; ') : card.name;
   }
 
   /** Phase 2 — optional ComfyUI atmosphere pass over an already-rendered tile

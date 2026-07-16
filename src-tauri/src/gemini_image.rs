@@ -180,13 +180,17 @@ pub async fn gemini_stylize_map(
     scene_context: Option<String>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let prompt = match scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let mut prompt = match scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             // "(reference only, do not render this as visible text)" is
             // load-bearing — see comfyui.rs's identical comment for what
             // happens without it.
             Some(ctx) => format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}"),
             None => prompt,
         };
+        // See comfyui.rs's EMPTY_ROOM_SUFFIX comment — a battle map should
+        // have no people/creatures painted in; stating it in-prompt reduces
+        // how often the model adds them anyway.
+        prompt.push_str(" The room is completely empty and unoccupied — no people, characters, or creatures present.");
         let key = read_key()?;
         stylize_blocking(&key, &prompt, &png_data_url)
     })
