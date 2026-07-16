@@ -115,7 +115,7 @@ export const useSettingsStore = create<SettingsState>()(
       setComfyUiBaseUrl: (v) => set({ comfyUiBaseUrl: v }),
       manualStyleProvider: 'comfyui',
       setManualStyleProvider: (v) => set({ manualStyleProvider: v }),
-      manualStylePrompt: 'top-down tabletop RPG battle map, detailed dungeon floor texture, atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, watermarks, or UI elements.',
+      manualStylePrompt: 'top-down tabletop RPG battle map, detailed floor texture, atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, watermarks, or UI elements.',
       setManualStylePrompt: (v) => set({ manualStylePrompt: v }),
       manualStyleStrength: 0.55,
       setManualStyleStrength: (v) => set({ manualStyleStrength: v }),

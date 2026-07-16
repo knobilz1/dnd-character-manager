@@ -13,17 +13,17 @@ export const MAP_STYLE_PRESETS: MapStylePreset[] = [
   {
     id: 'atmospheric',
     label: 'Atmospheric',
-    prompt: 'top-down tabletop RPG battle map, detailed dungeon floor texture, atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, watermarks, or UI elements.',
+    prompt: 'top-down tabletop RPG battle map, detailed floor texture, atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, watermarks, or UI elements.',
   },
   {
     id: 'anime',
     label: 'Anime',
-    prompt: 'top-down tabletop RPG battle map, Japanese anime art style, clean cel-shaded linework, vibrant saturated colors, Studio Ghibli-inspired dungeon floor texture, high detail. Do not add any text, watermarks, or UI elements.',
+    prompt: 'top-down tabletop RPG battle map, Japanese anime art style, clean cel-shaded linework, vibrant saturated colors, Studio Ghibli-inspired floor texture, high detail. Do not add any text, watermarks, or UI elements.',
   },
   {
     id: 'realistic',
     label: 'Realistic',
-    prompt: 'top-down tabletop RPG battle map, photorealistic dungeon floor texture, natural realistic lighting, physically accurate materials and wear, cinematic detail. Do not add any text, watermarks, or UI elements.',
+    prompt: 'top-down tabletop RPG battle map, photorealistic floor texture, natural realistic lighting, physically accurate materials and wear, cinematic detail. Do not add any text, watermarks, or UI elements.',
   },
   {
     id: 'fantastical',

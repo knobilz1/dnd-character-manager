@@ -32,7 +32,15 @@ use std::time::{Duration, Instant};
 // lines it couldn't faithfully reproduce. The frontend composites the ruler
 // back on top afterward, in code, so it's pixel-exact regardless of what
 // this pass does — see composeRulerFrame's doc comment in battleMapRender.ts.
-const POSITIVE_PROMPT: &str = "top-down tabletop RPG battle map, detailed dungeon floor texture, \
+// No hardcoded scene type ("dungeon", "ruins", etc.) here — the content
+// layer is just abstract colored rectangles with no indication of what the
+// map actually represents (a tavern, a ship deck, a forest clearing...), so
+// the caller passes a `scene_context` (the map's own name/features, from
+// the DM's authored spec) that gets prepended to this at request time. A
+// "Barroom Brawl" map stylized with this alone came back as a generic
+// ruined stone courtyard — the word "dungeon" was actively steering it
+// there regardless of what the map was actually named.
+const POSITIVE_PROMPT: &str = "top-down tabletop RPG battle map, detailed floor texture, \
 atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, \
 watermarks, or UI elements.";
 // No "photo" here on purpose — the manual AI Export panel offers a
@@ -40,8 +48,9 @@ watermarks, or UI elements.";
 // negating "photo" would fight that request. "characters/miniatures/people"
 // already covers the real concern (a literal photo of a tabletop with
 // plastic minis showing up instead of a stylized render).
-const NEGATIVE_PROMPT: &str = "blurry, watermark, text, letters, numbers, UI chrome, characters, \
-miniatures, people, distorted grid, warped geometry";
+const NEGATIVE_PROMPT: &str = "blurry, watermark, text, letters, numbers, title, caption, label, \
+signage, UI chrome, characters, miniatures, people, soldiers, guards, adventurers, humanoid \
+figures, human, isometric, 3D perspective, tilted camera angle, distorted grid, warped geometry";
 const DENOISE: f64 = 0.55;
 const POLL_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
@@ -201,8 +210,11 @@ fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise:
             // NEGATIVE_PROMPT ("no characters/people") would silently do
             // nothing (confirmed live: hallucinated humanoid figures kept
             // appearing despite it). Using a real negative CLIPTextEncode
-            // with cfg raised to 2.0 (a standard "true CFG" value for Flux)
-            // makes the negative prompt actually suppress unwanted content.
+            // with cfg raised makes the negative prompt actually suppress
+            // unwanted content — 2.0 still let people through at higher
+            // denoise strengths (confirmed live), so this is 3.0, a
+            // stronger "true CFG" value that trades a little quality for
+            // the negative prompt actually being obeyed.
             json!({
                 "4": { "class_type": "UNETLoader", "inputs": { "unet_name": unet_name, "weight_dtype": "default" } },
                 "5": clip_node,
@@ -217,7 +229,7 @@ fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise:
                     "inputs": {
                         "seed": seed,
                         "steps": 20,
-                        "cfg": 2.0,
+                        "cfg": 3.0,
                         "sampler_name": "euler",
                         "scheduler": "simple",
                         "denoise": denoise,
@@ -353,15 +365,30 @@ fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f
 /// path (a DM-written prompt and a chosen strength); the automatic
 /// "AI atmosphere pass on export" checkbox calls this with neither, so it
 /// keeps using the fixed POSITIVE_PROMPT/DENOISE defaults unchanged.
+///
+/// `scene_context` is the map's own name/authored features (e.g. `"Barroom
+/// Brawl" — Bar at A2; Fire pit at E7`), pulled from its spec on the
+/// frontend — see DMConsolePage.tsx's sceneContextFor. Prepended to
+/// whichever prompt is used, since neither POSITIVE_PROMPT nor a DM's style
+/// preset says anything about what the map actually depicts.
 #[tauri::command]
 pub async fn comfyui_stylize_map(
     base_url: String,
     png_data_url: String,
     prompt: Option<String>,
     denoise: Option<f64>,
+    scene_context: Option<String>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let prompt = prompt.unwrap_or_else(|| POSITIVE_PROMPT.to_string());
+        let mut prompt = prompt.unwrap_or_else(|| POSITIVE_PROMPT.to_string());
+        if let Some(ctx) = scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            // "(reference only, do not render this as visible text)" is load-
+            // bearing — without it, a scene description containing coordinate-
+            // shaped tokens got painted onto the map as a garbled title and
+            // floating labels (confirmed live), the model apparently reading
+            // them as annotations to reproduce rather than context to infer from.
+            prompt = format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}");
+        }
         let denoise = denoise.unwrap_or(DENOISE);
         stylize_blocking(&base_url, &png_data_url, &prompt, denoise)
     })
@@ -451,7 +478,7 @@ mod tests {
         assert_eq!(wf["15"]["class_type"], "FluxGuidance");
         assert_eq!(wf["16"]["class_type"], "CLIPTextEncode");
         assert_eq!(wf["16"]["inputs"]["text"], NEGATIVE_PROMPT);
-        assert_eq!(wf["3"]["inputs"]["cfg"], 2.0);
+        assert_eq!(wf["3"]["inputs"]["cfg"], 3.0);
         assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
         assert_eq!(wf["3"]["inputs"]["positive"][0], "15");
         assert_eq!(wf["3"]["inputs"]["negative"][0], "16");

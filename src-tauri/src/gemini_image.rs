@@ -42,8 +42,8 @@ const MODEL: &str = "gemini-2.5-flash-image";
 // following gap this preamble can fix, so it no longer tries.
 const GRID_PRESERVATION_PREAMBLE: &str = "This is a Dungeons & Dragons battle map floor plan. Keep \
 the exact grid layout, cell boundaries, and every element's position completely unchanged — do not \
-redraw, shift, resize, or reinterpret the layout. Do not add any text or UI elements. Only apply \
-the following stylistic/atmospheric treatment on top of it: ";
+redraw, shift, resize, or reinterpret the layout. Do not add any text, titles, labels, captions, \
+or UI elements of any kind. Only apply the following stylistic/atmospheric treatment on top of it: ";
 
 fn store_key(key: &str) -> Result<(), String> {
     keyring::Entry::new(SERVICE, ACCOUNT)
@@ -166,9 +166,27 @@ pub fn clear_gemini_api_key() -> Result<(), String> {
 /// a data URL) with a DM-provided style prompt, returning the edited PNG as
 /// a data URL — same output contract as comfyui.rs's comfyui_stylize_map, so
 /// the frontend treats both providers identically.
+///
+/// `scene_context` is the map's own name/authored features, pulled from its
+/// spec on the frontend (see DMConsolePage.tsx's sceneContextFor) and
+/// prepended to `prompt` — without it the model has no idea what the map
+/// actually depicts (a tavern, a ship deck, ...), only a generic style
+/// description, and drifts toward whatever's most common in its training
+/// data for "battle map."
 #[tauri::command]
-pub async fn gemini_stylize_map(prompt: String, png_data_url: String) -> Result<String, String> {
+pub async fn gemini_stylize_map(
+    prompt: String,
+    png_data_url: String,
+    scene_context: Option<String>,
+) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
+        let prompt = match scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            // "(reference only, do not render this as visible text)" is
+            // load-bearing — see comfyui.rs's identical comment for what
+            // happens without it.
+            Some(ctx) => format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}"),
+            None => prompt,
+        };
         let key = read_key()?;
         stylize_blocking(&key, &prompt, &png_data_url)
     })

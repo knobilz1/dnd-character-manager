@@ -14,7 +14,7 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapToStylizedPngDataUrl, battleMapToPdfBytes } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapToStylizedPngDataUrl, battleMapToPdfBytes, parseBattleMap } from '../../utils/battleMapRender';
 import { MAP_STYLE_PRESETS } from '../../data/mapStylePresets';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
@@ -2661,15 +2661,42 @@ export function DMConsolePage() {
     return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, png: battleMapToPngDataUrl(spec) };
   }
 
+  /** The stylize prompt is generic ("atmospheric lighting, high detail")
+   *  with no idea what the map actually depicts — the content layer just
+   *  shows abstract colored rectangles for furniture, so a tavern map came
+   *  back as a generic ruined dungeon courtyard with no hint it was ever a
+   *  barroom. This pulls the map's name and a couple of authored Features
+   *  lines (e.g. "Bar", "Fire pit") out of its spec so the stylize pass has
+   *  real scene context to work from, for both providers.
+   *
+   *  Grid-coordinate tokens ("at A2", "C4, G4") are stripped from those
+   *  lines first — feeding them through verbatim once got a real fantasy
+   *  tavern render back, but with "C4"/"G4"/a garbled map title painted
+   *  onto the floor as decorative labels, the model apparently reading the
+   *  coordinates as annotations to reproduce. */
+  function sceneContextFor(card: MapCard): string {
+    const map = parseBattleMap(card.spec);
+    const featureLines = (map?.features ?? '')
+      .split('\n')
+      .map((l) => l
+        .replace(/^-\s*/, '')
+        .replace(/\bat\s+[A-Za-z]{1,2}\d{1,3}(\s*,\s*[A-Za-z]{1,2}\d{1,3})*/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    return featureLines.length > 0 ? `"${card.name}" — ${featureLines.join('; ')}` : card.name;
+  }
+
   /** Phase 2 — optional ComfyUI atmosphere pass over an already-rendered tile
    *  PNG (see comfyui.rs's comfyui_stylize_map). Never throws: on any
    *  failure (ComfyUI not running, no checkpoint installed, timeout) it
    *  falls back to the plain tile render, which stays the DM's source of
    *  truth regardless. Only called when the mapAiStyle setting is on. */
-  async function stylizeMapImage(dataUrl: string): Promise<string> {
+  async function stylizeMapImage(dataUrl: string, sceneContext: string): Promise<string> {
     if (!mapAiStyle) return dataUrl;
     try {
-      return await invoke<string>('comfyui_stylize_map', { baseUrl: comfyUiBaseUrl, pngDataUrl: dataUrl });
+      return await invoke<string>('comfyui_stylize_map', { baseUrl: comfyUiBaseUrl, pngDataUrl: dataUrl, sceneContext });
     } catch (e) {
       console.warn('ComfyUI atmosphere pass failed, using the plain tile render instead:', e);
       return dataUrl;
@@ -2681,7 +2708,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting PNG…');
     try {
-      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, mapAiStyle ? stylizeMapImage : undefined);
+      const sceneContext = sceneContextFor(card);
+      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, mapAiStyle ? (dataUrl) => stylizeMapImage(dataUrl, sceneContext) : undefined);
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -2701,7 +2729,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting print-scaled PDF…');
     try {
-      const bytes = await battleMapToPdfBytes(card.spec, mapAiStyle ? stylizeMapImage : undefined);
+      const sceneContext = sceneContextFor(card);
+      const bytes = await battleMapToPdfBytes(card.spec, mapAiStyle ? (dataUrl) => stylizeMapImage(dataUrl, sceneContext) : undefined);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -2761,22 +2790,24 @@ export function DMConsolePage() {
    *  (the automatic checkbox path), this throws on failure rather than
    *  falling back silently — an explicit "AI Export" click should surface a
    *  clear error, not quietly hand back the plain tile render. */
-  async function manualStylizeImage(dataUrl: string): Promise<string> {
+  async function manualStylizeImage(dataUrl: string, sceneContext: string): Promise<string> {
     if (manualStyleProvider === 'gemini') {
-      return await invoke<string>('gemini_stylize_map', { prompt: manualStylePrompt, pngDataUrl: dataUrl });
+      return await invoke<string>('gemini_stylize_map', { prompt: manualStylePrompt, pngDataUrl: dataUrl, sceneContext });
     }
     return await invoke<string>('comfyui_stylize_map', {
       baseUrl: comfyUiBaseUrl,
       pngDataUrl: dataUrl,
       prompt: manualStylePrompt,
       denoise: manualStyleStrength,
+      sceneContext,
     });
   }
 
   async function previewAiExport(card: MapCard) {
     setPlanBusy(manualStyleProvider === 'gemini' ? 'Asking Gemini to restyle the map…' : 'Running the ComfyUI pass…');
     try {
-      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, manualStylizeImage);
+      const sceneContext = sceneContextFor(card);
+      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, (dataUrl) => manualStylizeImage(dataUrl, sceneContext));
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
     } catch (e) {
@@ -2791,7 +2822,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Generating and exporting PNG…');
     try {
-      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, manualStylizeImage);
+      const sceneContext = sceneContextFor(card);
+      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, (dataUrl) => manualStylizeImage(dataUrl, sceneContext));
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
       const b64 = dataUrl.split(',')[1];
@@ -2812,7 +2844,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Generating and exporting PDF…');
     try {
-      const bytes = await battleMapToPdfBytes(card.spec, manualStylizeImage);
+      const sceneContext = sceneContextFor(card);
+      const bytes = await battleMapToPdfBytes(card.spec, (dataUrl) => manualStylizeImage(dataUrl, sceneContext));
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
