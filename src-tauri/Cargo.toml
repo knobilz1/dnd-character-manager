@@ -44,8 +44,3 @@ pdf-extract = "0.12.0"
 # Extracting the downloaded F5 runtime archive (task #86). deflate-only: the
 # archive is built with Deflate/Fastest (see scripts/build-f5-runtime.ps1).
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# Canny edge detection for the ComfyUI ControlNet ai-style pass (comfyui.rs) —
-# turns our own procedurally-drawn content layer into the edge map a Flux2Fun
-# ControlNet expects, so structure stays locked regardless of denoise.
-image = { version = "0.25", default-features = false, features = ["png"] }
-imageproc = "0.25"

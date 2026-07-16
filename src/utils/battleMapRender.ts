@@ -263,6 +263,220 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
   return canvas;
 }
 
+// Depth-map colors for the ControlNet stylize path (comfyui.rs's
+// comfyui_stylize_map) — near/raised objects render brighter, the flat floor
+// plane renders darker, matching the convention depth-conditioned ControlNet
+// models are trained on (bright = close to camera, dark = far). Canny edges
+// alone only constrain 2D boundary *positions*, not camera perspective — a
+// model with a strong bias toward oblique architectural photography can
+// satisfy "edges roughly here" while still reinterpreting the whole scene as
+// a 3D room viewed at an angle (confirmed live: exported pages showed
+// visible wall/furniture sides instead of a strict top-down view, plus
+// furniture repositioned once the model committed to that 3D reading). A
+// near-flat depth map is a much more direct "this scene has no room depth"
+// signal than an edge outline.
+const DEPTH_FLOOR = '#4a4a4a';
+const DEPTH_RAISED = '#e0e0e0';
+
+function isRaisedCell(code: string): boolean {
+  // Walls/furniture/pillars/trees/hazards stand up off the floor; difficult
+  // terrain, stairs, and water are walkable ground-plane texture, not
+  // obstructions, so they stay at floor depth.
+  return code === '#' || code === '+' || code === '=' || code === 'o' || code === 'T' || code === '*';
+}
+
+// ── Per-tile-type stylization ────────────────────────────────────────────────
+// The whole-scene img2img pass (even with ControlNet/depth conditioning) let
+// the model invent geometry that isn't in the source grid and drift furniture
+// off-cell — confirmed live: a phantom wall band appeared where the spec had
+// none, and a staircase rendered at a slight rotation off the cell grid.
+// ControlNet only clamps this probabilistically; it can't guarantee it.
+//
+// The fix is to stop asking the AI to lay out a scene at all. Every cell's
+// look is fully determined by ONE character (see campaign.rs's MAP_LEGEND),
+// so instead of stylizing the whole assembled map, stylize ONE swatch per
+// DISTINCT legend code present on the map — a single floor tile, a single
+// wall block, a single pillar, etc. — then WE composite the result by
+// blitting each cell's stylized swatch at its exact grid position, exactly
+// like the plain procedural renderer already does with `drawTile`. The AI
+// never sees — and therefore can never move — anything relative to anything
+// else; grid alignment and furniture position are guaranteed by construction,
+// not by asking the model nicely. A repeated code (eight barrels, a long
+// wall run) costs one AI call total, not one per instance, since the same
+// stylized swatch is reused everywhere that code appears.
+const TILE_SAMPLE_PX = 192; // resolution sent to the AI per swatch, independent of print cellPx
+
+// Short descriptive phrase per legend code, for the stylize prompt — see
+// campaign.rs's MAP_LEGEND for the canonical meaning of each character.
+const TILE_LABELS: Record<string, string> = {
+  '.': 'plain floor',
+  '#': 'a stone wall block',
+  '+': 'a wooden door',
+  '~': 'water',
+  o: 'a stone pillar',
+  '^': 'rubble and difficult terrain',
+  '=': 'a piece of furniture or an altar',
+  T: 'a tree or foliage',
+  _: 'stone stairs',
+  '*': 'a fire hazard or brazier',
+};
+
+function tileLabelFor(code: string): string {
+  return TILE_LABELS[code] ?? 'plain floor';
+}
+
+// A background/material code repeats into many cells across a map — often
+// most of it. Any discrete object a stylize pass invents inside one of these
+// swatches (confirmed live: a wood beam painted into a floor tile) gets
+// stamped everywhere that code appears, reading as "furniture on every
+// tile." An object code is MEANT to depict one discrete thing (a door, a
+// pillar), so that risk doesn't apply the same way — repeating a stylized
+// barrel at every 'o' cell is the intended result, not a bug.
+const BACKGROUND_CODES = new Set(['.', '~', '^', '_', '#']);
+
+function isBackgroundTile(code: string): boolean {
+  return BACKGROUND_CODES.has(code);
+}
+
+/** Every distinct non-void legend code present in `win` (defaults to the
+ *  whole map) — the set of AI calls a stylize pass needs to make. */
+function collectDistinctCodes(map: ParsedBattleMap, win?: RenderWindow): Set<string> {
+  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
+  const codes = new Set<string>();
+  for (let r = w.rowStart; r < w.rowEnd; r++) {
+    for (let c = w.colStart; c < w.colEnd; c++) {
+      const code = map.grid[r]?.[c] ?? ' ';
+      if (code !== ' ') codes.add(code);
+    }
+  }
+  return codes;
+}
+
+/** One cell of `code`'s art, rendered at a fixed AI-friendly resolution
+ *  (independent of the print `cellPx`) so swatches can be cached and reused
+ *  across preview/PDF/multi-page exports regardless of their render scale. */
+function renderTileSwatch(code: string): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE_SAMPLE_PX;
+  canvas.height = TILE_SAMPLE_PX;
+  const ctx = canvas.getContext('2d')!;
+  drawTile(ctx, code, 0, 0, TILE_SAMPLE_PX);
+  return canvas;
+}
+
+function renderTileDepthSwatch(code: string): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE_SAMPLE_PX;
+  canvas.height = TILE_SAMPLE_PX;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = isRaisedCell(code) ? DEPTH_RAISED : DEPTH_FLOOR;
+  ctx.fillRect(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
+  return canvas;
+}
+
+/** A stylize call for ONE tile swatch: the swatch itself, its depth map, a
+ *  short label of what the tile depicts (e.g. "a stone pillar") so the
+ *  provider's prompt can name the object instead of guessing from pixels,
+ *  and whether this code is a background/material tile vs a discrete-object
+ *  tile — see `isBackgroundTile`, and comfyui.rs's comfyui_stylize_map doc
+ *  comment for why that distinction changes how the provider prompts it. */
+export type TileStylizeFn = (
+  tileDataUrl: string, depthMapDataUrl: string, tileLabel: string, isBackground: boolean
+) => Promise<string>;
+
+/** Runs `stylize` once per distinct code in `codes` (sequentially — this is
+ *  one local GPU running one job at a time regardless of how many requests
+ *  arrive concurrently, so there's no throughput to gain from firing them in
+ *  parallel, and sequential keeps "which tile is running" legible to the
+ *  caller). A code whose stylize call fails falls back to its plain
+ *  procedural swatch rather than aborting the whole set — matches the
+ *  existing per-card fallback behavior of the automatic checkbox path. */
+async function stylizeTileSet(codes: Set<string>, stylize: TileStylizeFn): Promise<Map<string, HTMLImageElement>> {
+  const tiles = new Map<string, HTMLImageElement>();
+  for (const code of codes) {
+    const swatch = renderTileSwatch(code);
+    const depth = renderTileDepthSwatch(code);
+    try {
+      const stylizedDataUrl = await stylize(
+        swatch.toDataURL('image/png'), depth.toDataURL('image/png'), tileLabelFor(code), isBackgroundTile(code)
+      );
+      tiles.set(code, await loadImage(stylizedDataUrl));
+    } catch (e) {
+      console.warn(`Stylizing the "${code}" tile failed, using its plain render instead:`, e);
+      tiles.set(code, await loadImage(swatch.toDataURL('image/png')));
+    }
+  }
+  return tiles;
+}
+
+/** Composites a stylized map from pre-stylized per-code tile swatches — the
+ *  AI-facing counterpart to `renderBattleMapContent`. Each cell blits its
+ *  code's swatch at its exact grid position, so alignment and furniture
+ *  position are guaranteed regardless of anything the AI pass did to a
+ *  swatch's own pixels (see the "Per-tile-type stylization" comment above).
+ *  A soft contact shadow grounds raised objects against the floor, and a
+ *  final vignette unifies tone across swatches that were stylized in
+ *  separate, independently-seeded AI calls. */
+function renderStylizedContentFromTiles(
+  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, tiles: Map<string, HTMLImageElement>
+): HTMLCanvasElement {
+  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
+  const wCols = w.colEnd - w.colStart;
+  const wRows = w.rowEnd - w.rowStart;
+  const canvas = document.createElement('canvas');
+  canvas.width = wCols * cellPx;
+  canvas.height = wRows * cellPx;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = COLORS.void;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let r = 0; r < wRows; r++) {
+    for (let c = 0; c < wCols; c++) {
+      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
+      if (code === ' ') continue;
+      const x = c * cellPx, y = r * cellPx;
+      if (isRaisedCell(code)) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.filter = `blur(${Math.max(1, cellPx * 0.06)}px)`;
+        ctx.beginPath();
+        ctx.ellipse(x + cellPx * 0.5, y + cellPx * 0.72, cellPx * 0.36, cellPx * 0.16, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      const tile = tiles.get(code);
+      if (tile) ctx.drawImage(tile, x, y, cellPx, cellPx);
+      else drawTile(ctx, code, x, y, cellPx);
+    }
+  }
+
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1;
+  for (let r = 0; r < wRows; r++) {
+    for (let c = 0; c < wCols; c++) {
+      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
+      if (code === ' ') continue;
+      ctx.strokeRect(c * cellPx, r * cellPx, cellPx, cellPx);
+    }
+  }
+
+  // Independently-seeded swatches can drift slightly in overall hue/exposure
+  // from each other; a single flat color-grade pass over the whole composite
+  // pulls them back toward one consistent tone so it reads as one scene
+  // rather than a patchwork of stickers.
+  const grade = ctx.createRadialGradient(
+    canvas.width / 2, canvas.height / 2, 0,
+    canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) * 0.7
+  );
+  grade.addColorStop(0, 'rgba(20,16,10,0)');
+  grade.addColorStop(1, 'rgba(20,16,10,0.22)');
+  ctx.fillStyle = grade;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  return canvas;
+}
+
 /** Draws the coordinate ruler (A../1..) around a content layer and returns
  *  the composed full-size canvas — same output shape `renderBattleMapToCanvas`
  *  always produced. `content` is drawn into the content rect via `drawImage`
@@ -322,19 +536,22 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Same result as `battleMapToPngDataUrl`, but runs `stylize` over only the
- *  content layer (no ruler) before compositing the ruler back on top — see
- *  `composeRulerFrame`'s doc comment. Pass no `stylize` for a plain render. */
+/** Same result as `battleMapToPngDataUrl`, but runs `stylize` once per
+ *  distinct tile type (no ruler, no whole-scene layout — see the "Per-tile-
+ *  type stylization" comment above) before compositing the ruler back on
+ *  top — see `composeRulerFrame`'s doc comment. Pass no `stylize` for a
+ *  plain render. */
 export async function battleMapToStylizedPngDataUrl(
-  spec: string, cellPx: number, stylize?: (dataUrl: string) => Promise<string>
+  spec: string, cellPx: number, stylize?: TileStylizeFn
 ): Promise<string | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
-  const content = renderBattleMapContent(map, cellPx);
-  let source: CanvasImageSource = content;
+  let source: CanvasImageSource;
   if (stylize) {
-    const stylizedDataUrl = await stylize(content.toDataURL('image/png'));
-    source = await loadImage(stylizedDataUrl);
+    const tiles = await stylizeTileSet(collectDistinctCodes(map), stylize);
+    source = renderStylizedContentFromTiles(map, cellPx, undefined, tiles);
+  } else {
+    source = renderBattleMapContent(map, cellPx);
   }
   return composeRulerFrame(map, cellPx, undefined, source).toDataURL('image/png');
 }
@@ -376,17 +593,15 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
  *  bigger than one page is tiled across multiple Letter sheets (with the
  *  coordinate ruler repeated on each) to tape together.
  *
- *  `stylize`, if given, is run over each page's content layer ONLY (no
- *  ruler — see `composeRulerFrame`'s doc comment) before the ruler is
- *  composed back on top and the page is embedded. It must resolve to a data
- *  URL and must not throw; a caller that wants a plain-render fallback on
- *  failure handles that itself before passing the callback in, so this
- *  function stays decoupled from any particular AI backend. Multi-page maps
- *  run one stylize call per page — seams between pages are not blended,
- *  a known limitation of the per-tile pass. */
+ *  `stylize`, if given, is run once per DISTINCT tile type across the WHOLE
+ *  map (not per page — see the "Per-tile-type stylization" comment above),
+ *  so a multi-page export costs the same handful of AI calls as a one-page
+ *  one, and every page reuses the identical stylized swatches — seams
+ *  between pages line up exactly because they're literally the same tile
+ *  image repeated, not independently re-generated per page. */
 export async function battleMapToPdfBytes(
   spec: string,
-  stylize?: (dataUrl: string) => Promise<string>
+  stylize?: TileStylizeFn
 ): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
@@ -394,6 +609,7 @@ export async function battleMapToPdfBytes(
   const usableSquaresX = Math.floor((PAGE_W - 2 * MARGIN) / PT_PER_SQUARE);
   const usableSquaresY = Math.floor((PAGE_H - 2 * MARGIN) / PT_PER_SQUARE);
   const pdf = await PDFDocument.create();
+  const tiles = stylize ? await stylizeTileSet(collectDistinctCodes(map), stylize) : null;
 
   for (let ry = 0; ry < map.rows; ry += usableSquaresY) {
     for (let rx = 0; rx < map.cols; rx += usableSquaresX) {
@@ -401,12 +617,9 @@ export async function battleMapToPdfBytes(
         colStart: rx, colEnd: Math.min(map.cols, rx + usableSquaresX),
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
-      const content = renderBattleMapContent(map, RENDER_PX, win);
-      let source: CanvasImageSource = content;
-      if (stylize) {
-        const stylizedDataUrl = await stylize(content.toDataURL('image/png'));
-        source = await loadImage(stylizedDataUrl);
-      }
+      const source: CanvasImageSource = tiles
+        ? renderStylizedContentFromTiles(map, RENDER_PX, win, tiles)
+        : renderBattleMapContent(map, RENDER_PX, win);
       const canvas = composeRulerFrame(map, RENDER_PX, win, source);
       const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));

@@ -44,6 +44,15 @@ const GRID_PRESERVATION_PREAMBLE: &str = "This is a Dungeons & Dragons battle ma
 the exact grid layout, cell boundaries, and every element's position completely unchanged — do not \
 redraw, shift, resize, or reinterpret the layout. Do not add any text, titles, labels, captions, \
 or UI elements of any kind. Only apply the following stylistic/atmospheric treatment on top of it: ";
+// See comfyui.rs's BACKGROUND_POSITIVE_SUFFIX for why this exists: a
+// background/material tile (floor, wall, water, rubble, stairs) gets stamped
+// into every matching cell across the whole map, so it must read as a plain
+// seamless texture, never a scene with an object in it — Gemini has no
+// separate negative-prompt channel, so both the "what to do" and "what not
+// to do" instructions have to live in this one suffix.
+const BACKGROUND_SUFFIX: &str = " This must be a seamless, edge-to-edge material surface texture only, \
+like a fabric swatch — do not include any furniture, beams, pillars, doors, statues, crates, or other \
+discrete objects anywhere in the frame.";
 
 fn store_key(key: &str) -> Result<(), String> {
     keyring::Entry::new(SERVICE, ACCOUNT)
@@ -173,11 +182,16 @@ pub fn clear_gemini_api_key() -> Result<(), String> {
 /// actually depicts (a tavern, a ship deck, ...), only a generic style
 /// description, and drifts toward whatever's most common in its training
 /// data for "battle map."
+/// `is_background` — see comfyui.rs's comfyui_stylize_map doc comment for
+/// what this marks and why it matters; BACKGROUND_SUFFIX is this module's
+/// equivalent of comfyui.rs's BACKGROUND_POSITIVE_SUFFIX + BACKGROUND_EXTRA_NEGATIVE
+/// combined into one instruction, since Gemini has no separate negative channel.
 #[tauri::command]
 pub async fn gemini_stylize_map(
     prompt: String,
     png_data_url: String,
     scene_context: Option<String>,
+    is_background: Option<bool>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let mut prompt = match scene_context.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -191,6 +205,9 @@ pub async fn gemini_stylize_map(
         // have no people/creatures painted in; stating it in-prompt reduces
         // how often the model adds them anyway.
         prompt.push_str(" The room is completely empty and unoccupied — no people, characters, or creatures present.");
+        if is_background.unwrap_or(false) {
+            prompt.push_str(BACKGROUND_SUFFIX);
+        }
         let key = read_key()?;
         stylize_blocking(&key, &prompt, &png_data_url)
     })

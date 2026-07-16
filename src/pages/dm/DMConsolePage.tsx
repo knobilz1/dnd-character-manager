@@ -2697,18 +2697,36 @@ export function DMConsolePage() {
     return featureLines.length > 0 ? featureLines.join('; ') : card.name;
   }
 
-  /** Phase 2 — optional ComfyUI atmosphere pass over an already-rendered tile
-   *  PNG (see comfyui.rs's comfyui_stylize_map). Never throws: on any
-   *  failure (ComfyUI not running, no checkpoint installed, timeout) it
-   *  falls back to the plain tile render, which stays the DM's source of
+  /** Every AI stylize call now runs over ONE tile swatch, not the whole
+   *  scene (see battleMapRender.ts's "Per-tile-type stylization" comment) —
+   *  this folds the map's overall context together with which specific
+   *  legend tile is being generated, so the provider knows both "this is a
+   *  tavern" and "this exact swatch is a stone pillar, not the whole room". */
+  function tileSceneContext(sceneContext: string, tileLabel: string): string {
+    return `${sceneContext}. This image is ONE small repeating tile texture, not the whole room — it depicts: ${tileLabel}.`;
+  }
+
+  /** Phase 2 — optional ComfyUI atmosphere pass over ONE tile swatch (see the
+   *  "Per-tile-type stylization" comment in battleMapRender.ts, and
+   *  comfyui.rs's comfyui_stylize_map). Never throws: on any failure
+   *  (ComfyUI not running, no checkpoint installed, timeout) it falls back
+   *  to that tile's plain procedural render, which stays the DM's source of
    *  truth regardless. Only called when the mapAiStyle setting is on. */
-  async function stylizeMapImage(dataUrl: string, sceneContext: string): Promise<string> {
-    if (!mapAiStyle) return dataUrl;
+  async function stylizeMapImage(
+    tileDataUrl: string, depthMapDataUrl: string, sceneContext: string, tileLabel: string, isBackground: boolean
+  ): Promise<string> {
+    if (!mapAiStyle) return tileDataUrl;
     try {
-      return await invoke<string>('comfyui_stylize_map', { baseUrl: comfyUiBaseUrl, pngDataUrl: dataUrl, sceneContext });
+      return await invoke<string>('comfyui_stylize_map', {
+        baseUrl: comfyUiBaseUrl,
+        pngDataUrl: tileDataUrl,
+        depthMapDataUrl,
+        sceneContext: tileSceneContext(sceneContext, tileLabel),
+        isBackground,
+      });
     } catch (e) {
       console.warn('ComfyUI atmosphere pass failed, using the plain tile render instead:', e);
-      return dataUrl;
+      return tileDataUrl;
     }
   }
 
@@ -2718,7 +2736,13 @@ export function DMConsolePage() {
     setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting PNG…');
     try {
       const sceneContext = sceneContextFor(card);
-      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, mapAiStyle ? (dataUrl) => stylizeMapImage(dataUrl, sceneContext) : undefined);
+      const dataUrl = await battleMapToStylizedPngDataUrl(
+        card.spec, 96,
+        mapAiStyle
+          ? (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
+              stylizeMapImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+          : undefined
+      );
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -2739,7 +2763,13 @@ export function DMConsolePage() {
     setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting print-scaled PDF…');
     try {
       const sceneContext = sceneContextFor(card);
-      const bytes = await battleMapToPdfBytes(card.spec, mapAiStyle ? (dataUrl) => stylizeMapImage(dataUrl, sceneContext) : undefined);
+      const bytes = await battleMapToPdfBytes(
+        card.spec,
+        mapAiStyle
+          ? (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
+              stylizeMapImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+          : undefined
+      );
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -2799,16 +2829,23 @@ export function DMConsolePage() {
    *  (the automatic checkbox path), this throws on failure rather than
    *  falling back silently — an explicit "AI Export" click should surface a
    *  clear error, not quietly hand back the plain tile render. */
-  async function manualStylizeImage(dataUrl: string, sceneContext: string): Promise<string> {
+  async function manualStylizeImage(
+    tileDataUrl: string, depthMapDataUrl: string, sceneContext: string, tileLabel: string, isBackground: boolean
+  ): Promise<string> {
+    const context = tileSceneContext(sceneContext, tileLabel);
     if (manualStyleProvider === 'gemini') {
-      return await invoke<string>('gemini_stylize_map', { prompt: manualStylePrompt, pngDataUrl: dataUrl, sceneContext });
+      return await invoke<string>('gemini_stylize_map', {
+        prompt: manualStylePrompt, pngDataUrl: tileDataUrl, sceneContext: context, isBackground,
+      });
     }
     return await invoke<string>('comfyui_stylize_map', {
       baseUrl: comfyUiBaseUrl,
-      pngDataUrl: dataUrl,
+      pngDataUrl: tileDataUrl,
+      depthMapDataUrl,
       prompt: manualStylePrompt,
       denoise: manualStyleStrength,
-      sceneContext,
+      sceneContext: context,
+      isBackground,
     });
   }
 
@@ -2816,7 +2853,11 @@ export function DMConsolePage() {
     setPlanBusy(manualStyleProvider === 'gemini' ? 'Asking Gemini to restyle the map…' : 'Running the ComfyUI pass…');
     try {
       const sceneContext = sceneContextFor(card);
-      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, (dataUrl) => manualStylizeImage(dataUrl, sceneContext));
+      const dataUrl = await battleMapToStylizedPngDataUrl(
+        card.spec, 96,
+        (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
+          manualStylizeImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+      );
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
     } catch (e) {
@@ -2832,7 +2873,11 @@ export function DMConsolePage() {
     setPlanBusy('Generating and exporting PNG…');
     try {
       const sceneContext = sceneContextFor(card);
-      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, (dataUrl) => manualStylizeImage(dataUrl, sceneContext));
+      const dataUrl = await battleMapToStylizedPngDataUrl(
+        card.spec, 96,
+        (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
+          manualStylizeImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+      );
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
       const b64 = dataUrl.split(',')[1];
@@ -2854,7 +2899,11 @@ export function DMConsolePage() {
     setPlanBusy('Generating and exporting PDF…');
     try {
       const sceneContext = sceneContextFor(card);
-      const bytes = await battleMapToPdfBytes(card.spec, (dataUrl) => manualStylizeImage(dataUrl, sceneContext));
+      const bytes = await battleMapToPdfBytes(
+        card.spec,
+        (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
+          manualStylizeImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+      );
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -3616,9 +3665,12 @@ export function DMConsolePage() {
                       extra setup needed for that.
                     </p>
                     <p>
-                      <strong className="text-slate-100">For structure-locked results</strong> (walls/furniture stay
-                      put instead of drifting), install a ControlNet — this app auto-detects and uses one if
-                      present, otherwise it just runs the plain pass:
+                      Walls and furniture never drift from the ASCII grid — the AI never sees the whole map, only
+                      one isolated swatch per tile <em>type</em> (a floor tile, a pillar, a door…), and this app
+                      composites every cell's swatch back at its exact grid position itself. A ControlNet is
+                      optional and only affects the look of each individual swatch (keeps its own camera angle
+                      flat/top-down instead of tilted) — this app auto-detects and uses one if present, otherwise
+                      it just runs the plain per-tile pass:
                     </p>
                     <ol className="list-decimal list-inside space-y-1 text-slate-400">
                       <li>

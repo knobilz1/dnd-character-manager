@@ -18,7 +18,6 @@
 //!   5. GET /view — downloads the finished PNG.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::DynamicImage;
 use rand::Rng;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -60,6 +59,25 @@ const EMPTY_ROOM_SUFFIX: &str =
 const NEGATIVE_PROMPT: &str = "blurry, watermark, text, letters, numbers, title, caption, label, \
 signage, UI chrome, characters, miniatures, people, soldiers, guards, adventurers, humanoid \
 figures, human, isometric, 3D perspective, tilted camera angle, distorted grid, warped geometry";
+// A "background" tile (floor/wall/water/rubble/stairs — see battleMapRender.ts's
+// isBackgroundTile) gets stamped into every matching cell across the whole
+// map, often dozens of times. Run through the same prompt as everything else,
+// the model treats "high detail, dramatic shadows" as license to invent a
+// discrete object to cast one (confirmed live: a wood beam painted into the
+// floor swatch, repeated at literal 100% of floor cells, read as furniture
+// covering the entire room). An object tile is SUPPOSED to depict one thing;
+// a background tile must never contain one — it needs to look like a fabric
+// swatch, not a scene. These two are appended only when the caller marks a
+// tile as background (see comfyui_stylize_map's is_background).
+const BACKGROUND_POSITIVE_SUFFIX: &str = " This is a seamless, edge-to-edge material surface texture \
+only, like a fabric swatch — absolutely no furniture, beams, pillars, doors, statues, crates, or any \
+other discrete object anywhere in the frame.";
+const BACKGROUND_EXTRA_NEGATIVE: &str = ", furniture, beam, plank, wooden beam, pillar, column, door, \
+statue, crate, barrel, prop, decorative object, architectural detail, discrete item, single object";
+// Background tiles get restyled (color/material/lighting) without earning the
+// model's full freedom to invent new geometry, regardless of what denoise the
+// DM chose for the "hero" object tiles.
+const BACKGROUND_DENOISE_CAP: f64 = 0.45;
 const DENOISE: f64 = 0.55;
 const POLL_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
@@ -80,24 +98,6 @@ fn png_bytes_to_data_url(bytes: &[u8]) -> String {
     format!("data:image/png;base64,{}", STANDARD.encode(bytes))
 }
 
-/// Runs Canny edge detection over the content-layer PNG and re-encodes the
-/// result as its own PNG (white edges on black) — the control_image a
-/// Flux2Fun ControlNet expects. Our content layer is procedurally drawn flat-
-/// color art with crisp black outlines around every wall/furniture/door, not
-/// a noisy photo, so these thresholds are tuned low/permissive rather than
-/// the higher defaults common for photographic input: missing a real
-/// architectural edge here would defeat the whole point of this pass —
-/// letting the model reinterpret exactly the geometry we're trying to lock.
-fn canny_edge_png(png: &[u8]) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(png)
-        .map_err(|e| format!("Couldn't decode the map image for edge detection: {e}"))?;
-    let edges = imageproc::edges::canny(&img.to_luma8(), 30.0, 90.0);
-    let mut out = Vec::new();
-    DynamicImage::ImageLuma8(edges)
-        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
-        .map_err(|e| format!("Couldn't encode the edge map: {e}"))?;
-    Ok(out)
-}
 
 /// `filename` must be distinct across the two images uploaded per request
 /// (content + edge map, when ControlNet is in play) — ComfyUI's upload
@@ -161,7 +161,11 @@ fn list_models_in_folder(base: &str, folder: &str) -> Result<Vec<String>, String
 /// workflow runs, same as before this existed.
 struct ControlNetConfig<'a> {
     model_name: &'a str,
-    edge_image_name: &'a str,
+    /// A synthetic depth map (see battleMapRender.ts's renderBattleMapDepthMap)
+    /// — replaced a Canny edge map here after live testing showed edges alone
+    /// don't stop the model from reinterpreting a flat top-down floor plan as
+    /// an oblique 3D room.
+    depth_image_name: &'a str,
 }
 
 fn pick_controlnet(base: &str) -> Option<String> {
@@ -211,6 +215,7 @@ const CONTROLNET_STRENGTH: f64 = 0.75;
 
 fn build_workflow(
     source: &ModelSource, image_name: &str, prompt: &str, denoise: f64, controlnet: Option<&ControlNetConfig>,
+    negative: &str,
 ) -> Value {
     let seed: u64 = rand::thread_rng().gen();
     match source {
@@ -219,7 +224,7 @@ fn build_workflow(
             "10": { "class_type": "LoadImage", "inputs": { "image": image_name } },
             "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["4", 2] } },
             "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": prompt } },
-            "7": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": NEGATIVE_PROMPT } },
+            "7": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["4", 1], "text": negative } },
             "3": {
                 "class_type": "KSampler",
                 "inputs": {
@@ -274,7 +279,7 @@ fn build_workflow(
                 "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["14", 0] } },
                 "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["5", 0], "text": prompt } },
                 "15": { "class_type": "FluxGuidance", "inputs": { "conditioning": ["6", 0], "guidance": 3.5 } },
-                "16": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["5", 0], "text": NEGATIVE_PROMPT } },
+                "16": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["5", 0], "text": negative } },
                 "3": {
                     "class_type": "KSampler",
                     "inputs": {
@@ -306,7 +311,7 @@ fn build_workflow(
             // (confirmed live: without this, higher denoise both
             // relocated furniture and occasionally invented new walls).
             if let (false, Some(cn)) = (*dual_clip, controlnet) {
-                graph["17"] = json!({ "class_type": "LoadImage", "inputs": { "image": cn.edge_image_name } });
+                graph["17"] = json!({ "class_type": "LoadImage", "inputs": { "image": cn.depth_image_name } });
                 graph["18"] = json!({
                     "class_type": "Flux2FunControlNetLoader",
                     "inputs": { "controlnet_name": cn.model_name }
@@ -448,7 +453,24 @@ fn fetch_view(base: &str, filename: &str, subfolder: &str, img_type: &str) -> Re
     Ok(bytes)
 }
 
-fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f64) -> Result<String, String> {
+/// Pure helper behind comfyui_stylize_map's `is_background` handling — pulled
+/// out so it's directly testable without a live ComfyUI/network round trip.
+/// Mutates `prompt`/`negative` in place (both already carry scene context and
+/// EMPTY_ROOM_SUFFIX by the time this runs) and returns the denoise to
+/// actually use.
+fn apply_background_adjustments(prompt: &mut String, negative: &mut String, denoise: f64, is_background: bool) -> f64 {
+    if !is_background {
+        return denoise;
+    }
+    prompt.push_str(BACKGROUND_POSITIVE_SUFFIX);
+    negative.push_str(BACKGROUND_EXTRA_NEGATIVE);
+    denoise.min(BACKGROUND_DENOISE_CAP)
+}
+
+fn stylize_blocking(
+    base_url: &str, png_data_url: &str, prompt: &str, denoise: f64, depth_map_data_url: Option<&str>,
+    negative: &str,
+) -> Result<String, String> {
     let base = base_url.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err("No ComfyUI address configured.".to_string());
@@ -458,17 +480,18 @@ fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f
     let source = pick_model_source(base)?;
     let controlnet_model = pick_controlnet(base);
     let controlnet_upload = controlnet_model
-        .map(|model_name| -> Result<(String, String), String> {
-            let edge_png = canny_edge_png(&png)?;
-            let edge_image_name = upload_image(base, &edge_png, "battle_map_edges.png")?;
-            Ok((model_name, edge_image_name))
+        .zip(depth_map_data_url)
+        .map(|(model_name, depth_map_url)| -> Result<(String, String), String> {
+            let depth_png = data_url_to_png_bytes(depth_map_url)?;
+            let depth_image_name = upload_image(base, &depth_png, "battle_map_depth.png")?;
+            Ok((model_name, depth_image_name))
         })
         .transpose()?;
     let controlnet = controlnet_upload
         .as_ref()
-        .map(|(model_name, edge_image_name)| ControlNetConfig { model_name, edge_image_name });
+        .map(|(model_name, depth_image_name)| ControlNetConfig { model_name, depth_image_name });
     let client_id = random_client_id();
-    let workflow = build_workflow(&source, &image_name, prompt, denoise, controlnet.as_ref());
+    let workflow = build_workflow(&source, &image_name, prompt, denoise, controlnet.as_ref(), negative);
     let prompt_id = queue_prompt(base, workflow, &client_id)?;
     let history_entry = poll_history(base, &prompt_id)?;
     let (filename, subfolder, img_type) = extract_image_ref(&history_entry)?;
@@ -494,6 +517,19 @@ fn stylize_blocking(base_url: &str, png_data_url: &str, prompt: &str, denoise: f
 /// frontend — see DMConsolePage.tsx's sceneContextFor. Prepended to
 /// whichever prompt is used, since neither POSITIVE_PROMPT nor a DM's style
 /// preset says anything about what the map actually depicts.
+///
+/// `depth_map_data_url` (see battleMapRender.ts's renderBattleMapDepthMap)
+/// is used as ControlNet structural guidance when a controlnet model is
+/// installed; ignored otherwise.
+///
+/// `is_background` marks a call as stylizing a background/material tile
+/// (floor, wall, water, rubble, stairs — see battleMapRender.ts's
+/// isBackgroundTile) rather than a discrete-object tile (door, pillar,
+/// furniture, tree, hazard). Background swatches get repeated into every
+/// matching cell across the whole map, so they're pushed toward a plain
+/// seamless texture (extra positive/negative reinforcement, capped denoise)
+/// instead of the full creative freedom an object tile gets — see
+/// BACKGROUND_POSITIVE_SUFFIX's doc comment for why this exists.
 #[tauri::command]
 pub async fn comfyui_stylize_map(
     base_url: String,
@@ -501,6 +537,8 @@ pub async fn comfyui_stylize_map(
     prompt: Option<String>,
     denoise: Option<f64>,
     scene_context: Option<String>,
+    depth_map_data_url: Option<String>,
+    is_background: Option<bool>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let mut prompt = prompt.unwrap_or_else(|| POSITIVE_PROMPT.to_string());
@@ -513,8 +551,11 @@ pub async fn comfyui_stylize_map(
             prompt = format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}");
         }
         prompt.push_str(EMPTY_ROOM_SUFFIX);
-        let denoise = denoise.unwrap_or(DENOISE);
-        stylize_blocking(&base_url, &png_data_url, &prompt, denoise)
+        let mut negative = NEGATIVE_PROMPT.to_string();
+        let denoise = apply_background_adjustments(
+            &mut prompt, &mut negative, denoise.unwrap_or(DENOISE), is_background.unwrap_or(false),
+        );
+        stylize_blocking(&base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative)
     })
     .await
     .map_err(|e| format!("Stylize task failed: {e}"))?
@@ -530,30 +571,6 @@ mod tests {
         assert!(original.starts_with("data:image/png;base64,"));
         let bytes = data_url_to_png_bytes(&original).unwrap();
         assert_eq!(bytes, b"not really a png but fine for a round trip");
-    }
-
-    #[test]
-    fn canny_edge_png_finds_the_boundary_of_a_high_contrast_square() {
-        let mut img = image::RgbImage::new(40, 40);
-        for p in img.pixels_mut() {
-            *p = image::Rgb([230, 220, 200]);
-        }
-        for y in 10..30 {
-            for x in 10..30 {
-                img.put_pixel(x, y, image::Rgb([20, 20, 20]));
-            }
-        }
-        let mut png = Vec::new();
-        DynamicImage::ImageRgb8(img)
-            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-            .unwrap();
-
-        let edges_png = canny_edge_png(&png).unwrap();
-        let edges = image::load_from_memory(&edges_png).unwrap().to_luma8();
-        assert_eq!(edges.dimensions(), (40, 40));
-        // The square's crisp boundary should register as real edge pixels —
-        // a flat/empty edge map would mean detection silently found nothing.
-        assert!(edges.pixels().any(|p| p.0[0] > 0));
     }
 
     #[test]
@@ -591,7 +608,7 @@ mod tests {
     #[test]
     fn build_workflow_wires_uploaded_image_and_checkpoint_through_the_graph() {
         let source = ModelSource::Checkpoint("my-checkpoint.safetensors".to_string());
-        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None);
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT);
         assert_eq!(wf["4"]["inputs"]["ckpt_name"], "my-checkpoint.safetensors");
         assert_eq!(wf["10"]["inputs"]["image"], "uploaded123.png");
         assert_eq!(wf["3"]["inputs"]["denoise"], DENOISE);
@@ -601,7 +618,7 @@ mod tests {
     #[test]
     fn build_workflow_uses_the_given_prompt_and_denoise_overrides() {
         let source = ModelSource::Checkpoint("ckpt.safetensors".to_string());
-        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8, None);
+        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8, None, NEGATIVE_PROMPT);
         assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
         assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
     }
@@ -615,7 +632,7 @@ mod tests {
             dual_clip: false,
             vae_name: "flux2-vae.safetensors".to_string(),
         };
-        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8, None);
+        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8, None, NEGATIVE_PROMPT);
         assert_eq!(wf["4"]["class_type"], "UNETLoader");
         assert_eq!(wf["4"]["inputs"]["unet_name"], "flux-2-klein-4b-fp8.safetensors");
         assert_eq!(wf["5"]["class_type"], "CLIPLoader");
@@ -642,7 +659,7 @@ mod tests {
             dual_clip: true,
             vae_name: "ae.safetensors".to_string(),
         };
-        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None);
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT);
         assert_eq!(wf["5"]["class_type"], "DualCLIPLoader");
         assert_eq!(wf["5"]["inputs"]["clip_name1"], "clip_l.safetensors");
         assert_eq!(wf["5"]["inputs"]["clip_name2"], "t5xxl.safetensors");
@@ -660,12 +677,12 @@ mod tests {
         };
         let cn = ControlNetConfig {
             model_name: "FLUX.2-dev-Fun-Controlnet-Union.safetensors",
-            edge_image_name: "edges123.png",
+            depth_image_name: "depth123.png",
         };
-        let wf = build_workflow(&flux2, "uploaded123.png", POSITIVE_PROMPT, 0.8, Some(&cn));
+        let wf = build_workflow(&flux2, "uploaded123.png", POSITIVE_PROMPT, 0.8, Some(&cn), NEGATIVE_PROMPT);
         assert_eq!(wf["18"]["class_type"], "Flux2FunControlNetLoader");
         assert_eq!(wf["18"]["inputs"]["controlnet_name"], "FLUX.2-dev-Fun-Controlnet-Union.safetensors");
-        assert_eq!(wf["17"]["inputs"]["image"], "edges123.png");
+        assert_eq!(wf["17"]["inputs"]["image"], "depth123.png");
         assert_eq!(wf["19"]["class_type"], "Flux2FunControlNetApply");
         assert_eq!(wf["19"]["inputs"]["conditioning"][0], "15");
         assert_eq!(wf["19"]["inputs"]["control_image"][0], "17");
@@ -695,7 +712,7 @@ mod tests {
             dual_clip: true,
             vae_name: "ae.safetensors".to_string(),
         };
-        let wf1 = build_workflow(&flux1, "uploaded123.png", POSITIVE_PROMPT, DENOISE, Some(&cn));
+        let wf1 = build_workflow(&flux1, "uploaded123.png", POSITIVE_PROMPT, DENOISE, Some(&cn), NEGATIVE_PROMPT);
         assert!(wf1.get("18").is_none());
         assert_eq!(wf1["3"]["class_type"], "KSampler");
         assert_eq!(wf1["3"]["inputs"]["positive"][0], "15");
@@ -703,8 +720,42 @@ mod tests {
     }
 
     #[test]
+    fn apply_background_adjustments_is_a_no_op_for_object_tiles() {
+        let mut prompt = "a stone pillar".to_string();
+        let mut negative = NEGATIVE_PROMPT.to_string();
+        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.7, false);
+        assert_eq!(prompt, "a stone pillar");
+        assert_eq!(negative, NEGATIVE_PROMPT);
+        assert_eq!(denoise, 0.7);
+    }
+
+    #[test]
+    fn apply_background_adjustments_reinforces_and_caps_denoise_for_background_tiles() {
+        let mut prompt = "plain floor".to_string();
+        let mut negative = NEGATIVE_PROMPT.to_string();
+        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.7, true);
+        assert!(prompt.contains("seamless"));
+        assert!(negative.contains("furniture"));
+        // 0.7 requested, but background tiles are capped below it so a
+        // repeated floor/wall swatch can't earn enough freedom to invent
+        // a discrete object that then gets stamped into every matching cell.
+        assert_eq!(denoise, BACKGROUND_DENOISE_CAP);
+        assert!(denoise < 0.7);
+    }
+
+    #[test]
+    fn apply_background_adjustments_never_raises_denoise_above_the_cap() {
+        let mut prompt = String::new();
+        let mut negative = String::new();
+        // A DM-chosen strength already below the cap should pass through
+        // unchanged, not get pulled UP to the cap.
+        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.2, true);
+        assert_eq!(denoise, 0.2);
+    }
+
+    #[test]
     fn stylize_blocking_rejects_an_empty_base_url() {
-        let err = stylize_blocking("   ", "data:image/png;base64,AAAA", POSITIVE_PROMPT, DENOISE).unwrap_err();
+        let err = stylize_blocking("   ", "data:image/png;base64,AAAA", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT).unwrap_err();
         assert!(err.contains("No ComfyUI address configured"));
     }
 }
