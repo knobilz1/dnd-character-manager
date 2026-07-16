@@ -53,6 +53,13 @@ or UI elements of any kind. Only apply the following stylistic/atmospheric treat
 const BACKGROUND_SUFFIX: &str = " This must be a seamless, edge-to-edge material surface texture only, \
 like a fabric swatch — do not include any furniture, beams, pillars, doors, statues, crates, or other \
 discrete objects anywhere in the frame.";
+// The object-tile counterpart — see comfyui.rs's OBJECT_POSITIVE_SUFFIX for
+// why this exists (small icon + atmospheric prompt → the model paints a whole
+// little room around the object, which then repeats into every cell).
+const OBJECT_SUFFIX: &str = " Render ONLY this single object by itself, centered and viewed straight \
+down from directly overhead, on a small bare patch of flat floor. There is no room here — no walls, no \
+window, no doorway, no background scenery, no other objects, no 3D perspective — just the one isolated \
+object on flat ground, like a single game-asset sprite on a plain background.";
 
 fn store_key(key: &str) -> Result<(), String> {
     keyring::Entry::new(SERVICE, ACCOUNT)
@@ -205,8 +212,10 @@ pub async fn gemini_stylize_map(
         // have no people/creatures painted in; stating it in-prompt reduces
         // how often the model adds them anyway.
         prompt.push_str(" The room is completely empty and unoccupied — no people, characters, or creatures present.");
-        if is_background.unwrap_or(false) {
-            prompt.push_str(BACKGROUND_SUFFIX);
+        match is_background {
+            Some(true) => prompt.push_str(BACKGROUND_SUFFIX),
+            Some(false) => prompt.push_str(OBJECT_SUFFIX),
+            None => {}
         }
         let key = read_key()?;
         stylize_blocking(&key, &prompt, &png_data_url)
