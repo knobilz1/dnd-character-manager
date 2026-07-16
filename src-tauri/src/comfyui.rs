@@ -193,9 +193,16 @@ fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise:
                     "inputs": { "clip_name": clip_names[0], "type": clip_type }
                 })
             };
-            // Flux models are guidance-distilled rather than CFG-driven: cfg
-            // stays at 1.0 and strength comes from FluxGuidance instead, with
-            // a zeroed-out negative (KSampler still requires one).
+            // Flux models are guidance-distilled: FluxGuidance drives how
+            // strongly the positive prompt is followed, separate from cfg.
+            // The common "cfg stays at 1, zero out the negative" Flux recipe
+            // is deliberately NOT used here — at cfg 1 the negative branch
+            // is mathematically ignored regardless of what's in it, so
+            // NEGATIVE_PROMPT ("no characters/people") would silently do
+            // nothing (confirmed live: hallucinated humanoid figures kept
+            // appearing despite it). Using a real negative CLIPTextEncode
+            // with cfg raised to 2.0 (a standard "true CFG" value for Flux)
+            // makes the negative prompt actually suppress unwanted content.
             json!({
                 "4": { "class_type": "UNETLoader", "inputs": { "unet_name": unet_name, "weight_dtype": "default" } },
                 "5": clip_node,
@@ -204,13 +211,13 @@ fn build_workflow(source: &ModelSource, image_name: &str, prompt: &str, denoise:
                 "12": { "class_type": "VAEEncode", "inputs": { "pixels": ["10", 0], "vae": ["14", 0] } },
                 "6": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["5", 0], "text": prompt } },
                 "15": { "class_type": "FluxGuidance", "inputs": { "conditioning": ["6", 0], "guidance": 3.5 } },
-                "16": { "class_type": "ConditioningZeroOut", "inputs": { "conditioning": ["6", 0] } },
+                "16": { "class_type": "CLIPTextEncode", "inputs": { "clip": ["5", 0], "text": NEGATIVE_PROMPT } },
                 "3": {
                     "class_type": "KSampler",
                     "inputs": {
                         "seed": seed,
                         "steps": 20,
-                        "cfg": 1.0,
+                        "cfg": 2.0,
                         "sampler_name": "euler",
                         "scheduler": "simple",
                         "denoise": denoise,
@@ -442,7 +449,9 @@ mod tests {
         assert_eq!(wf["14"]["inputs"]["vae_name"], "flux2-vae.safetensors");
         assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
         assert_eq!(wf["15"]["class_type"], "FluxGuidance");
-        assert_eq!(wf["3"]["inputs"]["cfg"], 1.0);
+        assert_eq!(wf["16"]["class_type"], "CLIPTextEncode");
+        assert_eq!(wf["16"]["inputs"]["text"], NEGATIVE_PROMPT);
+        assert_eq!(wf["3"]["inputs"]["cfg"], 2.0);
         assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
         assert_eq!(wf["3"]["inputs"]["positive"][0], "15");
         assert_eq!(wf["3"]["inputs"]["negative"][0], "16");
