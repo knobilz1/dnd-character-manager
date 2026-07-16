@@ -228,10 +228,57 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number) {
 
 export interface RenderWindow { colStart: number; colEnd: number; rowStart: number; rowEnd: number }
 
-/** Renders a (sub-)grid to a fresh canvas, with a coordinate ruler (A.. / 1..)
- *  down the left and across the top so cells are referenceable on the print.
- *  `win` defaults to the whole map. `cellPx` sets resolution. */
-export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow): HTMLCanvasElement {
+/** Renders ONLY the grid content — tiles + thin cell-boundary lines, no
+ *  coordinate ruler — sized exactly `wCols*cellPx` by `wRows*cellPx`. This is
+ *  the layer that's safe to hand to an AI stylize pass (see
+ *  `composeRulerFrame`'s doc comment for why the ruler is never included). */
+function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow): HTMLCanvasElement {
+  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
+  const wCols = w.colEnd - w.colStart;
+  const wRows = w.rowEnd - w.rowStart;
+  const canvas = document.createElement('canvas');
+  canvas.width = wCols * cellPx;
+  canvas.height = wRows * cellPx;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = COLORS.void;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let r = 0; r < wRows; r++) {
+    for (let c = 0; c < wCols; c++) {
+      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
+      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx);
+    }
+  }
+
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1;
+  for (let r = 0; r < wRows; r++) {
+    for (let c = 0; c < wCols; c++) {
+      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
+      if (code === ' ') continue;
+      ctx.strokeRect(c * cellPx, r * cellPx, cellPx, cellPx);
+    }
+  }
+  return canvas;
+}
+
+/** Draws the coordinate ruler (A../1..) around a content layer and returns
+ *  the composed full-size canvas — same output shape `renderBattleMapToCanvas`
+ *  always produced. `content` is drawn into the content rect via `drawImage`
+ *  (so it's rescaled to fit if an AI pass returned a different resolution)
+ *  and the ruler is always painted fresh afterward, from the map data, never
+ *  from pixels that passed through a stylize call. This split exists because
+ *  img2img diffusion models cannot reliably preserve small baked-in text or
+ *  thin straight lines through their VAE encode/decode round trip — testing
+ *  against a live ComfyUI/Flux install showed the ruler coming back as
+ *  scrambled digits and, worse, hallucinated extra walls where the model
+ *  "reinterpreted" grid lines it couldn't faithfully reproduce. Composing the
+ *  ruler afterward, in code, guarantees it's always pixel-exact regardless of
+ *  which provider (or model) ran the stylize pass, or whether one ran at all. */
+function composeRulerFrame(
+  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, content: CanvasImageSource
+): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
   const wRows = w.rowEnd - w.rowStart;
@@ -241,30 +288,10 @@ export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?:
   canvas.height = ruler + wRows * cellPx;
   const ctx = canvas.getContext('2d')!;
 
-  // Background (also fills the ruler gutter).
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(content, ruler, ruler, wCols * cellPx, wRows * cellPx);
 
-  // Tiles.
-  for (let r = 0; r < wRows; r++) {
-    for (let c = 0; c < wCols; c++) {
-      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
-      drawTile(ctx, code, ruler + c * cellPx, ruler + r * cellPx, cellPx);
-    }
-  }
-
-  // Grid lines over non-void cells.
-  ctx.strokeStyle = COLORS.grid;
-  ctx.lineWidth = 1;
-  for (let r = 0; r < wRows; r++) {
-    for (let c = 0; c < wCols; c++) {
-      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
-      if (code === ' ') continue;
-      ctx.strokeRect(ruler + c * cellPx, ruler + r * cellPx, cellPx, cellPx);
-    }
-  }
-
-  // Coordinate ruler.
   ctx.fillStyle = '#e8e2d2';
   ctx.font = `${Math.round(ruler * 0.5)}px sans-serif`;
   ctx.textAlign = 'center';
@@ -276,6 +303,40 @@ export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?:
     ctx.fillText(String(w.rowStart + r + 1), ruler / 2, ruler + r * cellPx + cellPx / 2);
   }
   return canvas;
+}
+
+/** Renders a (sub-)grid to a fresh canvas, with a coordinate ruler (A.. / 1..)
+ *  down the left and across the top so cells are referenceable on the print.
+ *  `win` defaults to the whole map. `cellPx` sets resolution. Plain/no-AI
+ *  render path — see `battleMapToStylizedPngDataUrl` for the AI-pass path. */
+export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow): HTMLCanvasElement {
+  return composeRulerFrame(map, cellPx, win, renderBattleMapContent(map, cellPx, win));
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Could not load the stylized image data.'));
+    img.src = dataUrl;
+  });
+}
+
+/** Same result as `battleMapToPngDataUrl`, but runs `stylize` over only the
+ *  content layer (no ruler) before compositing the ruler back on top — see
+ *  `composeRulerFrame`'s doc comment. Pass no `stylize` for a plain render. */
+export async function battleMapToStylizedPngDataUrl(
+  spec: string, cellPx: number, stylize?: (dataUrl: string) => Promise<string>
+): Promise<string | null> {
+  const map = parseBattleMap(spec);
+  if (!map) return null;
+  const content = renderBattleMapContent(map, cellPx);
+  let source: CanvasImageSource = content;
+  if (stylize) {
+    const stylizedDataUrl = await stylize(content.toDataURL('image/png'));
+    source = await loadImage(stylizedDataUrl);
+  }
+  return composeRulerFrame(map, cellPx, undefined, source).toDataURL('image/png');
 }
 
 /** Spreadsheet-style column label: 0→A, 25→Z, 26→AA. */
@@ -315,10 +376,10 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
  *  bigger than one page is tiled across multiple Letter sheets (with the
  *  coordinate ruler repeated on each) to tape together.
  *
- *  `stylize`, if given, is run over each page's rendered PNG (as a data URL)
- *  before it's embedded — this is the Phase 2 ComfyUI atmosphere-pass hook
- *  (see DMConsolePage.tsx's stylizeMapImage). It must resolve to a data URL
- *  and must not throw; a caller that wants a plain-render fallback on
+ *  `stylize`, if given, is run over each page's content layer ONLY (no
+ *  ruler — see `composeRulerFrame`'s doc comment) before the ruler is
+ *  composed back on top and the page is embedded. It must resolve to a data
+ *  URL and must not throw; a caller that wants a plain-render fallback on
  *  failure handles that itself before passing the callback in, so this
  *  function stays decoupled from any particular AI backend. Multi-page maps
  *  run one stylize call per page — seams between pages are not blended,
@@ -340,9 +401,14 @@ export async function battleMapToPdfBytes(
         colStart: rx, colEnd: Math.min(map.cols, rx + usableSquaresX),
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
-      const canvas = renderBattleMapToCanvas(map, RENDER_PX, win);
-      let dataUrl = canvas.toDataURL('image/png');
-      if (stylize) dataUrl = await stylize(dataUrl);
+      const content = renderBattleMapContent(map, RENDER_PX, win);
+      let source: CanvasImageSource = content;
+      if (stylize) {
+        const stylizedDataUrl = await stylize(content.toDataURL('image/png'));
+        source = await loadImage(stylizedDataUrl);
+      }
+      const canvas = composeRulerFrame(map, RENDER_PX, win, source);
+      const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));
       const page = pdf.addPage([PAGE_W, PAGE_H]);
       // The canvas is (ruler + cols*px) wide; scale so ONE square === 72pt.

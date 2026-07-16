@@ -14,7 +14,7 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapToPdfBytes } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapToStylizedPngDataUrl, battleMapToPdfBytes } from '../../utils/battleMapRender';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
 import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
@@ -2676,13 +2676,12 @@ export function DMConsolePage() {
   }
 
   async function exportMapPng(card: MapCard) {
-    const rawDataUrl = battleMapToPngDataUrl(card.spec, 96);
-    if (!rawDataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
     const dest = await save({ defaultPath: `${card.slug}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
     if (!dest) return;
     setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting PNG…');
     try {
-      const dataUrl = await stylizeMapImage(rawDataUrl);
+      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, mapAiStyle ? stylizeMapImage : undefined);
+      if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
       const bytes = new Uint8Array(bin.length);
@@ -2774,11 +2773,11 @@ export function DMConsolePage() {
   }
 
   async function previewAiExport(card: MapCard) {
-    const raw = battleMapToPngDataUrl(card.spec, 96);
-    if (!raw) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
     setPlanBusy(manualStyleProvider === 'gemini' ? 'Asking Gemini to restyle the map…' : 'Running the ComfyUI pass…');
     try {
-      setAiExportPreview(await manualStylizeImage(raw));
+      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, manualStylizeImage);
+      if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
+      setAiExportPreview(dataUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -2791,9 +2790,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Generating and exporting PNG…');
     try {
-      const raw = battleMapToPngDataUrl(card.spec, 96);
-      if (!raw) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
-      const dataUrl = await manualStylizeImage(raw);
+      const dataUrl = await battleMapToStylizedPngDataUrl(card.spec, 96, manualStylizeImage);
+      if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);

@@ -33,12 +33,17 @@ use serde_json::{json, Value};
 const SERVICE: &str = "tavernsheet";
 const ACCOUNT: &str = "gemini_api_key";
 const MODEL: &str = "gemini-2.5-flash-image";
-const GRID_PRESERVATION_PREAMBLE: &str = "This is a Dungeons & Dragons battle map grid. Keep the \
-exact grid layout, cell boundaries, and every element's position completely unchanged — do not \
-redraw, shift, resize, or reinterpret the layout. The image already has a coordinate ruler baked \
-in (row numbers and column letters along the top and left edges) — keep those labels exactly as \
-shown and fully legible; do not remove, blur, or redraw them, and do not add any other text or \
-UI elements. Only apply the following stylistic/atmospheric treatment on top of it: ";
+// This preamble receives the CONTENT layer only (battleMapRender.ts's
+// renderBattleMapContent) — the coordinate ruler is deliberately never sent
+// here; the frontend composites it back on top afterward, in code, once it
+// gets the stylized image back. Testing showed asking the model to preserve
+// baked-in text/grid labels through its own edit pass doesn't work reliably
+// (scrambled digits, hallucinated walls) — that's not an instruction-
+// following gap this preamble can fix, so it no longer tries.
+const GRID_PRESERVATION_PREAMBLE: &str = "This is a Dungeons & Dragons battle map floor plan. Keep \
+the exact grid layout, cell boundaries, and every element's position completely unchanged — do not \
+redraw, shift, resize, or reinterpret the layout. Do not add any text or UI elements. Only apply \
+the following stylistic/atmospheric treatment on top of it: ";
 
 fn store_key(key: &str) -> Result<(), String> {
     keyring::Entry::new(SERVICE, ACCOUNT)

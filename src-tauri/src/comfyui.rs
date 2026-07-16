@@ -11,9 +11,9 @@
 //!   2. GET /object_info/CheckpointLoaderSimple — picks whichever checkpoint
 //!      the user has installed; this deliberately assumes nothing about a
 //!      specific SD model/name, since that's entirely the user's local setup.
-//!   3. POST /prompt — queues a low-denoise img2img workflow (keeps the
-//!      grid/tile layout legible under the stylization) referencing the
-//!      uploaded image.
+//!   3. POST /prompt — queues a low-denoise img2img workflow over the
+//!      uploaded image (the content layer only — see the POSITIVE_PROMPT
+//!      doc comment below for why the coordinate ruler is never part of it).
 //!   4. GET /history/<id> — polls until the queued job's outputs appear.
 //!   5. GET /view — downloads the finished PNG.
 
@@ -23,20 +23,20 @@ use serde_json::{json, Value};
 use std::io::Read;
 use std::time::{Duration, Instant};
 
-// The rendered tile PNG this pass stylizes ALREADY has real text baked in —
-// the coordinate ruler (column letters / row numbers) drawn around the
-// grid's edges by renderBattleMapToCanvas (battleMapRender.ts). A blanket
-// "no text" instruction would tell the model to erase exactly the labels
-// the DM needs to read cells off the printed map, so this asks it to keep
-// them instead of suppressing text outright.
+// The PNG this pass stylizes is the CONTENT layer only (battleMapRender.ts's
+// renderBattleMapContent) — the coordinate ruler is deliberately never sent
+// here. Testing against a live ComfyUI/Flux install showed img2img can't
+// reliably preserve small baked-in text or thin straight lines through its
+// VAE encode/decode round trip: the ruler came back as scrambled digits and,
+// worse, the model hallucinated extra walls where it "reinterpreted" grid
+// lines it couldn't faithfully reproduce. The frontend composites the ruler
+// back on top afterward, in code, so it's pixel-exact regardless of what
+// this pass does — see composeRulerFrame's doc comment in battleMapRender.ts.
 const POSITIVE_PROMPT: &str = "top-down tabletop RPG battle map, detailed dungeon floor texture, \
-atmospheric lighting, dramatic shadows, digital painting, high detail. Keep the coordinate ruler \
-(the row numbers and column letters along the top and left edges) exactly as shown and fully \
-legible — do not remove, blur, or redraw them. Do not add any other text, watermarks, or UI \
-elements.";
-const NEGATIVE_PROMPT: &str = "blurry, watermark, invented captions, extra decorative text, UI \
-chrome, characters, miniatures, people, photo, distorted grid, illegible coordinate labels, \
-warped geometry";
+atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, \
+watermarks, or UI elements.";
+const NEGATIVE_PROMPT: &str = "blurry, watermark, text, letters, numbers, UI chrome, characters, \
+miniatures, people, photo, distorted grid, warped geometry";
 const DENOISE: f64 = 0.55;
 const POLL_TIMEOUT: Duration = Duration::from_secs(90);
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
