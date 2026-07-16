@@ -96,7 +96,56 @@ vanishing point, 3D room, tilted view, cropped";
 /// names the object ("a wooden door"); `scene`, if present, is folded in only
 /// as a material/setting hint (a bar table vs a dungeon table), flagged so the
 /// model doesn't render it as a scene.
+/// Case-insensitive removal of every occurrence of `needle` from `haystack`.
+/// Operates on bytes (the prompts are ASCII); other bytes are copied verbatim
+/// so any incidental UTF-8 stays intact.
+fn remove_phrase_ci(haystack: &str, needle: &str) -> String {
+    let hay = haystack.as_bytes();
+    let ndl = needle.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(hay.len());
+    let mut i = 0;
+    while i < hay.len() {
+        if i + ndl.len() <= hay.len() && hay[i..i + ndl.len()].eq_ignore_ascii_case(ndl) {
+            i += ndl.len();
+        } else {
+            out.push(hay[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| haystack.to_string())
+}
+
+/// Tidies dangling punctuation/whitespace left after phrase removal
+/// (", ,", double spaces, a leading comma).
+fn tidy_prompt(s: &str) -> String {
+    let mut out = s.to_string();
+    while out.contains("  ") {
+        out = out.replace("  ", " ");
+    }
+    out = out.replace(" ,", ",");
+    while out.contains(",,") {
+        out = out.replace(",,", ",");
+    }
+    out.trim().trim_start_matches([',', ' ']).trim().to_string()
+}
+
+/// Strips map-level scene wording ("battle map", "floor texture", ...) from a
+/// style prompt so it can be reused for an OBJECT. The preset/DM style is
+/// written to describe a whole battle map ("...photorealistic floor texture,
+/// cinematic detail..."); feeding "floor texture" into a table's prompt is a
+/// mild contradiction, so the object path keeps only the look words. Background
+/// tiles keep the full style unchanged (they ARE floor/wall texture).
+pub(crate) fn strip_map_wording(style: &str) -> String {
+    let mut s = style.to_string();
+    // Longest first, so removing the full phrase doesn't leave a fragment.
+    for pat in ["top-down tabletop RPG battle map", "tabletop RPG battle map", "battle map", "floor texture"] {
+        s = remove_phrase_ci(&s, pat);
+    }
+    tidy_prompt(&s)
+}
+
 fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String {
+    let style = strip_map_wording(style);
     let hint = scene
         .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
         .unwrap_or_default();
@@ -796,6 +845,36 @@ mod tests {
         let p = build_object_prompt("anime style.", "barrel", None);
         assert!(p.contains("a single barrel"));
         assert!(!p.contains("hint"));
+    }
+
+    #[test]
+    fn strip_map_wording_drops_scene_nouns_but_keeps_the_look_words() {
+        let realistic = "top-down tabletop RPG battle map, photorealistic floor texture, natural \
+                         realistic lighting, physically accurate materials and wear, cinematic detail.";
+        let s = strip_map_wording(realistic);
+        // The map-level nouns are gone...
+        assert!(!s.to_lowercase().contains("battle map"));
+        assert!(!s.to_lowercase().contains("floor texture"));
+        // ...but the style adjectives that describe the LOOK survive.
+        assert!(s.contains("photorealistic"));
+        assert!(s.contains("natural realistic lighting"));
+        assert!(s.contains("cinematic detail"));
+        // No dangling leading comma from the removal.
+        assert!(!s.starts_with(','));
+        assert!(!s.starts_with(' '));
+    }
+
+    #[test]
+    fn build_object_prompt_scrubs_floor_texture_from_the_object_style() {
+        let p = build_object_prompt(
+            "top-down tabletop RPG battle map, photorealistic floor texture, cinematic detail.",
+            "wooden table",
+            None,
+        );
+        assert!(!p.to_lowercase().contains("floor texture"));
+        assert!(!p.to_lowercase().contains("battle map"));
+        assert!(p.contains("photorealistic"));
+        assert!(p.contains("a single wooden table"));
     }
 
     #[test]

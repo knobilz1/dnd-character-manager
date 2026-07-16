@@ -53,20 +53,22 @@ or UI elements of any kind. Only apply the following stylistic/atmospheric treat
 const BACKGROUND_SUFFIX: &str = " This must be a seamless, edge-to-edge material surface texture only, \
 like a fabric swatch — do not include any furniture, beams, pillars, doors, statues, crates, or other \
 discrete objects anywhere in the frame.";
-/// The object-tile prompt — see comfyui.rs's build_object_prompt for why the
-/// object path drops all scene/battle-map framing (the frontend sends the
-/// object on a plain neutral backdrop and keys it out; the model's only job is
-/// to render one nice isolated object). `scene` is folded in as a flagged
-/// material hint only.
+/// The object-tile prompt for GEMINI. Unlike ComfyUI/Flux (a diffusion model
+/// that generates toward a *description*), Gemini's image API is an
+/// instruction-tuned *editor*, so this is phrased as an edit command
+/// ("Restyle this image into…", "change only the material/lighting") rather
+/// than a descriptive target. Shares comfyui.rs's strip_map_wording so the
+/// style's map-level nouns ("floor texture") don't leak into an object edit.
 fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String {
+    let style = crate::comfyui::strip_map_wording(style);
     let hint = scene
-        .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
+        .map(|s| format!(" Setting/material hint only, do NOT draw a scene: {s}."))
         .unwrap_or_default();
     format!(
-        "A direct top-down view, seen from straight overhead, of a single {label}. {style} The object \
-         is centered and fills the frame on a plain flat neutral studio background — one isolated \
-         object only, no room, no walls, no floor, no other objects, no scenery, no environment, no \
-         3D perspective, no side view.{hint}"
+        "Restyle this image into a direct top-down view, seen from straight overhead, of a single \
+         {label}. Preserve its shape, size, and centered position; change only the material, texture, \
+         colour, and lighting to match this look: {style} Keep the plain neutral background — do not \
+         add a room, walls, floor, other objects, scenery, or any 3D or side perspective.{hint}"
     )
 }
 
