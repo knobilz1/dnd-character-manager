@@ -2153,8 +2153,363 @@ fn battle_map_format_instructions() -> String {
         - <notable things and the cell they're in, e.g. \"Altar at J8\">\n\
         Tactics:\n\
         - <choke points, cover, and sightlines, plus concrete suggested enemy start cells and ambush spots, referencing cells like C3 or K1>\n\n\
-        Rules for the Map block: size it between 10x10 and 24x18; EVERY row must be the same width; enclose the playable area with `#` walls and use a space for anything outside it; make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction. Output nothing outside the sections shown."
+        Rules for the Map block — these are checked mechanically and a violation gets the map rejected:\n\
+        - Size it between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}, and the `Grid:` line's <cols>x<rows> MUST equal the block you actually draw.\n\
+        - EVERY row must be exactly <cols> characters wide — count them. Ragged rows are the single most common failure.\n\
+        - Enclose the playable area with `#` walls; use a space for anything outside it.\n\
+        - A `+` door must be SET INTO a wall run — a `#` on both sides of it, horizontally or vertically. Never leave a door standing on open floor.\n\
+        - Every `Features:` line must point at a cell you actually drew the matching code in. If you write \"Bar at A2\", then A2 must really be a `=`. Never list something you didn't draw.\n\
+        - The encounter's defining feature must physically exist on the grid, not just in the Features text: a barroom needs an actual bar (a contiguous run of `=`), a forge needs the forge, a shrine needs the altar. Draw it, then name it in Features.\n\
+        - Lay the room out like a real place, not a spreadsheet — avoid perfectly regular rows/columns of identical objects; vary spacing, leave irregular gaps, cluster things where people would actually put them.\n\
+        - Make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction.\n\
+        Output nothing outside the sections shown."
     )
+}
+
+// ── Map spec validation / normalization ──────────────────────────────────────
+// The model's spec used to be trusted verbatim and written straight to disk,
+// which shipped genuinely broken maps: a `Grid:` header claiming 16x12 over a
+// grid that was really 13 rows of ragged 14/16 width (the renderer pads short
+// rows with void, so the print got a black stripe down one side), doors sitting
+// on open floor instead of in a wall, and a `Features:` list naming a bar,
+// pillars, a fire pit and stairs that appear NOWHERE in the ASCII it drew. The
+// prompt already asked for equal row widths; the model ignored it. So the fix
+// can't be prompt-only: `validate_map_spec` reports concrete errors (fed back
+// for one retry) and `normalize_map_spec` guarantees whatever we finally store
+// is at least self-consistent — which matters beyond looks, since the DM plans
+// enemy placement against these cell coordinates.
+
+/// Every legal grid character (plus `' '` = void, handled separately).
+const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*'];
+/// Codes that are an actual object/terrain feature — what a `Features:` line
+/// must point at. Plain floor, void and wall are not "things".
+const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*'];
+const MAP_MIN_COLS: usize = 10;
+const MAP_MIN_ROWS: usize = 10;
+const MAP_MAX_COLS: usize = 24;
+const MAP_MAX_ROWS: usize = 18;
+/// Sanity cap while slurping rows, mirroring battleMapRender.ts's MAX_DIM.
+const MAP_SLURP_CAP: usize = 40;
+
+fn is_map_section_header(t: &str) -> bool {
+    t.starts_with("Features:") || t.starts_with("Tactics:") || t.starts_with("Legend:")
+        || t.starts_with("Grid:") || t.starts_with("# ")
+}
+
+/// Splits a spec into (everything up to and including `Map:`, the grid rows,
+/// everything after). Mirrors battleMapRender.ts's parseBattleMap so what we
+/// validate is exactly what the renderer will draw. Pure.
+fn split_spec_grid(spec: &str) -> Option<(Vec<String>, Vec<String>, Vec<String>)> {
+    let lines: Vec<&str> = spec.lines().collect();
+    let map_idx = lines.iter().position(|l| l.trim() == "Map:")?;
+    let mut i = map_idx + 1;
+    while i < lines.len() && lines[i].trim().is_empty() {
+        i += 1;
+    }
+    let start = i;
+    let mut rows: Vec<String> = Vec::new();
+    while i < lines.len() {
+        let t = lines[i].trim();
+        if t.is_empty() || is_map_section_header(t) || rows.len() >= MAP_SLURP_CAP {
+            break;
+        }
+        rows.push(lines[i].trim_end().to_string());
+        i += 1;
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    let prefix = lines[..start].iter().map(|s| s.to_string()).collect();
+    let suffix = lines[i..].iter().map(|s| s.to_string()).collect();
+    Some((prefix, rows, suffix))
+}
+
+/// Spreadsheet-style column label: 0→A, 25→Z, 26→AA. Mirrors
+/// battleMapRender.ts's columnLabel so cell refs mean the same thing in the
+/// spec, the print, and the DM's own planning.
+fn column_label(index: usize) -> String {
+    let mut n = index;
+    let mut s = String::new();
+    loop {
+        s.insert(0, (b'A' + (n % 26) as u8) as char);
+        if n < 26 {
+            break;
+        }
+        n = n / 26 - 1;
+    }
+    s
+}
+
+/// Inverse of `column_label` + a 1-based row: `"C3"` → `(2, 2)`. Pure.
+fn parse_cell_ref(tok: &str) -> Option<(usize, usize)> {
+    if !tok.is_ascii() {
+        return None;
+    }
+    let letters = tok.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+    if letters == 0 || letters > 2 {
+        return None;
+    }
+    let digits = &tok[letters..];
+    if digits.is_empty() || digits.len() > 2 || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let mut col = 0usize;
+    for c in tok[..letters].chars() {
+        col = col * 26 + (c.to_ascii_uppercase() as u8 - b'A') as usize + 1;
+    }
+    let row: usize = digits.parse().ok()?;
+    if row == 0 {
+        return None;
+    }
+    Some((col - 1, row - 1))
+}
+
+/// Every `A1`-shaped cell reference in a line, as (token, col, row).
+fn cell_refs_in(line: &str) -> Vec<(String, usize, usize)> {
+    line.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .filter_map(|t| parse_cell_ref(t).map(|(c, r)| (t.to_string(), c, r)))
+        .collect()
+}
+
+/// The `- ...` bullets under `Features:`.
+fn feature_lines(suffix: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_features = false;
+    for l in suffix {
+        let t = l.trim();
+        if t.starts_with("Features:") {
+            in_features = true;
+            continue;
+        }
+        if is_map_section_header(t) {
+            in_features = false;
+            continue;
+        }
+        if in_features {
+            if let Some(body) = t.strip_prefix('-') {
+                let body = body.trim();
+                if !body.is_empty() {
+                    out.push(body.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn cell_at(rows: &[String], col: usize, row: usize) -> Option<char> {
+    rows.get(row).and_then(|r| r.chars().nth(col))
+}
+
+/// The row width the most rows agree on (ties → the wider one). See
+/// `normalize_map_spec` for why the mode, not the max, is the repair target.
+fn modal_row_width(rows: &[String]) -> usize {
+    let mut widths: Vec<usize> = rows.iter().map(|r| r.chars().count()).collect();
+    widths.sort_unstable();
+    let mut best = (0usize, 0usize); // (count, width)
+    let mut i = 0;
+    while i < widths.len() {
+        let w = widths[i];
+        let run = widths[i..].iter().take_while(|x| **x == w).count();
+        // `>=` with the ascending sort means a tie keeps the wider width.
+        if run >= best.0 {
+            best = (run, w);
+        }
+        i += run;
+    }
+    best.1
+}
+
+/// A `+` is only a door if it's set into a wall run — `#` on both sides either
+/// horizontally or vertically. A `+` floating on open floor is the "four doors
+/// in the middle of the room" bug.
+fn door_in_wall(rows: &[String], col: usize, row: usize) -> bool {
+    let at = |c: isize, r: isize| -> char {
+        if c < 0 || r < 0 {
+            return ' ';
+        }
+        cell_at(rows, c as usize, r as usize).unwrap_or(' ')
+    };
+    let (c, r) = (col as isize, row as isize);
+    (at(c - 1, r) == '#' && at(c + 1, r) == '#') || (at(c, r - 1) == '#' && at(c, r + 1) == '#')
+}
+
+/// The `<cols>x<rows>` the `Grid:` line CLAIMS (which may be a lie).
+fn declared_dims(spec: &str) -> Option<(usize, usize)> {
+    let line = spec.lines().find(|l| l.trim_start().starts_with("Grid:"))?;
+    line.split(|c: char| !(c.is_ascii_digit() || c == 'x' || c == 'X'))
+        .filter_map(|tok| tok.split_once(['x', 'X']))
+        .find_map(|(a, b)| match (a.parse::<usize>(), b.parse::<usize>()) {
+            (Ok(a), Ok(b)) => Some((a, b)),
+            _ => None,
+        })
+}
+
+/// Concrete, model-readable problems with a spec — empty means it's sound.
+/// Fed back verbatim for one retry (see `generate_one_map_spec`). Pure.
+fn validate_map_spec(spec: &str) -> Vec<String> {
+    let mut issues = Vec::new();
+    let Some((_, rows, suffix)) = split_spec_grid(spec) else {
+        issues.push("The spec has no `Map:` block with grid rows under it.".to_string());
+        return issues;
+    };
+
+    let mut widths: Vec<usize> = rows.iter().map(|r| r.chars().count()).collect();
+    widths.sort_unstable();
+    widths.dedup();
+    if widths.len() > 1 {
+        issues.push(format!(
+            "The grid rows are not all the same width (found widths {widths:?}). EVERY row must be exactly the same number of characters — count them."
+        ));
+    }
+    let cols = widths.last().copied().unwrap_or(0);
+    let rows_n = rows.len();
+
+    if let Some((dc, dr)) = declared_dims(spec) {
+        if dc != cols || dr != rows_n {
+            issues.push(format!(
+                "The `Grid:` line says {dc}x{dr} but the map block you drew is actually {cols}x{rows_n}. They must match exactly."
+            ));
+        }
+    }
+    if cols < MAP_MIN_COLS || rows_n < MAP_MIN_ROWS || cols > MAP_MAX_COLS || rows_n > MAP_MAX_ROWS {
+        issues.push(format!(
+            "The map is {cols}x{rows_n}; it must be between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}."
+        ));
+    }
+
+    let mut unknown: Vec<char> = rows
+        .iter()
+        .flat_map(|r| r.chars())
+        .filter(|c| *c != ' ' && !MAP_CODES.contains(c))
+        .collect();
+    unknown.sort_unstable();
+    unknown.dedup();
+    if !unknown.is_empty() {
+        issues.push(format!(
+            "The grid uses characters that aren't in the legend: {unknown:?}. Use ONLY the legend codes."
+        ));
+    }
+
+    for (r, row) in rows.iter().enumerate() {
+        for (c, ch) in row.chars().enumerate() {
+            if ch == '+' && !door_in_wall(&rows, c, r) {
+                issues.push(format!(
+                    "The door at {}{} is standing on open floor. A `+` must be set into a wall run — a `#` on both sides of it, horizontally or vertically.",
+                    column_label(c),
+                    r + 1
+                ));
+            }
+        }
+    }
+
+    for line in feature_lines(&suffix) {
+        for (tok, c, r) in cell_refs_in(&line) {
+            match cell_at(&rows, c, r) {
+                None => issues.push(format!(
+                    "Features says \"{line}\" but cell {tok} is outside the {cols}x{rows_n} grid."
+                )),
+                Some(ch) if !MAP_OBJECT_CODES.contains(&ch) => {
+                    let what = match ch {
+                        '.' => "plain floor",
+                        '#' => "a wall",
+                        ' ' => "empty void outside the map",
+                        _ => "not an object",
+                    };
+                    issues.push(format!(
+                        "Features says \"{line}\" but cell {tok} contains `{ch}` ({what}) — there is nothing there. Every Features line must point at a cell you actually drew the matching code in."
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    issues
+}
+
+/// Forces a spec to be internally consistent no matter what the model did:
+/// snaps ragged rows to the width most of them already agree on, scrubs any
+/// character that isn't a legend code, and rewrites the `Grid:` header from the
+/// grid that's ACTUALLY there. Last-resort safety net after the retry in
+/// `generate_one_map_spec` — the result may still be an ugly map, but the DM's
+/// cell coordinates will at least resolve against something real.
+///
+/// The MODAL width (not the max) is the repair target because a ragged grid is
+/// nearly always "the model miscounted a couple of rows": the shipped barroom
+/// map had eleven 14-wide rows and two stray 16-wide wall rows, so snapping to
+/// 14 restores a clean 14-wide room, where padding out to 16 would instead bake
+/// in a 2-cell void stripe down the side of the print. Ties go to the wider
+/// width, which truncates less. Pure.
+fn normalize_map_spec(spec: &str) -> String {
+    let Some((prefix, rows, suffix)) = split_spec_grid(spec) else {
+        return spec.to_string();
+    };
+    let cols = modal_row_width(&rows);
+    let fixed: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let mut s: String = r
+                .chars()
+                .map(|c| if c == ' ' || MAP_CODES.contains(&c) { c } else { '.' })
+                .take(cols)
+                .collect();
+            let len = s.chars().count();
+            if len < cols {
+                s.push_str(&" ".repeat(cols - len));
+            }
+            s
+        })
+        .collect();
+    let rows_n = fixed.len();
+
+    let prefix: Vec<String> = prefix
+        .iter()
+        .map(|l| {
+            if l.trim_start().starts_with("Grid:") {
+                format!("Grid: {cols}x{rows_n}, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.")
+            } else {
+                l.clone()
+            }
+        })
+        .collect();
+
+    let mut out: Vec<String> = prefix;
+    out.extend(fixed);
+    out.extend(suffix);
+    out.join("\n")
+}
+
+/// Asks for ONE map spec, and — if the reply is structurally broken — re-asks
+/// exactly once with the concrete errors fed back, keeping the retry only if
+/// it's genuinely better. Whatever we end up with is normalized before it's
+/// returned, so a stored spec is always self-consistent.
+///
+/// Returns the provider's own error verbatim rather than a generic one: when
+/// this fails it's almost always the ingestion provider being unreachable or
+/// misconfigured, and "the model didn't return a usable map" hides exactly the
+/// detail the DM needs to fix it.
+fn generate_one_map_spec(prompt: &str) -> Result<String, String> {
+    let ask = |p: String| -> Result<Option<String>, String> {
+        let reply = crate::local_llm::ask_ingest_once(p, Some("sonnet"), false)?;
+        Ok(split_map_specs(&reply).into_iter().next())
+    };
+    let first = ask(prompt.to_string())?
+        .ok_or_else(|| "The model's reply didn't contain a `Map:` block.".to_string())?;
+    let issues = validate_map_spec(&first);
+    if issues.is_empty() {
+        return Ok(normalize_map_spec(&first));
+    }
+    let retry = format!(
+        "{prompt}\n\nYour previous attempt was REJECTED. Fix every one of these problems and output the corrected map in exactly the same format:\n{}",
+        issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")
+    );
+    // A retry that's no better (or errored outright) falls back to the first
+    // attempt — normalized either way, so we always store something coherent.
+    match ask(retry) {
+        Ok(Some(second)) if validate_map_spec(&second).len() < issues.len() => Ok(normalize_map_spec(&second)),
+        _ => Ok(normalize_map_spec(&first)),
+    }
 }
 
 /// Rewrites a spec's `# ` title line to exactly `name` (or prepends one if
@@ -2270,11 +2625,10 @@ fn generate_battle_maps_at(root: &Path, id: &str, hint: &str) -> Result<Vec<Batt
     let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
 
     let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint);
-    let reply = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)?;
-
-    for spec in split_map_specs(&reply) {
-        write_map_spec_at(root, id, &spec)?;
-    }
+    // The prompt asks for exactly ONE map, and this path validates + retries
+    // it (see generate_one_map_spec) rather than trusting the first reply.
+    let spec = generate_one_map_spec(&prompt)?;
+    write_map_spec_at(root, id, &spec)?;
     // Rebuild over ALL maps (new + pre-existing) so the UI reflects the whole
     // current set, not just this batch.
     rebuild_battle_maps_index_at(root, id)
@@ -2360,10 +2714,7 @@ fn generate_battle_maps_for_plan_at(
     for encounter in encounters {
         let hint = format!("{} — {}", encounter.name, encounter.description);
         let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint);
-        let spec = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)
-            .ok()
-            .and_then(|reply| split_map_specs(&reply).into_iter().next());
-        let Some(spec) = spec else {
+        let Ok(spec) = generate_one_map_spec(&prompt) else {
             failed.push(encounter.name.clone());
             continue;
         };
@@ -3951,6 +4302,109 @@ mod tests {
         // No battle_mode.txt is ever written by create_campaign_at, so an
         // existing campaign that predates this feature reads as theater.
         assert_eq!(read_battle_mode_at(&root.0, &meta.id), "theater");
+    }
+
+    /// The real spec the generator shipped for "Barroom Brawl" — every problem
+    /// below was live on disk and rendered/printed as-is.
+    const BROKEN_BARROOM_SPEC: &str = "# Barroom Brawl\nGrid: 16x12, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\nLegend: . floor  # wall  + door\nMap:\n################\n#............#\n#.+.........+#\n#............#\n#..^..=..=...#\n#..=..=..=...#\n#..^..=..=...#\n#..=..=..=...#\n#..^..=..=...#\n#..=..=..=...#\n#..^..=..=...#\n#.+.........+#\n################\nFeatures:\n- Bar at A2\n- Pillars at C4, G4\n- Fire pit at E7\nTactics:\n- The doors at A12 and P12 are entry points.";
+
+    #[test]
+    fn validate_map_spec_catches_every_flaw_in_the_shipped_barroom_map() {
+        let issues = validate_map_spec(BROKEN_BARROOM_SPEC);
+        let all = issues.join("\n");
+        // Ragged rows: the walls are 16 wide, every interior row is 14.
+        assert!(all.contains("not all the same width"), "{all}");
+        // The header claims 16x12 over a grid that's really 16x13.
+        assert!(all.contains("says 16x12"), "{all}");
+        // All four `+` sit two squares inside the wall, on open floor.
+        assert!(all.contains("C3 is standing on open floor"), "{all}");
+        assert!(all.contains("M3 is standing on open floor"), "{all}");
+        assert!(all.contains("C12 is standing on open floor"), "{all}");
+        assert!(all.contains("M12 is standing on open floor"), "{all}");
+        // "Bar at A2" — A2 is a wall; the bar was never drawn at all.
+        assert!(all.contains("A2 contains `#` (a wall)"), "{all}");
+        // "Pillars at C4/G4" and "Fire pit at E7" — plain floor, no `o`/`*`.
+        assert!(all.contains("C4 contains `.` (plain floor)"), "{all}");
+        assert!(all.contains("E7 contains `.` (plain floor)"), "{all}");
+    }
+
+    #[test]
+    fn validate_map_spec_passes_a_sound_map() {
+        // 10 wide x 10 tall, doors set into the top and left walls, and every
+        // Features line pointing at a cell that really holds that code.
+        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\n- Door at E1\n- Table at G6\nTactics:\n- The door at E1 is the only way in.";
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new());
+    }
+
+    #[test]
+    fn normalize_map_spec_squares_ragged_rows_and_rewrites_the_grid_header() {
+        let out = normalize_map_spec(BROKEN_BARROOM_SPEC);
+        let (_, rows, _) = split_spec_grid(&out).unwrap();
+        // Eleven rows were 14 wide and two stray wall rows were 16, so the grid
+        // snaps to 14 — the two long walls lose their overhang instead of the
+        // whole map gaining a 2-cell void stripe down the side of the print.
+        assert!(rows.iter().all(|r| r.chars().count() == 14), "{rows:?}");
+        assert_eq!(rows[0], "##############");
+        // The room itself survives the snap intact.
+        assert_eq!(rows[2], "#.+.........+#");
+        // ...and the header now tells the truth about the grid underneath it,
+        // which is what the DM's cell coordinates are resolved against.
+        assert!(out.contains("Grid: 14x13, 5 ft squares."), "{out}");
+        assert!(!out.contains("16x12"), "{out}");
+        // Normalizing is idempotent and leaves an already-sound map untouched.
+        assert_eq!(normalize_map_spec(&out), out);
+    }
+
+    #[test]
+    fn modal_row_width_picks_the_width_most_rows_agree_on() {
+        let rows: Vec<String> = vec!["####".into(), "#..#".into(), "#..#".into(), "######".into()];
+        assert_eq!(modal_row_width(&rows), 4);
+        // A tie goes to the wider width, so the repair truncates as little as possible.
+        let tie: Vec<String> = vec!["####".into(), "######".into()];
+        assert_eq!(modal_row_width(&tie), 6);
+    }
+
+    #[test]
+    fn normalize_map_spec_scrubs_characters_that_arent_legend_codes() {
+        let spec = "# X\nGrid: 4x2, 5 ft squares.\nMap:\n#!@#\n#.Z#\nFeatures:\n-";
+        let out = normalize_map_spec(spec);
+        let (_, rows, _) = split_spec_grid(&out).unwrap();
+        // Junk becomes plain floor rather than reaching the renderer.
+        assert_eq!(rows, vec!["#..#".to_string(), "#..#".to_string()]);
+    }
+
+    #[test]
+    fn door_in_wall_accepts_a_door_set_into_a_wall_and_rejects_a_floating_one() {
+        let rows: Vec<String> = vec!["###".into(), "#+#".into(), "#.#".into()];
+        // `+` at B2 has `#` left and right — a real doorway.
+        assert!(door_in_wall(&rows, 1, 1));
+        let floating: Vec<String> = vec!["...".into(), ".+.".into(), "...".into()];
+        assert!(!door_in_wall(&floating, 1, 1));
+    }
+
+    #[test]
+    fn column_label_and_parse_cell_ref_round_trip() {
+        for i in [0usize, 1, 25, 26, 27, 51] {
+            let label = column_label(i);
+            let (col, row) = parse_cell_ref(&format!("{label}3")).unwrap();
+            assert_eq!(col, i, "label {label}");
+            assert_eq!(row, 2);
+        }
+        assert_eq!(parse_cell_ref("A2"), Some((0, 1)));
+        assert_eq!(parse_cell_ref("M12"), Some((12, 11)));
+        // Not cell refs.
+        assert_eq!(parse_cell_ref("5"), None);
+        assert_eq!(parse_cell_ref("at"), None);
+        assert_eq!(parse_cell_ref("A0"), None);
+    }
+
+    #[test]
+    fn cell_refs_in_finds_every_cell_in_a_features_line_and_ignores_prose() {
+        let refs: Vec<String> = cell_refs_in("Furniture at B5, D5, and F5 (5 ft)")
+            .into_iter()
+            .map(|(t, _, _)| t)
+            .collect();
+        assert_eq!(refs, vec!["B5", "D5", "F5"]);
     }
 
     #[test]
