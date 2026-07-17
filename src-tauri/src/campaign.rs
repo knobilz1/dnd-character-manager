@@ -2162,8 +2162,45 @@ fn battle_map_format_instructions() -> String {
         - A `Features:` line may name a single cell (\"Hearth at B7\"), a list (\"Pillars at C4, G4\"), or a range (\"Bar counter at B2-K2\", \"Table at D4-E5\"). A range means EVERY cell in the rectangle its two corners span, so each one of them must hold that code — a run with a gap in it is wrong.\n\
         - Name each feature by what it actually is (\"Bar counter\", \"Hearth\", \"Main entrance\"), not by its legend code — those names are what the map's art is generated from, so \"Furniture at D4\" produces a generic table where \"Bar counter at B2-K2\" produces a bar.\n\
         - The encounter's defining feature must physically exist on the grid, not just in the Features text: a barroom needs an actual bar (a contiguous run of `=`), a forge needs the forge, a shrine needs the altar. Draw it, then name it in Features.\n\
-        - Lay the room out like a real place, not a spreadsheet — avoid perfectly regular rows/columns of identical objects; vary spacing, leave irregular gaps, cluster things where people would actually put them.\n\
-        - Make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction.\n\
+        - Lay the room out like a real place, not a spreadsheet. Concretely: do NOT mirror one half of the room onto the other; do NOT line objects up in matching columns down both walls; do NOT repeat one identical furniture block more than twice. Vary the SIZE of things (a 1-cell stool, a 2-cell bench, a 2x2 table). Leave irregular gaps.\n\
+        - Put something in the MIDDLE. A room whose objects all hug the walls, leaving a large empty void through the centre, is wrong — that is the most common layout failure.\n\
+        - A counter or bar needs open floor along at least one of its long sides — somebody has to stand behind it to work it. A bar drawn flat against a wall with no gap is wrong.\n\
+        - Make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction.\n\n\
+        Here is a COMPLETE, correct example. Copy its habits — the irregular spacing, the mix of object sizes, the bar with room behind it, the occupied centre — not its specific contents:\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # The Bent Nail\n\
+        Grid: 16x12, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        ################\n\
+        #..............#\n\
+        #.======.......#\n\
+        #..............#\n\
+        #.........=....#\n\
+        #...==.........+\n\
+        #...==.....=...#\n\
+        #.....^^.......#\n\
+        #.=.....==.....#\n\
+        #.......==...*.#\n\
+        #..............#\n\
+        #####+##########\n\
+        Features:\n\
+        - Bar counter at C3-H3 (the barkeep works the open floor at row 2 behind it)\n\
+        - Hearth at N10\n\
+        - Table at E6-F7\n\
+        - Table at I9-J10\n\
+        - Stool at K5\n\
+        - Stool at L7\n\
+        - Stool at C9\n\
+        - Spilled crockery at G8-H8\n\
+        - Main entrance at F12\n\
+        - Side door at P6\n\
+        Tactics:\n\
+        - The bar at C3-H3 gives half cover; the gap at row 2 behind it is a dead end once someone blocks B2.\n\
+        - The crockery at G8-H8 is difficult terrain and splits the room's centre.\n\
+        - Anyone coming in the main entrance at F12 is in the open until they reach the table at E6-F7.\n\
+        {MAP_SPEC_DELIMITER}\n\n\
+        Note what that example does NOT do: it does not put matching furniture at both walls, it does not repeat one block eight times, and it does not leave the centre empty.\n\n\
         Output nothing outside the sections shown."
     )
 }
@@ -6641,5 +6678,26 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
         let (_, current_a) = get_module_chapters_at(&root.0, &meta.id, &id_a).unwrap();
         assert_eq!(current_a, Some(chapters_a[1].id.clone()));
         assert!(fs::read_to_string(root.0.join(&meta.id).join("active_module").join("current.md")).unwrap().contains("Full text of chapter 2"));
+    }
+}
+
+#[cfg(test)]
+mod example_map_tests {
+    use super::*;
+
+    /// The worked example in battle_map_format_instructions is teaching material:
+    /// if it violated our own rules we would be training the model to violate
+    /// them. Pin it against the real validator.
+    #[test]
+    fn the_prompts_worked_example_passes_our_own_validator() {
+        let instr = battle_map_format_instructions();
+        let spec = instr
+            .split(MAP_SPEC_DELIMITER)
+            .find(|s| s.contains("# The Bent Nail"))
+            .expect("example map not found in the prompt");
+        let spec = spec.trim();
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new(), "spec was:\n{spec}");
+        // ...and normalizing it must be a no-op — it's already sound.
+        assert_eq!(normalize_map_spec(spec).trim(), spec);
     }
 }
