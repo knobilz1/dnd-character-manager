@@ -399,6 +399,37 @@ function parseCellRef(tok: string): { col: number; row: number } | null {
  *  table and a bench all get their own prompt without inventing a legend code
  *  per object. Only trustworthy because campaign.rs now validates that every
  *  Features line points at a cell really holding that code. */
+/** Every cell a Features line's cell-list refers to, RANGES EXPANDED: `B2–K2`
+ *  is the bar's whole ten-cell run and `D4–E5` a table's 2x2 block, not two
+ *  isolated corners. The model writes ranges with an en dash by default, so all
+ *  three dashes count. Mirrors campaign.rs's cell_refs_in — keep them in step.
+ *
+ *  Reading a range as two endpoints (what the plain non-alphanumeric split this
+ *  replaced did) meant a ten-cell bar was labelled "a bar counter" at exactly
+ *  its two ends, and stylized as generic furniture in between. */
+function featureCells(text: string): { col: number; row: number }[] {
+  const out: { col: number; row: number }[] = [];
+  const rest = text.replace(
+    /([A-Za-z]{1,2}\d{1,2})\s*[-–—]\s*([A-Za-z]{1,2}\d{1,2})/g,
+    (whole, from: string, to: string) => {
+      const a = parseCellRef(from);
+      const b = parseCellRef(to);
+      if (!a || !b) return whole;
+      for (let col = Math.min(a.col, b.col); col <= Math.max(a.col, b.col); col++) {
+        for (let row = Math.min(a.row, b.row); row <= Math.max(a.row, b.row); row++) {
+          out.push({ col, row });
+        }
+      }
+      return ' ';
+    }
+  );
+  for (const tok of rest.split(/[^A-Za-z0-9]+/)) {
+    const cell = parseCellRef(tok);
+    if (cell) out.push(cell);
+  }
+  return out;
+}
+
 function parseFeatureLabels(map: ParsedBattleMap): Map<string, string> {
   const out = new Map<string, string>();
   for (const raw of (map.features ?? '').split('\n')) {
@@ -408,10 +439,7 @@ function parseFeatureLabels(map: ParsedBattleMap): Map<string, string> {
     if (!m) continue;
     const name = m[1].trim();
     if (!name) continue;
-    for (const tok of m[2].split(/[^A-Za-z0-9]+/)) {
-      const cell = parseCellRef(tok);
-      if (cell) out.set(`${cell.col},${cell.row}`, name);
-    }
+    for (const cell of featureCells(m[2])) out.set(`${cell.col},${cell.row}`, name);
   }
   return out;
 }
@@ -675,7 +703,7 @@ function keyOutBackdrop(source: CanvasImageSource): HTMLCanvasElement {
  *  what the model actually sees, so they're what's worth inspecting. Stripped
  *  from production builds by the `import.meta.env.DEV` guard. */
 export const __testHooks = import.meta.env.DEV
-  ? { renderObjectSwatch, renderObjectMaskSwatch, renderBackgroundTextureSwatch, keyOutBackdrop }
+  ? { renderObjectSwatch, renderObjectMaskSwatch, renderBackgroundTextureSwatch, keyOutBackdrop, collectTileJobs, parseFeatureLabels, tileJobAt }
   : undefined;
 
 export interface TileStylizeRequest {

@@ -2159,6 +2159,8 @@ fn battle_map_format_instructions() -> String {
         - Enclose the playable area with `#` walls; use a space for anything outside it.\n\
         - A `+` door must be SET INTO a wall run — a `#` on both sides of it, horizontally or vertically. Never leave a door standing on open floor.\n\
         - Every `Features:` line must point at a cell you actually drew the matching code in. If you write \"Bar at A2\", then A2 must really be a `=`. Never list something you didn't draw.\n\
+        - A `Features:` line may name a single cell (\"Hearth at B7\"), a list (\"Pillars at C4, G4\"), or a range (\"Bar counter at B2-K2\", \"Table at D4-E5\"). A range means EVERY cell in the rectangle its two corners span, so each one of them must hold that code — a run with a gap in it is wrong.\n\
+        - Name each feature by what it actually is (\"Bar counter\", \"Hearth\", \"Main entrance\"), not by its legend code — those names are what the map's art is generated from, so \"Furniture at D4\" produces a generic table where \"Bar counter at B2-K2\" produces a bar.\n\
         - The encounter's defining feature must physically exist on the grid, not just in the Features text: a barroom needs an actual bar (a contiguous run of `=`), a forge needs the forge, a shrine needs the altar. Draw it, then name it in Features.\n\
         - Lay the room out like a real place, not a spreadsheet — avoid perfectly regular rows/columns of identical objects; vary spacing, leave irregular gaps, cluster things where people would actually put them.\n\
         - Make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction.\n\
@@ -2264,12 +2266,71 @@ fn parse_cell_ref(tok: &str) -> Option<(usize, usize)> {
     Some((col - 1, row - 1))
 }
 
-/// Every `A1`-shaped cell reference in a line, as (token, col, row).
+/// True for the separator between the two ends of a cell RANGE. The model
+/// reaches for an en dash by default ("Bar counter at B2–K2"), not the ASCII
+/// hyphen, so all three dashes are accepted.
+fn is_range_dash(sep: &str) -> bool {
+    let t = sep.trim();
+    !t.is_empty() && t.chars().all(|c| matches!(c, '-' | '\u{2013}' | '\u{2014}'))
+}
+
+/// Every cell a line refers to, as (token, col, row).
+///
+/// Crucially this EXPANDS ranges: `B2–K2` means the whole ten-cell run of the
+/// bar, and `D4–E5` the 2x2 block of a table, not just the two endpoints. The
+/// naive "split on anything non-alphanumeric" this replaced silently read both
+/// as a pair of isolated cells, so a Features line validated against its two
+/// ends while everything between it went unchecked — and, worse, the stylizer
+/// (battleMapRender.ts's parseFeatureLabels, which mirrors this) labelled only
+/// those two cells "a bar counter" and left the eight between them as generic
+/// furniture.
 fn cell_refs_in(line: &str) -> Vec<(String, usize, usize)> {
-    line.split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .filter_map(|t| parse_cell_ref(t).map(|(c, r)| (t.to_string(), c, r)))
-        .collect()
+    // Alphanumeric runs, each carrying whatever separated it from the previous.
+    let mut toks: Vec<(String, String)> = Vec::new();
+    let (mut cur, mut sep) = (String::new(), String::new());
+    for ch in line.chars() {
+        if ch.is_ascii_alphanumeric() {
+            cur.push(ch);
+        } else {
+            if !cur.is_empty() {
+                toks.push((std::mem::take(&mut cur), std::mem::take(&mut sep)));
+            }
+            sep.push(ch);
+        }
+    }
+    if !cur.is_empty() {
+        toks.push((cur, sep));
+    }
+
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let this = parse_cell_ref(&toks[i].0);
+        if let (Some((c1, r1)), Some(next)) = (this, toks.get(i + 1)) {
+            if is_range_dash(&next.1) {
+                if let Some((c2, r2)) = parse_cell_ref(&next.0) {
+                    let (cols, rows) = (c1.abs_diff(c2) + 1, r1.abs_diff(r2) + 1);
+                    // A range bigger than any map we'd ever draw isn't a range —
+                    // it's prose the tokenizer misread. Fall through and treat
+                    // the two tokens as ordinary separate references.
+                    if cols * rows <= MAP_MAX_COLS * MAP_MAX_ROWS {
+                        for c in c1.min(c2)..=c1.max(c2) {
+                            for r in r1.min(r2)..=r1.max(r2) {
+                                out.push((format!("{}{}", column_label(c), r + 1), c, r));
+                            }
+                        }
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+        if let Some((c, r)) = this {
+            out.push((toks[i].0.clone(), c, r));
+        }
+        i += 1;
+    }
+    out
 }
 
 /// The `- ...` bullets under `Features:`.
@@ -4405,6 +4466,42 @@ mod tests {
             .map(|(t, _, _)| t)
             .collect();
         assert_eq!(refs, vec!["B5", "D5", "F5"]);
+    }
+
+    #[test]
+    fn cell_refs_in_expands_a_range_into_every_cell_it_spans() {
+        // An en dash is what the model actually writes (seen live) — a bar
+        // counter written "B2–K2" is ten cells, not two.
+        let refs: Vec<String> = cell_refs_in("Bar counter at B2–K2 (10-cell run)")
+            .into_iter()
+            .map(|(t, _, _)| t)
+            .collect();
+        assert_eq!(refs, vec!["B2", "C2", "D2", "E2", "F2", "G2", "H2", "I2", "J2", "K2"]);
+
+        // A range across both axes is the rectangle it spans: a 2x2 table.
+        let block: Vec<String> = cell_refs_in("Table at D4-E5").into_iter().map(|(t, _, _)| t).collect();
+        assert_eq!(block, vec!["D4", "D5", "E4", "E5"]);
+
+        // A hyphen inside prose is not a range — both cells stand alone, and
+        // nothing between them is invented.
+        let prose: Vec<String> = cell_refs_in("Pillars at C4, G4 - both give cover")
+            .into_iter()
+            .map(|(t, _, _)| t)
+            .collect();
+        assert_eq!(prose, vec!["C4", "G4"]);
+    }
+
+    #[test]
+    fn validate_map_spec_checks_the_inside_of_a_range_not_just_its_ends() {
+        // The `=` run has a hole at D2, but B2 and F2 — the range's two ends —
+        // are both `=`. Reading a range as just its endpoints missed the gap
+        // entirely and reported a sound map.
+        let spec = "# R\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  = furniture\nMap:\n##########\n#==.==...#\n#........#\n#........#\n#........#\n#........#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Bar at B2–F2\nTactics:\n- x";
+        let issues = validate_map_spec(spec).join("\n");
+        assert!(issues.contains("D2 contains `.` (plain floor)"), "{issues}");
+        // ...and the cells that ARE furniture stay unreported.
+        assert!(!issues.contains("B2 contains"), "{issues}");
+        assert!(!issues.contains("E2 contains"), "{issues}");
     }
 
     #[test]
