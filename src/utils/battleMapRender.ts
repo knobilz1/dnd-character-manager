@@ -310,6 +310,19 @@ function isRaisedCell(code: string): boolean {
 // is high enough that it actually stylizes the swatch we send instead.
 const TILE_SAMPLE_PX = 512;
 
+// A BACKGROUND material is generated as ONE large texture spanning this many
+// map cells each way, and every cell samples a DIFFERENT sub-region of it
+// (see `drawBackgroundCell`). Stylizing a single cell and stamping it into all
+// ~150 floor cells makes any structure inside that one tile — a shadow, a grout
+// line amplified into a plank edge — repeat into a hard lattice across the
+// room; a repeated tile only looks right if it's perfectly homogeneous, which
+// is also the least-stylized it can be. Backgrounds don't need per-cell
+// determinism the way objects do (only objects mark positions; the floor is
+// pure texture, so a crack in one cell and not another changes nothing), so
+// they get real variation for the same single AI call per material.
+const BG_TEXTURE_PX = 1024;
+const BG_TEXTURE_CELLS = 8;
+
 // Object swatches are drawn on THIS plain neutral backdrop instead of on floor.
 // A small object sitting on a floor-colored square reads to the model as "a
 // room floor with empty space to furnish" — the direct cause of objects coming
@@ -356,18 +369,95 @@ function isBackgroundTile(code: string): boolean {
   return BACKGROUND_CODES.has(code);
 }
 
-/** Every distinct non-void legend code present in `win` (defaults to the
- *  whole map) — the set of AI calls a stylize pass needs to make. */
-function collectDistinctCodes(map: ParsedBattleMap, win?: RenderWindow): Set<string> {
-  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
-  const codes = new Set<string>();
-  for (let r = w.rowStart; r < w.rowEnd; r++) {
-    for (let c = w.colStart; c < w.colEnd; c++) {
-      const code = map.grid[r]?.[c] ?? ' ';
-      if (code !== ' ') codes.add(code);
+/** `"C3"` → `{ col: 2, row: 2 }`. Inverse of `columnLabel` + a 1-based row;
+ *  mirrors campaign.rs's parse_cell_ref so a cell reference means the same
+ *  thing in the spec, the print, and the DM's own planning. */
+function parseCellRef(tok: string): { col: number; row: number } | null {
+  const m = /^([A-Za-z]{1,2})(\d{1,2})$/.exec(tok);
+  if (!m) return null;
+  let col = 0;
+  for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64);
+  const row = parseInt(m[2], 10);
+  if (row < 1) return null;
+  return { col: col - 1, row: row - 1 };
+}
+
+/** Cell (`"col,row"`) → the name the spec's own `Features:` list gives whatever
+ *  is in it, e.g. `"Bar"` for every cell of `- Bar at A2, A3, A4`.
+ *
+ *  This is what stops the stylizer calling every `=` "a table": the legend is a
+ *  deliberately generic *tactical* abstraction (`=` just means "furniture-ish
+ *  thing you can hide behind"), and the Features list is where the spec says
+ *  what each one actually IS in fiction. Reading it back means a bar, a broken
+ *  table and a bench all get their own prompt without inventing a legend code
+ *  per object. Only trustworthy because campaign.rs now validates that every
+ *  Features line points at a cell really holding that code. */
+function parseFeatureLabels(map: ParsedBattleMap): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const raw of (map.features ?? '').split('\n')) {
+    const line = raw.replace(/^-\s*/, '').trim();
+    // "Bar at A2, A3" → name "Bar", cells A2/A3.
+    const m = /^(.*?)\s+at\s+(.+)$/i.exec(line);
+    if (!m) continue;
+    const name = m[1].trim();
+    if (!name) continue;
+    for (const tok of m[2].split(/[^A-Za-z0-9]+/)) {
+      const cell = parseCellRef(tok);
+      if (cell) out.set(`${cell.col},${cell.row}`, name);
     }
   }
-  return codes;
+  return out;
+}
+
+interface TileJob {
+  /** Distinct AI call identity: same code AND same label ⇒ one shared swatch. */
+  key: string;
+  code: string;
+  label: string;
+  isBackground: boolean;
+}
+
+/** The job key a BACKGROUND code always gets — backgrounds never take a feature
+ *  label (see `tileJobAt`), so this is stable without needing a specific cell.
+ *  Lets the compositor find the floor swatch to lay under object cells. */
+function tileJobKeyForCode(code: string): string {
+  return `${code} ${tileLabelFor(code)}`;
+}
+
+/** The stylize job for one cell, or null for void.
+ *
+ *  Feature names are applied to OBJECT cells only. A background/material code
+ *  is a seamless texture repeated across the map, so splitting it by label
+ *  would generate two different floor textures for cells of the same material
+ *  and print a visible seam between them — backgrounds always keep their
+ *  generic per-code label. */
+function tileJobAt(
+  map: ParsedBattleMap, labels: Map<string, string>, col: number, row: number
+): TileJob | null {
+  const code = map.grid[row]?.[col] ?? ' ';
+  if (code === ' ') return null;
+  const isBackground = isBackgroundTile(code);
+  const named = isBackground ? undefined : labels.get(`${col},${row}`);
+  // Feature names are written capitalised ("Broken table"); the prompt reads
+  // "…of a single {label}", so lowercase the lead-in to match TILE_LABELS.
+  const label = named ? named.charAt(0).toLowerCase() + named.slice(1) : tileLabelFor(code);
+  return { key: `${code} ${label}`, code, label, isBackground };
+}
+
+/** Every distinct stylize job in `win` (defaults to the whole map) — one per
+ *  distinct (code, label) pair, so a bar and a table both drawn as `=` are
+ *  stylized separately while eight identical benches still cost one call. */
+function collectTileJobs(map: ParsedBattleMap, win?: RenderWindow): Map<string, TileJob> {
+  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
+  const labels = parseFeatureLabels(map);
+  const jobs = new Map<string, TileJob>();
+  for (let r = w.rowStart; r < w.rowEnd; r++) {
+    for (let c = w.colStart; c < w.colEnd; c++) {
+      const job = tileJobAt(map, labels, c, r);
+      if (job && !jobs.has(job.key)) jobs.set(job.key, job);
+    }
+  }
+  return jobs;
 }
 
 /** One cell of `code`'s art, rendered at a fixed AI-friendly resolution
@@ -413,18 +503,52 @@ function renderObjectSwatch(code: string): HTMLCanvasElement {
   return canvas;
 }
 
-/** A flat depth map for a BACKGROUND/material tile — floor = far (dark), wall =
+/** The AI input for a BACKGROUND material: the code's procedural art laid out
+ *  across a large `BG_TEXTURE_CELLS`-square expanse, so the model restyles a
+ *  whole stretch of floor/wall at once and each map cell can later sample a
+ *  different part of it (see BG_TEXTURE_PX's comment). */
+function renderBackgroundTextureSwatch(code: string): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = BG_TEXTURE_PX;
+  canvas.height = BG_TEXTURE_PX;
+  const ctx = canvas.getContext('2d')!;
+  const cell = BG_TEXTURE_PX / BG_TEXTURE_CELLS;
+  for (let r = 0; r < BG_TEXTURE_CELLS; r++) {
+    for (let c = 0; c < BG_TEXTURE_CELLS; c++) {
+      drawTile(ctx, code, c * cell, r * cell, cell);
+    }
+  }
+  return canvas;
+}
+
+/** A flat depth map for a BACKGROUND material — floor = far (dark), wall =
  *  near (bright). Only background tiles use ControlNet now (objects are handled
  *  as keyed product shots, no structural conditioning needed), so this no
  *  longer needs an object-silhouette branch. */
 function renderTileDepthSwatch(code: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = TILE_SAMPLE_PX;
-  canvas.height = TILE_SAMPLE_PX;
+  canvas.width = BG_TEXTURE_PX;
+  canvas.height = BG_TEXTURE_PX;
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = isRaisedCell(code) ? DEPTH_RAISED : DEPTH_FLOOR;
-  ctx.fillRect(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
+  ctx.fillRect(0, 0, BG_TEXTURE_PX, BG_TEXTURE_PX);
   return canvas;
+}
+
+/** Draws one cell of a background material by sampling the sub-region of the
+ *  large texture that corresponds to this cell's ABSOLUTE map position — so
+ *  neighbouring cells get genuinely different pixels, and a cell samples the
+ *  same patch no matter which PDF page window it's rendered in. Reads the
+ *  texture's real width rather than assuming BG_TEXTURE_PX, since a provider
+ *  may hand back a different resolution than we sent. */
+function drawBackgroundCell(
+  ctx: Ctx, tex: CanvasImageSource, mapCol: number, mapRow: number, x: number, y: number, cellPx: number
+) {
+  const texW = (tex as HTMLImageElement).naturalWidth || (tex as HTMLCanvasElement).width || BG_TEXTURE_PX;
+  const texCell = texW / BG_TEXTURE_CELLS;
+  const sx = (mapCol % BG_TEXTURE_CELLS) * texCell;
+  const sy = (mapRow % BG_TEXTURE_CELLS) * texCell;
+  ctx.drawImage(tex, sx, sy, texCell, texCell, x, y, cellPx, cellPx);
 }
 
 /** Removes the neutral studio backdrop from a stylized OBJECT swatch, leaving
@@ -486,46 +610,47 @@ export type TileStylizeFn = (
   tileDataUrl: string, depthMapDataUrl: string, tileLabel: string, isBackground: boolean
 ) => Promise<string>;
 
-/** Stylized tiles split by kind: `backgrounds` are opaque material textures
- *  drawn edge-to-edge in their cells; `objects` are keyed to transparency and
- *  composited over the stylized floor at their footprint. */
+/** Stylized tiles split by kind, both keyed by `TileJob.key`: `backgrounds` are
+ *  opaque material textures drawn edge-to-edge in their cells; `objects` are
+ *  keyed to transparency and composited over the stylized floor. */
 interface StylizedTiles {
   backgrounds: Map<string, HTMLImageElement>;
   objects: Map<string, HTMLCanvasElement>;
 }
 
-/** Runs `stylize` once per distinct code (sequentially — one local GPU runs one
- *  job at a time regardless, and sequential keeps "which tile is running"
- *  legible). Background tiles are stylized as seamless textures with a flat
+/** Runs `stylize` once per distinct JOB — a (code, label) pair, so a bar and a
+ *  table both drawn as `=` each get their own prompt and swatch, while eight
+ *  identical benches still cost a single call. Sequential because one local GPU
+ *  runs one job at a time regardless, and it keeps "which tile is running"
+ *  legible. Background tiles are stylized as seamless textures with a flat
  *  depth map for ControlNet; object tiles are stylized as product shots on a
- *  neutral backdrop (no depth/ControlNet) and then keyed to transparency. A
- *  code whose stylize call fails falls back to its plain procedural art. */
-async function stylizeTileSet(codes: Set<string>, stylize: TileStylizeFn): Promise<StylizedTiles> {
+ *  neutral backdrop (no depth/ControlNet) and then keyed to transparency.
+ *
+ *  A failing `stylize` call propagates rather than being swallowed per-job:
+ *  whether to fall back is the CALLER's decision and the two callers differ.
+ *  The automatic checkbox path (stylizeMapImage) already catches internally and
+ *  hands back the plain swatch, so it never throws here; the manual "AI Export"
+ *  path deliberately throws so an explicit click reports "ComfyUI unreachable"
+ *  instead of quietly returning a plain map that looks like the AI just did
+ *  nothing. Catching here defeated that and hid a completely-down ComfyUI. */
+async function stylizeTileSet(jobs: Map<string, TileJob>, stylize: TileStylizeFn): Promise<StylizedTiles> {
   const backgrounds = new Map<string, HTMLImageElement>();
   const objects = new Map<string, HTMLCanvasElement>();
-  for (const code of codes) {
-    const label = tileLabelFor(code);
-    if (isBackgroundTile(code)) {
-      const swatch = renderTileSwatch(code);
+  for (const job of jobs.values()) {
+    const { key, code, label } = job;
+    if (job.isBackground) {
+      // One large expanse of the material per call — cells sample different
+      // parts of it at composite time, so nothing visibly repeats.
+      const swatch = renderBackgroundTextureSwatch(code);
       const depth = renderTileDepthSwatch(code);
-      try {
-        const out = await stylize(swatch.toDataURL('image/png'), depth.toDataURL('image/png'), label, true);
-        backgrounds.set(code, await loadImage(out));
-      } catch (e) {
-        console.warn(`Stylizing the "${code}" tile failed, using its plain render instead:`, e);
-        backgrounds.set(code, await loadImage(swatch.toDataURL('image/png')));
-      }
+      const out = await stylize(swatch.toDataURL('image/png'), depth.toDataURL('image/png'), label, true);
+      backgrounds.set(key, await loadImage(out));
     } else {
       const swatch = renderObjectSwatch(code);
-      try {
-        // No depth map for objects (empty string) → the backend skips ControlNet
-        // and prompts it as an isolated product shot; we key the backdrop out.
-        const out = await stylize(swatch.toDataURL('image/png'), '', label, false);
-        objects.set(code, keyOutBackdrop(await loadImage(out)));
-      } catch (e) {
-        console.warn(`Stylizing the "${code}" object failed, using its plain render instead:`, e);
-        objects.set(code, keyOutBackdrop(swatch));
-      }
+      // No depth map for objects (empty string) → the backend skips ControlNet
+      // and prompts it as an isolated product shot; we key the backdrop out.
+      const out = await stylize(swatch.toDataURL('image/png'), '', label, false);
+      objects.set(key, keyOutBackdrop(await loadImage(out)));
     }
   }
   return { backgrounds, objects };
@@ -557,21 +682,23 @@ function renderStylizedContentFromTiles(
   // its surround matches neighboring floor cells exactly instead of showing a
   // patch. Needs a floor to lay down first — the map's own '.' floor if
   // present, else any other background/material tile as a fallback base.
+  const labels = parseFeatureLabels(map);
   const floorBase =
-    tiles.backgrounds.get('.') ?? [...tiles.backgrounds.values()][0] ?? null;
+    tiles.backgrounds.get(tileJobKeyForCode('.')) ?? [...tiles.backgrounds.values()][0] ?? null;
   // Keyed object art has transparent margins, so it's inset slightly within the
   // cell (never bleeding past the grid line) and grounded with a contact shadow.
   const inset = cellPx * 0.06;
 
   for (let r = 0; r < wRows; r++) {
     for (let c = 0; c < wCols; c++) {
-      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
-      if (code === ' ') continue;
+      const mapCol = w.colStart + c, mapRow = w.rowStart + r;
+      const job = tileJobAt(map, labels, mapCol, mapRow);
+      if (!job) continue;
       const x = c * cellPx, y = r * cellPx;
-      const objectTile = tiles.objects.get(code);
+      const objectTile = tiles.objects.get(job.key);
 
       if (objectTile) {
-        if (floorBase) ctx.drawImage(floorBase, x, y, cellPx, cellPx);
+        if (floorBase) drawBackgroundCell(ctx, floorBase, mapCol, mapRow, x, y, cellPx);
         else drawFloor(ctx, x, y, cellPx);
         ctx.save();
         ctx.fillStyle = 'rgba(0,0,0,0.28)';
@@ -582,9 +709,9 @@ function renderStylizedContentFromTiles(
         ctx.restore();
         ctx.drawImage(objectTile, x + inset, y + inset, cellPx - inset * 2, cellPx - inset * 2);
       } else {
-        const bg = tiles.backgrounds.get(code);
-        if (bg) ctx.drawImage(bg, x, y, cellPx, cellPx);
-        else drawTile(ctx, code, x, y, cellPx);
+        const bg = tiles.backgrounds.get(job.key);
+        if (bg) drawBackgroundCell(ctx, bg, mapCol, mapRow, x, y, cellPx);
+        else drawTile(ctx, job.code, x, y, cellPx);
       }
     }
   }
@@ -686,7 +813,7 @@ export async function battleMapToStylizedPngDataUrl(
   if (!map) return null;
   let source: CanvasImageSource;
   if (stylize) {
-    const tiles = await stylizeTileSet(collectDistinctCodes(map), stylize);
+    const tiles = await stylizeTileSet(collectTileJobs(map), stylize);
     source = renderStylizedContentFromTiles(map, cellPx, undefined, tiles);
   } else {
     source = renderBattleMapContent(map, cellPx);
@@ -747,7 +874,7 @@ export async function battleMapToPdfBytes(
   const usableSquaresX = Math.floor((PAGE_W - 2 * MARGIN) / PT_PER_SQUARE);
   const usableSquaresY = Math.floor((PAGE_H - 2 * MARGIN) / PT_PER_SQUARE);
   const pdf = await PDFDocument.create();
-  const tiles = stylize ? await stylizeTileSet(collectDistinctCodes(map), stylize) : null;
+  const tiles = stylize ? await stylizeTileSet(collectTileJobs(map), stylize) : null;
 
   for (let ry = 0; ry < map.rows; ry += usableSquaresY) {
     for (let rx = 0; rx < map.cols; rx += usableSquaresX) {

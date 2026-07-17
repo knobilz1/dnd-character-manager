@@ -69,15 +69,30 @@ figures, human, isometric, 3D perspective, tilted camera angle, distorted grid, 
 // a background tile must never contain one — it needs to look like a fabric
 // swatch, not a scene. These two are appended only when the caller marks a
 // tile as background (see comfyui_stylize_map's is_background).
-const BACKGROUND_POSITIVE_SUFFIX: &str = " This is a seamless, edge-to-edge material surface texture \
-only, like a fabric swatch — absolutely no furniture, beams, pillars, doors, statues, crates, or any \
-other discrete object anywhere in the frame.";
 const BACKGROUND_EXTRA_NEGATIVE: &str = ", furniture, beam, plank, wooden beam, pillar, column, door, \
-statue, crate, barrel, prop, decorative object, architectural detail, discrete item, single object";
-// Background tiles get restyled (color/material/lighting) without earning the
-// model's full freedom to invent new geometry, regardless of what denoise the
-// DM chose for the "hero" object tiles.
-const BACKGROUND_DENOISE_CAP: f64 = 0.45;
+statue, crate, barrel, prop, decorative object, architectural detail, discrete item, single object, \
+cast shadow, directional lighting, dramatic lighting, spotlight, highlight, vignette, gradient, \
+uneven lighting, light falloff";
+
+/// Builds the prompt for a BACKGROUND material — a large expanse of floor/wall
+/// the frontend slices per cell (see battleMapRender.ts's BG_TEXTURE_PX).
+/// `label` names the material, so the model knows a floor from a wall instead
+/// of inferring it from pixels alone. The style has its lighting words stripped
+/// (see strip_lighting_wording) and flat-even lighting demanded, because this
+/// one image covers many cells and any baked-in shadow repeats across them.
+fn build_background_prompt(style: &str, label: &str, scene: Option<&str>) -> String {
+    let style = strip_lighting_wording(style);
+    let hint = scene
+        .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
+        .unwrap_or_default();
+    format!(
+        "A large, seamless, flat top-down texture of {label}. {style} It is one continuous material \
+         surface edge to edge — no furniture, pillars, doors, crates or any other discrete object \
+         anywhere in the frame, and nobody in it. Lit perfectly flat and evenly, with uniform \
+         brightness corner to corner: no directional light, no cast shadows, no highlights, no \
+         vignette, no gradient, nothing brighter or darker on one side.{hint}"
+    )
+}
 // OBJECT tiles (door, pillar, furniture, tree, hazard) are stylized as an
 // isolated PRODUCT SHOT, not as a battle-map cell. The frontend sends the
 // object on a plain neutral backdrop (not floor — see battleMapRender.ts's
@@ -139,6 +154,36 @@ pub(crate) fn strip_map_wording(style: &str) -> String {
     let mut s = style.to_string();
     // Longest first, so removing the full phrase doesn't leave a fragment.
     for pat in ["top-down tabletop RPG battle map", "tabletop RPG battle map", "battle map", "floor texture"] {
+        s = remove_phrase_ci(&s, pat);
+    }
+    tidy_prompt(&s)
+}
+
+/// Strips scene-LIGHTING wording from a style prompt before it's used on a
+/// BACKGROUND tile. A background swatch is stamped into every cell of its
+/// material, so any directional light or shadow baked into the one swatch
+/// repeats identically ~150 times and reads as wallpaper — confirmed live: at
+/// high denoise "atmospheric lighting, dramatic shadows" put the same diagonal
+/// shadow streak in the same corner of every single floor cell. The scene's
+/// lighting and mood belong to the finished map, applied ONCE globally over the
+/// composite (battleMapRender.ts's renderStylizedContentFromTiles grade pass),
+/// never per tile. Object tiles keep the lighting words — each is placed once.
+fn strip_lighting_wording(style: &str) -> String {
+    let mut s = style.to_string();
+    for pat in [
+        "atmospheric lighting",
+        "natural realistic lighting",
+        "dramatic shadows",
+        "dramatic lighting",
+        "cinematic lighting",
+        "cinematic detail",
+        "realistic lighting",
+        "natural lighting",
+        "moody lighting",
+        "soft lighting",
+        "rim lighting",
+        "volumetric light",
+    ] {
         s = remove_phrase_ci(&s, pat);
     }
     tidy_prompt(&s)
@@ -537,18 +582,6 @@ fn fetch_view(base: &str, filename: &str, subfolder: &str, img_type: &str) -> Re
     Ok(bytes)
 }
 
-/// Pure helper for the BACKGROUND/material path: a seamless texture that
-/// repeats into many cells, so it's pushed toward a plain surface (extra
-/// positive/negative reinforcement) and its denoise capped so it can't invent
-/// a discrete object that then gets stamped everywhere. Mutates
-/// `prompt`/`negative` in place and returns the denoise to actually use. Pulled
-/// out so it's directly testable without a live ComfyUI/network round trip.
-fn apply_background_adjustments(prompt: &mut String, negative: &mut String, denoise: f64) -> f64 {
-    prompt.push_str(BACKGROUND_POSITIVE_SUFFIX);
-    negative.push_str(BACKGROUND_EXTRA_NEGATIVE);
-    denoise.min(BACKGROUND_DENOISE_CAP)
-}
-
 fn stylize_blocking(
     base_url: &str, png_data_url: &str, prompt: &str, denoise: f64, depth_map_data_url: Option<&str>,
     negative: &str,
@@ -644,7 +677,17 @@ pub async fn comfyui_stylize_map(
             );
         }
 
-        // BACKGROUND or unclassified: scene-context + empty-room framing.
+        if is_background == Some(true) {
+            // BACKGROUND: a large flat expanse of one named material.
+            let label = tile_label.as_deref().unwrap_or("a stone floor");
+            let prompt = build_background_prompt(&style, label, scene);
+            let negative = format!("{NEGATIVE_PROMPT}{BACKGROUND_EXTRA_NEGATIVE}");
+            return stylize_blocking(
+                &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative,
+            );
+        }
+
+        // Unclassified/legacy caller: scene-context + empty-room framing.
         let mut prompt = style;
         if let Some(ctx) = scene {
             // "(reference only, do not render this as visible text)" is load-
@@ -655,13 +698,7 @@ pub async fn comfyui_stylize_map(
             prompt = format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}");
         }
         prompt.push_str(EMPTY_ROOM_SUFFIX);
-        let mut negative = NEGATIVE_PROMPT.to_string();
-        let denoise = if is_background == Some(true) {
-            apply_background_adjustments(&mut prompt, &mut negative, denoise)
-        } else {
-            denoise
-        };
-        stylize_blocking(&base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative)
+        stylize_blocking(&base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), NEGATIVE_PROMPT)
     })
     .await
     .map_err(|e| format!("Stylize task failed: {e}"))?
@@ -878,27 +915,39 @@ mod tests {
     }
 
     #[test]
-    fn apply_background_adjustments_reinforces_and_caps_denoise() {
-        let mut prompt = "plain floor".to_string();
-        let mut negative = NEGATIVE_PROMPT.to_string();
-        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.7);
-        assert!(prompt.contains("seamless"));
-        assert!(negative.contains("furniture"));
-        // 0.7 requested, but background tiles are capped below it so a
-        // repeated floor/wall swatch can't earn enough freedom to invent
-        // a discrete object that then gets stamped into every matching cell.
-        assert_eq!(denoise, BACKGROUND_DENOISE_CAP);
-        assert!(denoise < 0.7);
+    fn strip_lighting_wording_keeps_the_material_but_drops_per_tile_lighting() {
+        let realistic = "top-down tabletop RPG battle map, photorealistic floor texture, natural \
+                         realistic lighting, physically accurate materials and wear, cinematic detail.";
+        let s = strip_lighting_wording(realistic);
+        // Lighting words are gone — baked into a repeating tile they'd stamp the
+        // same shadow into all ~150 cells of that material.
+        assert!(!s.to_lowercase().contains("lighting"));
+        assert!(!s.to_lowercase().contains("cinematic detail"));
+        // ...but what the surface is MADE of survives, which is the whole point
+        // of stylizing it at all.
+        assert!(s.contains("photorealistic"));
+        assert!(s.contains("physically accurate materials and wear"));
+        assert!(!s.starts_with(','));
     }
 
     #[test]
-    fn apply_background_adjustments_never_raises_denoise_above_the_cap() {
-        let mut prompt = String::new();
-        let mut negative = String::new();
-        // A DM-chosen strength already below the cap should pass through
-        // unchanged, not get pulled UP to the cap.
-        let denoise = apply_background_adjustments(&mut prompt, &mut negative, 0.2);
-        assert_eq!(denoise, 0.2);
+    fn build_background_prompt_names_the_material_and_demands_flat_even_lighting() {
+        let p = build_background_prompt(
+            "photorealistic, dramatic shadows, cinematic detail.",
+            "plain floor",
+            Some("Bar; Fire pit"),
+        );
+        // Names the material, so the model knows a floor from a wall.
+        assert!(p.contains("texture of plain floor"));
+        assert!(p.contains("photorealistic"));
+        // This one image covers many cells, so any baked-in lighting would
+        // repeat across them — the style's lighting words are stripped and
+        // flat even lighting demanded instead.
+        assert!(!p.to_lowercase().contains("dramatic shadows"));
+        assert!(p.contains("no cast shadows"));
+        assert!(p.contains("seamless"));
+        // Scene stays a style hint only, never something to draw.
+        assert!(p.contains("do NOT draw this as a scene"));
     }
 
     #[test]
