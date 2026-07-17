@@ -2159,16 +2159,36 @@ const EXAMPLE_MAP_GRID: &[&str] = &[
     "#####+##########",
 ];
 
-/// True when the model handed the prompt's example straight back instead of
-/// drawing its own room. Confirmed live: asked for a dockside tavern brawl, it
-/// returned The Bent Nail's grid verbatim under a new name. A worked example is
-/// what finally taught it to lay a room out properly, but a close-enough
-/// request also invites plain copying, and telling it "copy the habits, not the
-/// contents" in the prompt does not prevent that. So, like every other rule
-/// here the model ignored: check it mechanically and feed it back.
+/// Second worked example, deliberately NOT a furnished room — a cave has no
+/// `=` anywhere. Without this, the tavern above was the model's only full
+/// pattern in context, and it started reaching for bar-shaped furniture even
+/// in caves and wizard towers that were never asked for one.
+const EXAMPLE_CAVE_GRID: &[&str] = &[
+    "##########",
+    "#..o.....#",
+    "#...~~...#",
+    "#..~~~...#",
+    "#....^^..#",
+    "+.^^.....#",
+    "#......o.#",
+    "#...*....#",
+    "#......._#",
+    "##########",
+];
+
+/// True when the model handed one of the prompt's examples straight back
+/// instead of drawing its own room. Confirmed live: asked for a dockside
+/// tavern brawl, it returned The Bent Nail's grid verbatim under a new name.
+/// A worked example is what finally taught it to lay a room out properly,
+/// but a close-enough request also invites plain copying, and telling it
+/// "copy the habits, not the contents" in the prompt does not prevent that.
+/// So, like every other rule here the model ignored: check it mechanically
+/// and feed it back.
 fn copies_the_example(spec: &str) -> bool {
-    split_spec_grid(spec)
-        .is_some_and(|(_, rows, _)| rows.iter().map(|r| r.trim_end()).eq(EXAMPLE_MAP_GRID.iter().copied()))
+    split_spec_grid(spec).is_some_and(|(_, rows, _)| {
+        let rows: Vec<&str> = rows.iter().map(|r| r.trim_end()).collect();
+        rows.as_slice() == EXAMPLE_MAP_GRID || rows.as_slice() == EXAMPLE_CAVE_GRID
+    })
 }
 
 fn battle_map_format_instructions() -> String {
@@ -2221,12 +2241,36 @@ fn battle_map_format_instructions() -> String {
         - Anyone coming in the main entrance at F12 is in the open until they reach the table at E6-F7.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         Note what that example does NOT do: it does not put matching furniture at both walls, it does not repeat one block eight times, and it does not leave the centre empty. It illustrates HABITS, not a room to reuse: drawing that same grid again, or a lightly-edited version of it, is a rejected answer — the encounter you were asked for is a different place.\n\n\
+        A second example, so you don't walk away thinking every map needs a bar. This is a cave — it has NO `=` furniture anywhere, because a cave has none. Draw what the fiction actually contains, not what the previous example happened to have:\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # Flooded Grotto\n\
+        Grid: 10x10, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        {example_cave_grid}\n\
+        Features:\n\
+        - Stalagmite at D2\n\
+        - Water pool at E3-F3\n\
+        - Water pool at D4-F4\n\
+        - Rockfall at F5-G5\n\
+        - Cave mouth at A6\n\
+        - Rockfall at C6-D6\n\
+        - Stalagmite at H7\n\
+        - Glowing fungus at E8\n\
+        - Stairs down at I9\n\
+        Tactics:\n\
+        - The pool at D4-F4/E3-F3 blocks a straight line through the middle; the rockfall at F5-G5 and C6-D6 forces anyone going around it into difficult terrain.\n\
+        - Anyone entering at the cave mouth (A6) is in rockfall before they reach open floor.\n\
+        - The stalagmite at H7 gives three-quarter cover to whoever holds the stairs down at I9.\n\
+        {MAP_SPEC_DELIMITER}\n\n\
+        A wizard's tower, an octopus-ship hold, a goblin warren — none of them are a tavern. Only draw `=` furniture, a bar, tables, stools, when the encounter actually has them. Fit the room to what was asked for, not to whichever example above looks closest.\n\n\
         Output nothing outside the sections shown.",
         // Plain "\n": the source indentation around this is stripped by Rust's
         // line-continuation escapes, but indentation inside an interpolated
         // value is not — padding here would put leading spaces on every grid
         // row and the model would learn a grid that doesn't parse.
-        example_grid = EXAMPLE_MAP_GRID.join("\n")
+        example_grid = EXAMPLE_MAP_GRID.join("\n"),
+        example_cave_grid = EXAMPLE_CAVE_GRID.join("\n")
     )
 }
 
@@ -6736,13 +6780,36 @@ mod example_map_tests {
         assert_eq!(normalize_map_spec(spec).trim(), spec);
     }
 
-    /// The example is embedded in the prompt by joining EXAMPLE_MAP_GRID, so
-    /// the guard compares against exactly the text the model saw. If someone
-    /// edits the grid, both move together — this pins that they can't drift.
+    /// Same pin, for the cave example — it's teaching material too, and it's
+    /// the one example that must NOT contain `=` anywhere.
+    #[test]
+    fn the_prompts_cave_example_passes_our_own_validator_and_has_no_furniture() {
+        let instr = battle_map_format_instructions();
+        let spec = instr
+            .split(MAP_SPEC_DELIMITER)
+            .find(|s| s.contains("# Flooded Grotto"))
+            .expect("cave example not found in the prompt");
+        let spec = spec.trim();
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new(), "spec was:\n{spec}");
+        assert_eq!(normalize_map_spec(spec).trim(), spec);
+        assert!(
+            !EXAMPLE_CAVE_GRID.iter().any(|row| row.contains('=')),
+            "the whole point of the cave example is that it has no furniture"
+        );
+    }
+
+    /// The examples are embedded in the prompt by joining EXAMPLE_MAP_GRID /
+    /// EXAMPLE_CAVE_GRID, so the guard compares against exactly the text the
+    /// model saw. If someone edits a grid, both move together — this pins
+    /// that they can't drift.
     #[test]
     fn copies_the_example_catches_the_grid_the_prompt_actually_shows() {
+        let instr = battle_map_format_instructions();
         for row in EXAMPLE_MAP_GRID {
-            assert!(battle_map_format_instructions().contains(row), "prompt lost row {row}");
+            assert!(instr.contains(row), "prompt lost tavern row {row}");
+        }
+        for row in EXAMPLE_CAVE_GRID {
+            assert!(instr.contains(row), "prompt lost cave row {row}");
         }
         // The real thing the model returned live: our example under a new name.
         let plagiarised = format!(
@@ -6750,6 +6817,12 @@ mod example_map_tests {
             EXAMPLE_MAP_GRID.join("\n")
         );
         assert!(copies_the_example(&plagiarised));
+        // Copying the SECOND example verbatim must be caught too.
+        let plagiarised_cave = format!(
+            "# Sunken Cavern\nGrid: 10x10, 5 ft squares.\nLegend: {MAP_LEGEND}\nMap:\n{}\nFeatures:\n- Stalagmite at D2\nTactics:\n- x",
+            EXAMPLE_CAVE_GRID.join("\n")
+        );
+        assert!(copies_the_example(&plagiarised_cave));
         // A genuinely different room is not a copy — this is the live-generated
         // Dockside Tap, which passed on its own merits.
         let original = "# The Dockside Tap\nGrid: 18x14, 5 ft squares.\nMap:\n##################\n#................#\n#.==========.....#\n#...=............#\n#...........==...#\n#.o..==..........+\n#....==....=.....#\n#......^^........#\n#......==........#\n#......==......*.#\n#.==.........=...#\n#.==.............#\n#................#\n#######+##########\nFeatures:\n- Bar counter at C3-L3\nTactics:\n- x";
