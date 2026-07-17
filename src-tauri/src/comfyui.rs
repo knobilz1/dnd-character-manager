@@ -80,17 +80,24 @@ uneven lighting, light falloff";
 /// of inferring it from pixels alone. The style has its lighting words stripped
 /// (see strip_lighting_wording) and flat-even lighting demanded, because this
 /// one image covers many cells and any baked-in shadow repeats across them.
-fn build_background_prompt(style: &str, label: &str, scene: Option<&str>) -> String {
+/// NOTE: deliberately takes NO scene context. It used to pass the map's
+/// name/Features in as a "hint for style only, do NOT draw this as a scene" —
+/// which is a request only an instruction-tuned editor could honour. Flux is a
+/// diffusion model: every word of that hint is a positive token, so handing it
+/// `"The Dockside Taproom" — Bar counter at B2–K2; Hearth at B7` made it paint
+/// bars, hearths and the literal text "B2–K2" INTO the seamless floor texture,
+/// which the tiler then faithfully repeated across the whole map (confirmed
+/// live). Removing the hint produced a clean, correct floor on the same prompt.
+/// The material's identity belongs in `label`, which is already feature-aware —
+/// naming the scene here buys nothing and cannot be negatived away.
+fn build_background_prompt(style: &str, label: &str) -> String {
     let style = strip_lighting_wording(style);
-    let hint = scene
-        .map(|s| format!(" Setting/material hint for style only, do NOT draw this as a scene: {s}."))
-        .unwrap_or_default();
     format!(
         "A large, seamless, flat top-down texture of {label}. {style} It is one continuous material \
          surface edge to edge — no furniture, pillars, doors, crates or any other discrete object \
          anywhere in the frame, and nobody in it. Lit perfectly flat and evenly, with uniform \
          brightness corner to corner: no directional light, no cast shadows, no highlights, no \
-         vignette, no gradient, nothing brighter or darker on one side.{hint}"
+         vignette, no gradient, nothing brighter or darker on one side."
     )
 }
 // OBJECT tiles (door, pillar, furniture, tree, hazard) are stylized as an
@@ -735,7 +742,7 @@ pub async fn comfyui_stylize_map(
         if is_background == Some(true) {
             // BACKGROUND: a large flat expanse of one named material.
             let label = tile_label.as_deref().unwrap_or("a stone floor");
-            let prompt = build_background_prompt(&style, label, scene);
+            let prompt = build_background_prompt(&style, label);
             let negative = format!("{NEGATIVE_PROMPT}{BACKGROUND_EXTRA_NEGATIVE}");
             return stylize_blocking(
                 &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative, None,
@@ -1001,11 +1008,7 @@ mod tests {
 
     #[test]
     fn build_background_prompt_names_the_material_and_demands_flat_even_lighting() {
-        let p = build_background_prompt(
-            "photorealistic, dramatic shadows, cinematic detail.",
-            "plain floor",
-            Some("Bar; Fire pit"),
-        );
+        let p = build_background_prompt("photorealistic, dramatic shadows, cinematic detail.", "plain floor");
         // Names the material, so the model knows a floor from a wall.
         assert!(p.contains("texture of plain floor"));
         assert!(p.contains("photorealistic"));
@@ -1015,8 +1018,10 @@ mod tests {
         assert!(!p.to_lowercase().contains("dramatic shadows"));
         assert!(p.contains("no cast shadows"));
         assert!(p.contains("seamless"));
-        // Scene stays a style hint only, never something to draw.
-        assert!(p.contains("do NOT draw this as a scene"));
+        // The scene never reaches a texture prompt at all — a diffusion model
+        // draws whatever it's shown, so the only safe amount is none.
+        assert!(!p.contains("Bar"), "{p}");
+        assert!(!p.contains("scene"), "{p}");
     }
 
     #[test]
