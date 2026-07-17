@@ -102,9 +102,15 @@ fn build_background_prompt(style: &str, label: &str, scene: Option<&str>) -> Str
 // model paint a whole room around the object (confirmed live: a grid of
 // identical miniature rooms). The scene context is passed only as a brief
 // material/style hint, explicitly flagged as "not a scene to draw."
+// No bare "shadow" here on purpose — that would flatten the object's own
+// self-shading and make it look like a sticker. Only shadows cast ONTO the
+// backdrop are unwanted: they're what breaks keyOutBackdrop's flood fill (it
+// stops at the much-darker shadow and leaves a grey halo ring around the
+// object), and the compositor draws its own contact shadow anyway.
 const OBJECT_EXTRA_NEGATIVE: &str = ", room, interior, walls, wall, window, doorway, corridor, floor \
 tiles, background scenery, environment, diorama, multiple objects, furniture set, perspective view, \
-vanishing point, 3D room, tilted view, cropped";
+vanishing point, 3D room, tilted view, cropped, cast shadow, drop shadow, shadow on the ground, \
+gradient background, vignette";
 
 /// Builds the isolated-object product-shot prompt for an object tile. `style`
 /// is the DM's chosen look (preset/manual prompt, or POSITIVE_PROMPT); `label`
@@ -201,9 +207,12 @@ fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String 
     // words follow; the isolation constraints and material hint come last.
     format!(
         "A direct top-down view, seen from straight overhead, of a single {label}. {style} The object \
-         is centered and fills the frame on a plain flat neutral studio background — one isolated \
-         object only, no room, no walls, no floor, no other objects, no scenery, no environment, no \
-         3D perspective, no side view.{hint}"
+         is centered and fills the frame — one isolated object only, no room, no walls, no floor, no \
+         other objects, no scenery, no environment, no 3D perspective, no side view. Everything \
+         behind and around the object is pure solid magenta (#FF00FF) chroma-key screen: keep that \
+         magenta perfectly flat, uniform and untouched — it is NOT a surface, do not turn it into \
+         stone, wood, floor or any material, do not texture or shade it, and cast no shadow onto \
+         it.{hint}"
     )
 }
 
@@ -342,12 +351,37 @@ fn pick_model_source(base: &str) -> Result<ModelSource, String> {
 
 const CONTROLNET_STRENGTH: f64 = 0.75;
 
+/// Wires an inpaint mask into a built graph: SetLatentNoiseMask restricts the
+/// sampler to denoising only the white region of the mask, so every pixel
+/// outside it comes back bit-identical to the input. Objects use this to keep
+/// their OBJECT_BG magenta backdrop pristine — at high denoise the model
+/// otherwise repaints the backdrop too and leaves no flat colour to key
+/// against, which is what produced the stone-textured slabs behind objects.
+/// The mask image is a plain white-on-black PNG, so any channel works; red is
+/// what battleMapRender.ts's renderObjectMaskSwatch writes.
+fn apply_noise_mask(graph: &mut Value, mask_image_name: &str) {
+    graph["25"] = json!({ "class_type": "LoadImage", "inputs": { "image": mask_image_name } });
+    graph["26"] = json!({ "class_type": "ImageToMask", "inputs": { "image": ["25", 0], "channel": "red" } });
+    graph["27"] = json!({
+        "class_type": "SetLatentNoiseMask",
+        "inputs": { "samples": ["12", 0], "mask": ["26", 0] }
+    });
+    // Whichever sampler this graph ended up with (classic KSampler, or the
+    // split pipeline the ControlNet branch swaps in) now reads the masked
+    // latent instead of the bare VAEEncode output.
+    for id in ["3", "24"] {
+        if graph.get(id).is_some() {
+            graph[id]["inputs"]["latent_image"] = json!(["27", 0]);
+        }
+    }
+}
+
 fn build_workflow(
     source: &ModelSource, image_name: &str, prompt: &str, denoise: f64, controlnet: Option<&ControlNetConfig>,
-    negative: &str,
+    negative: &str, mask_image_name: Option<&str>,
 ) -> Value {
     let seed: u64 = rand::thread_rng().gen();
-    match source {
+    let mut graph = match source {
         ModelSource::Checkpoint(ckpt_name) => json!({
             "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": ckpt_name } },
             "10": { "class_type": "LoadImage", "inputs": { "image": image_name } },
@@ -492,7 +526,11 @@ fn build_workflow(
             }
             graph
         }
+    };
+    if let Some(mask) = mask_image_name {
+        apply_noise_mask(&mut graph, mask);
     }
+    graph
 }
 
 fn queue_prompt(base: &str, workflow: Value, client_id: &str) -> Result<String, String> {
@@ -584,7 +622,7 @@ fn fetch_view(base: &str, filename: &str, subfolder: &str, img_type: &str) -> Re
 
 fn stylize_blocking(
     base_url: &str, png_data_url: &str, prompt: &str, denoise: f64, depth_map_data_url: Option<&str>,
-    negative: &str,
+    negative: &str, mask_data_url: Option<&str>,
 ) -> Result<String, String> {
     let base = base_url.trim().trim_end_matches('/');
     if base.is_empty() {
@@ -605,8 +643,18 @@ fn stylize_blocking(
     let controlnet = controlnet_upload
         .as_ref()
         .map(|(model_name, depth_image_name)| ControlNetConfig { model_name, depth_image_name });
+    // A distinct filename: ComfyUI's /upload/image overwrites by name, so
+    // reusing "battle_map.png" here would clobber the source we just sent.
+    let mask_image_name = mask_data_url
+        .map(|url| -> Result<String, String> {
+            let mask_png = data_url_to_png_bytes(url)?;
+            upload_image(base, &mask_png, "battle_map_mask.png")
+        })
+        .transpose()?;
     let client_id = random_client_id();
-    let workflow = build_workflow(&source, &image_name, prompt, denoise, controlnet.as_ref(), negative);
+    let workflow = build_workflow(
+        &source, &image_name, prompt, denoise, controlnet.as_ref(), negative, mask_image_name.as_deref(),
+    );
     let prompt_id = queue_prompt(base, workflow, &client_id)?;
     let history_entry = poll_history(base, &prompt_id)?;
     let (filename, subfolder, img_type) = extract_image_ref(&history_entry)?;
@@ -651,6 +699,11 @@ fn stylize_blocking(
 /// `scene_context` is the map's authored features, used as scene framing for
 /// backgrounds and only as a brief material hint for objects. `depth_map_data_url`
 /// drives ControlNet for backgrounds; objects send none.
+///
+/// `mask_data_url` is an object's inpaint mask (white = the object, black = the
+/// magenta backdrop). Objects only: it pins the sampler to the object's own
+/// footprint via SetLatentNoiseMask so the backdrop survives untouched and keys
+/// out exactly. See apply_noise_mask and renderObjectMaskSwatch.
 #[tauri::command]
 pub async fn comfyui_stylize_map(
     base_url: String,
@@ -659,6 +712,7 @@ pub async fn comfyui_stylize_map(
     denoise: Option<f64>,
     scene_context: Option<String>,
     depth_map_data_url: Option<String>,
+    mask_data_url: Option<String>,
     is_background: Option<bool>,
     tile_label: Option<String>,
 ) -> Result<String, String> {
@@ -674,6 +728,7 @@ pub async fn comfyui_stylize_map(
             let negative = format!("{NEGATIVE_PROMPT}{OBJECT_EXTRA_NEGATIVE}");
             return stylize_blocking(
                 &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative,
+                mask_data_url.as_deref(),
             );
         }
 
@@ -683,7 +738,7 @@ pub async fn comfyui_stylize_map(
             let prompt = build_background_prompt(&style, label, scene);
             let negative = format!("{NEGATIVE_PROMPT}{BACKGROUND_EXTRA_NEGATIVE}");
             return stylize_blocking(
-                &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative,
+                &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), &negative, None,
             );
         }
 
@@ -698,7 +753,9 @@ pub async fn comfyui_stylize_map(
             prompt = format!("Scene: {ctx} (reference only, do not render this as visible text). {prompt}");
         }
         prompt.push_str(EMPTY_ROOM_SUFFIX);
-        stylize_blocking(&base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), NEGATIVE_PROMPT)
+        stylize_blocking(
+            &base_url, &png_data_url, &prompt, denoise, depth_map_data_url.as_deref(), NEGATIVE_PROMPT, None,
+        )
     })
     .await
     .map_err(|e| format!("Stylize task failed: {e}"))?
@@ -751,7 +808,7 @@ mod tests {
     #[test]
     fn build_workflow_wires_uploaded_image_and_checkpoint_through_the_graph() {
         let source = ModelSource::Checkpoint("my-checkpoint.safetensors".to_string());
-        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT);
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT, None);
         assert_eq!(wf["4"]["inputs"]["ckpt_name"], "my-checkpoint.safetensors");
         assert_eq!(wf["10"]["inputs"]["image"], "uploaded123.png");
         assert_eq!(wf["3"]["inputs"]["denoise"], DENOISE);
@@ -761,7 +818,7 @@ mod tests {
     #[test]
     fn build_workflow_uses_the_given_prompt_and_denoise_overrides() {
         let source = ModelSource::Checkpoint("ckpt.safetensors".to_string());
-        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8, None, NEGATIVE_PROMPT);
+        let wf = build_workflow(&source, "img.png", "a custom style prompt", 0.8, None, NEGATIVE_PROMPT, None);
         assert_eq!(wf["6"]["inputs"]["text"], "a custom style prompt");
         assert_eq!(wf["3"]["inputs"]["denoise"], 0.8);
     }
@@ -775,7 +832,7 @@ mod tests {
             dual_clip: false,
             vae_name: "flux2-vae.safetensors".to_string(),
         };
-        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8, None, NEGATIVE_PROMPT);
+        let wf = build_workflow(&source, "uploaded123.png", "a custom style prompt", 0.8, None, NEGATIVE_PROMPT, None);
         assert_eq!(wf["4"]["class_type"], "UNETLoader");
         assert_eq!(wf["4"]["inputs"]["unet_name"], "flux-2-klein-4b-fp8.safetensors");
         assert_eq!(wf["5"]["class_type"], "CLIPLoader");
@@ -802,7 +859,7 @@ mod tests {
             dual_clip: true,
             vae_name: "ae.safetensors".to_string(),
         };
-        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT);
+        let wf = build_workflow(&source, "uploaded123.png", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT, None);
         assert_eq!(wf["5"]["class_type"], "DualCLIPLoader");
         assert_eq!(wf["5"]["inputs"]["clip_name1"], "clip_l.safetensors");
         assert_eq!(wf["5"]["inputs"]["clip_name2"], "t5xxl.safetensors");
@@ -822,7 +879,7 @@ mod tests {
             model_name: "FLUX.2-dev-Fun-Controlnet-Union.safetensors",
             depth_image_name: "depth123.png",
         };
-        let wf = build_workflow(&flux2, "uploaded123.png", POSITIVE_PROMPT, 0.8, Some(&cn), NEGATIVE_PROMPT);
+        let wf = build_workflow(&flux2, "uploaded123.png", POSITIVE_PROMPT, 0.8, Some(&cn), NEGATIVE_PROMPT, None);
         assert_eq!(wf["18"]["class_type"], "Flux2FunControlNetLoader");
         assert_eq!(wf["18"]["inputs"]["controlnet_name"], "FLUX.2-dev-Fun-Controlnet-Union.safetensors");
         assert_eq!(wf["17"]["inputs"]["image"], "depth123.png");
@@ -845,6 +902,18 @@ mod tests {
         assert_eq!(wf["24"]["inputs"]["latent_image"][0], "12");
         assert_eq!(wf["8"]["inputs"]["samples"][0], "24");
 
+        // With an inpaint mask the sampler must read the MASKED latent, not
+        // the bare VAEEncode — that's the whole point (see apply_noise_mask).
+        let masked = build_workflow(
+            &flux2, "uploaded123.png", POSITIVE_PROMPT, 0.8, Some(&cn), NEGATIVE_PROMPT, Some("mask123.png"),
+        );
+        assert_eq!(masked["25"]["inputs"]["image"], "mask123.png");
+        assert_eq!(masked["26"]["class_type"], "ImageToMask");
+        assert_eq!(masked["27"]["class_type"], "SetLatentNoiseMask");
+        assert_eq!(masked["27"]["inputs"]["samples"][0], "12");
+        assert_eq!(masked["27"]["inputs"]["mask"][0], "26");
+        assert_eq!(masked["24"]["inputs"]["latent_image"][0], "27");
+
         // Flux 1 (dual CLIP) skips the ControlNet entirely — the node
         // package is Flux.2-specific and untested against Flux 1 — and
         // keeps the classic KSampler path unchanged.
@@ -855,7 +924,7 @@ mod tests {
             dual_clip: true,
             vae_name: "ae.safetensors".to_string(),
         };
-        let wf1 = build_workflow(&flux1, "uploaded123.png", POSITIVE_PROMPT, DENOISE, Some(&cn), NEGATIVE_PROMPT);
+        let wf1 = build_workflow(&flux1, "uploaded123.png", POSITIVE_PROMPT, DENOISE, Some(&cn), NEGATIVE_PROMPT, None);
         assert!(wf1.get("18").is_none());
         assert_eq!(wf1["3"]["class_type"], "KSampler");
         assert_eq!(wf1["3"]["inputs"]["positive"][0], "15");
@@ -952,7 +1021,7 @@ mod tests {
 
     #[test]
     fn stylize_blocking_rejects_an_empty_base_url() {
-        let err = stylize_blocking("   ", "data:image/png;base64,AAAA", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT).unwrap_err();
+        let err = stylize_blocking("   ", "data:image/png;base64,AAAA", POSITIVE_PROMPT, DENOISE, None, NEGATIVE_PROMPT, None).unwrap_err();
         assert!(err.contains("No ComfyUI address configured"));
     }
 }

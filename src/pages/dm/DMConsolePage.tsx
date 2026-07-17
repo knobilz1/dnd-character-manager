@@ -15,6 +15,7 @@ import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { battleMapToPngDataUrl, battleMapToStylizedPngDataUrl, battleMapToPdfBytes, parseBattleMap } from '../../utils/battleMapRender';
+import type { TileStylizeRequest } from '../../utils/battleMapRender';
 import { MAP_STYLE_PRESETS } from '../../data/mapStylePresets';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
@@ -2704,22 +2705,21 @@ export function DMConsolePage() {
    *  (ComfyUI not running, no checkpoint installed, timeout) it falls back
    *  to that tile's plain procedural render, which stays the DM's source of
    *  truth regardless. Only called when the mapAiStyle setting is on. */
-  async function stylizeMapImage(
-    tileDataUrl: string, depthMapDataUrl: string, sceneContext: string, tileLabel: string, isBackground: boolean
-  ): Promise<string> {
-    if (!mapAiStyle) return tileDataUrl;
+  async function stylizeMapImage(req: TileStylizeRequest, sceneContext: string): Promise<string> {
+    if (!mapAiStyle) return req.tileDataUrl;
     try {
       return await invoke<string>('comfyui_stylize_map', {
         baseUrl: comfyUiBaseUrl,
-        pngDataUrl: tileDataUrl,
-        depthMapDataUrl: depthMapDataUrl || undefined,
+        pngDataUrl: req.tileDataUrl,
+        depthMapDataUrl: req.depthMapDataUrl,
+        maskDataUrl: req.maskDataUrl,
         sceneContext,
-        tileLabel,
-        isBackground,
+        tileLabel: req.tileLabel,
+        isBackground: req.isBackground,
       });
     } catch (e) {
       console.warn('ComfyUI atmosphere pass failed, using the plain tile render instead:', e);
-      return tileDataUrl;
+      return req.tileDataUrl;
     }
   }
 
@@ -2732,8 +2732,7 @@ export function DMConsolePage() {
       const dataUrl = await battleMapToStylizedPngDataUrl(
         card.spec, 96,
         mapAiStyle
-          ? (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
-              stylizeMapImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+          ? (req) => stylizeMapImage(req, sceneContext)
           : undefined
       );
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
@@ -2759,8 +2758,7 @@ export function DMConsolePage() {
       const bytes = await battleMapToPdfBytes(
         card.spec,
         mapAiStyle
-          ? (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
-              stylizeMapImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+          ? (req) => stylizeMapImage(req, sceneContext)
           : undefined
       );
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
@@ -2822,23 +2820,26 @@ export function DMConsolePage() {
    *  (the automatic checkbox path), this throws on failure rather than
    *  falling back silently — an explicit "AI Export" click should surface a
    *  clear error, not quietly hand back the plain tile render. */
-  async function manualStylizeImage(
-    tileDataUrl: string, depthMapDataUrl: string, sceneContext: string, tileLabel: string, isBackground: boolean
-  ): Promise<string> {
+  async function manualStylizeImage(req: TileStylizeRequest, sceneContext: string): Promise<string> {
     if (manualStyleProvider === 'gemini') {
       return await invoke<string>('gemini_stylize_map', {
-        prompt: manualStylePrompt, pngDataUrl: tileDataUrl, sceneContext, tileLabel, isBackground,
+        prompt: manualStylePrompt,
+        pngDataUrl: req.tileDataUrl,
+        sceneContext,
+        tileLabel: req.tileLabel,
+        isBackground: req.isBackground,
       });
     }
     return await invoke<string>('comfyui_stylize_map', {
       baseUrl: comfyUiBaseUrl,
-      pngDataUrl: tileDataUrl,
-      depthMapDataUrl: depthMapDataUrl || undefined,
+      pngDataUrl: req.tileDataUrl,
+      depthMapDataUrl: req.depthMapDataUrl,
+      maskDataUrl: req.maskDataUrl,
       prompt: manualStylePrompt,
       denoise: manualStyleStrength,
       sceneContext,
-      tileLabel,
-      isBackground,
+      tileLabel: req.tileLabel,
+      isBackground: req.isBackground,
     });
   }
 
@@ -2848,8 +2849,7 @@ export function DMConsolePage() {
       const sceneContext = sceneContextFor(card);
       const dataUrl = await battleMapToStylizedPngDataUrl(
         card.spec, 96,
-        (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
-          manualStylizeImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+        (req) => manualStylizeImage(req, sceneContext)
       );
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
@@ -2868,8 +2868,7 @@ export function DMConsolePage() {
       const sceneContext = sceneContextFor(card);
       const dataUrl = await battleMapToStylizedPngDataUrl(
         card.spec, 96,
-        (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
-          manualStylizeImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+        (req) => manualStylizeImage(req, sceneContext)
       );
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       setAiExportPreview(dataUrl);
@@ -2894,8 +2893,7 @@ export function DMConsolePage() {
       const sceneContext = sceneContextFor(card);
       const bytes = await battleMapToPdfBytes(
         card.spec,
-        (tileDataUrl, depthMapDataUrl, tileLabel, isBackground) =>
-          manualStylizeImage(tileDataUrl, depthMapDataUrl, sceneContext, tileLabel, isBackground)
+        (req) => manualStylizeImage(req, sceneContext)
       );
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);

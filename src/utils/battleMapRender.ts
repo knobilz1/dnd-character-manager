@@ -323,14 +323,21 @@ const TILE_SAMPLE_PX = 512;
 const BG_TEXTURE_PX = 1024;
 const BG_TEXTURE_CELLS = 8;
 
-// Object swatches are drawn on THIS plain neutral backdrop instead of on floor.
-// A small object sitting on a floor-colored square reads to the model as "a
-// room floor with empty space to furnish" — the direct cause of objects coming
-// back as rooms. A neutral studio backdrop + an object-only prompt makes it a
-// product shot instead; we key this backdrop out afterward and composite the
-// object over the real stylized floor. Mid-grey, distinct from any floor/object
-// color so the edge flood-fill in `keyOutBackdrop` separates cleanly.
-const OBJECT_BG = '#8a8f96';
+// Object swatches are drawn on THIS backdrop instead of on floor. A small
+// object sitting on a floor-colored square reads to the model as "a room floor
+// with empty space to furnish" — the direct cause of objects coming back as
+// rooms. A backdrop + an object-only prompt makes it a product shot instead; we
+// key the backdrop out afterward and composite the object over the real
+// stylized floor.
+//
+// It's chroma MAGENTA, not a neutral grey, and that matters: grey is a
+// perfectly plausible material, so at high denoise the model happily restyled
+// the "neutral studio background" into stone masonry (confirmed live). A
+// textured backdrop defeats keying entirely — there's no single colour to
+// remove. Magenta is a colour no stone/wood/metal prop contains, so it survives
+// as an obvious key no matter how hard the model restyles, and `keyOutBackdrop`
+// can strip it by colour distance alone rather than relying on it staying flat.
+const OBJECT_BG = '#ff00ff';
 
 // Short descriptive phrase per legend code, for the stylize prompt — see
 // campaign.rs's MAP_LEGEND for the canonical meaning of each character.
@@ -503,6 +510,50 @@ function renderObjectSwatch(code: string): HTMLCanvasElement {
   return canvas;
 }
 
+/** The inpaint mask for an OBJECT swatch: white where the object's pixels are,
+ *  black over the magenta backdrop. ComfyUI's SetLatentNoiseMask denoises ONLY
+ *  the white region, so the backdrop latents are left mathematically untouched
+ *  and come back exactly OBJECT_BG — which turns `keyOutBackdrop` from a
+ *  tolerance guess into an exact key. Without this the model repaints the
+ *  backdrop too at high denoise, and no colour survives to key against.
+ *
+ *  The white region is DILATED: the latent mask is 1/8 of image resolution, so
+ *  a pixel-tight mask would clip the object's own edge. Blurring and then
+ *  thresholding low grows the region by roughly the blur radius, giving the
+ *  object room to gain a rim, shading and thickness. */
+function renderObjectMaskSwatch(code: string): HTMLCanvasElement {
+  const swatch = renderTileSwatch(code); // drawFloor + the object on top
+  const img = swatch.getContext('2d')!.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const isFloor = FLOOR_RGBS.some(([fr, fg, fb]) => {
+      const dr = d[i] - fr, dg = d[i + 1] - fg, db = d[i + 2] - fb;
+      return dr * dr + dg * dg + db * db < 900;
+    });
+    const v = isFloor ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  swatch.getContext('2d')!.putImageData(img, 0, 0);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE_SAMPLE_PX;
+  canvas.height = TILE_SAMPLE_PX;
+  const ctx = canvas.getContext('2d')!;
+  ctx.filter = `blur(${Math.round(TILE_SAMPLE_PX * 0.03)}px)`;
+  ctx.drawImage(swatch, 0, 0);
+  ctx.filter = 'none';
+  const out = ctx.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
+  const o = out.data;
+  for (let i = 0; i < o.length; i += 4) {
+    const v = o[i] > 20 ? 255 : 0; // low threshold → the blur halo becomes mask
+    o[i] = o[i + 1] = o[i + 2] = v;
+    o[i + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+  return canvas;
+}
+
 /** The AI input for a BACKGROUND material: the code's procedural art laid out
  *  across a large `BG_TEXTURE_CELLS`-square expanse, so the model restyles a
  *  whole stretch of floor/wall at once and each map cell can later sample a
@@ -551,14 +602,20 @@ function drawBackgroundCell(
   ctx.drawImage(tex, sx, sy, texCell, texCell, x, y, cellPx, cellPx);
 }
 
-/** Removes the neutral studio backdrop from a stylized OBJECT swatch, leaving
- *  just the object on transparency, via a flood fill inward from all four
- *  edges: every pixel reachable from an edge and close to the corner colour is
- *  cleared. The object sits centred and doesn't touch the edges, so it
- *  survives whatever colour the backdrop became after stylization (a soft cast
- *  shadow near the object is kept, which helps ground it). `source` is the
- *  stylized swatch — or, on a failed stylize call, the plain object swatch,
- *  which has the same neutral backdrop and keys out identically. */
+/** Chroma-keys the OBJECT_BG magenta backdrop out of a stylized object swatch,
+ *  leaving just the object on transparency.
+ *
+ *  This is a plain colour-distance key over every pixel, NOT a flood fill from
+ *  the edges. The flood fill it replaced assumed the backdrop stayed a flat
+ *  colour, and died the moment it didn't: at high denoise the model rendered
+ *  the old grey backdrop as stone masonry, so the fill hit its tolerance one
+ *  pixel in and left the whole textured slab behind the object. Keying a
+ *  saturated magenta by distance doesn't care whether the backdrop stayed flat,
+ *  got textured, or picked up a cast shadow — none of that moves it near any
+ *  wood/stone/metal colour an object is actually made of.
+ *
+ *  `source` is the stylized swatch — or, on a failed stylize call, the plain
+ *  object swatch, which has the same magenta backdrop and keys out identically. */
 function keyOutBackdrop(source: CanvasImageSource): HTMLCanvasElement {
   const px = TILE_SAMPLE_PX;
   const canvas = document.createElement('canvas');
@@ -569,32 +626,39 @@ function keyOutBackdrop(source: CanvasImageSource): HTMLCanvasElement {
   const img = ctx.getImageData(0, 0, px, px);
   const d = img.data;
 
-  // Reference backdrop colour = average of the four corners.
-  const cornerIdx = [0, (px - 1) * 4, (px * (px - 1)) * 4, (px * px - 1) * 4];
-  let rr = 0, gg = 0, bb = 0;
-  for (const c of cornerIdx) { rr += d[c]; gg += d[c + 1]; bb += d[c + 2]; }
-  rr /= 4; gg /= 4; bb /= 4;
-  const tol = 52 * 52 * 3; // squared per-pixel colour distance to count as backdrop
-
-  const visited = new Uint8Array(px * px);
-  const stack: number[] = [];
-  const push = (x: number, y: number) => {
-    if (x < 0 || y < 0 || x >= px || y >= px) return;
-    const p = y * px + x;
-    if (visited[p]) return;
-    visited[p] = 1;
-    stack.push(p);
-  };
-  for (let x = 0; x < px; x++) { push(x, 0); push(x, px - 1); }
-  for (let y = 0; y < px; y++) { push(0, y); push(px - 1, y); }
-  while (stack.length) {
-    const p = stack.pop()!;
-    const i = p * 4;
-    const dr = d[i] - rr, dg = d[i + 1] - gg, db = d[i + 2] - bb;
-    if (dr * dr + dg * dg + db * db > tol) continue; // hit the object edge — stop
-    d[i + 3] = 0;
-    const x = p % px, y = (p / px) | 0;
-    push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
+  const [kr, kg, kb] = hexToRgb(OBJECT_BG);
+  // Squared colour distances: at/below IN it's backdrop, at/above OUT it's the
+  // object, between them alpha ramps so anti-aliased edges stay soft rather
+  // than turning into a hard magenta-fringed cutout.
+  //
+  // These are TIGHT because the inpaint mask (renderObjectMaskSwatch) means the
+  // backdrop is no longer denoised at all — measured live, it round-trips
+  // through the VAE with its green channel drifting only to ~38, so anything
+  // beyond a small radius is genuinely object. A wide ramp was the safety net
+  // for a backdrop that could drift arbitrarily, and it cost real quality: at
+  // OUT = 140 a plain wooden tabletop landed INSIDE the ramp (measured: ~90%
+  // alpha over 42k pixels), i.e. the table itself came out faintly see-through.
+  const IN = 50 * 50 * 3;
+  const OUT = 90 * 90 * 3;
+  for (let i = 0; i < d.length; i += 4) {
+    const dr = d[i] - kr, dg = d[i + 1] - kg, db = d[i + 2] - kb;
+    const dist = dr * dr + dg * dg + db * db;
+    if (dist <= IN) {
+      d[i + 3] = 0;
+    } else if (dist < OUT) {
+      d[i + 3] = Math.round((255 * (dist - IN)) / (OUT - IN));
+      // Despill, EDGE PIXELS ONLY: chroma bleeds a magenta cast onto pixels
+      // that blend object into backdrop (both red and blue lifted above
+      // green). Pull the excess back toward green so a keyed table doesn't
+      // come out with a pink rim. Deliberately not applied to fully-opaque
+      // pixels: run over the whole object it crushes anything legitimately
+      // red/purple (a lit brazier keyed to solid black that way).
+      const spill = Math.min(d[i], d[i + 2]) - d[i + 1];
+      if (spill > 0) {
+        d[i] -= Math.round(spill * 0.8);
+        d[i + 2] -= Math.round(spill * 0.8);
+      }
+    }
   }
   ctx.putImageData(img, 0, 0);
   return canvas;
@@ -606,9 +670,28 @@ function keyOutBackdrop(source: CanvasImageSource): HTMLCanvasElement {
  *  named product shot, and whether this code is a background/material tile vs a
  *  discrete-object tile — see `isBackgroundTile`, and comfyui.rs's
  *  comfyui_stylize_map doc comment for why the two are prompted differently. */
-export type TileStylizeFn = (
-  tileDataUrl: string, depthMapDataUrl: string, tileLabel: string, isBackground: boolean
-) => Promise<string>;
+/** Dev-only handles on the swatch builders, so the AI pass can be driven from
+ *  the running app (via CDP) without exporting a whole map — the swatches are
+ *  what the model actually sees, so they're what's worth inspecting. Stripped
+ *  from production builds by the `import.meta.env.DEV` guard. */
+export const __testHooks = import.meta.env.DEV
+  ? { renderObjectSwatch, renderObjectMaskSwatch, renderBackgroundTextureSwatch, keyOutBackdrop }
+  : undefined;
+
+export interface TileStylizeRequest {
+  /** The swatch to restyle. */
+  tileDataUrl: string;
+  /** ControlNet depth map. Absent for objects, which don't use ControlNet. */
+  depthMapDataUrl?: string;
+  /** Inpaint mask (white = restyle this, black = leave untouched). Objects only
+   *  — see `renderObjectMaskSwatch`. */
+  maskDataUrl?: string;
+  /** What the tile depicts, e.g. "a stone pillar", for a named product shot. */
+  tileLabel: string;
+  isBackground: boolean;
+}
+
+export type TileStylizeFn = (req: TileStylizeRequest) => Promise<string>;
 
 /** Stylized tiles split by kind, both keyed by `TileJob.key`: `backgrounds` are
  *  opaque material textures drawn edge-to-edge in their cells; `objects` are
@@ -643,13 +726,23 @@ async function stylizeTileSet(jobs: Map<string, TileJob>, stylize: TileStylizeFn
       // parts of it at composite time, so nothing visibly repeats.
       const swatch = renderBackgroundTextureSwatch(code);
       const depth = renderTileDepthSwatch(code);
-      const out = await stylize(swatch.toDataURL('image/png'), depth.toDataURL('image/png'), label, true);
+      const out = await stylize({
+        tileDataUrl: swatch.toDataURL('image/png'),
+        depthMapDataUrl: depth.toDataURL('image/png'),
+        tileLabel: label,
+        isBackground: true,
+      });
       backgrounds.set(key, await loadImage(out));
     } else {
-      const swatch = renderObjectSwatch(code);
-      // No depth map for objects (empty string) → the backend skips ControlNet
-      // and prompts it as an isolated product shot; we key the backdrop out.
-      const out = await stylize(swatch.toDataURL('image/png'), '', label, false);
+      // No depth map for objects → the backend skips ControlNet and prompts it
+      // as an isolated product shot. The mask keeps the denoise off the magenta
+      // backdrop so we can key it out exactly.
+      const out = await stylize({
+        tileDataUrl: renderObjectSwatch(code).toDataURL('image/png'),
+        maskDataUrl: renderObjectMaskSwatch(code).toDataURL('image/png'),
+        tileLabel: label,
+        isBackground: false,
+      });
       objects.set(key, keyOutBackdrop(await loadImage(out)));
     }
   }

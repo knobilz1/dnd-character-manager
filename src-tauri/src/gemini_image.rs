@@ -67,8 +67,10 @@ fn build_object_prompt(style: &str, label: &str, scene: Option<&str>) -> String 
     format!(
         "Restyle this image into a direct top-down view, seen from straight overhead, of a single \
          {label}. Preserve its shape, size, and centered position; change only the material, texture, \
-         colour, and lighting to match this look: {style} Keep the plain neutral background — do not \
-         add a room, walls, floor, other objects, scenery, or any 3D or side perspective.{hint}"
+         colour, and lighting to match this look: {style} Keep the background exactly as it is — flat, \
+         uniform and all one solid colour, with no cast shadow, gradient or darkening anywhere around \
+         the object. Do not add a room, walls, floor, other objects, scenery, or any 3D or side \
+         perspective.{hint}"
     )
 }
 
