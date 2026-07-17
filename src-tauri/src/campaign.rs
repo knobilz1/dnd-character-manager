@@ -2140,6 +2140,37 @@ fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &s
     )
 }
 
+/// The grid of the worked example embedded in the prompt. A const rather than
+/// inline prompt text because `copies_the_example` has to compare against
+/// exactly what the model was shown — if the two drifted apart, the guard would
+/// quietly stop guarding.
+const EXAMPLE_MAP_GRID: &[&str] = &[
+    "################",
+    "#..............#",
+    "#.======.......#",
+    "#..............#",
+    "#.........=....#",
+    "#...==.........+",
+    "#...==.....=...#",
+    "#.....^^.......#",
+    "#.=.....==.....#",
+    "#.......==...*.#",
+    "#..............#",
+    "#####+##########",
+];
+
+/// True when the model handed the prompt's example straight back instead of
+/// drawing its own room. Confirmed live: asked for a dockside tavern brawl, it
+/// returned The Bent Nail's grid verbatim under a new name. A worked example is
+/// what finally taught it to lay a room out properly, but a close-enough
+/// request also invites plain copying, and telling it "copy the habits, not the
+/// contents" in the prompt does not prevent that. So, like every other rule
+/// here the model ignored: check it mechanically and feed it back.
+fn copies_the_example(spec: &str) -> bool {
+    split_spec_grid(spec)
+        .is_some_and(|(_, rows, _)| rows.iter().map(|r| r.trim_end()).eq(EXAMPLE_MAP_GRID.iter().copied()))
+}
+
 fn battle_map_format_instructions() -> String {
     format!(
         "Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
@@ -2172,18 +2203,7 @@ fn battle_map_format_instructions() -> String {
         Grid: 16x12, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
         Legend: {MAP_LEGEND}\n\
         Map:\n\
-        ################\n\
-        #..............#\n\
-        #.======.......#\n\
-        #..............#\n\
-        #.........=....#\n\
-        #...==.........+\n\
-        #...==.....=...#\n\
-        #.....^^.......#\n\
-        #.=.....==.....#\n\
-        #.......==...*.#\n\
-        #..............#\n\
-        #####+##########\n\
+        {example_grid}\n\
         Features:\n\
         - Bar counter at C3-H3 (the barkeep works the open floor at row 2 behind it)\n\
         - Hearth at N10\n\
@@ -2200,8 +2220,13 @@ fn battle_map_format_instructions() -> String {
         - The crockery at G8-H8 is difficult terrain and splits the room's centre.\n\
         - Anyone coming in the main entrance at F12 is in the open until they reach the table at E6-F7.\n\
         {MAP_SPEC_DELIMITER}\n\n\
-        Note what that example does NOT do: it does not put matching furniture at both walls, it does not repeat one block eight times, and it does not leave the centre empty.\n\n\
-        Output nothing outside the sections shown."
+        Note what that example does NOT do: it does not put matching furniture at both walls, it does not repeat one block eight times, and it does not leave the centre empty. It illustrates HABITS, not a room to reuse: drawing that same grid again, or a lightly-edited version of it, is a rejected answer — the encounter you were asked for is a different place.\n\n\
+        Output nothing outside the sections shown.",
+        // Plain "\n": the source indentation around this is stripped by Rust's
+        // line-continuation escapes, but indentation inside an interpolated
+        // value is not — padding here would put leading spaces on every grid
+        // row and the model would learn a grid that doesn't parse.
+        example_grid = EXAMPLE_MAP_GRID.join("\n")
     )
 }
 
@@ -2594,7 +2619,13 @@ fn generate_one_map_spec(prompt: &str) -> Result<String, String> {
     };
     let first = ask(prompt.to_string())?
         .ok_or_else(|| "The model's reply didn't contain a `Map:` block.".to_string())?;
-    let issues = validate_map_spec(&first);
+    let mut issues = validate_map_spec(&first);
+    if copies_the_example(&first) {
+        issues.push(
+            "You returned the example map (The Bent Nail) verbatim instead of drawing the encounter you were asked for. The example only demonstrates habits — irregular spacing, mixed object sizes, an occupied centre, a bar with floor behind it. Draw a DIFFERENT room that has those habits."
+                .to_string(),
+        );
+    }
     if issues.is_empty() {
         return Ok(normalize_map_spec(&first));
     }
@@ -2605,7 +2636,11 @@ fn generate_one_map_spec(prompt: &str) -> Result<String, String> {
     // A retry that's no better (or errored outright) falls back to the first
     // attempt — normalized either way, so we always store something coherent.
     match ask(retry) {
-        Ok(Some(second)) if validate_map_spec(&second).len() < issues.len() => Ok(normalize_map_spec(&second)),
+        // Copying the example again is never an improvement, however few
+        // consistency issues the copy happens to have.
+        Ok(Some(second)) if !copies_the_example(&second) && validate_map_spec(&second).len() < issues.len() => {
+            Ok(normalize_map_spec(&second))
+        }
         _ => Ok(normalize_map_spec(&first)),
     }
 }
@@ -6699,5 +6734,25 @@ mod example_map_tests {
         assert_eq!(validate_map_spec(spec), Vec::<String>::new(), "spec was:\n{spec}");
         // ...and normalizing it must be a no-op — it's already sound.
         assert_eq!(normalize_map_spec(spec).trim(), spec);
+    }
+
+    /// The example is embedded in the prompt by joining EXAMPLE_MAP_GRID, so
+    /// the guard compares against exactly the text the model saw. If someone
+    /// edits the grid, both move together — this pins that they can't drift.
+    #[test]
+    fn copies_the_example_catches_the_grid_the_prompt_actually_shows() {
+        for row in EXAMPLE_MAP_GRID {
+            assert!(battle_map_format_instructions().contains(row), "prompt lost row {row}");
+        }
+        // The real thing the model returned live: our example under a new name.
+        let plagiarised = format!(
+            "# Tavern Brawl\nGrid: 16x12, 5 ft squares.\nLegend: {MAP_LEGEND}\nMap:\n{}\nFeatures:\n- Bar counter at C3-H3\nTactics:\n- x",
+            EXAMPLE_MAP_GRID.join("\n")
+        );
+        assert!(copies_the_example(&plagiarised));
+        // A genuinely different room is not a copy — this is the live-generated
+        // Dockside Tap, which passed on its own merits.
+        let original = "# The Dockside Tap\nGrid: 18x14, 5 ft squares.\nMap:\n##################\n#................#\n#.==========.....#\n#...=............#\n#...........==...#\n#.o..==..........+\n#....==....=.....#\n#......^^........#\n#......==........#\n#......==......*.#\n#.==.........=...#\n#.==.............#\n#................#\n#######+##########\nFeatures:\n- Bar counter at C3-L3\nTactics:\n- x";
+        assert!(!copies_the_example(original));
     }
 }
