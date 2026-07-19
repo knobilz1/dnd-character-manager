@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -14,9 +14,9 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapToStylizedPngDataUrl, battleMapToPdfBytes, parseBattleMap } from '../../utils/battleMapRender';
-import type { TileStylizeRequest } from '../../utils/battleMapRender';
-import { MAP_STYLE_PRESETS } from '../../data/mapStylePresets';
+import { battleMapToPngDataUrl, battleMapToPdfBytes, preloadBattleTileSprites, preloadMapObjectSprites, setActiveTileStyle } from '../../utils/battleMapRender';
+import type { TileStyleId } from '../../utils/battleMapRender';
+import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
 import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
@@ -343,15 +343,6 @@ interface MapCard {
   png: string | null;
 }
 
-/** Mirrors tts.rs's GpuMemoryInfo — a live "how much VRAM is free right now"
- *  reading, shown as a heads-up next to the ComfyUI option in AI Export
- *  (a local LLM like vLLM may already be holding most of the card). */
-interface GpuMemoryInfo {
-  total_mb: number;
-  used_mb: number;
-  free_mb: number;
-}
-
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
  *  A campaign can have several; exactly one is active at a time. */
 interface ModuleSummary {
@@ -374,21 +365,40 @@ interface ChapterizeImportResult {
   concerns: string[];
 }
 
+/** Source for a `[Name]:` / `[Name|gender]:` NPC-dialogue cue — shared by
+ *  SPEAKER_TAG (anchored, for parsing a cue that's already at the start of a
+ *  sentence) and TAG_ANYWHERE below (unanchored, for finding one mid-buffer). */
+const TAG_BODY = '\\[([^\\]]{1,60})\\]:\\s*';
+
+/** Matches a speaker cue occurring anywhere in a buffer, not just at the
+ *  start — used by extractCompleteSentences to treat a mid-sentence cue as
+ *  its own boundary. The DM sometimes writes a cue right after a colon
+ *  instead of starting a fresh sentence (`...bellows: [Guard|male]: "..."`),
+ *  and without this the cue stays glued to the prose before it — it's never
+ *  at position 0 of anything, so parseSpeakerTag's `^` anchor never fires
+ *  and the raw `[Guard|male]:` leaks straight into what's shown/spoken. */
+const TAG_ANYWHERE = new RegExp(TAG_BODY);
+
 /** Splits an accumulating narration buffer into any newly-complete sentences
  *  plus the remaining (possibly incomplete) tail. A sentence only counts as
  *  complete when its ending punctuation is followed by whitespace — not
  *  just because the buffer happens to end there, since more text may still
  *  be streaming in. Doesn't need to be perfect (abbreviations, decimals,
  *  etc. can occasionally split oddly) — worst case a sentence gets spoken
- *  in two slightly-early pieces, not a correctness issue. */
+ *  in two slightly-early pieces, not a correctness issue. A speaker cue
+ *  found past the very start of the remaining buffer is ALSO treated as a
+ *  boundary (see TAG_ANYWHERE) — whichever comes first wins. */
 function extractCompleteSentences(buffer: string): { sentences: string[]; remainder: string } {
   const sentences: string[] = [];
   let rest = buffer;
   const boundary = /[.!?]+["')\]]?\s+/;
   for (;;) {
-    const match = rest.match(boundary);
-    if (!match || match.index === undefined) break;
-    const end = match.index + match[0].length;
+    const punctMatch = rest.match(boundary);
+    const punctEnd = punctMatch && punctMatch.index !== undefined ? punctMatch.index + punctMatch[0].length : undefined;
+    const tagMatch = rest.match(TAG_ANYWHERE);
+    const tagStart = tagMatch && tagMatch.index !== undefined && tagMatch.index > 0 ? tagMatch.index : undefined;
+    const end = tagStart !== undefined && (punctEnd === undefined || tagStart < punctEnd) ? tagStart : punctEnd;
+    if (end === undefined) break;
     sentences.push(rest.slice(0, end));
     rest = rest.slice(end);
   }
@@ -396,8 +406,11 @@ function extractCompleteSentences(buffer: string): { sentences: string[]; remain
 }
 
 /** Matches a leading `[Name]:` NPC-dialogue cue (see BASE_CLAUDE_MD's "Giving
- *  NPCs distinct voices") at the very start of a sentence. */
-const SPEAKER_TAG = /^\s*\[([^\]]{1,60})\]:\s*/;
+ *  NPCs distinct voices") at the very start of a sentence. Every sentence
+ *  handed here has already been split so any cue is at position 0 — see
+ *  TAG_ANYWHERE above, which is what makes that guarantee hold even when the
+ *  DM wrote the cue mid-buffer instead of starting a fresh sentence with it. */
+const SPEAKER_TAG = new RegExp(`^\\s*${TAG_BODY}`);
 
 /** How much recent narrator prose to keep as a gender signal for an untagged
  *  NPC (see resolveEphemeralVoice). Roughly a sentence or two — long enough to
@@ -565,7 +578,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, mapAiStyle, setMapAiStyle, comfyUiBaseUrl, setComfyUiBaseUrl, manualStyleProvider, setManualStyleProvider, manualStylePrompt, setManualStylePrompt, manualStyleStrength, setManualStyleStrength } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, tileLibraryPath, setTileLibraryPath } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -598,6 +611,13 @@ export function DMConsolePage() {
   const [pendingModuleFile, setPendingModuleFile] = React.useState<{ name: string; text: string } | null>(null);
   const [pendingLoreFile, setPendingLoreFile] = React.useState<{ name: string; text: string } | null>(null);
   const [moduleBusy, setModuleBusy] = React.useState<string | null>(null);
+  /** Step progress for the currently-running module import ONLY — see
+   *  campaign.rs's IngestProgress ("ingest-progress" event). The other
+   *  moduleBusy consumers (attach lore, reconcile NPC voices/hooks, create
+   *  campaign) are single opaque calls with nothing to report, so they stay
+   *  on the plain elapsed-time ticker below; this is layered on top just for
+   *  handleImportModuleForNewCampaign/handleImportModuleForExisting. */
+  const [ingestProgress, setIngestProgress] = React.useState<{ phase: string; done: number; total: number } | null>(null);
   // Elapsed-time ticker for moduleBusy — one-shot Opus ingestion calls
   // (establish_campaign_lore, chapterize_and_import_module, update_campaign_lore)
   // can run for minutes on a long PDF with nothing else changing on screen, so
@@ -787,20 +807,19 @@ export function DMConsolePage() {
   const [planText, setPlanText] = React.useState('');
   const [planLoading, setPlanLoading] = React.useState(false);
   const [planBusy, setPlanBusy] = React.useState<string | null>(null);
+  /** Step progress for the currently-running plan/maps generation — see
+   *  campaign.rs's PlanProgress ("plan-progress" event). `phase` is "plan"
+   *  (the single session-plan-text call, nothing to increment mid-call) or
+   *  "maps" (done/total combat-encounter maps generated, ticking up in real
+   *  completion order). Reset to null whenever a new generate/regenerate
+   *  starts, same lifecycle as planBusy. */
+  const [planProgress, setPlanProgress] = React.useState<{ phase: string; done: number; total: number } | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
   const [failedMaps, setFailedMaps] = React.useState<string[]>([]);
+  const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
+  const [tileLibraryBusy, setTileLibraryBusy] = React.useState(false);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
-  // "AI Export…" — a manual, per-card style pass (custom prompt/provider),
-  // separate from the automatic mapAiStyle checkbox above. Only one card's
-  // panel is open at a time (`aiExportSlug`); `aiExportPreview` is that
-  // panel's own preview image, independent of the card's saved tile PNG.
-  const [aiExportSlug, setAiExportSlug] = React.useState<string | null>(null);
-  const [showComfyUiGuide, setShowComfyUiGuide] = React.useState(false);
-  const [aiExportPreview, setAiExportPreview] = React.useState<string | null>(null);
-  const [geminiKeyConfigured, setGeminiKeyConfigured] = React.useState<boolean | null>(null);
-  const [geminiKeyInput, setGeminiKeyInput] = React.useState('');
-  const [aiExportGpuMemory, setAiExportGpuMemory] = React.useState<GpuMemoryInfo | null>(null);
   const [modulePlan, setModulePlan] = React.useState('');
   // Lore dialog — view the established campaign_lore.md and fold in new
   // material any time after creation (a sourcebook picked up mid-campaign, a
@@ -1335,6 +1354,11 @@ export function DMConsolePage() {
     invoke<string | null>('local_lan_ip').then(setLanIp).catch(() => setLanIp(null));
     warmupSTT().then(() => setSttReady(true)).catch((e) => setError(`Speech recognition failed to load: ${e.message || e}`));
     invoke<CampaignMeta[]>('list_campaigns').then(setCampaigns).catch((e) => setError(`Couldn't load campaigns: ${e}`));
+    // Decodes battle-map tile art once up front so the first real map render
+    // (which is synchronous — see battleMapRender.ts) already has it cached,
+    // and applies whichever style the user last picked (persisted setting).
+    preloadBattleTileSprites();
+    setActiveTileStyle(battleTileStyle as TileStyleId);
     // Sync the Rust engine selection to the persisted setting, THEN warm that
     // engine ahead of the first real turn so it doesn't also pay the one-time
     // spawn (+ first-ever model download, or F5's ~16s model-load) cost.
@@ -1359,6 +1383,19 @@ export function DMConsolePage() {
       }
     );
     return () => { unlisten.then((f) => f()); };
+  }, []);
+
+  // Plan Next Session / module ingestion step progress — same event/listen
+  // pattern as f5-install-progress just above, two separate events since
+  // each operation's phases are its own vocabulary (see campaign.rs's
+  // PlanProgress/IngestProgress).
+  React.useEffect(() => {
+    const unlistenPlan = listen<{ phase: string; done: number; total: number }>('plan-progress', (e) => setPlanProgress(e.payload));
+    const unlistenIngest = listen<{ phase: string; done: number; total: number }>('ingest-progress', (e) => setIngestProgress(e.payload));
+    return () => {
+      unlistenPlan.then((f) => f());
+      unlistenIngest.then((f) => f());
+    };
   }, []);
 
   /** Queries local_llm.rs's /v1/models proxy for the DM Model dialog's model
@@ -2249,6 +2286,7 @@ export function DMConsolePage() {
       // chapterize it now that we have a real campaign id.
       if (pendingModuleFile) {
         setModuleBusy('Reading your module and building a chapter breakdown + campaign plan… this can take a few minutes for long documents.');
+        setIngestProgress(null);
         try {
           const result = await withClaudeReconnect(() =>
             invoke<ChapterizeImportResult>('chapterize_and_import_module', { id: meta.id, text: pendingModuleFile.text })
@@ -2258,6 +2296,7 @@ export function DMConsolePage() {
           setError(e instanceof Error ? e.message : String(e));
         } finally {
           setModuleBusy(null);
+          setIngestProgress(null);
         }
       }
       setNewCampaign(BLANK_INTAKE);
@@ -2369,6 +2408,7 @@ export function DMConsolePage() {
       // (possibly minutes-long) chapterize call finishes.
       if (picked.concern) setWarning(picked.concern);
       setModuleBusy('Reading your module and building a chapter breakdown + campaign plan… this can take a few minutes for long documents.');
+      setIngestProgress(null);
       const result = await withClaudeReconnect(() =>
         invoke<ChapterizeImportResult>('chapterize_and_import_module', { id: activeCampaignId, text: picked.text })
       );
@@ -2383,6 +2423,7 @@ export function DMConsolePage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setModuleBusy(null);
+      setIngestProgress(null);
     }
   }
 
@@ -2660,81 +2701,84 @@ export function DMConsolePage() {
 
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
+    await preloadMapObjectSprites(spec);
     return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, png: battleMapToPngDataUrl(spec) };
   }
 
-  /** The stylize prompt is generic ("atmospheric lighting, high detail")
-   *  with no idea what the map actually depicts — the content layer just
-   *  shows abstract colored rectangles for furniture, so a tavern map came
-   *  back as a generic ruined dungeon courtyard with no hint it was ever a
-   *  barroom. This pulls a couple of authored Features lines (e.g. "Bar",
-   *  "Fire pit") out of its spec so the stylize pass has real scene context
-   *  to work from, for both providers.
-   *
-   *  Grid-coordinate tokens ("at A2", "C4, G4") are stripped from those
-   *  lines first — feeding them through verbatim once got a real fantasy
-   *  tavern render back, but with "C4"/"G4" painted onto the floor as
-   *  decorative labels, the model apparently reading the coordinates as
-   *  annotations to reproduce.
-   *
-   *  The map's own NAME is deliberately never included here (it used to
-   *  be) — every text-hallucination incident during testing painted a
-   *  near-verbatim garbled copy of the literal name string onto the map as
-   *  a big decorative title, even with the coordinate fix and an explicit
-   *  "do not render this as visible text" instruction in place. The
-   *  Features text alone already reads as "tavern" (bar, fire pit) without
-   *  handing the model a quoted title to copy. */
-  function sceneContextFor(card: MapCard): string {
-    const map = parseBattleMap(card.spec);
-    const featureLines = (map?.features ?? '')
-      .split('\n')
-      .map((l) => l
-        .replace(/^-\s*/, '')
-        .replace(/\bat\s+[A-Za-z]{1,2}\d{1,3}(\s*,\s*[A-Za-z]{1,2}\d{1,3})*/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim())
-      .filter(Boolean)
-      .slice(0, 3);
-    return featureLines.length > 0 ? featureLines.join('; ') : card.name;
+  /** Loads the currently-imported tile library's summary (if any) — called
+   *  on Plan dialog open so the count shown is never stale after a restart. */
+  async function refreshTileLibrarySummary() {
+    try {
+      const summary = await invoke<{ total: number } | null>('get_tile_library_summary');
+      setTileLibraryTotal(summary?.total ?? null);
+    } catch {
+      setTileLibraryTotal(null);
+    }
   }
 
+  React.useEffect(() => {
+    if (planOpen) void refreshTileLibrarySummary();
+  }, [planOpen]);
 
-  /** Phase 2 — optional ComfyUI atmosphere pass over ONE tile swatch (see the
-   *  "Per-tile-type stylization" comment in battleMapRender.ts, and
-   *  comfyui.rs's comfyui_stylize_map). Never throws: on any failure
-   *  (ComfyUI not running, no checkpoint installed, timeout) it falls back
-   *  to that tile's plain procedural render, which stays the DM's source of
-   *  truth regardless. Only called when the mapAiStyle setting is on. */
-  async function stylizeMapImage(req: TileStylizeRequest, sceneContext: string): Promise<string> {
-    if (!mapAiStyle) return req.tileDataUrl;
+  /** "Import…" for the optional local tile library (see tile_library.rs) —
+   *  a folder picker, then a one-shot scan+index command. Nothing here ever
+   *  touches git or the app bundle: the art stays exactly where the DM put
+   *  it, only a small filename manifest is cached locally (see
+   *  import_tile_library's doc comment for why). */
+  async function importTileLibrary() {
+    const root = await open({ directory: true, multiple: false });
+    if (!root || typeof root !== 'string') return;
+    setTileLibraryBusy(true);
     try {
-      return await invoke<string>('comfyui_stylize_map', {
-        baseUrl: comfyUiBaseUrl,
-        pngDataUrl: req.tileDataUrl,
-        depthMapDataUrl: req.depthMapDataUrl,
-        maskDataUrl: req.maskDataUrl,
-        sceneContext,
-        tileLabel: req.tileLabel,
-        isBackground: req.isBackground,
-      });
+      const summary = await invoke<{ total: number }>('import_tile_library', { root });
+      setTileLibraryPath(root);
+      setTileLibraryTotal(summary.total);
     } catch (e) {
-      console.warn('ComfyUI atmosphere pass failed, using the plain tile render instead:', e);
-      return req.tileDataUrl;
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTileLibraryBusy(false);
+    }
+  }
+
+  /** Re-renders every currently-shown card's preview PNG from its own spec —
+   *  battleMapToPngDataUrl reads whichever tile style is currently active
+   *  (see setActiveTileStyle), so switching styles doesn't touch any map's
+   *  saved spec, just what art the already-loaded cards redraw with. */
+  function refreshMapCardPreviews() {
+    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec) });
+    setPlanMapCards((cards) => cards.map(rerender));
+    setAdHocMapCards((cards) => cards.map(rerender));
+  }
+
+  /** Per-card "Regenerate" — redoes ONLY this one plan-owned map, using the
+   *  same encounter name/description the plan originally gave it
+   *  (campaign.rs's regenerate_one_plan_map_at). The only regenerate action
+   *  used to be the whole-plan one below, which silently redid every
+   *  encounter's map — a DM regenerating one bad map was actually paying
+   *  for the whole plan every time. Plan-owned maps only; an ad-hoc map has
+   *  no encounter context to regenerate from (re-describe it instead). */
+  async function regenerateOneMap(card: MapCard) {
+    if (!activeCampaignId) return;
+    if (!(await ensureClaudeConnected())) return;
+    setPlanBusy(`Regenerating "${card.name}"…`);
+    try {
+      const meta = await withClaudeReconnect(() => invoke<BattleMapMeta>('regenerate_one_plan_map', { id: activeCampaignId, slug: card.slug }));
+      const fresh = await loadMapCard(meta);
+      setPlanMapCards((cards) => cards.map((c) => (c.slug === fresh.slug ? fresh : c)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
     }
   }
 
   async function exportMapPng(card: MapCard) {
     const dest = await save({ defaultPath: `${card.slug}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
     if (!dest) return;
-    setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting PNG…');
+    setPlanBusy('Exporting PNG…');
     try {
-      const sceneContext = sceneContextFor(card);
-      const dataUrl = await battleMapToStylizedPngDataUrl(
-        card.spec, 96,
-        mapAiStyle
-          ? (req) => stylizeMapImage(req, sceneContext)
-          : undefined
-      );
+      await preloadMapObjectSprites(card.spec);
+      const dataUrl = await battleMapToPngDataUrl(card.spec, 96);
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -2752,149 +2796,10 @@ export function DMConsolePage() {
   async function exportMapPdf(card: MapCard) {
     const dest = await save({ defaultPath: `${card.slug}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (!dest) return;
-    setPlanBusy(mapAiStyle ? 'Running the ComfyUI atmosphere pass…' : 'Exporting print-scaled PDF…');
+    setPlanBusy('Exporting print-scaled PDF…');
     try {
-      const sceneContext = sceneContextFor(card);
-      const bytes = await battleMapToPdfBytes(
-        card.spec,
-        mapAiStyle
-          ? (req) => stylizeMapImage(req, sceneContext)
-          : undefined
-      );
-      if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
-      await writeFile(dest, bytes);
-      await openPath(dest);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPlanBusy(null);
-    }
-  }
-
-  // ── AI Export… (manual, per-card style pass — separate from the automatic
-  // mapAiStyle checkbox above, which stays ComfyUI-only with a fixed
-  // prompt/denoise) ───────────────────────────────────────────────────────
-
-  async function toggleAiExport(slug: string) {
-    if (aiExportSlug === slug) { setAiExportSlug(null); return; }
-    setAiExportSlug(slug);
-    setAiExportPreview(null);
-    setGeminiKeyInput('');
-    setAiExportGpuMemory(null);
-    try {
-      setGeminiKeyConfigured(await invoke<boolean>('has_gemini_api_key'));
-    } catch {
-      setGeminiKeyConfigured(false);
-    }
-    // Informational only — None on any non-NVIDIA/driverless machine, same
-    // as probe_cuda; the panel just omits the hint rather than erroring.
-    try {
-      setAiExportGpuMemory(await invoke<GpuMemoryInfo | null>('probe_gpu_memory'));
-    } catch {
-      setAiExportGpuMemory(null);
-    }
-  }
-
-  async function saveGeminiKey() {
-    if (!geminiKeyInput.trim()) return;
-    try {
-      await invoke('save_gemini_api_key', { key: geminiKeyInput.trim() });
-      setGeminiKeyConfigured(true);
-      setGeminiKeyInput('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function clearGeminiKey() {
-    try {
-      await invoke('clear_gemini_api_key');
-      setGeminiKeyConfigured(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  /** Runs whichever provider is selected in the AI Export panel, with the
-   *  DM's own prompt (and, for ComfyUI, strength). Unlike stylizeMapImage
-   *  (the automatic checkbox path), this throws on failure rather than
-   *  falling back silently — an explicit "AI Export" click should surface a
-   *  clear error, not quietly hand back the plain tile render. */
-  async function manualStylizeImage(req: TileStylizeRequest, sceneContext: string): Promise<string> {
-    if (manualStyleProvider === 'gemini') {
-      return await invoke<string>('gemini_stylize_map', {
-        prompt: manualStylePrompt,
-        pngDataUrl: req.tileDataUrl,
-        sceneContext,
-        tileLabel: req.tileLabel,
-        isBackground: req.isBackground,
-      });
-    }
-    return await invoke<string>('comfyui_stylize_map', {
-      baseUrl: comfyUiBaseUrl,
-      pngDataUrl: req.tileDataUrl,
-      depthMapDataUrl: req.depthMapDataUrl,
-      maskDataUrl: req.maskDataUrl,
-      prompt: manualStylePrompt,
-      denoise: manualStyleStrength,
-      sceneContext,
-      tileLabel: req.tileLabel,
-      isBackground: req.isBackground,
-    });
-  }
-
-  async function previewAiExport(card: MapCard) {
-    setPlanBusy(manualStyleProvider === 'gemini' ? 'Asking Gemini to restyle the map…' : 'Running the ComfyUI pass…');
-    try {
-      const sceneContext = sceneContextFor(card);
-      const dataUrl = await battleMapToStylizedPngDataUrl(
-        card.spec, 96,
-        (req) => manualStylizeImage(req, sceneContext)
-      );
-      if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
-      setAiExportPreview(dataUrl);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPlanBusy(null);
-    }
-  }
-
-  async function exportAiStyledPng(card: MapCard) {
-    const dest = await save({ defaultPath: `${card.slug}-ai.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
-    if (!dest) return;
-    setPlanBusy('Generating and exporting PNG…');
-    try {
-      const sceneContext = sceneContextFor(card);
-      const dataUrl = await battleMapToStylizedPngDataUrl(
-        card.spec, 96,
-        (req) => manualStylizeImage(req, sceneContext)
-      );
-      if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
-      setAiExportPreview(dataUrl);
-      const b64 = dataUrl.split(',')[1];
-      const bin = atob(b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      await writeFile(dest, bytes);
-      await openPath(dest);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPlanBusy(null);
-    }
-  }
-
-  async function exportAiStyledPdf(card: MapCard) {
-    const dest = await save({ defaultPath: `${card.slug}-ai.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
-    if (!dest) return;
-    setPlanBusy('Generating and exporting PDF…');
-    try {
-      const sceneContext = sceneContextFor(card);
-      const bytes = await battleMapToPdfBytes(
-        card.spec,
-        (req) => manualStylizeImage(req, sceneContext)
-      );
+      await preloadMapObjectSprites(card.spec);
+      const bytes = await battleMapToPdfBytes(card.spec);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -2909,7 +2814,8 @@ export function DMConsolePage() {
    *  (plan-owned or ad-hoc), without touching the others. `updatePreview`
    *  also re-renders the png — set false on every keystroke (cheap text
    *  update only) and true on "Re-render preview" / after a successful save. */
-  function patchMapCardSpec(slug: string, spec: string, updatePreview: boolean) {
+  async function patchMapCardSpec(slug: string, spec: string, updatePreview: boolean) {
+    if (updatePreview) await preloadMapObjectSprites(spec);
     const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec) : c.png } : c));
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
@@ -2921,7 +2827,7 @@ export function DMConsolePage() {
     setPlanBusy('Saving…');
     try {
       await invoke('save_battle_map', { id: activeCampaignId, slug: card.slug, content: card.spec });
-      patchMapCardSpec(card.slug, card.spec, true);
+      await patchMapCardSpec(card.slug, card.spec, true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -3010,6 +2916,7 @@ export function DMConsolePage() {
     if (!activeCampaignId) return;
     if (!(await ensureClaudeConnected())) return;
     setPlanLoading(true);
+    setPlanProgress(null);
     setAdHocMapCards([]);
     setFailedMaps([]);
     try {
@@ -3022,6 +2929,7 @@ export function DMConsolePage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setPlanLoading(false);
+      setPlanProgress(null);
     }
   }
 
@@ -3076,8 +2984,20 @@ export function DMConsolePage() {
   }
 
   const activeCampaignName = campaigns.find((c) => c.id === activeCampaignId)?.name;
+  // Only non-null while a chapterize_and_import_module call is actually in
+  // flight (see the two setIngestProgress(null) call sites bracketing it) —
+  // every other moduleBusy consumer never touches it, so no extra check for
+  // WHICH action is running is needed here.
+  const ingestStepSuffix =
+    ingestProgress?.phase === 'extracting'
+      ? ` — chunk ${ingestProgress.done} of ${ingestProgress.total}`
+      : ingestProgress?.phase === 'synthesizing'
+        ? ' — writing the plan'
+        : ingestProgress?.phase === 'critiquing'
+          ? ' — polishing the plan'
+          : '';
   const moduleBusyLabel = moduleBusy
-    ? `${moduleBusy} (${formatElapsed(Math.floor((Date.now() - moduleBusyStartRef.current) / 1000))})`
+    ? `${moduleBusy} (${formatElapsed(Math.floor((Date.now() - moduleBusyStartRef.current) / 1000))})${ingestStepSuffix}`
     : null;
 
   return (
@@ -3605,7 +3525,24 @@ export function DMConsolePage() {
           Cached once generated — reopening this shows the same plan (and the same battle maps) until you Regenerate or the party advances a chapter, based on the upcoming chapter, the campaign's arc plan, recent memory, and your terrain catalog.
         </p>
         {planLoading ? (
-          <p className="text-sm text-slate-400">Thinking through what's coming up…</p>
+          <div className="py-2">
+            <p className="text-sm text-slate-400 mb-1">
+              {planProgress?.phase === 'maps'
+                ? `Generating battle maps… (${planProgress.done} of ${planProgress.total})`
+                : "Thinking through what's coming up…"}
+            </p>
+            <div className="h-1.5 w-full bg-slate-800 rounded overflow-hidden">
+              <div
+                className="h-full bg-red-600 transition-all"
+                style={{
+                  width:
+                    planProgress?.phase === 'maps' && planProgress.total > 0
+                      ? `${Math.min(100, (planProgress.done / planProgress.total) * 100)}%`
+                      : '25%',
+                }}
+              />
+            </div>
+          </div>
         ) : !planText ? (
           <div className="text-center py-6">
             <p className="text-sm text-slate-400 mb-3">No plan generated yet for what's coming up.</p>
@@ -3623,86 +3560,40 @@ export function DMConsolePage() {
                     {failedMaps.length} map{failedMaps.length > 1 ? 's' : ''} didn't generate ({failedMaps.join(', ')}) — this set is partial. Try Regenerate.
                   </p>
                 )}
-                <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <input type="checkbox" checked={mapAiStyle} onChange={(e) => setMapAiStyle(e.target.checked)} />
-                    AI atmosphere pass on export (local ComfyUI, off by default — the tile map stays the DM's source of truth either way)
-                  </label>
-                  {mapAiStyle && (
-                    <>
-                      <input
-                        value={comfyUiBaseUrl}
-                        onChange={(e) => setComfyUiBaseUrl(e.target.value)}
-                        placeholder="http://127.0.0.1:8188"
-                        className="w-48 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowComfyUiGuide((v) => !v)}
-                        title="What ComfyUI setup was this tested with?"
-                        className="text-slate-500 hover:text-slate-300"
-                      >
-                        <HelpCircle size={15} />
-                      </button>
-                    </>
-                  )}
+                <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                  <span className="text-xs text-slate-400 mr-1">Tile art:</span>
+                  {TILE_STYLES.map((style) => (
+                    <button
+                      key={style.id}
+                      type="button"
+                      onClick={() => { setBattleTileStyle(style.id); setActiveTileStyle(style.id); refreshMapCardPreviews(); }}
+                      className={`px-2 py-1 rounded-full text-xs border transition-colors ${
+                        battleTileStyle === style.id
+                          ? 'bg-red-600 border-red-600 text-white'
+                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
                 </div>
-                {mapAiStyle && showComfyUiGuide && (
-                  <div className="mb-2 p-3 bg-slate-900/60 border border-slate-700 rounded-lg text-xs text-slate-300 space-y-2">
-                    <p>
-                      <strong className="text-slate-100">Tested with:</strong> ComfyUI Desktop + Flux 2 Klein 4B
-                      (<code className="text-slate-400">flux-2-klein-4b-fp8.safetensors</code>). Any Flux/Flux 2
-                      split model or classic SD checkpoint works out of the box for a plain atmosphere pass — no
-                      extra setup needed for that.
-                    </p>
-                    <p>
-                      Walls and furniture never drift from the ASCII grid — the AI never sees the whole map, only
-                      one isolated swatch per tile <em>type</em> (a floor tile, a pillar, a door…), and this app
-                      composites every cell's swatch back at its exact grid position itself. A ControlNet is
-                      optional and only affects the look of each individual swatch (keeps its own camera angle
-                      flat/top-down instead of tilted) — this app auto-detects and uses one if present, otherwise
-                      it just runs the plain per-tile pass:
-                    </p>
-                    <ol className="list-decimal list-inside space-y-1 text-slate-400">
-                      <li>
-                        Clone{' '}
-                        <code className="text-slate-300">github.com/bryanmcguire/comfyui-flux2fun-controlnet</code>{' '}
-                        into ComfyUI's <code className="text-slate-300">custom_nodes/</code>, restart ComfyUI.
-                      </li>
-                      <li>
-                        Download <code className="text-slate-300">FLUX.2-dev-Fun-Controlnet-Union.safetensors</code>{' '}
-                        (~8GB, from <code className="text-slate-300">alibaba-pai/FLUX.2-dev-Fun-Controlnet-Union</code>{' '}
-                        on Hugging Face) into <code className="text-slate-300">models/controlnet/</code>.
-                      </li>
-                      <li>
-                        On a newer ComfyUI core you may hit <code className="text-slate-300">AttributeError:
-                        'ControlNetWrapper' object has no attribute 'multigpu_clones'</code> or{' '}
-                        <code className="text-slate-300">TypeError: patched_forward_orig() got an unexpected
-                        keyword argument 'timestep_zero_index'</code> the first time you generate — both are the
-                        node package lagging behind ComfyUI's own internals, not a real conflict. Fix: in the node
-                        package's <code className="text-slate-300">nodes.py</code>, add{' '}
-                        <code className="text-slate-300">self.multigpu_clones = {'{}'}</code> to{' '}
-                        <code className="text-slate-300">ControlNetWrapper.__init__</code>; in{' '}
-                        <code className="text-slate-300">flux_patch.py</code>, add{' '}
-                        <code className="text-slate-300">timestep_zero_index=None</code> to{' '}
-                        <code className="text-slate-300">patched_forward_orig</code>'s parameters. Restart ComfyUI
-                        after editing either file.
-                      </li>
-                    </ol>
-                    <p>
-                      Recommended Strength: <strong className="text-slate-100">0.6–0.75</strong>. Even with all of
-                      this, expect the occasional stray hallucinated person/text — regenerating (a fresh random
-                      seed each time) usually clears it.
-                    </p>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-slate-400">
+                    Tileset library: {tileLibraryTotal != null ? `${tileLibraryTotal.toLocaleString()} objects imported` : 'not imported'}
+                  </span>
+                  <Button size="sm" variant="outline" onClick={importTileLibrary} disabled={tileLibraryBusy}>
+                    {tileLibraryBusy ? 'Importing…' : tileLibraryPath ? 'Re-import…' : 'Import…'}
+                  </Button>
+                </div>
                 {planBusy && <p className="text-xs text-amber-400 mb-2">{planBusy}</p>}
 
                 <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
                   {[...planMapCards, ...adHocMapCards].length === 0 && !planBusy && (
                     <p className="text-xs text-slate-500">No combat encounters in this plan called for a map yet.</p>
                   )}
-                  {[...planMapCards, ...adHocMapCards].map((card) => (
+                  {(() => {
+                    const planOwnedSlugs = new Set(planMapCards.map((c) => c.slug));
+                    return [...planMapCards, ...adHocMapCards].map((card) => (
                     <div key={card.slug} className="border border-slate-800 rounded-lg p-3">
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <div>
@@ -3710,111 +3601,19 @@ export function DMConsolePage() {
                           {card.summary && <div className="text-xs text-slate-500">{card.summary}</div>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                          {planOwnedSlugs.has(card.slug) && (
+                            <Button size="sm" variant="ghost" onClick={() => regenerateOneMap(card)} disabled={!!planBusy}>
+                              <RotateCcw size={14} /> Regenerate
+                            </Button>
+                          )}
                           <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>
                           <Button size="sm" variant="outline" onClick={() => exportMapPng(card)} disabled={!!planBusy}><Download size={14} /> PNG</Button>
-                          <Button size="sm" variant="ghost" onClick={() => toggleAiExport(card.slug)} disabled={!!planBusy}>
-                            {aiExportSlug === card.slug ? 'Close AI Export' : 'AI Export…'}
-                          </Button>
                         </div>
                       </div>
                       {card.png ? (
                         <img src={card.png} alt={`${card.name} preview`} className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
                       ) : (
                         <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
-                      )}
-
-                      {aiExportSlug === card.slug && (
-                        <div className="mt-2 p-3 bg-slate-900/60 border border-slate-700 rounded-lg space-y-2">
-                          <p className="text-xs text-slate-400">
-                            A manual, one-off restyle with your own prompt — separate from the automatic pass above. {manualStyleProvider === 'gemini' ? 'Gemini has no denoise dial; grid preservation is prompt-only, so it’s less exact than the ComfyUI path.' : 'Low denoise keeps the grid legible.'}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select
-                              value={manualStyleProvider}
-                              onChange={(e) => setManualStyleProvider(e.target.value as 'comfyui' | 'gemini')}
-                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-red-600"
-                            >
-                              <option value="comfyui">ComfyUI (local)</option>
-                              <option value="gemini">Gemini (cloud)</option>
-                            </select>
-                            {manualStyleProvider === 'comfyui' ? (
-                              <>
-                                <input
-                                  value={comfyUiBaseUrl}
-                                  onChange={(e) => setComfyUiBaseUrl(e.target.value)}
-                                  placeholder="http://127.0.0.1:8188"
-                                  className="w-44 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
-                                />
-                                {aiExportGpuMemory && (
-                                  <span className={`text-xs ${aiExportGpuMemory.free_mb < 2048 ? 'text-amber-400' : 'text-slate-500'}`}>
-                                    ≈{(aiExportGpuMemory.free_mb / 1024).toFixed(1)}GB VRAM free
-                                    {aiExportGpuMemory.free_mb < 2048 && ' — may be tight alongside a local LLM'}
-                                  </span>
-                                )}
-                              </>
-                            ) : geminiKeyConfigured ? (
-                              <span className="flex items-center gap-2 text-xs text-emerald-400">
-                                Key saved ✓
-                                <button type="button" onClick={clearGeminiKey} className="text-slate-500 hover:text-slate-300 underline">Change</button>
-                              </span>
-                            ) : (
-                              <>
-                                <input
-                                  type="password"
-                                  value={geminiKeyInput}
-                                  onChange={(e) => setGeminiKeyInput(e.target.value)}
-                                  placeholder="Gemini API key"
-                                  className="w-44 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 focus:outline-none focus:border-red-600"
-                                />
-                                <Button size="sm" variant="ghost" onClick={saveGeminiKey} disabled={!geminiKeyInput.trim()}>Save key</Button>
-                              </>
-                            )}
-                          </div>
-                          {manualStyleProvider === 'comfyui' && (
-                            <label className="flex items-center gap-2 text-xs text-slate-400">
-                              Strength {manualStyleStrength.toFixed(2)}
-                              <input
-                                type="range"
-                                min={0.1}
-                                max={0.9}
-                                step={0.05}
-                                value={manualStyleStrength}
-                                onChange={(e) => setManualStyleStrength(parseFloat(e.target.value))}
-                                className="flex-1"
-                              />
-                            </label>
-                          )}
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {MAP_STYLE_PRESETS.map((preset) => (
-                              <button
-                                key={preset.id}
-                                type="button"
-                                onClick={() => setManualStylePrompt(preset.prompt)}
-                                className={`px-2 py-1 rounded-full text-xs border transition-colors ${
-                                  manualStylePrompt === preset.prompt
-                                    ? 'bg-red-600 border-red-600 text-white'
-                                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'
-                                }`}
-                              >
-                                {preset.label}
-                              </button>
-                            ))}
-                          </div>
-                          <textarea
-                            value={manualStylePrompt}
-                            onChange={(e) => setManualStylePrompt(e.target.value)}
-                            spellCheck={false}
-                            className="w-full h-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-red-600"
-                          />
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button size="sm" variant="ghost" onClick={() => previewAiExport(card)} disabled={!!planBusy}>Preview</Button>
-                            <Button size="sm" variant="outline" onClick={() => exportAiStyledPdf(card)} disabled={!!planBusy}><Download size={14} /> Export PDF</Button>
-                            <Button size="sm" variant="outline" onClick={() => exportAiStyledPng(card)} disabled={!!planBusy}><Download size={14} /> Export PNG</Button>
-                          </div>
-                          {aiExportPreview && (
-                            <img src={aiExportPreview} alt={`${card.name} AI export preview`} className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
-                          )}
-                        </div>
                       )}
 
                       <details className="mt-2">
@@ -3831,7 +3630,8 @@ export function DMConsolePage() {
                         </div>
                       </details>
                     </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 mt-3">

@@ -59,7 +59,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const BASE_CLAUDE_MD: &str = r#"# You are the Dungeon Master
 
@@ -110,7 +110,7 @@ Most turns you'll just see the active module's current chapter text (if any) and
 - Track initiative yourself. Each round: narrate enemies, resolve actions, prompt the next player by name.
 - Balance the spotlight across a session — check in with quieter players by name rather than only following whoever spoke most recently or is loudest.
 - Prefer open prompts ("what do you do?") over leading yes/no ones ("do you want to attack?") — let players drive the scene instead of picking from an implied menu.
-- Roll monster attacks, saves, and damage yourself and state the result; let players roll their own d20s unless asked to roll for them, in which case just state a result plausible for the situation.
+- Roll monster attacks, saves, and damage yourself and state the result; let players roll their own d20s unless asked to roll for them, in which case just state a result plausible for the situation. Never speak the raw number or mechanic behind ANY roll you make on the DM's side of the screen (enemy/NPC attack rolls, saves, checks, initiative, damage dice, DCs) — the players only get the in-fiction outcome ("the guard's blade skims past your shoulder", "the two watchmen shove in first", never "he rolled a 14" or "the watchmen rolled a 9 for initiative"). A player's OWN rolls are theirs to report and discuss freely — this rule is only about what happens behind the screen.
 - Favor pace and fun over rules-lawyering — make a ruling, state it briefly, move on.
 - On a failed check, avoid a flat dead stop ("nothing happens") — prefer a complication or partial consequence that keeps the scene moving, where it fits the fiction.
 - Describe scenes vividly but concisely — this is spoken aloud, so avoid long info-dumps. Most turns should only be a few sentences; save longer narration for genuine set-piece moments (arriving somewhere new, a big reveal, a boss's entrance), not routine actions.
@@ -219,7 +219,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ difficult terrain (rubble)  = furniture/altar  T tree/foliage  _ stairs  * hazard (fire/brazier)  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ difficult terrain (rubble)  = furniture/altar  T tree/foliage  _ stairs  * hazard (fire/brazier)  , sand/beach  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -271,6 +271,18 @@ pub struct ChapterizeImportResult {
     /// frontend to show as a non-blocking warning. Empty when nothing stood
     /// out. Never contains plot content — safe to show a player.
     pub concerns: Vec<String>,
+}
+
+/// Payload for the `"ingest-progress"` event — `phase` is `"chapterizing"`,
+/// `"extracting"` (`done`/`total` = chunk N of M, the only phase with a real
+/// count — see chapterize_and_import_module_at), `"synthesizing"`, or
+/// `"critiquing"` (the other three are single opaque calls, `done`/`total`
+/// always 0/0). Mirrors PlanProgress/tts.rs's F5InstallProgress.
+#[derive(Clone, serde::Serialize)]
+struct IngestProgress {
+    phase: String,
+    done: usize,
+    total: usize,
 }
 
 /// Answers collected once, when a campaign is first created (see the "New
@@ -2128,7 +2140,7 @@ fn battle_maps_dir(root: &Path, id: &str) -> PathBuf {
 /// path (generate_battle_maps_for_plan_at), which is driven by the
 /// already-decided, already-persisted plan instead of asking the model to
 /// independently re-guess "what's coming up" a second time.
-fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str) -> String {
+fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str, objects_enabled: bool) -> String {
     format!(
         "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
         Design ONE battle map for this specific encounter the DM described: {hint}\n\n\
@@ -2136,7 +2148,7 @@ fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &s
         Current chapter (what's coming up):\n{current_chapter}\n\n\
         Recent memory/recaps:\n{memory}\n\n\
         {}",
-        battle_map_format_instructions()
+        battle_map_format_instructions(crate::local_llm::is_local_ingestion(), objects_enabled)
     )
 }
 
@@ -2191,7 +2203,99 @@ fn copies_the_example(spec: &str) -> bool {
     })
 }
 
-fn battle_map_format_instructions() -> String {
+/// Picks the prompt variant by which provider is actually about to answer it
+/// `use_local` is passed in rather than read here (see
+/// local_llm::is_local_ingestion) — the caller looks it up once, keeping this
+/// function itself a pure dispatch on an explicit argument instead of an
+/// implicit read of shared global state, so its output stays deterministic
+/// for tests regardless of what some OTHER test's process-global ingestion
+/// config happens to be set to at the moment this runs.
+///
+/// Confirmed live (test-campaign "Bar Fight", 2026-07-17): the full prompt's
+/// two worked examples and dozen rules are well within Claude's reach but
+/// reliably broke a local model — three independent generations all lost
+/// track of their own declared grid width, and wrote `Features:` describing a
+/// different, larger room than the one actually drawn, with two retries
+/// barely moving the issue count. A shorter, single-example prompt gives a
+/// small model a shot at self-consistency instead of setting it up to fail
+/// the same way every time.
+fn battle_map_format_instructions(use_local: bool, objects_enabled: bool) -> String {
+    if use_local {
+        battle_map_format_instructions_streamlined(objects_enabled)
+    } else {
+        battle_map_format_instructions_full(objects_enabled)
+    }
+}
+
+/// Text for the optional `Objects:` section — a free-object placement layer
+/// independent of the legend grid, resolved against a user-imported local
+/// tile catalog (see tile_library.rs) instead of the fixed legend codes.
+/// Only ever interpolated in when `tile_library_configured` is true (see
+/// this function's callers) — with nothing imported, the model never sees
+/// this text and never writes the section, so behavior is unchanged.
+fn objects_format_line() -> &'static str {
+    "Objects:\n- <free description of a real object, e.g. \"round wooden dining table\"> at <cell> (<W>x<H>)\n"
+}
+
+fn objects_rule_line() -> &'static str {
+    "- An `Objects:` line places something with NO legend code of its own, anywhere on real floor you drew: `<description> at <cell> (<W>x<H>)`, where `W`/`H` are whole numbers 1-4 (the object's footprint in cells). This is extra set-dressing variety (a unique chair, a tree, a barrel) on top of the legend codes — it does not replace drawing the room's defining feature with `=`/`*` and a matching Features: line, which still works exactly as before.\n"
+}
+
+/// The streamlined prompt for a local model: one worked example instead of
+/// two, and only the mechanically-load-bearing rules (the ones
+/// validate_map_spec actually checks) — the qualitative layout advice
+/// ("vary object sizes", "put something in the middle", the anti-mirroring
+/// rules) is cut, not because it's wrong, but because a model that can't
+/// reliably hold its own row width steady has no spare capacity for nuance,
+/// and the extra length was actively working against it.
+fn battle_map_format_instructions_streamlined(objects_enabled: bool) -> String {
+    let objects_format = if objects_enabled { objects_format_line() } else { "" };
+    let objects_rule = if objects_enabled { objects_rule_line() } else { "" };
+    format!(
+        "Format the map EXACTLY like this, with a line containing only {MAP_SPEC_DELIMITER} before it:\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # <Short map name>\n\
+        Grid: <cols>x<rows>, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        <exactly <rows> lines, each exactly <cols> characters wide, using ONLY the legend codes above>\n\
+        Features:\n\
+        - <what's in a cell, e.g. \"Altar at J8\">\n\
+        {objects_format}\
+        Tactics:\n\
+        - <cover, choke points, suggested enemy cells>\n\n\
+        Rules — count carefully, a mistake gets the map rejected:\n\
+        - Size between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}. The `Grid:` line MUST match the block you actually draw — count every row before you answer.\n\
+        - EVERY row must be the exact same number of characters as every other row.\n\
+        - Enclose the room with `#` walls; a space is outside the map.\n\
+        - A `+` door needs `#` directly on both sides (left+right, or above+below) — never on open floor.\n\
+        - Every `Features:` line must point at a cell that really has that code right now. \"Bar at A2\" means A2 must actually be `=`.\n\
+        - A stool, chair, or bench is `=` (furniture) — never `^`. `^` only means rubble/difficult terrain.\n\
+        {objects_rule}\
+        - Draw the encounter's main feature for real, not just in words: a bar needs an actual run of `=`, a shrine needs an actual altar cell.\n\n\
+        One example:\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # The Bent Nail\n\
+        Grid: 16x12, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        {example_grid}\n\
+        Features:\n\
+        - Bar counter at C3-H3\n\
+        - Table at E6-F7\n\
+        - Stool at K5\n\
+        Tactics:\n\
+        - The bar at C3-H3 gives half cover.\n\
+        {MAP_SPEC_DELIMITER}\n\n\
+        Draw a DIFFERENT room for THIS encounter — do not just copy that grid. Only draw a bar or tables if the encounter actually has them; a cave or tower would have none of that.\n\n\
+        Output nothing outside the sections shown.",
+        example_grid = EXAMPLE_MAP_GRID.join("\n")
+    )
+}
+
+fn battle_map_format_instructions_full(objects_enabled: bool) -> String {
+    let objects_format = if objects_enabled { objects_format_line() } else { "" };
+    let objects_rule = if objects_enabled { objects_rule_line() } else { "" };
     format!(
         "Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
         {MAP_SPEC_DELIMITER}\n\
@@ -2202,6 +2306,7 @@ fn battle_map_format_instructions() -> String {
         <exactly <rows> lines, each exactly <cols> characters wide, using ONLY the single-character legend codes above>\n\
         Features:\n\
         - <notable things and the cell they're in, e.g. \"Altar at J8\">\n\
+        {objects_format}\
         Tactics:\n\
         - <choke points, cover, and sightlines, plus concrete suggested enemy start cells and ambush spots, referencing cells like C3 or K1>\n\n\
         Rules for the Map block — these are checked mechanically and a violation gets the map rejected:\n\
@@ -2211,9 +2316,11 @@ fn battle_map_format_instructions() -> String {
         - A `+` door must be SET INTO a wall run — a `#` on both sides of it, horizontally or vertically. Never leave a door standing on open floor.\n\
         - Every `Features:` line must point at a cell you actually drew the matching code in. If you write \"Bar at A2\", then A2 must really be a `=`. Never list something you didn't draw.\n\
         - A `Features:` line may name a single cell (\"Hearth at B7\"), a list (\"Pillars at C4, G4\"), or a range (\"Bar counter at B2-K2\", \"Table at D4-E5\"). A range means EVERY cell in the rectangle its two corners span, so each one of them must hold that code — a run with a gap in it is wrong.\n\
+        {objects_rule}\
         - Name each feature by what it actually is (\"Bar counter\", \"Hearth\", \"Main entrance\"), not by its legend code — those names are what the map's art is generated from, so \"Furniture at D4\" produces a generic table where \"Bar counter at B2-K2\" produces a bar.\n\
         - The encounter's defining feature must physically exist on the grid, not just in the Features text: a barroom needs an actual bar (a contiguous run of `=`), a forge needs the forge, a shrine needs the altar. Draw it, then name it in Features.\n\
         - Lay the room out like a real place, not a spreadsheet. Concretely: do NOT mirror one half of the room onto the other; do NOT line objects up in matching columns down both walls; do NOT repeat one identical furniture block more than twice. Vary the SIZE of things (a 1-cell stool, a 2-cell bench, a 2x2 table). Leave irregular gaps.\n\
+        - A stool, chair, or bench is FURNITURE — draw it with `=`, one cell each, the same as a table just smaller. NEVER draw a seat with `^`: `^` means rubble/debris difficult terrain, it is not a size variant of furniture, and drawing seating with it renders as a pile of rocks, not a place to sit.\n\
         - Put something in the MIDDLE. A room whose objects all hug the walls, leaving a large empty void through the centre, is wrong — that is the most common layout failure.\n\
         - A counter or bar needs open floor along at least one of its long sides — somebody has to stand behind it to work it. A bar drawn flat against a wall with no gap is wrong.\n\
         - Make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction.\n\n\
@@ -2288,19 +2395,61 @@ fn battle_map_format_instructions() -> String {
 // enemy placement against these cell coordinates.
 
 /// Every legal grid character (plus `' '` = void, handled separately).
-const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*'];
+const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*', ','];
 /// Codes that are an actual object/terrain feature — what a `Features:` line
 /// must point at. Plain floor, void and wall are not "things".
-const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*'];
+const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*', ','];
+
+/// Words that mean "this is furniture" in a Features label. `=` is the ONLY
+/// legend code for furniture (see MAP_LEGEND) — if a line named this way
+/// points at any other object code, the model drew the wrong character for
+/// what it meant, not just a wrong cell. Confirmed live: a "Stools at ..."
+/// line landed on `^` cells and rendered as a pile of rocks instead of
+/// stools, because `^` means rubble/difficult terrain, not furniture.
+const FURNITURE_WORDS: &[&str] = &[
+    "bar", "table", "counter", "stool", "chest", "bench", "altar", "crate", "shelf", "cabinet", "throne", "cauldron",
+    "bed", "cot", "shrine",
+];
+
+/// The label of a `Features:` bullet — everything before the first " at ",
+/// the same split `parseFeatureLabels` in battleMapRender.ts uses to name a
+/// cell. Case-insensitive so "Stools AT" still splits correctly.
+fn feature_line_name(line: &str) -> &str {
+    let idx = line.to_lowercase().find(" at ");
+    match idx {
+        Some(i) => line[..i].trim(),
+        None => line.trim(),
+    }
+}
+
+fn feature_line_names_furniture(line: &str) -> bool {
+    let name = feature_line_name(line).to_lowercase();
+    FURNITURE_WORDS.iter().any(|w| name.contains(w))
+}
+
 const MAP_MIN_COLS: usize = 10;
 const MAP_MIN_ROWS: usize = 10;
 const MAP_MAX_COLS: usize = 24;
 const MAP_MAX_ROWS: usize = 18;
+/// How many extra attempts `generate_one_map_spec` gets after the first, each
+/// fed the concrete errors from the one before. Bounded rather than "until
+/// clean" — this is a real network call each time, and the caller needs a
+/// bounded worst case, not a spec that's merely closer to sound.
+///
+/// Local and Claude get DIFFERENT budgets because they fail differently:
+/// local (confirmed live, test-campaign 2026-07-17) routinely needed 2-3
+/// tries just to get basic mechanical correctness — a floating door, an
+/// unlabeled bar counter, still present after a single retry. Claude at high
+/// effort reliably nails that in 1-2 tries, so spending the same budget on
+/// it mostly buys nothing beyond real cost — see generate_map_spec for where
+/// this is picked.
+const MAP_SPEC_MAX_RETRIES_LOCAL: usize = 2;
+const MAP_SPEC_MAX_RETRIES_CLAUDE: usize = 1;
 /// Sanity cap while slurping rows, mirroring battleMapRender.ts's MAX_DIM.
 const MAP_SLURP_CAP: usize = 40;
 
 fn is_map_section_header(t: &str) -> bool {
-    t.starts_with("Features:") || t.starts_with("Tactics:") || t.starts_with("Legend:")
+    t.starts_with("Features:") || t.starts_with("Objects:") || t.starts_with("Tactics:") || t.starts_with("Legend:")
         || t.starts_with("Grid:") || t.starts_with("# ")
 }
 
@@ -2439,21 +2588,23 @@ fn cell_refs_in(line: &str) -> Vec<(String, usize, usize)> {
     out
 }
 
-/// The `- ...` bullets under `Features:`.
-fn feature_lines(suffix: &[String]) -> Vec<String> {
+/// The `- ...` bullets under whichever section `header` names (e.g.
+/// `"Features:"`, `"Objects:"`) — shared by `feature_lines`/`object_lines` so
+/// "how a section's bullets are collected" can't drift between the two.
+fn bullets_under(suffix: &[String], header: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut in_features = false;
+    let mut in_section = false;
     for l in suffix {
         let t = l.trim();
-        if t.starts_with("Features:") {
-            in_features = true;
+        if t.starts_with(header) {
+            in_section = true;
             continue;
         }
         if is_map_section_header(t) {
-            in_features = false;
+            in_section = false;
             continue;
         }
-        if in_features {
+        if in_section {
             if let Some(body) = t.strip_prefix('-') {
                 let body = body.trim();
                 if !body.is_empty() {
@@ -2463,6 +2614,16 @@ fn feature_lines(suffix: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// The `- ...` bullets under `Features:`.
+fn feature_lines(suffix: &[String]) -> Vec<String> {
+    bullets_under(suffix, "Features:")
+}
+
+/// The `- ...` bullets under `Objects:` — see `parse_object_line`.
+fn object_lines(suffix: &[String]) -> Vec<String> {
+    bullets_under(suffix, "Objects:")
 }
 
 fn cell_at(rows: &[String], col: usize, row: usize) -> Option<char> {
@@ -2572,6 +2733,7 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
     }
 
     for line in feature_lines(&suffix) {
+        let names_furniture = feature_line_names_furniture(&line);
         for (tok, c, r) in cell_refs_in(&line) {
             match cell_at(&rows, c, r) {
                 None => issues.push(format!(
@@ -2588,11 +2750,131 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
                         "Features says \"{line}\" but cell {tok} contains `{ch}` ({what}) — there is nothing there. Every Features line must point at a cell you actually drew the matching code in."
                     ));
                 }
+                Some(ch) if names_furniture && ch != '=' => {
+                    issues.push(format!(
+                        "Features says \"{line}\" but cell {tok} contains `{ch}`, not `=`. \"{}\" is furniture — draw it with the `=` legend code, not `{ch}` (that means something else entirely).",
+                        feature_line_name(&line)
+                    ));
+                }
                 _ => {}
             }
         }
     }
+
+    for line in object_lines(&suffix) {
+        let Some((label, c, r, w, h)) = parse_object_line(&line) else {
+            issues.push(format!(
+                "Objects says \"{line}\" but that doesn't parse as \"<description> at <cell> (<W>x<H>)\"."
+            ));
+            continue;
+        };
+        match cell_at(&rows, c, r) {
+            None => issues.push(format!("Objects says \"{label}\" at a cell outside the {cols}x{rows_n} grid.")),
+            Some('#') => issues.push(format!(
+                "Objects says \"{label}\" at {}{}, but that cell is a `#` wall — objects need real floor.",
+                column_label(c),
+                r + 1
+            )),
+            Some(' ') => issues.push(format!(
+                "Objects says \"{label}\" at {}{}, but that cell is void, outside the map.",
+                column_label(c),
+                r + 1
+            )),
+            _ => {}
+        }
+        if !(1..=4).contains(&w) || !(1..=4).contains(&h) {
+            issues.push(format!(
+                "Objects says \"{label}\" is {w}x{h} — width and height must both be whole numbers from 1 to 4."
+            ));
+        }
+    }
+
     issues
+}
+
+/// Parses one `Objects:` bullet body (already stripped of its leading `- `
+/// by `object_lines`): `<label> at <cell> (<W>x<H>)` → (label, col, row, w,
+/// h). `None` if it doesn't match that shape, which `validate_map_spec`
+/// reports as an issue rather than silently dropping — same treatment as a
+/// malformed Features line.
+fn parse_object_line(line: &str) -> Option<(String, usize, usize, u32, u32)> {
+    let lower = line.to_lowercase();
+    let at_idx = lower.find(" at ")?;
+    let label = line[..at_idx].trim().to_string();
+    let rest = line[at_idx + 4..].trim();
+
+    let open = rest.rfind('(')?;
+    let close = rest.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let cell_part = rest[..open].trim();
+    let (w_str, h_str) = rest[open + 1..close].split_once(['x', 'X'])?;
+    let w: u32 = w_str.trim().parse().ok()?;
+    let h: u32 = h_str.trim().parse().ok()?;
+
+    // The cell ref is the leading alphanumeric run — tolerates trailing
+    // punctuation/prose the model sometimes leaves before the `(WxH)`.
+    let cell_tok: String = cell_part.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    let (col, row) = parse_cell_ref(&cell_tok)?;
+    Some((label, col, row, w, h))
+}
+
+/// True when every cell `line` refers to would pass `validate_map_spec`'s
+/// Features checks — same three rules (in grid, an object code, and the
+/// right KIND of object code if the label names furniture), just as a bool
+/// instead of issue strings. Shared by `validate_map_spec` and
+/// `prune_invalid_features` so "what makes a Features line valid" can't drift
+/// between the two.
+fn feature_line_is_valid(rows: &[String], line: &str) -> bool {
+    let names_furniture = feature_line_names_furniture(line);
+    let refs = cell_refs_in(line);
+    !refs.is_empty()
+        && refs.iter().all(|(_, c, r)| match cell_at(rows, *c, *r) {
+            Some(ch) if MAP_OBJECT_CODES.contains(&ch) => !names_furniture || ch == '=',
+            _ => false,
+        })
+}
+
+/// Drops any `Features:` bullet that fails validation instead of shipping it.
+/// `generate_one_map_spec` gets exactly one retry — if the model still hasn't
+/// fixed every issue by then, the spec we're about to store may still have a
+/// `Features` line pointing at the wrong cell or the wrong kind of object
+/// (confirmed live: a "Bar counter" line pointed at a floor row, so the real
+/// bar rendered with a generic "table" prompt instead — silently wrong is
+/// worse than silently generic). Pruning the bad line doesn't fix the label,
+/// but it stops a wrong one from reaching the stylizer; the cell just falls
+/// back to its plain per-code prompt. Never touches Tactics text — that's
+/// prose, never mechanically checked. Pure.
+fn prune_invalid_features(spec: &str) -> String {
+    let Some((_, rows, _)) = split_spec_grid(spec) else {
+        return spec.to_string();
+    };
+    let mut in_features = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in spec.split('\n') {
+        let t = line.trim();
+        if t.starts_with("Features:") {
+            in_features = true;
+            out.push(line.to_string());
+            continue;
+        }
+        if is_map_section_header(t) {
+            in_features = false;
+            out.push(line.to_string());
+            continue;
+        }
+        if in_features {
+            if let Some(body) = t.strip_prefix('-') {
+                let body = body.trim();
+                if !body.is_empty() && !feature_line_is_valid(&rows, body) {
+                    continue; // drop this bullet
+                }
+            }
+        }
+        out.push(line.to_string());
+    }
+    out.join("\n")
 }
 
 /// Forces a spec to be internally consistent no matter what the model did:
@@ -2613,7 +2895,7 @@ fn normalize_map_spec(spec: &str) -> String {
         return spec.to_string();
     };
     let cols = modal_row_width(&rows);
-    let fixed: Vec<String> = rows
+    let mut fixed: Vec<String> = rows
         .iter()
         .map(|r| {
             let mut s: String = r
@@ -2628,6 +2910,24 @@ fn normalize_map_spec(spec: &str) -> String {
             s
         })
         .collect();
+
+    // Demote a door that isn't actually set into a wall back to plain floor.
+    // A `+` floating in the open prints wrong AND drives real decisions — the
+    // DM reads it as an entrance and places encounters around it. Confirmed
+    // live: a door two cells deep in open floor, no `#` adjacent on any side.
+    // `validate_map_spec` already flags this and asks for a fix, but one
+    // retry doesn't always land it, so this is the same safety net as the
+    // width/character scrub above — never ship a structural lie.
+    for r in 0..fixed.len() {
+        for c in 0..cols {
+            if cell_at(&fixed, c, r) == Some('+') && !door_in_wall(&fixed, c, r) {
+                let mut chars: Vec<char> = fixed[r].chars().collect();
+                chars[c] = '.';
+                fixed[r] = chars.into_iter().collect();
+            }
+        }
+    }
+
     let rows_n = fixed.len();
 
     let prefix: Vec<String> = prefix
@@ -2647,45 +2947,316 @@ fn normalize_map_spec(spec: &str) -> String {
     out.join("\n")
 }
 
-/// Asks for ONE map spec, and — if the reply is structurally broken — re-asks
-/// exactly once with the concrete errors fed back, keeping the retry only if
-/// it's genuinely better. Whatever we end up with is normalized before it's
-/// returned, so a stored spec is always self-consistent.
+/// Asks for a map spec, and — if the reply is structurally broken — re-asks
+/// with the concrete errors fed back, up to `max_retries` times, keeping the
+/// best attempt seen (fewest issues; a verbatim copy of the worked example
+/// never counts as an improvement no matter how few consistency issues the
+/// copy itself has). Whatever we end up with is pruned and normalized before
+/// it's returned, so a stored spec is always self-consistent — and if not
+/// every issue got fixed within the retry budget, at least nothing wrong
+/// reaches the renderer silently.
+///
+/// `max_retries` is the caller's job to pick — see generate_map_spec, which
+/// uses a different budget for local vs Claude because they fail
+/// differently.
 ///
 /// Returns the provider's own error verbatim rather than a generic one: when
 /// this fails it's almost always the ingestion provider being unreachable or
 /// misconfigured, and "the model didn't return a usable map" hides exactly the
-/// detail the DM needs to fix it.
-fn generate_one_map_spec(prompt: &str) -> Result<String, String> {
+/// detail the DM needs to fix it. That only applies to the FIRST call — once
+/// we have at least one spec in hand, a retry failing (network error, or a
+/// reply with no `Map:` block) just ends the loop early and keeps the best
+/// attempt so far, same as running out of retries.
+fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, String> {
+    // Tried Opus + high effort here (2026-07-17): ~10 minutes and a real
+    // usage-budget hit per map, for output that wasn't measurably better —
+    // reverted to Sonnet. That comparison never actually tried LOW effort
+    // though — "reverted" left it on the CLI's default, same as every other
+    // ask_ingest_once caller, which is NOT low (see build_claude_args's doc
+    // comment: the DM turn loop forces low specifically because default
+    // effort burns real wall-clock time thinking before replying). Live-
+    // measured here (2026-07-19): 362s for one call, 11552 chars in / 2161
+    // chars out — a ratio default effort's raw generation speed doesn't
+    // explain; almost certainly mostly thinking time, same shape as the
+    // turn-loop finding. This is a structural/spatial layout task, not a
+    // nuanced narrative judgment call, so it's at least as good a fit for
+    // low effort as an ordinary DM turn was — see ask_ingest_once_low_effort.
     let ask = |p: String| -> Result<Option<String>, String> {
-        let reply = crate::local_llm::ask_ingest_once(p, Some("sonnet"), false)?;
+        let t = std::time::Instant::now();
+        let prompt_len = p.len();
+        let reply = crate::local_llm::ask_ingest_once_low_effort(p, Some("sonnet"))?;
+        eprintln!("[plan-timing] one claude call (low effort): {:.1}s, {prompt_len} chars in / {} chars out", t.elapsed().as_secs_f64(), reply.len());
         Ok(split_map_specs(&reply).into_iter().next())
     };
+    let issues_for = |spec: &str| -> Vec<String> {
+        let mut issues = validate_map_spec(spec);
+        if copies_the_example(spec) {
+            issues.push(
+                "You returned the example map (The Bent Nail) verbatim instead of drawing the encounter you were asked for. The example only demonstrates habits — irregular spacing, mixed object sizes, an occupied centre, a bar with floor behind it. Draw a DIFFERENT room that has those habits."
+                    .to_string(),
+            );
+        }
+        issues
+    };
+
     let first = ask(prompt.to_string())?
         .ok_or_else(|| "The model's reply didn't contain a `Map:` block.".to_string())?;
-    let mut issues = validate_map_spec(&first);
-    if copies_the_example(&first) {
-        issues.push(
-            "You returned the example map (The Bent Nail) verbatim instead of drawing the encounter you were asked for. The example only demonstrates habits — irregular spacing, mixed object sizes, an occupied centre, a bar with floor behind it. Draw a DIFFERENT room that has those habits."
-                .to_string(),
-        );
-    }
-    if issues.is_empty() {
-        return Ok(normalize_map_spec(&first));
-    }
-    let retry = format!(
-        "{prompt}\n\nYour previous attempt was REJECTED. Fix every one of these problems and output the corrected map in exactly the same format:\n{}",
-        issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")
+    let first_fallback = first.clone(); // last resort if every attempt below copies
+    let mut issues = issues_for(&first);
+    let first_is_copy = copies_the_example(&first);
+    eprintln!(
+        "[battle-map] attempt 1: {} issue(s), copied_example={first_is_copy}: {:?}\n--- raw ---\n{first}\n--- end ---",
+        issues.len(), issues
     );
-    // A retry that's no better (or errored outright) falls back to the first
-    // attempt — normalized either way, so we always store something coherent.
-    match ask(retry) {
-        // Copying the example again is never an improvement, however few
-        // consistency issues the copy happens to have.
-        Ok(Some(second)) if !copies_the_example(&second) && validate_map_spec(&second).len() < issues.len() => {
-            Ok(normalize_map_spec(&second))
+    // What the retry prompt shows back as "here's what you drew" — every
+    // ask_ingest_once call is a stateless one-shot completion (no
+    // conversation history), so without this the model has NO visibility
+    // into its own previous attempt when asked to "fix cell F8": it can only
+    // blind-guess a whole new room from the original brief plus an abstract
+    // list of error strings. Confirmed live: attempts varied wildly instead
+    // of converging (issue counts went UP between retries as often as down),
+    // which is exactly what "fix something you can't see" produces.
+    let mut previous_spec = first.clone();
+    let mut best_real = fold_best_real_map_attempt(None, first, issues.len(), first_is_copy);
+
+    for attempt in 0..max_retries {
+        // `issues_for` always adds the copy message when it applies, so an
+        // empty `issues` here already implies the attempt that produced it
+        // wasn't a copy.
+        if issues.is_empty() {
+            break;
         }
-        _ => Ok(normalize_map_spec(&first)),
+        // When the grid itself is already sound and the ONLY remaining
+        // problems are Features mismatches, ask for the much narrower task
+        // of describing the already-good grid, instead of redrawing the
+        // whole room again — a captioning task, not a design task. Confirmed
+        // live: the grid converges faster than Features does (a room with
+        // real furniture but only one surviving Features line after
+        // pruning), so once the grid stops being the bottleneck, keep it out
+        // of what's being asked to change.
+        let retry_prompt = if all_features_only_issues(&issues) {
+            format!(
+                "{prompt}\n\nHere is EXACTLY what you drew last time — its Map: grid is fine, keep every \
+                 character of it EXACTLY unchanged:\n\n{MAP_SPEC_DELIMITER}\n{previous_spec}\n{MAP_SPEC_DELIMITER}\n\n\
+                 Only your Features: text is wrong — it names cells that don't actually hold what it claims. Fix \
+                 EXACTLY these mismatches by rewriting Features (and Tactics, if it needs updating too) to \
+                 describe what's ACTUALLY in the grid above; do NOT touch the Map: block at all:\n{}\n\n\
+                 Output the map in exactly the same format, with the Map: block copied over character-for-character.",
+                issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")
+            )
+        } else {
+            format!(
+                "{prompt}\n\nHere is EXACTLY what you drew last time:\n\n{MAP_SPEC_DELIMITER}\n{previous_spec}\n{MAP_SPEC_DELIMITER}\n\n\
+                 It was REJECTED for these concrete problems. Fix EXACTLY these, cell by cell, in the map above — do \
+                 NOT start over with a different room — and output the corrected map in exactly the same format:\n{}",
+                issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")
+            )
+        };
+        let Ok(Some(retry_spec)) = ask(retry_prompt) else {
+            eprintln!("[battle-map] retry {} failed outright (provider error or no Map: block); stopping with best so far", attempt + 2);
+            break;
+        };
+        issues = issues_for(&retry_spec);
+        let is_copy = copies_the_example(&retry_spec);
+        eprintln!(
+            "[battle-map] retry {}: {} issue(s), copied_example={is_copy}: {:?}\n--- raw ---\n{retry_spec}\n--- end ---",
+            attempt + 2, issues.len(), issues
+        );
+        previous_spec = retry_spec.clone();
+        best_real = fold_best_real_map_attempt(best_real, retry_spec, issues.len(), is_copy);
+    }
+
+    let (best, best_issue_count, is_fallback_copy) = match best_real {
+        Some((spec, count)) => (spec, count, false),
+        None => {
+            let count = issues_for(&first_fallback).len();
+            (first_fallback, count, true)
+        }
+    };
+    eprintln!(
+        "[battle-map] kept the attempt with {best_issue_count} issue(s) as the candidate{}",
+        if is_fallback_copy { " (WARNING: every attempt copied the example; shipping the copy as a last resort)" } else { "" }
+    );
+    let pruned = prune_invalid_features(&best);
+    if pruned != best {
+        eprintln!("[battle-map] prune_invalid_features dropped one or more Features lines\n--- before ---\n{best}\n--- after ---\n{pruned}\n--- end ---");
+    }
+    Ok(normalize_map_spec(&pruned))
+}
+
+/// Folds one attempt into the best REAL (non-copy) candidate seen so far. A
+/// copy is never eligible to become `best`, however cleanly it validates —
+/// it usually validates almost perfectly, since it IS the reference spec,
+/// which is exactly what let one slip through live: the very first attempt
+/// copied the worked example verbatim, scored just the one "you copied"
+/// issue, and no genuine retry — which necessarily starts from a blank room
+/// and racks up real issues along the way — could ever beat that on issue
+/// count alone. The fix is that a copy simply isn't a candidate: `None` means
+/// "no real attempt yet", so ANY non-copy beats it regardless of its own
+/// issue count, and only two non-copies are ever compared by issue count
+/// against each other. Pure.
+fn fold_best_real_map_attempt(
+    best: Option<(String, usize)>, candidate: String, issue_count: usize, is_copy: bool,
+) -> Option<(String, usize)> {
+    if is_copy {
+        return best;
+    }
+    match &best {
+        Some((_, best_count)) if issue_count >= *best_count => best,
+        _ => Some((candidate, issue_count)),
+    }
+}
+
+/// True for a `validate_map_spec` issue about a `Features:` line pointing at
+/// the wrong cell or wrong kind of object — as opposed to a structural
+/// problem with the Map: grid itself (ragged rows, an unenclosed room, a
+/// floating door). Every Features-related message `validate_map_spec` emits
+/// starts with this exact literal prefix; kept in sync with that function by
+/// the shipped-spec regression tests below. Pure.
+fn issue_is_features_only(issue: &str) -> bool {
+    issue.starts_with("Features says \"")
+}
+
+/// True when EVERY remaining issue is a Features mismatch and the grid
+/// itself is already sound — the signal `generate_one_map_spec`'s retry loop
+/// uses to switch from "redraw the room" to the much narrower "describe the
+/// room you already drew correctly", once the grid has stopped being the
+/// bottleneck. Empty issues are never "features-only" — that means nothing
+/// is wrong at all, which is generate_one_map_spec's separate stopping
+/// condition, not this one. Pure.
+fn all_features_only_issues(issues: &[String]) -> bool {
+    !issues.is_empty() && issues.iter().all(|i| issue_is_features_only(i))
+}
+
+/// How many independent candidates `generate_map_spec` produces before asking
+/// the model to judge between them. Local keeps the full 3 since any single
+/// attempt might still be too mechanically broken to be worth judging at all.
+///
+/// Claude is 1, not 2 — measured live (2026-07-18) at 200-420 SECONDS for a
+/// single candidate call on the real map prompt (~11.5K chars in), even
+/// though a trivial one-word `claude -p` call on the same machine came back
+/// in 1.6s of actual API time. That rules out CLI/account throttling — the
+/// cost is Sonnet genuinely burning heavy internal reasoning on this
+/// specific many-constraint grid task. "2 candidates at a fraction of the
+/// cost" (the previous reasoning here) was true for wall time under the
+/// since-added parallelization, but false for USAGE: 2 candidates + a judge
+/// call is 2-3x the actual Claude-quota cost of 1, for a quality gain the
+/// DM reported wasn't worth it ("uses up 50% of my usage... unacceptable").
+/// A single candidate that's already mechanically validated (see
+/// generate_one_map_spec's retry loop) ships directly with candidates.len()
+/// == 1 skipping judging entirely — see MAP_SPEC_MAX_RETRIES_CLAUDE's
+/// comment for the matching retry-budget reasoning.
+const MAP_SPEC_CANDIDATE_COUNT_LOCAL: usize = 3;
+const MAP_SPEC_CANDIDATE_COUNT_CLAUDE: usize = 1;
+
+/// Generates several independent map specs for the SAME prompt and asks the
+/// model to pick the best one, instead of shipping whichever the first
+/// attempt happened to be. Each candidate is a full, independently generated
+/// `generate_one_map_spec` run — not a retry sharing context with the others
+/// — so they genuinely differ in layout, not just wording, and each already
+/// went through its own validate/retry/prune pipeline before judging ever
+/// sees it. That means judging is purely about layout QUALITY (is the room
+/// interesting, does it use its own fiction, is the encounter's defining
+/// feature actually drawn) — mechanical soundness is already guaranteed
+/// going in, on every candidate.
+///
+/// The first candidate's failure propagates outward, same contract as
+/// `generate_one_map_spec` itself (a provider outage should be reported, not
+/// hidden). A later candidate failing just means judging runs on however many
+/// did succeed; with only one candidate there's nothing to judge, so it ships
+/// directly and costs nothing extra.
+fn generate_map_spec(prompt: &str) -> Result<String, String> {
+    let use_local = crate::local_llm::is_local_ingestion();
+    let candidate_count = if use_local { MAP_SPEC_CANDIDATE_COUNT_LOCAL } else { MAP_SPEC_CANDIDATE_COUNT_CLAUDE };
+    let max_retries = if use_local { MAP_SPEC_MAX_RETRIES_LOCAL } else { MAP_SPEC_MAX_RETRIES_CLAUDE };
+
+    // Each candidate is an independent LLM call (no shared state) — running
+    // them on their own threads instead of one after another is what cut
+    // "Plan Next Session" from minutes to seconds per encounter.
+    let results: Vec<Result<String, String>> = std::thread::scope(|s| {
+        (0..candidate_count)
+            .map(|_| s.spawn(move || generate_one_map_spec(prompt, max_retries)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect()
+    });
+
+    let mut results = results.into_iter();
+    let mut candidates = vec![results.next().unwrap()?];
+    for (n, r) in results.enumerate() {
+        match r {
+            Ok(spec) => candidates.push(spec),
+            Err(e) => eprintln!("[battle-map] candidate {} failed to generate at all: {e}", n + 2),
+        }
+    }
+    eprintln!("[battle-map] {} of {candidate_count} candidate(s) generated", candidates.len());
+    Ok(match candidates.len() {
+        1 => {
+            eprintln!("[battle-map] only one candidate — shipping it directly, no judging");
+            candidates.pop().unwrap()
+        }
+        _ => judge_best_map_spec(&candidates),
+    })
+}
+
+/// The prompt asking the model to compare several already-valid candidates
+/// for the same encounter and pick one. Restates the same layout-quality
+/// rubric `battle_map_format_instructions` already asks for at generation
+/// time — judging and generating should agree on what "good" means — rather
+/// than introducing a second, different standard. Pure.
+fn build_map_judge_prompt(candidates: &[String]) -> String {
+    let mut out = String::from(
+        "You drew the same battle-map encounter several different ways below. Pick the ONE that is the best fit to \
+         actually run at the table. Judge by: does it lay out like a real place rather than a spreadsheet (varied \
+         object sizes, no mirrored halves, something in the middle, not everything hugging the walls); does its own \
+         defining feature (the bar, the altar, the forge — whatever this encounter is actually about) genuinely \
+         stand out; and is it tactically interesting (real cover, choke points, a reason to move rather than just \
+         stand and trade blows). Every candidate below is already mechanically sound — judge on layout quality \
+         alone, not on which one has fewer mistakes.\n\n",
+    );
+    for (i, c) in candidates.iter().enumerate() {
+        out.push_str(&format!("=== Candidate {} ===\n{}\n\n", i + 1, c.trim()));
+    }
+    out.push_str(&format!(
+        "Write one short paragraph comparing them, then on its own final line write EXACTLY one of: {}.\n",
+        (1..=candidates.len()).map(|n| format!("\"Best: {n}\"")).collect::<Vec<_>>().join(", ")
+    ));
+    out
+}
+
+/// The candidate number the model's judging reply picked, zero-indexed — or
+/// `None` if no `Best: N` line is found or `N` is out of range. Looks for the
+/// LAST "best:" occurrence (case-insensitive) so restating the rubric earlier
+/// in the reply can't be mistaken for the actual verdict. Pure.
+fn parse_judge_choice(reply: &str, candidate_count: usize) -> Option<usize> {
+    let lower = reply.to_lowercase();
+    let idx = lower.rfind("best:")?;
+    let digit = lower[idx + "best:".len()..].trim_start().chars().next()?;
+    let choice = digit.to_digit(10)? as usize;
+    (1..=candidate_count).contains(&choice).then_some(choice - 1)
+}
+
+/// Asks the model to pick the best of several candidate map specs for the
+/// same encounter. Never fails outward — a provider error, an empty reply, or
+/// an answer that doesn't parse all fall back to the first candidate, so a
+/// judging hiccup never loses an otherwise perfectly good map.
+fn judge_best_map_spec(candidates: &[String]) -> String {
+    let Ok(reply) = crate::local_llm::ask_ingest_once(build_map_judge_prompt(candidates), Some("sonnet"), false)
+    else {
+        eprintln!("[battle-map] judge call failed outright; falling back to candidate 1");
+        return candidates[0].clone();
+    };
+    eprintln!("[battle-map] judge reply:\n--- raw ---\n{reply}\n--- end ---");
+    match parse_judge_choice(&reply, candidates.len()) {
+        Some(i) => {
+            eprintln!("[battle-map] judge picked candidate {}", i + 1);
+            candidates[i].clone()
+        }
+        None => {
+            eprintln!("[battle-map] judge reply had no parseable \"Best: N\" line; falling back to candidate 1");
+            candidates[0].clone()
+        }
     }
 }
 
@@ -2791,7 +3362,14 @@ fn write_map_spec_with_slug_at(root: &Path, id: &str, slug: &str, spec: &str) ->
 /// On-demand single-map generation ("describe one encounter" in the merged
 /// dialog) — reads live plan/chapter/memory context itself since it's a
 /// standalone ad-hoc request, not tied to the cached session plan.
-fn generate_battle_maps_at(root: &Path, id: &str, hint: &str) -> Result<Vec<BattleMapMeta>, String> {
+/// The campaign-arc/chapter/memory context every battle-map generation call
+/// needs: the campaign lore + active module's arc plan, the current
+/// chapter's text, and recent memory + flagged facts, combined the same way
+/// every caller wants them. Was duplicated across the on-demand path and the
+/// plan-driven batch path before this; a third near-identical copy for a
+/// single map's scoped regenerate was the last straw. Returns (combined_plan,
+/// current_chapter, combined_memory).
+fn battle_map_context_at(root: &Path, id: &str) -> (String, String, String) {
     let dir = root.join(id);
     let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
     let current_chapter = read_optional(&dir.join("active_module").join("current.md"));
@@ -2800,11 +3378,16 @@ fn generate_battle_maps_at(root: &Path, id: &str, hint: &str) -> Result<Vec<Batt
     let memory = read_optional(&dir.join("memory").join("MEMORY.md"));
     let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
     let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
+    (combined_plan, current_chapter, combined_memory)
+}
 
-    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint);
-    // The prompt asks for exactly ONE map, and this path validates + retries
-    // it (see generate_one_map_spec) rather than trusting the first reply.
-    let spec = generate_one_map_spec(&prompt)?;
+fn generate_battle_maps_at(root: &Path, id: &str, hint: &str, objects_enabled: bool) -> Result<Vec<BattleMapMeta>, String> {
+    let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint, objects_enabled);
+    // The prompt asks for exactly ONE map. generate_map_spec generates 3
+    // independent, individually-validated candidates and has the model judge
+    // between them rather than trusting whichever the first attempt was.
+    let spec = generate_map_spec(&prompt)?;
     write_map_spec_at(root, id, &spec)?;
     // Rebuild over ALL maps (new + pre-existing) so the UI reflects the whole
     // current set, not just this batch.
@@ -2815,12 +3398,25 @@ fn plan_manifest_path(root: &Path, id: &str) -> PathBuf {
     battle_maps_dir(root, id).join("plan_manifest.json")
 }
 
-/// Slugs of the maps the CURRENT session plan owns — written by
+/// One map the CURRENT session plan owns, plus the encounter that produced
+/// it — kept alongside the slug specifically so a single map can be
+/// regenerated later using the SAME encounter context the plan originally
+/// gave it, rather than either re-guessing from the map's own title or
+/// (the bug this was added to fix) having no scoped regenerate at all and
+/// silently regenerating the whole plan instead.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct PlanMapEntry {
+    slug: String,
+    name: String,
+    description: String,
+}
+
+/// The maps the CURRENT session plan owns, written by
 /// generate_battle_maps_for_plan_at, consulted so a regenerate replaces
 /// exactly this set (never touching hand-crafted or on-demand/hint maps,
 /// which are never listed here) and so a cache hit can list "the plan's
 /// maps" without re-deriving anything.
-fn read_plan_manifest_at(root: &Path, id: &str) -> Vec<String> {
+fn read_plan_manifest_at(root: &Path, id: &str) -> Vec<PlanMapEntry> {
     let content = read_optional(&plan_manifest_path(root, id));
     if content.trim().is_empty() {
         return Vec::new();
@@ -2828,8 +3424,8 @@ fn read_plan_manifest_at(root: &Path, id: &str) -> Vec<String> {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-fn write_plan_manifest_at(root: &Path, id: &str, slugs: &[String]) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(slugs).map_err(|e| e.to_string())?;
+fn write_plan_manifest_at(root: &Path, id: &str, entries: &[PlanMapEntry]) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
     write_atomic(&plan_manifest_path(root, id), &json)
 }
 
@@ -2841,12 +3437,31 @@ fn current_plan_owned_maps_at(root: &Path, id: &str) -> Vec<BattleMapMeta> {
     let dir = battle_maps_dir(root, id);
     read_plan_manifest_at(root, id)
         .into_iter()
-        .filter_map(|slug| {
-            let spec = fs::read_to_string(dir.join(format!("{slug}.md"))).ok()?;
-            Some(BattleMapMeta { name: map_title(&spec), summary: map_summary(&spec), slug })
+        .filter_map(|entry| {
+            let spec = fs::read_to_string(dir.join(format!("{}.md", entry.slug))).ok()?;
+            Some(BattleMapMeta { name: map_title(&spec), summary: map_summary(&spec), slug: entry.slug })
         })
         .collect()
 }
+
+/// Reports one step of a long-running, multi-call operation — `phase` names
+/// which stage (e.g. "maps", "extracting"), `done`/`total` count within it.
+/// A closure rather than an `AppHandle` threaded into these `_at` functions:
+/// every `_at` function in this file is deliberately Tauri-free (the command
+/// layer resolves anything AppHandle-derived and passes plain data down),
+/// which is exactly why they're all directly unit-testable with a `Scratch`
+/// tempdir and no Tauri runtime. Passing `&no_progress` preserves that in
+/// tests; the real command layer passes a closure that calls `app.emit`
+/// (mirrors tts.rs's install_f5_runtime, which does the same with its own
+/// "f5-install-progress" event). Must be `Sync` — generate_battle_maps_for_plan_at
+/// calls it from multiple `std::thread::scope` threads at once.
+type ProgressFn<'a> = &'a (dyn Fn(&str, usize, usize) + Sync);
+
+/// The default "nobody's listening" progress callback — every direct unit
+/// test of an `_at` function that takes a `ProgressFn` passes `&no_progress`.
+/// Test-only: the real command layer always builds a real emit closure.
+#[cfg(test)]
+fn no_progress(_phase: &str, _done: usize, _total: usize) {}
 
 /// The deterministic batch path: exactly one map per combat encounter,
 /// stably keyed to that encounter's name (see force_map_title), replacing
@@ -2855,10 +3470,11 @@ fn current_plan_owned_maps_at(root: &Path, id: &str) -> Vec<BattleMapMeta> {
 /// list in, the same slugs out, every time, so a regenerate overwrites
 /// instead of accumulating or drifting.
 ///
-/// One Claude/local-LLM call PER encounter (reusing build_battle_maps_prompt,
-/// the same single-map prompt the on-demand "describe one encounter" path
-/// already uses reliably) — NOT one combined call asking for every map at
-/// once. An early version asked for all of them in a single reply and
+/// A handful of Claude/local-LLM calls PER encounter — reusing
+/// build_battle_maps_prompt, the same single-map prompt the on-demand
+/// "describe one encounter" path already uses reliably, fed through
+/// generate_map_spec's generate-3-and-judge — NOT one combined call asking
+/// for every map at once. An early version asked for all of them in a single reply and
 /// silently truncated to however many the model actually completed (long
 /// multi-map ASCII-grid replies reliably drop or malform later maps, or
 /// forget the delimiter between them), which is exactly what made "only 1
@@ -2873,10 +3489,12 @@ fn generate_battle_maps_for_plan_at(
     current_chapter: &str,
     memory: &str,
     encounters: &[PlanEncounter],
+    objects_enabled: bool,
+    on_progress: ProgressFn,
 ) -> Result<(Vec<BattleMapMeta>, Vec<String>), String> {
     let dir = battle_maps_dir(root, id);
-    for old_slug in read_plan_manifest_at(root, id) {
-        let _ = fs::remove_file(dir.join(format!("{old_slug}.md")));
+    for old_entry in read_plan_manifest_at(root, id) {
+        let _ = fs::remove_file(dir.join(format!("{}.md", old_entry.slug)));
     }
 
     if encounters.is_empty() {
@@ -2885,13 +3503,45 @@ fn generate_battle_maps_for_plan_at(
         return Ok((Vec::new(), Vec::new()));
     }
 
-    let mut new_slugs = Vec::new();
+    // Every encounter's map is an independent LLM job — generate them all at
+    // once instead of one after another (this, plus the same fix inside
+    // generate_map_spec's own candidates, is what took "Plan Next Session"
+    // from ~N minutes to ~1 candidate-round's worth of wall time). The actual
+    // file writes below stay sequential since they're cheap and touch shared
+    // manifest state.
+    //
+    // `done_count` is shared across the spawned threads so on_progress fires
+    // in REAL completion order — whichever encounter's map actually finishes
+    // first reports first — not the order the handles are collected in below
+    // (`.map(|h| h.join().unwrap())` blocks on handle 0 before handle 1 even
+    // if handle 1 finished first, so that order alone would misreport pacing).
+    let total = encounters.len();
+    let done_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let specs: Vec<Result<String, String>> = std::thread::scope(|s| {
+        encounters
+            .iter()
+            .map(|encounter| {
+                let hint = format!("{} — {}", encounter.name, encounter.description);
+                let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint, objects_enabled);
+                let done_count = done_count.clone();
+                s.spawn(move || {
+                    let result = generate_map_spec(&prompt);
+                    let done = done_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    on_progress("maps", done, total);
+                    result
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect()
+    });
+
+    let mut new_entries = Vec::new();
     let mut metas = Vec::new();
     let mut failed = Vec::new();
-    for encounter in encounters {
-        let hint = format!("{} — {}", encounter.name, encounter.description);
-        let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint);
-        let Ok(spec) = generate_one_map_spec(&prompt) else {
+    for (encounter, spec_result) in encounters.iter().zip(specs.into_iter()) {
+        let Ok(spec) = spec_result else {
             failed.push(encounter.name.clone());
             continue;
         };
@@ -2899,9 +3549,9 @@ fn generate_battle_maps_for_plan_at(
         let titled = force_map_title(&spec, &encounter.name);
         write_map_spec_with_slug_at(root, id, &slug, &titled)?;
         metas.push(BattleMapMeta { slug: slug.clone(), name: encounter.name.clone(), summary: map_summary(&titled) });
-        new_slugs.push(slug);
+        new_entries.push(PlanMapEntry { slug, name: encounter.name.clone(), description: encounter.description.clone() });
     }
-    write_plan_manifest_at(root, id, &new_slugs)?;
+    write_plan_manifest_at(root, id, &new_entries)?;
     rebuild_battle_maps_index_at(root, id)?;
     Ok((metas, failed))
 }
@@ -2917,6 +3567,18 @@ pub struct SessionPlanResult {
     pub failed_maps: Vec<String>,
 }
 
+/// Payload for the `"plan-progress"` event — `phase` is `"plan"` (the single
+/// session-plan-text call, `done`/`total` always 0/1 since there's nothing to
+/// increment mid-call) or `"maps"` (`done` of `total` combat-encounter maps
+/// generated so far, ticking up in real completion order — see
+/// generate_battle_maps_for_plan_at). Mirrors tts.rs's F5InstallProgress.
+#[derive(Clone, serde::Serialize)]
+struct PlanProgress {
+    phase: String,
+    done: usize,
+    total: usize,
+}
+
 /// Orchestrates "Plan Next Session" end to end — the single entry point both
 /// the cache-aware `suggest_session_plan` command and the always-fresh
 /// `regenerate_session_plan` command call. `force = false` and a cache hit
@@ -2925,14 +3587,17 @@ pub struct SessionPlanResult {
 /// derived from THIS SAME plan rather than independently re-guessed — asks
 /// Claude once per combat encounter (see generate_battle_maps_for_plan_at)
 /// for exactly the maps that plan calls for.
-fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool) -> Result<SessionPlanResult, String> {
+fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool, objects_enabled: bool, on_progress: ProgressFn) -> Result<SessionPlanResult, String> {
     if !force {
         if let Some(cached) = read_session_plan_at(root, id) {
             return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id), failed_maps: Vec::new() });
         }
     }
 
+    on_progress("plan", 0, 1);
+    let t0 = std::time::Instant::now();
     let plan_text = suggest_session_plan_at(root, id, terrain_catalog)?;
+    eprintln!("[plan-timing] plan text: {:.1}s, {} chars", t0.elapsed().as_secs_f64(), plan_text.len());
     write_session_plan_at(root, id, &plan_text)?;
 
     // Battle maps only make sense in Grid mode. Theater has no grid/minis at
@@ -2950,17 +3615,41 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
         parse_plan_encounters(&plan_text).into_iter().filter(|e| e.combat).collect()
     };
 
-    let dir = root.join(id);
-    let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
-    let current_chapter = read_optional(&dir.join("active_module").join("current.md"));
-    let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
-    let combined_plan = [campaign_lore.trim(), module_plan.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
-    let memory = read_optional(&dir.join("memory").join("MEMORY.md"));
-    let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
-    let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
-
-    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters)?;
+    let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
+    eprintln!("[plan-timing] {} combat encounter(s) need maps", encounters.len());
+    if !encounters.is_empty() {
+        on_progress("maps", 0, encounters.len());
+    }
+    let t1 = std::time::Instant::now();
+    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters, objects_enabled, on_progress)?;
+    eprintln!("[plan-timing] all maps: {:.1}s total", t1.elapsed().as_secs_f64());
     Ok(SessionPlanResult { plan_text, maps, failed_maps })
+}
+
+/// Regenerates exactly ONE map the session plan owns, using the same
+/// encounter name/description the plan originally gave it (see
+/// PlanMapEntry) — never the whole plan. This is what the per-card
+/// "Regenerate" button in the UI calls; it exists because the ONLY
+/// regenerate action used to be the plan-level one (regenerate_session_plan),
+/// which silently redid every encounter's map, not just the one the DM was
+/// looking at (confirmed live: a DM clicking what looked like "redo this
+/// map" was actually burning a full plan regeneration's worth of calls every
+/// time). Errors if `slug` isn't one of the plan's own maps — an ad-hoc or
+/// hand-crafted map has no encounter context to regenerate from.
+fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled: bool) -> Result<BattleMapMeta, String> {
+    let entry = read_plan_manifest_at(root, id)
+        .into_iter()
+        .find(|e| e.slug == slug)
+        .ok_or_else(|| format!("\"{slug}\" isn't one of the current plan's maps, so it can't be regenerated this way."))?;
+
+    let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
+    let hint = format!("{} — {}", entry.name, entry.description);
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, &hint, objects_enabled);
+    let spec = generate_map_spec(&prompt)?;
+    let titled = force_map_title(&spec, &entry.name);
+    write_map_spec_with_slug_at(root, id, &entry.slug, &titled)?;
+    rebuild_battle_maps_index_at(root, id)?;
+    Ok(BattleMapMeta { slug: entry.slug, name: entry.name, summary: map_summary(&titled) })
 }
 
 fn read_battle_map_at(root: &Path, id: &str, slug: &str) -> Result<String, String> {
@@ -2997,11 +3686,26 @@ fn sync_battle_maps_index_at(root: &Path, id: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn generate_battle_map(app: AppHandle, id: String, hint: String) -> Result<Vec<BattleMapMeta>, String> {
     tokio::task::spawn_blocking(move || {
+        let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let root = campaigns_root(&app)?;
-        generate_battle_maps_at(&root, &id, &hint)
+        generate_battle_maps_at(&root, &id, &hint, objects_enabled)
     })
     .await
     .map_err(|e| format!("Battle map generation task failed: {e}"))?
+}
+
+/// Regenerates exactly one of the CURRENT plan's maps — see
+/// regenerate_one_plan_map_at's doc comment for why this exists as its own
+/// command instead of DMs having only the whole-plan regenerate to reach for.
+#[tauri::command]
+pub async fn regenerate_one_plan_map(app: AppHandle, id: String, slug: String) -> Result<BattleMapMeta, String> {
+    tokio::task::spawn_blocking(move || {
+        let objects_enabled = crate::tile_library::tile_library_configured(&app);
+        let root = campaigns_root(&app)?;
+        regenerate_one_plan_map_at(&root, &id, &slug, objects_enabled)
+    })
+    .await
+    .map_err(|e| format!("Battle map regeneration task failed: {e}"))?
 }
 
 /// List a campaign's saved maps (also refreshes index.md as a side effect —
@@ -3621,11 +4325,21 @@ fn get_module_chapters_at(root: &Path, id: &str, module_id: &str) -> Result<(Vec
 /// wrapping it) touches the network/subprocess — split_by_headings/
 /// split_into_chunks/write_chapters_to_disk above are pure and covered by
 /// real tests instead.
-fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Result<ChapterizeImportResult, String> {
+/// Total chunk count across every chapter — gives the "extracting" progress
+/// phase a real "chunk N of M" total up front (see
+/// chapterize_and_import_module_at). Pure/cheap (split_into_chunks does no
+/// I/O), unit-tested directly since the orchestrating function itself needs
+/// a live `claude` to exercise (see the #[ignore]d end-to-end test).
+fn total_extraction_chunks(chapters: &[(String, String, String)]) -> usize {
+    chapters.iter().map(|(_, _, body)| split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS).len()).sum()
+}
+
+fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_progress: ProgressFn) -> Result<ChapterizeImportResult, String> {
     let dir = root.join(id);
     let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
     let other_modules_summary = read_optional(&dir.join("modules_index.md"));
 
+    on_progress("chapterizing", 0, 0);
     let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(raw_text), Some("opus"), true)?;
     let parsed = parse_chapterize_reply(&reply)?;
     let chapters = split_by_headings(raw_text, &parsed.chapters);
@@ -3641,16 +4355,27 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str) -> Res
         concerns.push(note);
     }
 
+    // Total chunk count is fully knowable now (chapters are fixed, chunking is
+    // pure/deterministic) — precompute it so "extracting" reports a real
+    // "chunk N of M" instead of an unbounded counter.
+    let total_chunks = total_extraction_chunks(&chapters);
+    let mut chunks_done = 0usize;
+    on_progress("extracting", 0, total_chunks);
+
     let mut extracts: Vec<(String, String)> = Vec::with_capacity(chapters.len());
     for (title, _, body) in &chapters {
         let mut chunk_extracts = Vec::new();
         for chunk in split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS) {
             chunk_extracts.push(crate::local_llm::ask_ingest_once(build_chapter_extraction_prompt(&module_title, title, &chunk), Some("opus"), false)?);
+            chunks_done += 1;
+            on_progress("extracting", chunks_done, total_chunks);
         }
         extracts.push((title.clone(), chunk_extracts.join("\n\n")));
     }
 
+    on_progress("synthesizing", 0, 0);
     let draft_plan = crate::local_llm::ask_ingest_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"), false)?;
+    on_progress("critiquing", 0, 0);
     let plan = crate::local_llm::ask_ingest_once(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
@@ -4104,9 +4829,14 @@ pub fn read_cached_session_plan(app: AppHandle, id: String) -> Result<Option<Ses
 #[tauri::command]
 pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionPlanResult, String> {
     tokio::task::spawn_blocking(move || {
+        let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
-        plan_next_session_at(&root, &id, &terrain_catalog, false)
+        let app_emit = app.clone();
+        let on_progress = move |phase: &str, done: usize, total: usize| {
+            let _ = app_emit.emit("plan-progress", PlanProgress { phase: phase.to_string(), done, total });
+        };
+        plan_next_session_at(&root, &id, &terrain_catalog, false, objects_enabled, &on_progress)
     })
     .await
     .map_err(|e| format!("Session-plan task failed: {e}"))?
@@ -4118,9 +4848,14 @@ pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionP
 #[tauri::command]
 pub async fn regenerate_session_plan(app: AppHandle, id: String) -> Result<SessionPlanResult, String> {
     tokio::task::spawn_blocking(move || {
+        let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
-        plan_next_session_at(&root, &id, &terrain_catalog, true)
+        let app_emit = app.clone();
+        let on_progress = move |phase: &str, done: usize, total: usize| {
+            let _ = app_emit.emit("plan-progress", PlanProgress { phase: phase.to_string(), done, total });
+        };
+        plan_next_session_at(&root, &id, &terrain_catalog, true, objects_enabled, &on_progress)
     })
     .await
     .map_err(|e| format!("Session-plan task failed: {e}"))?
@@ -4193,7 +4928,11 @@ pub fn extract_module_text(path: String) -> Result<ExtractedModuleText, String> 
 pub async fn chapterize_and_import_module(app: AppHandle, id: String, text: String) -> Result<ChapterizeImportResult, String> {
     tokio::task::spawn_blocking(move || {
         let root = campaigns_root(&app)?;
-        chapterize_and_import_module_at(&root, &id, &text)
+        let app_emit = app.clone();
+        let on_progress = move |phase: &str, done: usize, total: usize| {
+            let _ = app_emit.emit("ingest-progress", IngestProgress { phase: phase.to_string(), done, total });
+        };
+        chapterize_and_import_module_at(&root, &id, &text, &on_progress)
     })
     .await
     .map_err(|e| format!("Chapterize task failed: {e}"))?
@@ -4513,6 +5252,189 @@ mod tests {
         assert_eq!(validate_map_spec(spec), Vec::<String>::new());
     }
 
+    /// `=` is the only legend code for furniture. A Features line that says
+    /// "Stool" but points at `^` (rubble) is drawing the wrong CHARACTER, not
+    /// just the wrong cell — this is the semantic check on top of the
+    /// existing "does this cell hold any object at all" one.
+    #[test]
+    fn validate_map_spec_flags_a_furniture_word_pointed_at_the_wrong_kind_of_object() {
+        let spec = "# Rubble Test\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  ^ rubble\nMap:\n##########\n#........#\n#..^.....#\n#........#\n#........#\n#........#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Stool at D3\nTactics:\n- x";
+        let all = validate_map_spec(spec).join("\n");
+        assert!(all.contains("is furniture"), "{all}");
+        assert!(all.contains("draw it with the `=` legend code, not `^`"), "{all}");
+    }
+
+    #[test]
+    fn parse_object_line_reads_label_cell_and_footprint() {
+        assert_eq!(
+            parse_object_line("Round wooden dining table at D4 (2x2)"),
+            Some(("Round wooden dining table".to_string(), 3, 3, 2, 2))
+        );
+        // Case-insensitive "at" and the "x" in the size suffix.
+        assert_eq!(parse_object_line("Campfire AT C7 (1X1)"), Some(("Campfire".to_string(), 2, 6, 1, 1)));
+    }
+
+    #[test]
+    fn parse_object_line_rejects_a_line_with_no_footprint_or_no_cell() {
+        assert_eq!(parse_object_line("A table"), None);
+        assert_eq!(parse_object_line("A table at D4"), None, "missing the (WxH) suffix");
+        assert_eq!(parse_object_line("A table (2x2)"), None, "missing \" at \"");
+    }
+
+    #[test]
+    fn validate_map_spec_passes_a_sound_map_with_objects() {
+        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\n- Door at E1\n- Table at G6\nObjects:\n- Small campfire at C7 (1x1)\n- Round rug at F8 (2x2)\nTactics:\n- x";
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new());
+    }
+
+    #[test]
+    fn validate_map_spec_flags_every_kind_of_bad_objects_line() {
+        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\nObjects:\n- Wall torch at A1 (1x1)\n- Floating debris at Z9 (1x1)\n- Giant boulder at C7 (5x5)\n- a garbled line with no cell or size\nTactics:\n- x";
+        let all = validate_map_spec(spec).join("\n");
+        assert!(all.contains("Wall torch") && all.contains("`#` wall"), "{all}");
+        assert!(all.contains("Floating debris") && all.contains("outside the"), "{all}");
+        assert!(all.contains("Giant boulder") && all.contains("must both be whole numbers from 1 to 4"), "{all}");
+        assert!(all.contains("doesn't parse"), "{all}");
+    }
+
+    /// The real spec the generator shipped for "Bar Fight" (test-campaign,
+    /// 2026-07-17 live run): every Features line — the bar counter, the
+    /// pillars, the tables, the stools, both doors — points at either the
+    /// wrong row or a cell that never held the code the label claims. This
+    /// is what taught the model to draw the room's furniture two rows off
+    /// from where its own Features text described it.
+    const BAR_FIGHT_SPEC: &str = "# Bar Fight\nGrid: 16x14, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\nLegend: . floor  # wall  + door  ~ water  o pillar  ^ difficult terrain (rubble)  = furniture/altar  T tree/foliage  _ stairs  * hazard (fire/brazier)  (space) = empty/void outside the map\nMap:\n################\n#..............#\n#=.===.===.===.#\n#..............#\n#....=....=....#\n#....==....==..+\n#....==....==..#\n#....^^....^^..#\n#....=....=....#\n#....==....==..#\n#....==....==..#\n#....^^....^^..#\n#....=....=....#\n#####+##########\nFeatures:\n- Bar counter at B2-K2 (the barkeep works the open floor at row 1 behind it)\n- Pillars at B5, D5, F5, H5, J5, L5, N5, P5\n- Tables at B7-C8, E7-F8, H7-I8, K7-L8, N7-O8\n- Stools at B10, D10, F10, H10, J10, L10, N10, P10\n- Broken bottles at G11-H11\n- Side door at A13\n- Main entrance at R13\nTactics:\n- x";
+
+    #[test]
+    fn prune_invalid_features_drops_every_line_the_model_never_actually_fixed() {
+        let pruned = prune_invalid_features(BAR_FIGHT_SPEC);
+        assert!(split_spec_grid(&pruned).is_some(), "pruning must not corrupt the grid: {pruned}");
+        assert!(!pruned.contains("Bar counter at"), "{pruned}");
+        assert!(!pruned.contains("Pillars at"), "{pruned}");
+        assert!(!pruned.contains("Tables at"), "{pruned}");
+        assert!(!pruned.contains("Stools at"), "{pruned}");
+        assert!(!pruned.contains("Broken bottles at"), "{pruned}");
+        assert!(!pruned.contains("Side door at"), "{pruned}");
+        assert!(!pruned.contains("Main entrance at"), "{pruned}");
+        // The Features header itself, the Map block, and Tactics survive —
+        // pruning only removes bullets that fail validation, not sections.
+        assert!(pruned.contains("Features:\n"), "{pruned}");
+        assert!(pruned.contains("#=.===.===.===.#"), "{pruned}");
+        assert!(pruned.contains("Tactics:\n- x"), "{pruned}");
+    }
+
+    #[test]
+    fn prune_invalid_features_keeps_a_line_that_actually_checks_out() {
+        let spec = "# Mixed\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  ^ rubble  = furniture\nMap:\n##########\n#........#\n#..^.....#\n#........#\n#........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Stool at D3\n- Table at G6\nTactics:\n- x";
+        let pruned = prune_invalid_features(spec);
+        // "Stool at D3" is wrong (D3 is rubble) and gets dropped.
+        assert!(!pruned.contains("Stool at"), "{pruned}");
+        // "Table at G6" is correct (G6 really is `=`) and survives untouched.
+        assert!(pruned.contains("Table at G6"), "{pruned}");
+    }
+
+    /// The exact live bug (test-campaign "Watch Intervention", 2026-07-17):
+    /// the FIRST attempt copied the worked example verbatim — 1 issue, just
+    /// the copy flag itself — and every retry that followed had MORE issues
+    /// than that (a genuine attempt starts from nothing and racks up real
+    /// mistakes), so nothing could ever beat it and the literal reference map
+    /// shipped under a new title. A copy must never be eligible at all,
+    /// whatever its own issue count, including on the very first attempt.
+    #[test]
+    fn fold_best_real_map_attempt_never_lets_a_copy_win_even_as_the_first_attempt() {
+        let mut best = fold_best_real_map_attempt(None, "copied verbatim".into(), 1, true);
+        assert_eq!(best, None, "a copy must never become best, even starting from nothing");
+        // A genuine retry with WORSE issue count than the copy still wins —
+        // any real attempt beats a copy outright.
+        best = fold_best_real_map_attempt(best, "a real, imperfect room".into(), 9, false);
+        assert_eq!(best, Some(("a real, imperfect room".to_string(), 9)));
+        // A second copy can't unseat the real attempt already in hand.
+        best = fold_best_real_map_attempt(best, "copied again".into(), 0, true);
+        assert_eq!(best, Some(("a real, imperfect room".to_string(), 9)));
+    }
+
+    #[test]
+    fn fold_best_real_map_attempt_prefers_fewer_issues_between_two_genuine_attempts() {
+        let best = fold_best_real_map_attempt(None, "first try".into(), 5, false);
+        // Worse doesn't replace better...
+        let same = fold_best_real_map_attempt(best.clone(), "worse retry".into(), 8, false);
+        assert_eq!(same, best);
+        // ...but strictly better does.
+        let improved = fold_best_real_map_attempt(best, "better retry".into(), 2, false);
+        assert_eq!(improved, Some(("better retry".to_string(), 2)));
+    }
+
+    #[test]
+    fn fold_best_real_map_attempt_returns_none_when_every_attempt_copies() {
+        let mut best = fold_best_real_map_attempt(None, "copy 1".into(), 1, true);
+        best = fold_best_real_map_attempt(best, "copy 2".into(), 1, true);
+        // generate_one_map_spec falls back to the first attempt as a last
+        // resort in this case — None here is what triggers that fallback.
+        assert_eq!(best, None);
+    }
+
+    /// Pins the discriminator against validate_map_spec's REAL output on a
+    /// spec with both kinds of problem, so a wording change to either
+    /// function that breaks the classification fails a test instead of
+    /// silently routing a structurally-broken grid into the narrow
+    /// "just fix the labels" retry.
+    #[test]
+    fn all_features_only_issues_distinguishes_grid_problems_from_features_problems() {
+        // Ragged rows (grid problem) AND a Features line pointing at floor —
+        // BROKEN_BARROOM_SPEC has both.
+        let mixed = validate_map_spec(BROKEN_BARROOM_SPEC);
+        assert!(!mixed.is_empty());
+        assert!(!all_features_only_issues(&mixed), "{mixed:?}");
+
+        // A sound grid with ONLY a bad Features line — nothing structurally
+        // wrong with the Map: block itself.
+        let features_only_spec = "# X\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  = furniture\nMap:\n##########\n#........#\n#........#\n#........#\n#........#\n#....=...#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Bar at B2\nTactics:\n- x";
+        let features_only = validate_map_spec(features_only_spec);
+        assert!(!features_only.is_empty());
+        assert!(all_features_only_issues(&features_only), "{features_only:?}");
+
+        // No issues at all is a different stopping condition, not this one.
+        assert!(!all_features_only_issues(&[]));
+    }
+
+    #[test]
+    fn build_map_judge_prompt_shows_every_candidate_and_asks_for_a_numbered_verdict() {
+        let candidates = vec!["# Room One\nMap:\n#..#".to_string(), "# Room Two\nMap:\n#..#".to_string(), "# Room Three\nMap:\n#..#".to_string()];
+        let prompt = build_map_judge_prompt(&candidates);
+        assert!(prompt.contains("Room One"), "{prompt}");
+        assert!(prompt.contains("Room Two"), "{prompt}");
+        assert!(prompt.contains("Room Three"), "{prompt}");
+        assert!(prompt.contains("=== Candidate 1 ==="), "{prompt}");
+        assert!(prompt.contains("=== Candidate 3 ==="), "{prompt}");
+        // The exact output contract parse_judge_choice depends on.
+        assert!(prompt.contains("\"Best: 1\""), "{prompt}");
+        assert!(prompt.contains("\"Best: 3\""), "{prompt}");
+    }
+
+    #[test]
+    fn parse_judge_choice_reads_a_bare_verdict_line() {
+        assert_eq!(parse_judge_choice("Room 2 has the strongest layout.\n\nBest: 2", 3), Some(1));
+    }
+
+    #[test]
+    fn parse_judge_choice_is_case_insensitive_and_ignores_trailing_punctuation() {
+        assert_eq!(parse_judge_choice("best: 3.", 3), Some(2));
+    }
+
+    #[test]
+    fn parse_judge_choice_uses_the_last_occurrence_so_a_restated_rubric_cant_be_mistaken_for_the_verdict() {
+        // A reply that echoes "judge them, pick the Best: option" earlier and
+        // gives its real verdict at the end must read the real verdict.
+        let reply = "The rubric says to pick the Best: candidate by layout quality.\n\nBest: 1";
+        assert_eq!(parse_judge_choice(reply, 3), Some(0));
+    }
+
+    #[test]
+    fn parse_judge_choice_rejects_an_out_of_range_or_missing_verdict() {
+        assert_eq!(parse_judge_choice("Best: 5", 3), None);
+        assert_eq!(parse_judge_choice("I like the second one best.", 3), None);
+    }
+
     #[test]
     fn normalize_map_spec_squares_ragged_rows_and_rewrites_the_grid_header() {
         let out = normalize_map_spec(BROKEN_BARROOM_SPEC);
@@ -4522,8 +5444,13 @@ mod tests {
         // whole map gaining a 2-cell void stripe down the side of the print.
         assert!(rows.iter().all(|r| r.chars().count() == 14), "{rows:?}");
         assert_eq!(rows[0], "##############");
-        // The room itself survives the snap intact.
-        assert_eq!(rows[2], "#.+.........+#");
+        // The room itself survives the snap intact — except its four doors,
+        // which validate_map_spec's own test already established are all
+        // floating two squares inside the wall on open floor. normalize_map_spec
+        // now demotes a door that isn't actually set into a wall, so both rows
+        // that had one come out as plain floor instead.
+        assert_eq!(rows[2], "#............#");
+        assert_eq!(rows[11], "#............#");
         // ...and the header now tells the truth about the grid underneath it,
         // which is what the DM's cell coordinates are resolved against.
         assert!(out.contains("Grid: 14x13, 5 ft squares."), "{out}");
@@ -4548,6 +5475,27 @@ mod tests {
         let (_, rows, _) = split_spec_grid(&out).unwrap();
         // Junk becomes plain floor rather than reaching the renderer.
         assert_eq!(rows, vec!["#..#".to_string(), "#..#".to_string()]);
+    }
+
+    /// The real spec the generator shipped for "Bar Fight" on a later run
+    /// (test-campaign, 2026-07-17): a door two cells deep in open floor, no
+    /// `#` on any side — the retry never fixed it. normalize_map_spec must
+    /// demote it to plain floor rather than shipping a door nobody can walk
+    /// through a wall to reach.
+    #[test]
+    fn normalize_map_spec_demotes_a_door_that_isnt_set_into_a_wall() {
+        let spec = "# X\nGrid: 5x5, 5 ft squares.\nMap:\n#####\n#...#\n#.+.#\n#...#\n#####\nFeatures:\n-";
+        let out = normalize_map_spec(spec);
+        let (_, rows, _) = split_spec_grid(&out).unwrap();
+        assert_eq!(rows[2], "#...#", "the floating door should have been demoted to floor");
+    }
+
+    #[test]
+    fn normalize_map_spec_leaves_a_real_door_alone() {
+        let spec = "# X\nGrid: 5x5, 5 ft squares.\nMap:\n##+##\n#...#\n#...#\n#...#\n#####\nFeatures:\n-";
+        let out = normalize_map_spec(spec);
+        let (_, rows, _) = split_spec_grid(&out).unwrap();
+        assert_eq!(rows[0], "##+##", "a door genuinely set into a wall must survive untouched");
     }
 
     #[test]
@@ -4714,7 +5662,7 @@ mod tests {
 
     #[test]
     fn build_battle_maps_prompt_includes_content_and_hint() {
-        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush");
+        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush", false);
         assert!(one.contains("chapter goblins"));
         assert!(one.contains("a bridge ambush"));
         assert!(one.contains("ONE battle map"));
@@ -4817,9 +5765,12 @@ mod tests {
         let meta = create_campaign_at(&root.0, &intake("Cached")).unwrap();
         write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Bridge Ambush — Goblins attack.\n").unwrap();
         write_map_spec_with_slug_at(&root.0, &meta.id, "bridge-ambush", SAMPLE_MAP_SPEC).unwrap();
-        write_plan_manifest_at(&root.0, &meta.id, &["bridge-ambush".to_string()]).unwrap();
+        write_plan_manifest_at(
+            &root.0, &meta.id,
+            &[PlanMapEntry { slug: "bridge-ambush".to_string(), name: "Bridge Ambush".to_string(), description: "Goblins attack.".to_string() }],
+        ).unwrap();
 
-        let result = plan_next_session_at(&root.0, &meta.id, "", false).unwrap();
+        let result = plan_next_session_at(&root.0, &meta.id, "", false, false, &no_progress).unwrap();
         assert!(result.plan_text.contains("Bridge Ambush"));
         assert_eq!(result.maps.len(), 1);
         assert_eq!(result.maps[0].slug, "bridge-ambush");
@@ -4833,7 +5784,10 @@ mod tests {
 
         write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Bridge Ambush — Goblins attack.\n").unwrap();
         write_map_spec_with_slug_at(&root.0, &meta.id, "bridge-ambush", SAMPLE_MAP_SPEC).unwrap();
-        write_plan_manifest_at(&root.0, &meta.id, &["bridge-ambush".to_string()]).unwrap();
+        write_plan_manifest_at(
+            &root.0, &meta.id,
+            &[PlanMapEntry { slug: "bridge-ambush".to_string(), name: "Bridge Ambush".to_string(), description: "Goblins attack.".to_string() }],
+        ).unwrap();
 
         let result = read_cached_session_plan_at(&root.0, &meta.id).unwrap();
         assert!(result.plan_text.contains("Bridge Ambush"));
@@ -4846,7 +5800,13 @@ mod tests {
         let root = Scratch::new("plan-owned-missing-file");
         let meta = create_campaign_at(&root.0, &intake("X")).unwrap();
         write_map_spec_with_slug_at(&root.0, &meta.id, "still-here", SAMPLE_MAP_SPEC).unwrap();
-        write_plan_manifest_at(&root.0, &meta.id, &["still-here".to_string(), "hand-deleted".to_string()]).unwrap();
+        write_plan_manifest_at(
+            &root.0, &meta.id,
+            &[
+                PlanMapEntry { slug: "still-here".to_string(), name: "Still Here".to_string(), description: "x".to_string() },
+                PlanMapEntry { slug: "hand-deleted".to_string(), name: "Hand Deleted".to_string(), description: "x".to_string() },
+            ],
+        ).unwrap();
         let maps = current_plan_owned_maps_at(&root.0, &meta.id);
         assert_eq!(maps.len(), 1);
         assert_eq!(maps[0].slug, "still-here");
@@ -4898,14 +5858,34 @@ mod tests {
         let root = Scratch::new("plan-maps-clear-on-empty");
         let meta = create_campaign_at(&root.0, &intake("X")).unwrap();
         write_map_spec_with_slug_at(&root.0, &meta.id, "old-fight", SAMPLE_MAP_SPEC).unwrap();
-        write_plan_manifest_at(&root.0, &meta.id, &["old-fight".to_string()]).unwrap();
+        write_plan_manifest_at(
+            &root.0, &meta.id,
+            &[PlanMapEntry { slug: "old-fight".to_string(), name: "Old Fight".to_string(), description: "x".to_string() }],
+        ).unwrap();
 
-        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[]).unwrap();
+        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[], false, &no_progress).unwrap();
 
         assert!(maps.is_empty());
         assert!(failed.is_empty());
         assert!(read_plan_manifest_at(&root.0, &meta.id).is_empty());
         assert!(!battle_maps_dir(&root.0, &meta.id).join("old-fight.md").exists(), "the stale plan-owned map must be deleted");
+    }
+
+    /// The bug this whole function exists to fix: a slug that isn't one of
+    /// the plan's own maps (ad-hoc, hand-crafted, or just wrong) must be
+    /// rejected with a clear reason rather than silently doing something
+    /// unexpected — this is the one path testable without a live LLM call,
+    /// since it returns before ever building a prompt.
+    #[test]
+    fn regenerate_one_plan_map_at_rejects_a_slug_the_plan_doesnt_own() {
+        let root = Scratch::new("regenerate-one-map-rejects-unowned");
+        let meta = create_campaign_at(&root.0, &intake("X")).unwrap();
+        write_map_spec_with_slug_at(&root.0, &meta.id, "hand-crafted", SAMPLE_MAP_SPEC).unwrap();
+        // No plan_manifest.json entry for "hand-crafted" — it's not plan-owned.
+
+        let err = regenerate_one_plan_map_at(&root.0, &meta.id, "hand-crafted", false).unwrap_err();
+        assert!(err.contains("hand-crafted"), "{err}");
+        assert!(err.contains("isn't one of the current plan's maps"), "{err}");
     }
 
     #[test]
@@ -6092,6 +7072,24 @@ mod tests {
     }
 
     #[test]
+    fn total_extraction_chunks_sums_chunk_counts_across_every_chapter() {
+        // Chapter 1 fits in one chunk; chapter 2 needs a hard cut into two;
+        // chapter 3 is empty (still one "chunk" — split_into_chunks is a
+        // no-op on text that already fits, even empty text).
+        let chapters = vec![
+            ("Ch1".to_string(), "heading1".to_string(), "short".to_string()),
+            ("Ch2".to_string(), "heading2".to_string(), "a".repeat(150)),
+            ("Ch3".to_string(), "heading3".to_string(), "".to_string()),
+        ];
+        assert_eq!(split_into_chunks(&chapters[1].2, EXTRACTION_CHUNK_MAX_CHARS).len(), 1, "150 chars is well under the real 80k limit");
+        // Use a tiny max so the "needs more than one chunk" branch is actually exercised here.
+        let small_max = 60;
+        let total: usize = chapters.iter().map(|(_, _, body)| split_into_chunks(body, small_max).len()).sum();
+        assert_eq!(total, 1 + 3 + 1, "5 total chunks: 1 (short) + 3 (150 chars @ 60/chunk) + 1 (empty)");
+        assert_eq!(total_extraction_chunks(&chapters), 3, "at the REAL EXTRACTION_CHUNK_MAX_CHARS, every chapter here is one chunk");
+    }
+
+    #[test]
     fn parse_chapterize_reply_defaults_concerns_to_empty_when_absent() {
         let no_concerns = r#"{"chapters":[{"heading":"Chapter 1","summary":"Intro."}]}"#;
         let parsed = parse_chapterize_reply(no_concerns).unwrap();
@@ -6293,7 +7291,7 @@ CHAPTER 2: MILLHAVEN'S SECRET
 The party arrives in Millhaven, a small fishing town of about 200 people. The town is run by Mayor Osric Penn, who is unaware of Captain Renn's smuggling operation. The smugglers meet at the old lighthouse every new moon. Inside the lighthouse, the party finds a locked chest requiring a DC 15 Dexterity check to pick, containing 200 gold pieces and a map showing a hidden cave along the coast — the location of the campaign's next adventure.
 ";
 
-        let result = chapterize_and_import_module_at(&root.0, &meta.id, raw_text).unwrap();
+        let result = chapterize_and_import_module_at(&root.0, &meta.id, raw_text, &no_progress).unwrap();
         println!("=== RESULT ===\n{result:#?}");
         assert_eq!(result.chapters.len(), 2, "should detect exactly 2 narrative chapters, got: {:?}", result.chapters);
 
@@ -6769,7 +7767,7 @@ mod example_map_tests {
     /// them. Pin it against the real validator.
     #[test]
     fn the_prompts_worked_example_passes_our_own_validator() {
-        let instr = battle_map_format_instructions();
+        let instr = battle_map_format_instructions(false, false);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# The Bent Nail"))
@@ -6780,11 +7778,27 @@ mod example_map_tests {
         assert_eq!(normalize_map_spec(spec).trim(), spec);
     }
 
+    /// Live evidence (test-campaign "Bar Fight", two separate generations on
+    /// 2026-07-17) showed the model drawing stool clusters as `^` — the
+    /// existing "vary the size" rule taught it stools are small, but never
+    /// said small furniture is still `=`, so it reached for rubble's dotted
+    /// rendering instead. Pin that the explicit correction is actually in
+    /// the prompt the model sees.
+    #[test]
+    fn battle_map_format_instructions_explicitly_forbids_drawing_a_seat_as_rubble() {
+        let full = battle_map_format_instructions(false, false);
+        assert!(full.contains("NEVER draw a seat with `^`"), "{full}");
+        // The streamlined variant phrases it more tersely, but the same
+        // correction — stools are `=`, never `^` — must still be in there.
+        let streamlined = battle_map_format_instructions(true, false);
+        assert!(streamlined.contains("never `^`"), "{streamlined}");
+    }
+
     /// Same pin, for the cave example — it's teaching material too, and it's
     /// the one example that must NOT contain `=` anywhere.
     #[test]
     fn the_prompts_cave_example_passes_our_own_validator_and_has_no_furniture() {
-        let instr = battle_map_format_instructions();
+        let instr = battle_map_format_instructions(false, false);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# Flooded Grotto"))
@@ -6804,12 +7818,18 @@ mod example_map_tests {
     /// that they can't drift.
     #[test]
     fn copies_the_example_catches_the_grid_the_prompt_actually_shows() {
-        let instr = battle_map_format_instructions();
+        let instr = battle_map_format_instructions(false, false);
         for row in EXAMPLE_MAP_GRID {
             assert!(instr.contains(row), "prompt lost tavern row {row}");
         }
         for row in EXAMPLE_CAVE_GRID {
             assert!(instr.contains(row), "prompt lost cave row {row}");
+        }
+        // The streamlined (local-model) variant only shows one example, but
+        // it's the SAME tavern grid — copying it must still be caught.
+        let streamlined = battle_map_format_instructions(true, false);
+        for row in EXAMPLE_MAP_GRID {
+            assert!(streamlined.contains(row), "streamlined prompt lost tavern row {row}");
         }
         // The real thing the model returned live: our example under a new name.
         let plagiarised = format!(
@@ -6827,5 +7847,30 @@ mod example_map_tests {
         // Dockside Tap, which passed on its own merits.
         let original = "# The Dockside Tap\nGrid: 18x14, 5 ft squares.\nMap:\n##################\n#................#\n#.==========.....#\n#...=............#\n#...........==...#\n#.o..==..........+\n#....==....=.....#\n#......^^........#\n#......==........#\n#......==......*.#\n#.==.........=...#\n#.==.............#\n#................#\n#######+##########\nFeatures:\n- Bar counter at C3-L3\nTactics:\n- x";
         assert!(!copies_the_example(original));
+    }
+
+    /// The streamlined prompt is teaching material too, just shorter — its
+    /// one example has to actually be sound, same as the full prompt's.
+    #[test]
+    fn the_streamlined_prompts_example_passes_our_own_validator() {
+        let instr = battle_map_format_instructions(true, false);
+        let spec = instr
+            .split(MAP_SPEC_DELIMITER)
+            .find(|s| s.contains("# The Bent Nail"))
+            .expect("example map not found in the streamlined prompt");
+        let spec = spec.trim();
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new(), "spec was:\n{spec}");
+    }
+
+    /// The whole point is that it's actually shorter — a small model with a
+    /// long prompt is exactly what broke live. Pin that the streamlined
+    /// variant dropped the second worked example and the qualitative rules,
+    /// not just reworded them.
+    #[test]
+    fn the_streamlined_prompt_is_meaningfully_shorter_and_drops_the_cave_example() {
+        let full = battle_map_format_instructions(false, false);
+        let streamlined = battle_map_format_instructions(true, false);
+        assert!(streamlined.len() < full.len() / 2, "full={} streamlined={}", full.len(), streamlined.len());
+        assert!(!streamlined.contains("Flooded Grotto"), "{streamlined}");
     }
 }

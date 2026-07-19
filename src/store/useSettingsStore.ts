@@ -59,30 +59,24 @@ interface SettingsState {
    *  command; this persisted value is the source of truth, re-synced on mount. */
   ttsEngine: 'kokoro' | 'f5';
   setTtsEngine: (v: 'kokoro' | 'f5') => void;
-  /** Battle Map Generator Phase 2: run a local Stable Diffusion img2img
-   *  atmosphere pass (via the user's own ComfyUI install) over the
-   *  deterministic tile render before export. OFF by default — the tile
-   *  render is the source of truth the DM reasons from; this is a purely
-   *  cosmetic finish applied at export time, and falls back cleanly to the
-   *  plain tile render if ComfyUI isn't reachable (see comfyui.rs). */
-  mapAiStyle: boolean;
-  setMapAiStyle: (v: boolean) => void;
-  /** Base URL of the user's local ComfyUI server, e.g. "http://127.0.0.1:8188". */
-  comfyUiBaseUrl: string;
-  setComfyUiBaseUrl: (v: string) => void;
-  /** Per-card "AI Export…" manual style pass (separate from the automatic
-   *  mapAiStyle checkbox above, which stays ComfyUI-only with a fixed
-   *  prompt/denoise). These three are just remembered starting points —
-   *  freely edited per export, not enforced anywhere. The Gemini API key
-   *  itself is NOT here: it lives in the OS keychain (see gemini_image.rs),
-   *  never in localStorage. */
-  manualStyleProvider: 'comfyui' | 'gemini';
-  setManualStyleProvider: (v: 'comfyui' | 'gemini') => void;
-  manualStylePrompt: string;
-  setManualStylePrompt: (v: string) => void;
-  /** ComfyUI-only (img2img denoise, 0–1); Gemini has no equivalent dial. */
-  manualStyleStrength: number;
-  setManualStyleStrength: (v: number) => void;
+  /** Which sprite art battle maps render with (see battleMapRender.ts's
+   *  TILE_STYLES / setActiveTileStyle). Replaced the old AI img2img
+   *  atmosphere pass (ComfyUI/Gemini) entirely — that pass never saw the
+   *  actual grid content, was slow, and gave inconsistent results per map;
+   *  a real sprite tileset the DM never has to wait on is the whole map,
+   *  every time, deterministically. */
+  battleTileStyle: string;
+  setBattleTileStyle: (v: string) => void;
+  /** Local folder path of an imported battle-map tile library (e.g. a
+   *  Forgotten Adventures Patreon pack) — remembered here for display only.
+   *  The real catalog (a manifest of filenames + derived metadata, never the
+   *  art itself) lives Rust-side (see tile_library.rs) and is never
+   *  committed or bundled: vendor asset packs keep their own ownership, so
+   *  this stays a local, user-imported resource, not something the app
+   *  ships. `null` (the default, and every install before this feature)
+   *  means map generation never even mentions the Objects: layer. */
+  tileLibraryPath: string | null;
+  setTileLibraryPath: (v: string | null) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -109,16 +103,10 @@ export const useSettingsStore = create<SettingsState>()(
       setIngestionProvider: (v) => set({ ingestionProvider: v }),
       ttsEngine: 'kokoro',
       setTtsEngine: (v) => set({ ttsEngine: v }),
-      mapAiStyle: false,
-      setMapAiStyle: (v) => set({ mapAiStyle: v }),
-      comfyUiBaseUrl: 'http://127.0.0.1:8188',
-      setComfyUiBaseUrl: (v) => set({ comfyUiBaseUrl: v }),
-      manualStyleProvider: 'comfyui',
-      setManualStyleProvider: (v) => set({ manualStyleProvider: v }),
-      manualStylePrompt: 'top-down tabletop RPG battle map, detailed floor texture, atmospheric lighting, dramatic shadows, digital painting, high detail. Do not add any text, watermarks, or UI elements.',
-      setManualStylePrompt: (v) => set({ manualStylePrompt: v }),
-      manualStyleStrength: 0.55,
-      setManualStyleStrength: (v) => set({ manualStyleStrength: v }),
+      battleTileStyle: 'default',
+      setBattleTileStyle: (v) => set({ battleTileStyle: v }),
+      tileLibraryPath: null,
+      setTileLibraryPath: (v) => set({ tileLibraryPath: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )

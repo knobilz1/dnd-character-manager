@@ -4,11 +4,17 @@
  * printable image and PDF. The spec is the source of truth; rendering is fully
  * deterministic, so what the DM authored is exactly what prints.
  *
- * Tiles are drawn PROCEDURALLY here (no external art), which keeps the app
- * self-contained and lets a map render offline with zero bundled assets. The
- * drawing is isolated in `drawTile` behind a single `TILE` dispatch — to swap
- * in a real CC0 art tileset later, replace `drawTile` with an image blit from
- * bundled sprites keyed by the same legend codes; nothing else changes.
+ * Tiles are drawn from real art via `drawTile`'s single dispatch point — the
+ * core indoor pieces (wall/floor/door/column/stairs) are 0x72's "16x16
+ * DungeonTileset II" (CC0); water/rubble/foliage/hazard/furniture came from
+ * companion CC0/free packs since 0x72's own pack has no outdoor or terrain
+ * tiles at all (see src/assets/battle-tiles/ and each style's comment in
+ * TILE_STYLE_SPRITES for provenance). `=` (furniture) isn't one fixed sprite
+ * — `furnitureVariantFor` picks table/barrel/bench/crate based on what the
+ * DM's Features text actually calls that cell, so a "Bar counter" doesn't
+ * render identically to a "Barrel" three cells over. A procedural fallback
+ * (line-art canvas shapes, the original renderer) covers the brief window
+ * before sprites finish loading. See `preloadBattleTileSprites`.
  *
  * The coordinate system matches the DM's prompt and the Active Battle Log:
  * columns are lettered A, B, C… left-to-right, rows numbered 1, 2, 3…
@@ -16,6 +22,28 @@
  */
 
 import { PDFDocument } from 'pdf-lib';
+import { invoke } from '@tauri-apps/api/core';
+import wallLeftUrl from '../assets/battle-tiles/wall_left.png';
+import wallMidUrl from '../assets/battle-tiles/wall_mid.png';
+import wallRightUrl from '../assets/battle-tiles/wall_right.png';
+import wallTopLeftUrl from '../assets/battle-tiles/wall_top_left.png';
+import wallTopMidUrl from '../assets/battle-tiles/wall_top_mid.png';
+import wallTopRightUrl from '../assets/battle-tiles/wall_top_right.png';
+import floorUrl from '../assets/battle-tiles/floor_1.png';
+import stairsUrl from '../assets/battle-tiles/floor_stairs.png';
+import doorUrl from '../assets/battle-tiles/doors_leaf_closed.png';
+import columnUrl from '../assets/battle-tiles/column.png';
+import crateUrl from '../assets/battle-tiles/crate.png';
+import kosinaFloorUrl from '../assets/battle-tiles/kosina_floor_1.png';
+import waterUrl from '../assets/battle-tiles/water_1.png';
+import rubbleUrl from '../assets/battle-tiles/rubble_1.png';
+import foliageUrl from '../assets/battle-tiles/foliage_1.png';
+import treeUrl from '../assets/battle-tiles/tree_1.png';
+import hazardUrl from '../assets/battle-tiles/hazard_1.png';
+import fireplaceUrl from '../assets/battle-tiles/fireplace_1.png';
+import tableUrl from '../assets/battle-tiles/table_1.png';
+import barrelUrl from '../assets/battle-tiles/barrel_1.png';
+import benchUrl from '../assets/battle-tiles/bench_1.png';
 
 export interface ParsedBattleMap {
   name: string;
@@ -25,6 +53,11 @@ export interface ParsedBattleMap {
   /** One string per row, each padded to exactly `cols` chars (space = void). */
   grid: string[];
   features: string;
+  /** Raw `Objects:` section text — a free-object placement layer independent
+   *  of the legend grid, only ever present when the DM was told a tile
+   *  library is configured (see campaign.rs's build_battle_maps_prompt).
+   *  See parseObjectPlacements/preloadMapObjectSprites. */
+  objects: string;
   tactics: string;
 }
 
@@ -55,7 +88,7 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
       if (rowLines.length === 0) continue;
       break;
     }
-    if (/^(Features:|Tactics:|Legend:|Grid:)/.test(trimmed) || trimmed.startsWith('# ')) break;
+    if (/^(Features:|Objects:|Tactics:|Legend:|Grid:)/.test(trimmed) || trimmed.startsWith('# ')) break;
     rowLines.push(raw.replace(/\s+$/, ''));
     if (rowLines.length >= MAX_DIM) break;
   }
@@ -70,13 +103,13 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
     const out: string[] = [];
     for (let i = start + 1; i < lines.length; i++) {
       const t = lines[i].trim();
-      if (/^(Features:|Tactics:|Legend:|Grid:|Map:)$/.test(t) || t.startsWith('# ')) break;
+      if (/^(Features:|Objects:|Tactics:|Legend:|Grid:|Map:)$/.test(t) || t.startsWith('# ')) break;
       out.push(lines[i]);
     }
     return out.join('\n').trim();
   };
 
-  return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), tactics: section('Tactics:') };
+  return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), objects: section('Objects:'), tactics: section('Tactics:') };
 }
 
 // ── Procedural tile drawing ──────────────────────────────────────────────────
@@ -91,6 +124,7 @@ const COLORS = {
   wood: '#7a5230', stone: '#8a8178', stoneHi: '#a7a097',
   green: '#4b7a3a', greenHi: '#639a4d',
   rubble: '#8a7f6a', hazard: '#d4692a', hazardHi: '#f0a04b',
+  sand: '#dcc48a', sandHi: '#c9ac6c',
   grid: 'rgba(40,36,30,0.35)', ink: '#2a2620',
 };
 
@@ -111,7 +145,13 @@ function drawFloor(ctx: Ctx, x: number, y: number, px: number) {
   ctx.stroke();
 }
 
-function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number) {
+/** The original line-art renderer — a fallback for the brief window before
+ *  sprites finish loading or if a sprite fails to decode (see `drawTile`),
+ *  and the ONLY renderer for `,` (sand) — no sand sprite exists yet, so this
+ *  is what actually paints it (a distinct tan/grain look, not just plain
+ *  floor). Every other legend code has real art, so this rarely fires for
+ *  them. */
+function drawTileProcedural(ctx: Ctx, code: string, x: number, y: number, px: number) {
   switch (code) {
     case ' ': fillCell(ctx, x, y, px, COLORS.void); return;
     case '#': {
@@ -194,6 +234,19 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number) {
       }
       return;
     }
+    case ',': {
+      // No real sand sprite yet (see TILE_STYLE_SPRITES) — this stays
+      // procedural-only, distinct from plain floor, until one's sourced.
+      fillCell(ctx, x, y, px, COLORS.sand);
+      ctx.fillStyle = COLORS.sandHi;
+      const grains = [[0.2, 0.25], [0.55, 0.2], [0.35, 0.5], [0.75, 0.45], [0.6, 0.75], [0.2, 0.7]];
+      for (const [dx, dy] of grains) {
+        ctx.beginPath();
+        ctx.arc(x + px * dx, y + px * dy, px * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
     case '_': {
       drawFloor(ctx, x, y, px);
       ctx.strokeStyle = COLORS.stone;
@@ -224,14 +277,467 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number) {
   }
 }
 
+// ── Sprite tile art ──────────────────────────────────────────────────────────
+// Loaded once and cached as decoded <img> elements so `drawTile` can blit them
+// synchronously — canvas rendering elsewhere in this file is all sync (no
+// await), so images must already be decoded before the first real render.
+// See `preloadBattleTileSprites`, which the app calls once on startup; until
+// it resolves (or for a sprite this pack has none of), `drawTileProcedural`
+// is what actually ends up on the page — a graceful, non-blocking fallback,
+// never a broken image.
+
+const WALL_SPRITE_KEYS = ['left', 'mid', 'right', 'topLeft', 'topMid', 'topRight'] as const;
+type WallSpriteKey = (typeof WALL_SPRITE_KEYS)[number];
+
+const DEFAULT_WALL: Record<WallSpriteKey, string> = {
+  left: wallLeftUrl, mid: wallMidUrl, right: wallRightUrl,
+  topLeft: wallTopLeftUrl, topMid: wallTopMidUrl, topRight: wallTopRightUrl,
+};
+
+/** The `=` code covers everything from a bar counter to a barrel to a stool
+ *  — one fixed crate sprite for all of it looked identical no matter what
+ *  the DM's Features text called it. `furnitureVariantFor` below picks one
+ *  of these based on that label; `crate` is the fallback for an unlabeled or
+ *  unrecognized `=` cell (altar, generic "furniture", etc). */
+interface FurnitureSet {
+  crate: string;
+  table: string;
+  barrel: string;
+  bench: string;
+}
+
+/** Same idea as FurnitureSet for `*` — "hazard (fire/brazier)" per
+ *  MAP_LEGEND covers an indoor hearth/campfire/brazier just as often as
+ *  actual lava, and those don't look alike. `hazardVariantFor` picks
+ *  between them from the Features label. */
+interface HazardSet {
+  lava: string;
+  fireplace: string;
+}
+
+interface StyleSpriteSet {
+  wall: Record<WallSpriteKey, string>;
+  floor: string;
+  stairs: string;
+  door: string;
+  column: string;
+  furniture: FurnitureSet;
+  water: string;
+  rubble: string;
+  foliage: string;
+  hazard: HazardSet;
+  /** Canvas filter applied when blitting this style's sprites — lets a
+   *  style reuse another style's art with a different mood (see 'dark')
+   *  without needing its own full art pass for every piece. */
+  filter?: string;
+}
+
+/** Every sprite style the battle-map renderer can draw with — see
+ *  `setActiveTileStyle`/`src/data/tileStyles.ts` for the user-facing list.
+ *  'dark' reuses the same wall/door/pillar/crate/stairs art as 'default'
+ *  (filtered darker/desaturated for consistency) but swaps in real tiles
+ *  from Zoltan Kosina's "16x16 Dark Dungeon Tileset" (CC0) for the floor —
+ *  the one piece of that pack that turned out to be a clean, atomic tile
+ *  rather than a pre-assembled demo fragment (see the extraction notes in
+ *  this session's history: most of that sheet wasn't a usable grid).
+ *
+ *  water/rubble/hazard are shared across both styles (0x72's own pack is
+ *  purely indoor dungeon furniture — zero outdoor/terrain tiles): hazard's
+ *  `lava` variant is the lava-font pool crop from nijikokun's official
+ *  "DungeonTileset II Extended" (CC0, same palette as 0x72's base pack);
+ *  water is a cropped tile from lexyshmexy's "Dungeon - Pixel 16x16 Top Down
+ *  Tileset" (free, non-commercial-friendly); rubble (the rock pile) is from
+ *  Kauzz's "Pixel Valley | Cave (16x16)" (same license terms). Foliage
+ *  diverges on purpose: 'default' gets a real tree (Ventilatore's "The
+ *  Fan-tasy Tileset", free for non-commercial use, no attribution required)
+ *  since that's the style actually meant to read as an outdoor/general-
+ *  fantasy setting; 'dark' keeps Kauzz's mushroom since that reads better
+ *  for a cave. All picked and cropped by hand — see this session's history
+ *  for the extraction process. Sand (`,`) has no sprite yet in either style
+ *  (see drawTileProcedural).
+ *
+ *  `furniture` (table/barrel/bench) and hazard's `fireplace` variant are all
+ *  from Ventilatore's free pack too — same source and license as the tree
+ *  above — shared across both styles, same reasoning as water/rubble. */
+const FURNITURE: FurnitureSet = { crate: crateUrl, table: tableUrl, barrel: barrelUrl, bench: benchUrl };
+const HAZARD: HazardSet = { lava: hazardUrl, fireplace: fireplaceUrl };
+
+const TILE_STYLE_SPRITES: Record<string, StyleSpriteSet> = {
+  default: {
+    wall: DEFAULT_WALL, floor: floorUrl, stairs: stairsUrl, door: doorUrl, column: columnUrl, furniture: FURNITURE,
+    water: waterUrl, rubble: rubbleUrl, foliage: treeUrl, hazard: HAZARD,
+  },
+  dark: {
+    wall: DEFAULT_WALL, floor: kosinaFloorUrl, stairs: stairsUrl, door: doorUrl, column: columnUrl, furniture: FURNITURE,
+    water: waterUrl, rubble: rubbleUrl, foliage: foliageUrl, hazard: HAZARD,
+    filter: 'brightness(0.55) saturate(0.55)',
+  },
+};
+
+export type TileStyleId = keyof typeof TILE_STYLE_SPRITES;
+
+let activeTileStyle: TileStyleId = 'default';
+
+/** Switches which sprite style `drawTile` draws with, effective on the next
+ *  render — nothing re-renders on its own; callers re-run whatever produced
+ *  their current preview (see DMConsolePage's refreshMapCardPreviews). */
+export function setActiveTileStyle(id: TileStyleId): void {
+  activeTileStyle = id;
+}
+
+const spriteCache = new Map<string, HTMLImageElement>();
+let spritesLoaded = false;
+
+function loadOneSprite(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => { spriteCache.set(url, img); resolve(); };
+    img.onerror = () => resolve(); // missing/broken art just falls back to procedural
+    img.src = url;
+  });
+}
+
+/** Decodes every sprite for every style once and caches them, so later
+ *  synchronous renders (`battleMapToPngDataUrl`, PDF export, live preview)
+ *  can blit them immediately regardless of which style is active. Safe to
+ *  call more than once (no-ops after the first). Call this early (app/page
+ *  mount) — a render that happens before it resolves isn't broken, it just
+ *  draws the procedural fallback that render call. */
+export async function preloadBattleTileSprites(): Promise<void> {
+  if (spritesLoaded) return;
+  const urls = new Set<string>();
+  for (const style of Object.values(TILE_STYLE_SPRITES)) {
+    for (const url of Object.values(style.wall)) urls.add(url);
+    urls.add(style.floor);
+    urls.add(style.stairs);
+    urls.add(style.door);
+    urls.add(style.column);
+    for (const url of Object.values(style.furniture)) urls.add(url);
+    urls.add(style.water);
+    urls.add(style.rubble);
+    urls.add(style.foliage);
+    for (const url of Object.values(style.hazard)) urls.add(url);
+  }
+  await Promise.all([...urls].map(loadOneSprite));
+  spritesLoaded = true;
+}
+
+function drawSprite(ctx: Ctx, url: string, x: number, y: number, px: number, filter?: string): boolean {
+  const img = spriteCache.get(url);
+  if (!img) return false;
+  if (filter) ctx.filter = filter;
+  ctx.drawImage(img, x, y, px, px);
+  if (filter) ctx.filter = 'none';
+  return true;
+}
+
+/** Same as drawSprite but for a non-square footprint — the Objects: layer's
+ *  catalog art spans `w`x`h` cells rather than always exactly one. */
+function drawSpriteScaled(ctx: Ctx, url: string, x: number, y: number, w: number, h: number): boolean {
+  const img = spriteCache.get(url);
+  if (!img) return false;
+  ctx.drawImage(img, x, y, w, h);
+  return true;
+}
+
+/** Whether the grid cell at (row, col) is a wall — out-of-bounds counts as
+ *  "not a wall" (the map edge reads the same as open space). Pure. */
+function isWallAt(grid: string[], row: number, col: number): boolean {
+  return grid[row]?.[col] === '#';
+}
+
+/** True only for a REAL walkable cell — not a wall, and not void/out-of-
+ *  bounds (a space, or past the grid's edge). The distinction from plain
+ *  "not a wall" matters for `wallSpriteFor`: a room's bottom wall has void
+ *  to its south (nothing beyond the room) but its top wall has real floor
+ *  to its south (the room interior) — treating those the same picked the
+ *  wrong sprite for the bottom wall (caught by the self-check script before
+ *  this ever hit the UI). Pure. */
+function isOpenFloorAt(grid: string[], row: number, col: number): boolean {
+  const ch = grid[row]?.[col];
+  return ch !== undefined && ch !== '#' && ch !== ' ';
+}
+
+/** The four cardinal neighbors of a `#` cell — `n`/`s`/`e`/`w` true iff that
+ *  neighbor is ALSO a wall (wall-run continuity, for corner detection);
+ *  the `*Floor` fields true iff that neighbor is real open floor specifically
+ *  (see isOpenFloorAt — void doesn't count), which is what tells a cap/face
+ *  wall from a side wall. Everything `wallSpriteFor` needs. Pure. */
+export interface WallNeighbors {
+  n: boolean; s: boolean; e: boolean; w: boolean;
+  nFloor: boolean; sFloor: boolean; eFloor: boolean; wFloor: boolean;
+}
+
+export function wallNeighborsAt(grid: string[], row: number, col: number): WallNeighbors {
+  return {
+    n: isWallAt(grid, row - 1, col),
+    s: isWallAt(grid, row + 1, col),
+    e: isWallAt(grid, row, col + 1),
+    w: isWallAt(grid, row, col - 1),
+    nFloor: isOpenFloorAt(grid, row - 1, col),
+    sFloor: isOpenFloorAt(grid, row + 1, col),
+    eFloor: isOpenFloorAt(grid, row, col + 1),
+    wFloor: isOpenFloorAt(grid, row, col - 1),
+  };
+}
+
+/** Picks which of the 6 low-wall sprites (see WALL_SPRITES) reads correctly
+ *  for a `#` cell given its neighbors, using this specific tileset's
+ *  convention (its own community-documented "3x3 minimal" autotile, see
+ *  0x72_DungeonTilesetII_v1.7/README): a wall shows its flat TOP-CAP when
+ *  there's open floor to its south (a north-perimeter wall, looked down on
+ *  from above) and its brick FACE when there's open floor to its north (a
+ *  south-facing wall) or to its east/west (an east/west-facing side wall).
+ *  NW/NE corners (wall continues exactly south+east or south+west) get their
+ *  own dedicated corner sprite; SW/SE corners reuse the plain side-wall
+ *  piece, since this pack's *low* wall set has no south-corner sprite of its
+ *  own (only wall_edge_*, wall_outer_* do — see the ponytail note below).
+ *  Verified against a plain rectangular room and an L-shaped room via a
+ *  throwaway script before wiring this into the UI. Pure.
+ *
+ *  ponytail: doesn't use wall_edge_*, wall_outer_* (the full inner/outer
+ *  corner-trim set) — SW/SE corners are a visually-fine approximation, not a
+ *  true miter. Upgrade path if a DM's room shape ever looks visibly off: add
+ *  those sprites and their cases here. */
+export function wallSpriteFor(neighbors: WallNeighbors): WallSpriteKey {
+  const { n, s, e, w, nFloor, sFloor, eFloor, wFloor } = neighbors;
+  if (s && e && !n && !w) return 'topLeft';
+  if (s && w && !n && !e) return 'topRight';
+  if (n && e && !s && !w) return 'left'; // SW corner, approximated
+  if (n && w && !s && !e) return 'right'; // SE corner, approximated
+  if (sFloor) return 'topMid';
+  if (nFloor) return 'mid';
+  if (eFloor) return 'left';
+  if (wFloor) return 'right';
+  return 'mid'; // interior wall mass, or bordered by void on every side
+}
+
+const NEUTRAL_WALL_NEIGHBORS: WallNeighbors = {
+  n: true, s: true, e: true, w: true, nFloor: false, sFloor: false, eFloor: false, wFloor: false,
+};
+
+/** `- <Label> at <cellrefs>` → cellKey ("col,row", 0-indexed) → lowercased
+ *  label, e.g. "Bar counter at B2-K2" → every cell B2..K2 maps to "bar
+ *  counter". Mirrors campaign.rs's cell_refs_in (ranges via -/–/—, expanding
+ *  a rectangle when both axes differ) closely enough for our purpose here —
+ *  picking which furniture sprite LOOKS right, not validating correctness
+ *  (that's the backend's job; a spec that fails validation there never
+ *  reaches this renderer with bad refs left in). Pure. */
+function parseFeatureLabels(features: string): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const raw of features.split('\n')) {
+    const line = raw.trim().replace(/^-\s*/, '');
+    if (!line) continue;
+    const atIdx = line.toLowerCase().indexOf(' at ');
+    if (atIdx === -1) continue;
+    const label = line.slice(0, atIdx).trim().toLowerCase();
+    for (const cellKey of cellRefsInText(line.slice(atIdx + 4))) {
+      if (!labels.has(cellKey)) labels.set(cellKey, label);
+    }
+  }
+  return labels;
+}
+
+const RANGE_DASHES = new Set(['-', '–', '—']); // hyphen, en dash, em dash
+
+/** "B2" → [1, 1] (0-indexed col/row), or null for anything else. */
+function parseCellRefToken(tok: string): [number, number] | null {
+  const m = /^([A-Za-z]{1,2})(\d{1,2})$/.exec(tok);
+  if (!m) return null;
+  let col = 0;
+  for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64);
+  const row = parseInt(m[2], 10);
+  return row > 0 ? [col - 1, row - 1] : null;
+}
+
+/** Every "col,row" cell a Features line's tail actually refers to — single
+ *  refs and dash-separated ranges (a range across both axes is the
+ *  rectangle it spans, same as the backend). A dash next to something that
+ *  isn't a cell ref (ordinary prose) is just prose. */
+function cellRefsInText(text: string): string[] {
+  const toks: { word: string; sep: string }[] = [];
+  let cur = '', sep = '';
+  for (const ch of text) {
+    if (/[A-Za-z0-9]/.test(ch)) {
+      cur += ch;
+    } else {
+      if (cur) { toks.push({ word: cur, sep }); cur = ''; sep = ''; }
+      sep += ch;
+    }
+  }
+  if (cur) toks.push({ word: cur, sep });
+
+  const out: string[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const a = parseCellRefToken(toks[i].word);
+    if (!a) continue;
+    const next = toks[i + 1];
+    const b = next && RANGE_DASHES.has(next.sep.trim()) ? parseCellRefToken(next.word) : null;
+    if (b) {
+      const [c1, r1] = a, [c2, r2] = b;
+      for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+        for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) out.push(`${c},${r}`);
+      }
+      i++; // consumed the range's second endpoint too
+    } else {
+      out.push(`${a[0]},${a[1]}`);
+    }
+  }
+  return out;
+}
+
+export interface ObjectPlacement { label: string; col: number; row: number; w: number; h: number }
+
+/** `- <label> at <cell> (<W>x<H>)` → placements, mirroring campaign.rs's
+ *  parse_object_line (same shape, same tolerances) closely enough for our
+ *  purpose here — picking what to draw, not validating correctness (that's
+ *  the backend's job; a spec that fails validate_map_spec never reaches
+ *  this renderer with a bad Objects line left in). Pure. */
+function parseObjectPlacements(objectsText: string): ObjectPlacement[] {
+  const out: ObjectPlacement[] = [];
+  for (const raw of objectsText.split('\n')) {
+    const line = raw.trim().replace(/^-\s*/, '');
+    if (!line) continue;
+    const atIdx = line.toLowerCase().indexOf(' at ');
+    if (atIdx === -1) continue;
+    const label = line.slice(0, atIdx).trim();
+    const rest = line.slice(atIdx + 4).trim();
+    const open = rest.lastIndexOf('(');
+    const close = rest.lastIndexOf(')');
+    if (open === -1 || close === -1 || close <= open) continue;
+    const cellTok = (rest.slice(0, open).trim().match(/^[A-Za-z0-9]+/) ?? [''])[0];
+    const cell = parseCellRefToken(cellTok);
+    const sizeMatch = /^(\d+)\s*[xX]\s*(\d+)$/.exec(rest.slice(open + 1, close).trim());
+    if (!cell || !sizeMatch) continue;
+    out.push({ label, col: cell[0], row: cell[1], w: parseInt(sizeMatch[1], 10), h: parseInt(sizeMatch[2], 10) });
+  }
+  return out;
+}
+
+/** label → resolved sprite URL (or null: no library / no match), warmed by
+ *  preloadMapObjectSprites and read synchronously by the object draw pass
+ *  in renderBattleMapContent — same "resolve once, render from a warm
+ *  cache" split as spriteCache/preloadBattleTileSprites. Memoized across
+ *  calls so re-rendering an already-resolved spec costs nothing. */
+const resolvedObjectUrls = new Map<string, string | null>();
+
+/** Resolves and preloads every unique Objects: label in `spec` against the
+ *  user's imported tile catalog (see tile_library.rs's search_tile_catalog),
+ *  so the synchronous render pass that follows can draw them from a warm
+ *  cache. Call this once before battleMapToPngDataUrl/battleMapToPdfBytes
+ *  for a spec that might have changed — safe to call for every spec, since
+ *  already-resolved labels are free. No library imported, or no match for a
+ *  label, both resolve to `null` (nothing extra drawn) — same as a broken
+ *  sprite URL today: silent fallback, never an error. */
+export async function preloadMapObjectSprites(spec: string): Promise<void> {
+  const map = parseBattleMap(spec);
+  if (!map || !map.objects) return;
+  const labels = [...new Set(parseObjectPlacements(map.objects).map((p) => p.label))].filter((l) => !resolvedObjectUrls.has(l));
+  if (labels.length === 0) return;
+  await Promise.all(
+    labels.map(async (label) => {
+      try {
+        const matches = await invoke<{ data_url: string }[]>('search_tile_catalog', { query: label });
+        const url = matches[0]?.data_url ?? null;
+        if (url) await loadOneSprite(url);
+        resolvedObjectUrls.set(label, url);
+      } catch {
+        resolvedObjectUrls.set(label, null);
+      }
+    })
+  );
+}
+
+/** Which furniture look best fits a Features label — real variety instead
+ *  of every `=` cell drawing the same crate regardless of what the DM
+ *  called it. Falls back to the plain crate for anything unrecognized
+ *  (altar, generic "furniture", or no label at all — an ad-hoc/hand-edited
+ *  map may have `=` cells with no matching Features line). */
+function furnitureVariantFor(label: string | undefined): keyof FurnitureSet {
+  if (!label) return 'crate';
+  if (/\b(bar|counter|table|desk|altar|shrine)\b/.test(label)) return 'table';
+  if (/\b(barrel|keg|cask)\b/.test(label)) return 'barrel';
+  if (/\b(stool|chair|bench|seat)\b/.test(label)) return 'bench';
+  return 'crate';
+}
+
+/** Which hazard look fits a Features label — MAP_LEGEND defines `*` as
+ *  "hazard (fire/brazier)", and an indoor hearth/campfire/brazier doesn't
+ *  look like a lava pit. `fireplace` is the fallback (unlabeled, "brazier",
+ *  "hearth", "campfire", anything not explicitly molten) since most `*`
+ *  cells are indoor — actual lava only wins when the label says so. */
+function hazardVariantFor(label: string | undefined): keyof HazardSet {
+  if (label && /\b(lava|magma|molten|chasm)\b/.test(label)) return 'lava';
+  return 'fireplace';
+}
+
+/** Sprite-first tile dispatch, using whichever style `setActiveTileStyle`
+ *  last selected: draws real art for the codes that style covers (falling
+ *  back to the procedural renderer if sprites haven't finished loading
+ *  yet), and the original procedural art for anything without a sprite yet
+ *  (currently just sand, `,` — see drawTileProcedural). `wallNeighbors` is
+ *  only meaningful for `#` cells; omit it for isolated single-tile renders,
+ *  where it defaults to a plain wall face (see NEUTRAL_WALL_NEIGHBORS).
+ *  `featureLabel` is only meaningful for `=`/`*` cells (see
+ *  furnitureVariantFor/hazardVariantFor) — omit it for the fallback look. */
+function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string) {
+  const style = TILE_STYLE_SPRITES[activeTileStyle];
+  switch (code) {
+    case '.':
+      if (drawSprite(ctx, style.floor, x, y, px, style.filter)) return;
+      break;
+    case '#': {
+      const key = wallSpriteFor(wallNeighbors ?? NEUTRAL_WALL_NEIGHBORS);
+      if (drawSprite(ctx, style.wall[key], x, y, px, style.filter)) return;
+      break;
+    }
+    case '+':
+      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.door, x, y, px, style.filter)) return;
+      break;
+    case 'o':
+      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.column, x, y, px, style.filter)) return;
+      break;
+    case '=': {
+      const sprite = style.furniture[furnitureVariantFor(featureLabel)];
+      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, sprite, x, y, px, style.filter)) return;
+      break;
+    }
+    case '_':
+      if (drawSprite(ctx, style.stairs, x, y, px, style.filter)) return;
+      break;
+    case '~':
+      if (drawSprite(ctx, style.water, x, y, px, style.filter)) return;
+      break;
+    case '*': {
+      const variant = hazardVariantFor(featureLabel);
+      const sprite = style.hazard[variant];
+      // 'lava' is a full-cell pool crop (its own rocky border, no gap to
+      // fill); 'fireplace' is a standalone object like furniture/rubble and
+      // needs a floor pass underneath or it'd float on a transparent cell.
+      if (variant === 'lava') {
+        if (drawSprite(ctx, sprite, x, y, px, style.filter)) return;
+      } else if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, sprite, x, y, px, style.filter)) {
+        return;
+      }
+      break;
+    }
+    case '^':
+      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.rubble, x, y, px, style.filter)) return;
+      break;
+    case 'T':
+      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.foliage, x, y, px, style.filter)) return;
+      break;
+  }
+  drawTileProcedural(ctx, code, x, y, px);
+}
+
 // ── Canvas rendering ─────────────────────────────────────────────────────────
 
 export interface RenderWindow { colStart: number; colEnd: number; rowStart: number; rowEnd: number }
 
 /** Renders ONLY the grid content — tiles + thin cell-boundary lines, no
- *  coordinate ruler — sized exactly `wCols*cellPx` by `wRows*cellPx`. This is
- *  the layer that's safe to hand to an AI stylize pass (see
- *  `composeRulerFrame`'s doc comment for why the ruler is never included). */
+ *  coordinate ruler — sized exactly `wCols*cellPx` by `wRows*cellPx`. The
+ *  ruler is composited separately (see `composeRulerFrame`). */
 function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
@@ -244,11 +750,28 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  const featureLabels = parseFeatureLabels(map.features);
   for (let r = 0; r < wRows; r++) {
     for (let c = 0; c < wCols; c++) {
-      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
-      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx);
+      const mapRow = w.rowStart + r, mapCol = w.colStart + c;
+      const code = map.grid[mapRow]?.[mapCol] ?? ' ';
+      const neighbors = code === '#' ? wallNeighborsAt(map.grid, mapRow, mapCol) : undefined;
+      const featureLabel = code === '=' || code === '*' ? featureLabels.get(`${mapCol},${mapRow}`) : undefined;
+      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel);
     }
+  }
+
+  // Objects: layer — free placements independent of the legend grid, drawn
+  // on top of it (see preloadMapObjectSprites, which must have already run
+  // for `resolvedObjectUrls` to have anything in it). An object anchored
+  // outside the current render window is skipped rather than clipped —
+  // acceptable for a print-paginated map, since the same map's other pages
+  // still show it in full where it actually belongs.
+  for (const p of map.objects ? parseObjectPlacements(map.objects) : []) {
+    if (p.col < w.colStart || p.col >= w.colEnd || p.row < w.rowStart || p.row >= w.rowEnd) continue;
+    const url = resolvedObjectUrls.get(p.label);
+    if (!url) continue;
+    drawSpriteScaled(ctx, url, (p.col - w.colStart) * cellPx, (p.row - w.rowStart) * cellPx, p.w * cellPx, p.h * cellPx);
   }
 
   ctx.strokeStyle = COLORS.grid;
@@ -260,622 +783,11 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
       ctx.strokeRect(c * cellPx, r * cellPx, cellPx, cellPx);
     }
   }
-  return canvas;
-}
-
-// Depth-map colors for the ControlNet stylize path (comfyui.rs's
-// comfyui_stylize_map) — near/raised objects render brighter, the flat floor
-// plane renders darker, matching the convention depth-conditioned ControlNet
-// models are trained on (bright = close to camera, dark = far). Canny edges
-// alone only constrain 2D boundary *positions*, not camera perspective — a
-// model with a strong bias toward oblique architectural photography can
-// satisfy "edges roughly here" while still reinterpreting the whole scene as
-// a 3D room viewed at an angle (confirmed live: exported pages showed
-// visible wall/furniture sides instead of a strict top-down view, plus
-// furniture repositioned once the model committed to that 3D reading). A
-// near-flat depth map is a much more direct "this scene has no room depth"
-// signal than an edge outline.
-const DEPTH_FLOOR = '#4a4a4a';
-const DEPTH_RAISED = '#e0e0e0';
-
-function isRaisedCell(code: string): boolean {
-  // Walls/furniture/pillars/trees/hazards stand up off the floor; difficult
-  // terrain, stairs, and water are walkable ground-plane texture, not
-  // obstructions, so they stay at floor depth.
-  return code === '#' || code === '+' || code === '=' || code === 'o' || code === 'T' || code === '*';
-}
-
-// ── Per-tile-type stylization ────────────────────────────────────────────────
-// The whole-scene img2img pass (even with ControlNet/depth conditioning) let
-// the model invent geometry that isn't in the source grid and drift furniture
-// off-cell — confirmed live: a phantom wall band appeared where the spec had
-// none, and a staircase rendered at a slight rotation off the cell grid.
-// ControlNet only clamps this probabilistically; it can't guarantee it.
-//
-// The fix is to stop asking the AI to lay out a scene at all. Every cell's
-// look is fully determined by ONE character (see campaign.rs's MAP_LEGEND),
-// so instead of stylizing the whole assembled map, stylize ONE swatch per
-// DISTINCT legend code present on the map — a single floor tile, a single
-// wall block, a single pillar, etc. — then WE composite the result by
-// blitting each cell's stylized swatch at its exact grid position, exactly
-// like the plain procedural renderer already does with `drawTile`. The AI
-// never sees — and therefore can never move — anything relative to anything
-// else; grid alignment and furniture position are guaranteed by construction,
-// not by asking the model nicely. A repeated code (eight barrels, a long
-// wall run) costs one AI call total, not one per instance, since the same
-// stylized swatch is reused everywhere that code appears.
-// Resolution sent to the AI per swatch, independent of print cellPx. Flux is
-// trained at ~1024px; at the old 192px it effectively ignored the input and
-// regenerated from the prompt (so "top-down table" became a whole scene). 512
-// is high enough that it actually stylizes the swatch we send instead.
-const TILE_SAMPLE_PX = 512;
-
-// A BACKGROUND material is generated as ONE large texture spanning this many
-// map cells each way, and every cell samples a DIFFERENT sub-region of it
-// (see `drawBackgroundCell`). Stylizing a single cell and stamping it into all
-// ~150 floor cells makes any structure inside that one tile — a shadow, a grout
-// line amplified into a plank edge — repeat into a hard lattice across the
-// room; a repeated tile only looks right if it's perfectly homogeneous, which
-// is also the least-stylized it can be. Backgrounds don't need per-cell
-// determinism the way objects do (only objects mark positions; the floor is
-// pure texture, so a crack in one cell and not another changes nothing), so
-// they get real variation for the same single AI call per material.
-const BG_TEXTURE_PX = 1024;
-const BG_TEXTURE_CELLS = 8;
-
-// Object swatches are drawn on THIS backdrop instead of on floor. A small
-// object sitting on a floor-colored square reads to the model as "a room floor
-// with empty space to furnish" — the direct cause of objects coming back as
-// rooms. A backdrop + an object-only prompt makes it a product shot instead; we
-// key the backdrop out afterward and composite the object over the real
-// stylized floor.
-//
-// It's chroma MAGENTA, not a neutral grey, and that matters: grey is a
-// perfectly plausible material, so at high denoise the model happily restyled
-// the "neutral studio background" into stone masonry (confirmed live). A
-// textured backdrop defeats keying entirely — there's no single colour to
-// remove. Magenta is a colour no stone/wood/metal prop contains, so it survives
-// as an obvious key no matter how hard the model restyles, and `keyOutBackdrop`
-// can strip it by colour distance alone rather than relying on it staying flat.
-const OBJECT_BG = '#ff00ff';
-
-// Short descriptive phrase per legend code, for the stylize prompt — see
-// campaign.rs's MAP_LEGEND for the canonical meaning of each character.
-// Clean, singular object names matter: the model renders a specific named
-// object well ("wooden door" came out great) but a vague or dual label
-// ("furniture or an altar") comes back as an ambiguous shape. Keep each object
-// code to one concrete thing, WITHOUT a leading article — build_object_prompt
-// (comfyui.rs) supplies "a single …" itself, so an article here would double up.
-const TILE_LABELS: Record<string, string> = {
-  '.': 'plain floor',
-  '#': 'stone wall block',
-  '+': 'heavy wooden door',
-  '~': 'water',
-  o: 'round stone pillar',
-  '^': 'pile of rubble',
-  '=': 'sturdy wooden table',
-  T: 'leafy tree',
-  _: 'stone steps',
-  '*': 'lit iron brazier',
-};
-
-function tileLabelFor(code: string): string {
-  return TILE_LABELS[code] ?? 'plain floor';
-}
-
-// A background/material code repeats into many cells across a map — often
-// most of it. Any discrete object a stylize pass invents inside one of these
-// swatches (confirmed live: a wood beam painted into a floor tile) gets
-// stamped everywhere that code appears, reading as "furniture on every
-// tile." An object code is MEANT to depict one discrete thing (a door, a
-// pillar), so that risk doesn't apply the same way — repeating a stylized
-// barrel at every 'o' cell is the intended result, not a bug.
-const BACKGROUND_CODES = new Set(['.', '~', '^', '_', '#']);
-
-function isBackgroundTile(code: string): boolean {
-  return BACKGROUND_CODES.has(code);
-}
-
-/** `"C3"` → `{ col: 2, row: 2 }`. Inverse of `columnLabel` + a 1-based row;
- *  mirrors campaign.rs's parse_cell_ref so a cell reference means the same
- *  thing in the spec, the print, and the DM's own planning. */
-function parseCellRef(tok: string): { col: number; row: number } | null {
-  const m = /^([A-Za-z]{1,2})(\d{1,2})$/.exec(tok);
-  if (!m) return null;
-  let col = 0;
-  for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64);
-  const row = parseInt(m[2], 10);
-  if (row < 1) return null;
-  return { col: col - 1, row: row - 1 };
-}
-
-/** Cell (`"col,row"`) → the name the spec's own `Features:` list gives whatever
- *  is in it, e.g. `"Bar"` for every cell of `- Bar at A2, A3, A4`.
- *
- *  This is what stops the stylizer calling every `=` "a table": the legend is a
- *  deliberately generic *tactical* abstraction (`=` just means "furniture-ish
- *  thing you can hide behind"), and the Features list is where the spec says
- *  what each one actually IS in fiction. Reading it back means a bar, a broken
- *  table and a bench all get their own prompt without inventing a legend code
- *  per object. Only trustworthy because campaign.rs now validates that every
- *  Features line points at a cell really holding that code. */
-/** Every cell a Features line's cell-list refers to, RANGES EXPANDED: `B2–K2`
- *  is the bar's whole ten-cell run and `D4–E5` a table's 2x2 block, not two
- *  isolated corners. The model writes ranges with an en dash by default, so all
- *  three dashes count. Mirrors campaign.rs's cell_refs_in — keep them in step.
- *
- *  Reading a range as two endpoints (what the plain non-alphanumeric split this
- *  replaced did) meant a ten-cell bar was labelled "a bar counter" at exactly
- *  its two ends, and stylized as generic furniture in between. */
-function featureCells(text: string): { col: number; row: number }[] {
-  const out: { col: number; row: number }[] = [];
-  const rest = text.replace(
-    /([A-Za-z]{1,2}\d{1,2})\s*[-–—]\s*([A-Za-z]{1,2}\d{1,2})/g,
-    (whole, from: string, to: string) => {
-      const a = parseCellRef(from);
-      const b = parseCellRef(to);
-      if (!a || !b) return whole;
-      for (let col = Math.min(a.col, b.col); col <= Math.max(a.col, b.col); col++) {
-        for (let row = Math.min(a.row, b.row); row <= Math.max(a.row, b.row); row++) {
-          out.push({ col, row });
-        }
-      }
-      return ' ';
-    }
-  );
-  for (const tok of rest.split(/[^A-Za-z0-9]+/)) {
-    const cell = parseCellRef(tok);
-    if (cell) out.push(cell);
-  }
-  return out;
-}
-
-function parseFeatureLabels(map: ParsedBattleMap): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const raw of (map.features ?? '').split('\n')) {
-    const line = raw.replace(/^-\s*/, '').trim();
-    // "Bar at A2, A3" → name "Bar", cells A2/A3.
-    const m = /^(.*?)\s+at\s+(.+)$/i.exec(line);
-    if (!m) continue;
-    const name = m[1].trim();
-    if (!name) continue;
-    for (const cell of featureCells(m[2])) out.set(`${cell.col},${cell.row}`, name);
-  }
-  return out;
-}
-
-interface TileJob {
-  /** Distinct AI call identity: same code AND same label ⇒ one shared swatch. */
-  key: string;
-  code: string;
-  label: string;
-  isBackground: boolean;
-}
-
-/** The job key a BACKGROUND code always gets — backgrounds never take a feature
- *  label (see `tileJobAt`), so this is stable without needing a specific cell.
- *  Lets the compositor find the floor swatch to lay under object cells. */
-function tileJobKeyForCode(code: string): string {
-  return `${code} ${tileLabelFor(code)}`;
-}
-
-/** The stylize job for one cell, or null for void.
- *
- *  Feature names are applied to OBJECT cells only. A background/material code
- *  is a seamless texture repeated across the map, so splitting it by label
- *  would generate two different floor textures for cells of the same material
- *  and print a visible seam between them — backgrounds always keep their
- *  generic per-code label. */
-function tileJobAt(
-  map: ParsedBattleMap, labels: Map<string, string>, col: number, row: number
-): TileJob | null {
-  const code = map.grid[row]?.[col] ?? ' ';
-  if (code === ' ') return null;
-  const isBackground = isBackgroundTile(code);
-  const named = isBackground ? undefined : labels.get(`${col},${row}`);
-  // Feature names are written capitalised ("Broken table"); the prompt reads
-  // "…of a single {label}", so lowercase the lead-in to match TILE_LABELS.
-  const label = named ? named.charAt(0).toLowerCase() + named.slice(1) : tileLabelFor(code);
-  return { key: `${code} ${label}`, code, label, isBackground };
-}
-
-/** Every distinct stylize job in `win` (defaults to the whole map) — one per
- *  distinct (code, label) pair, so a bar and a table both drawn as `=` are
- *  stylized separately while eight identical benches still cost one call. */
-function collectTileJobs(map: ParsedBattleMap, win?: RenderWindow): Map<string, TileJob> {
-  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
-  const labels = parseFeatureLabels(map);
-  const jobs = new Map<string, TileJob>();
-  for (let r = w.rowStart; r < w.rowEnd; r++) {
-    for (let c = w.colStart; c < w.colEnd; c++) {
-      const job = tileJobAt(map, labels, c, r);
-      if (job && !jobs.has(job.key)) jobs.set(job.key, job);
-    }
-  }
-  return jobs;
-}
-
-/** One cell of `code`'s art, rendered at a fixed AI-friendly resolution
- *  (independent of the print `cellPx`) so swatches can be cached and reused
- *  across preview/PDF/multi-page exports regardless of their render scale. */
-function renderTileSwatch(code: string): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = TILE_SAMPLE_PX;
-  canvas.height = TILE_SAMPLE_PX;
-  const ctx = canvas.getContext('2d')!;
-  drawTile(ctx, code, 0, 0, TILE_SAMPLE_PX);
-  return canvas;
-}
-
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-
-// The floor + grout colors the procedural art draws an object on top of, so a
-// key pass can tell "this pixel is flat floor" from "this pixel is the object."
-const FLOOR_RGBS: [number, number, number][] = [hexToRgb(COLORS.floor), hexToRgb(COLORS.floorGrout)];
-
-/** An OBJECT swatch for the AI: the object on a plain neutral backdrop rather
- *  than on floor (see OBJECT_BG). We take the procedural tile (floor + object)
- *  and repaint every floor pixel to the backdrop colour, leaving just the
- *  object floating on neutral grey — a product-shot setup the model won't try
- *  to turn into a room. */
-function renderObjectSwatch(code: string): HTMLCanvasElement {
-  const canvas = renderTileSwatch(code); // drawFloor + the object on top
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
-  const d = img.data;
-  const [br, bg, bb] = hexToRgb(OBJECT_BG);
-  for (let i = 0; i < d.length; i += 4) {
-    const isFloor = FLOOR_RGBS.some(([fr, fg, fb]) => {
-      const dr = d[i] - fr, dg = d[i + 1] - fg, db = d[i + 2] - fb;
-      return dr * dr + dg * dg + db * db < 900;
-    });
-    if (isFloor) { d[i] = br; d[i + 1] = bg; d[i + 2] = bb; }
-  }
-  ctx.putImageData(img, 0, 0);
-  return canvas;
-}
-
-/** The inpaint mask for an OBJECT swatch: white where the object's pixels are,
- *  black over the magenta backdrop. ComfyUI's SetLatentNoiseMask denoises ONLY
- *  the white region, so the backdrop latents are left mathematically untouched
- *  and come back exactly OBJECT_BG — which turns `keyOutBackdrop` from a
- *  tolerance guess into an exact key. Without this the model repaints the
- *  backdrop too at high denoise, and no colour survives to key against.
- *
- *  The white region is DILATED: the latent mask is 1/8 of image resolution, so
- *  a pixel-tight mask would clip the object's own edge. Blurring and then
- *  thresholding low grows the region by roughly the blur radius, giving the
- *  object room to gain a rim, shading and thickness. */
-function renderObjectMaskSwatch(code: string): HTMLCanvasElement {
-  const swatch = renderTileSwatch(code); // drawFloor + the object on top
-  const img = swatch.getContext('2d')!.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const isFloor = FLOOR_RGBS.some(([fr, fg, fb]) => {
-      const dr = d[i] - fr, dg = d[i + 1] - fg, db = d[i + 2] - fb;
-      return dr * dr + dg * dg + db * db < 900;
-    });
-    const v = isFloor ? 0 : 255;
-    d[i] = d[i + 1] = d[i + 2] = v;
-    d[i + 3] = 255;
-  }
-  swatch.getContext('2d')!.putImageData(img, 0, 0);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = TILE_SAMPLE_PX;
-  canvas.height = TILE_SAMPLE_PX;
-  const ctx = canvas.getContext('2d')!;
-  ctx.filter = `blur(${Math.round(TILE_SAMPLE_PX * 0.03)}px)`;
-  ctx.drawImage(swatch, 0, 0);
-  ctx.filter = 'none';
-  const out = ctx.getImageData(0, 0, TILE_SAMPLE_PX, TILE_SAMPLE_PX);
-  const o = out.data;
-  for (let i = 0; i < o.length; i += 4) {
-    const v = o[i] > 20 ? 255 : 0; // low threshold → the blur halo becomes mask
-    o[i] = o[i + 1] = o[i + 2] = v;
-    o[i + 3] = 255;
-  }
-  ctx.putImageData(out, 0, 0);
-  return canvas;
-}
-
-/** The AI input for a BACKGROUND material: the code's procedural art laid out
- *  across a large `BG_TEXTURE_CELLS`-square expanse, so the model restyles a
- *  whole stretch of floor/wall at once and each map cell can later sample a
- *  different part of it (see BG_TEXTURE_PX's comment). */
-function renderBackgroundTextureSwatch(code: string): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = BG_TEXTURE_PX;
-  canvas.height = BG_TEXTURE_PX;
-  const ctx = canvas.getContext('2d')!;
-  const cell = BG_TEXTURE_PX / BG_TEXTURE_CELLS;
-  for (let r = 0; r < BG_TEXTURE_CELLS; r++) {
-    for (let c = 0; c < BG_TEXTURE_CELLS; c++) {
-      drawTile(ctx, code, c * cell, r * cell, cell);
-    }
-  }
-  return canvas;
-}
-
-/** A flat depth map for a BACKGROUND material — floor = far (dark), wall =
- *  near (bright). Only background tiles use ControlNet now (objects are handled
- *  as keyed product shots, no structural conditioning needed), so this no
- *  longer needs an object-silhouette branch. */
-function renderTileDepthSwatch(code: string): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = BG_TEXTURE_PX;
-  canvas.height = BG_TEXTURE_PX;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = isRaisedCell(code) ? DEPTH_RAISED : DEPTH_FLOOR;
-  ctx.fillRect(0, 0, BG_TEXTURE_PX, BG_TEXTURE_PX);
-  return canvas;
-}
-
-/** Draws one cell of a background material by sampling the sub-region of the
- *  large texture that corresponds to this cell's ABSOLUTE map position — so
- *  neighbouring cells get genuinely different pixels, and a cell samples the
- *  same patch no matter which PDF page window it's rendered in. Reads the
- *  texture's real width rather than assuming BG_TEXTURE_PX, since a provider
- *  may hand back a different resolution than we sent. */
-function drawBackgroundCell(
-  ctx: Ctx, tex: CanvasImageSource, mapCol: number, mapRow: number, x: number, y: number, cellPx: number
-) {
-  const texW = (tex as HTMLImageElement).naturalWidth || (tex as HTMLCanvasElement).width || BG_TEXTURE_PX;
-  const texCell = texW / BG_TEXTURE_CELLS;
-  const sx = (mapCol % BG_TEXTURE_CELLS) * texCell;
-  const sy = (mapRow % BG_TEXTURE_CELLS) * texCell;
-  ctx.drawImage(tex, sx, sy, texCell, texCell, x, y, cellPx, cellPx);
-}
-
-/** Chroma-keys the OBJECT_BG magenta backdrop out of a stylized object swatch,
- *  leaving just the object on transparency.
- *
- *  This is a plain colour-distance key over every pixel, NOT a flood fill from
- *  the edges. The flood fill it replaced assumed the backdrop stayed a flat
- *  colour, and died the moment it didn't: at high denoise the model rendered
- *  the old grey backdrop as stone masonry, so the fill hit its tolerance one
- *  pixel in and left the whole textured slab behind the object. Keying a
- *  saturated magenta by distance doesn't care whether the backdrop stayed flat,
- *  got textured, or picked up a cast shadow — none of that moves it near any
- *  wood/stone/metal colour an object is actually made of.
- *
- *  `source` is the stylized swatch — or, on a failed stylize call, the plain
- *  object swatch, which has the same magenta backdrop and keys out identically. */
-function keyOutBackdrop(source: CanvasImageSource): HTMLCanvasElement {
-  const px = TILE_SAMPLE_PX;
-  const canvas = document.createElement('canvas');
-  canvas.width = px;
-  canvas.height = px;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(source, 0, 0, px, px);
-  const img = ctx.getImageData(0, 0, px, px);
-  const d = img.data;
-
-  const [kr, kg, kb] = hexToRgb(OBJECT_BG);
-  // Squared colour distances: at/below IN it's backdrop, at/above OUT it's the
-  // object, between them alpha ramps so anti-aliased edges stay soft rather
-  // than turning into a hard magenta-fringed cutout.
-  //
-  // These are TIGHT because the inpaint mask (renderObjectMaskSwatch) means the
-  // backdrop is no longer denoised at all — measured live, it round-trips
-  // through the VAE with its green channel drifting only to ~38, so anything
-  // beyond a small radius is genuinely object. A wide ramp was the safety net
-  // for a backdrop that could drift arbitrarily, and it cost real quality: at
-  // OUT = 140 a plain wooden tabletop landed INSIDE the ramp (measured: ~90%
-  // alpha over 42k pixels), i.e. the table itself came out faintly see-through.
-  const IN = 50 * 50 * 3;
-  const OUT = 90 * 90 * 3;
-  for (let i = 0; i < d.length; i += 4) {
-    const dr = d[i] - kr, dg = d[i + 1] - kg, db = d[i + 2] - kb;
-    const dist = dr * dr + dg * dg + db * db;
-    if (dist <= IN) {
-      d[i + 3] = 0;
-    } else if (dist < OUT) {
-      d[i + 3] = Math.round((255 * (dist - IN)) / (OUT - IN));
-      // Despill, EDGE PIXELS ONLY: chroma bleeds a magenta cast onto pixels
-      // that blend object into backdrop (both red and blue lifted above
-      // green). Pull the excess back toward green so a keyed table doesn't
-      // come out with a pink rim. Deliberately not applied to fully-opaque
-      // pixels: run over the whole object it crushes anything legitimately
-      // red/purple (a lit brazier keyed to solid black that way).
-      const spill = Math.min(d[i], d[i + 2]) - d[i + 1];
-      if (spill > 0) {
-        d[i] -= Math.round(spill * 0.8);
-        d[i + 2] -= Math.round(spill * 0.8);
-      }
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  return canvas;
-}
-
-/** A stylize call for ONE tile swatch: the swatch itself, its depth map (empty
- *  string for object tiles, which don't use ControlNet), a short label of what
- *  the tile depicts (e.g. "a stone pillar") so the provider can prompt it as a
- *  named product shot, and whether this code is a background/material tile vs a
- *  discrete-object tile — see `isBackgroundTile`, and comfyui.rs's
- *  comfyui_stylize_map doc comment for why the two are prompted differently. */
-/** Dev-only handles on the swatch builders, so the AI pass can be driven from
- *  the running app (via CDP) without exporting a whole map — the swatches are
- *  what the model actually sees, so they're what's worth inspecting. Stripped
- *  from production builds by the `import.meta.env.DEV` guard. */
-export const __testHooks = import.meta.env.DEV
-  ? { renderObjectSwatch, renderObjectMaskSwatch, renderBackgroundTextureSwatch, keyOutBackdrop, collectTileJobs, parseFeatureLabels, tileJobAt }
-  : undefined;
-
-export interface TileStylizeRequest {
-  /** The swatch to restyle. */
-  tileDataUrl: string;
-  /** ControlNet depth map. Absent for objects, which don't use ControlNet. */
-  depthMapDataUrl?: string;
-  /** Inpaint mask (white = restyle this, black = leave untouched). Objects only
-   *  — see `renderObjectMaskSwatch`. */
-  maskDataUrl?: string;
-  /** What the tile depicts, e.g. "a stone pillar", for a named product shot. */
-  tileLabel: string;
-  isBackground: boolean;
-}
-
-export type TileStylizeFn = (req: TileStylizeRequest) => Promise<string>;
-
-/** Stylized tiles split by kind, both keyed by `TileJob.key`: `backgrounds` are
- *  opaque material textures drawn edge-to-edge in their cells; `objects` are
- *  keyed to transparency and composited over the stylized floor. */
-interface StylizedTiles {
-  backgrounds: Map<string, HTMLImageElement>;
-  objects: Map<string, HTMLCanvasElement>;
-}
-
-/** Runs `stylize` once per distinct JOB — a (code, label) pair, so a bar and a
- *  table both drawn as `=` each get their own prompt and swatch, while eight
- *  identical benches still cost a single call. Sequential because one local GPU
- *  runs one job at a time regardless, and it keeps "which tile is running"
- *  legible. Background tiles are stylized as seamless textures with a flat
- *  depth map for ControlNet; object tiles are stylized as product shots on a
- *  neutral backdrop (no depth/ControlNet) and then keyed to transparency.
- *
- *  A failing `stylize` call propagates rather than being swallowed per-job:
- *  whether to fall back is the CALLER's decision and the two callers differ.
- *  The automatic checkbox path (stylizeMapImage) already catches internally and
- *  hands back the plain swatch, so it never throws here; the manual "AI Export"
- *  path deliberately throws so an explicit click reports "ComfyUI unreachable"
- *  instead of quietly returning a plain map that looks like the AI just did
- *  nothing. Catching here defeated that and hid a completely-down ComfyUI. */
-async function stylizeTileSet(jobs: Map<string, TileJob>, stylize: TileStylizeFn): Promise<StylizedTiles> {
-  const backgrounds = new Map<string, HTMLImageElement>();
-  const objects = new Map<string, HTMLCanvasElement>();
-  for (const job of jobs.values()) {
-    const { key, code, label } = job;
-    if (job.isBackground) {
-      // One large expanse of the material per call — cells sample different
-      // parts of it at composite time, so nothing visibly repeats.
-      const swatch = renderBackgroundTextureSwatch(code);
-      const depth = renderTileDepthSwatch(code);
-      const out = await stylize({
-        tileDataUrl: swatch.toDataURL('image/png'),
-        depthMapDataUrl: depth.toDataURL('image/png'),
-        tileLabel: label,
-        isBackground: true,
-      });
-      backgrounds.set(key, await loadImage(out));
-    } else {
-      // No depth map for objects → the backend skips ControlNet and prompts it
-      // as an isolated product shot. The mask keeps the denoise off the magenta
-      // backdrop so we can key it out exactly.
-      const out = await stylize({
-        tileDataUrl: renderObjectSwatch(code).toDataURL('image/png'),
-        maskDataUrl: renderObjectMaskSwatch(code).toDataURL('image/png'),
-        tileLabel: label,
-        isBackground: false,
-      });
-      objects.set(key, keyOutBackdrop(await loadImage(out)));
-    }
-  }
-  return { backgrounds, objects };
-}
-
-/** Composites a stylized map from pre-stylized per-code tile swatches — the
- *  AI-facing counterpart to `renderBattleMapContent`. Each cell blits its
- *  code's swatch at its exact grid position, so alignment and furniture
- *  position are guaranteed regardless of anything the AI pass did to a
- *  swatch's own pixels (see the "Per-tile-type stylization" comment above).
- *  A soft contact shadow grounds raised objects against the floor, and a
- *  final vignette unifies tone across swatches that were stylized in
- *  separate, independently-seeded AI calls. */
-function renderStylizedContentFromTiles(
-  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, tiles: StylizedTiles
-): HTMLCanvasElement {
-  const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
-  const wCols = w.colEnd - w.colStart;
-  const wRows = w.rowEnd - w.rowStart;
-  const canvas = document.createElement('canvas');
-  canvas.width = wCols * cellPx;
-  canvas.height = wRows * cellPx;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = COLORS.void;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // An object cell is composited as `stylized floor + keyed object on top`, so
-  // its surround matches neighboring floor cells exactly instead of showing a
-  // patch. Needs a floor to lay down first — the map's own '.' floor if
-  // present, else any other background/material tile as a fallback base.
-  const labels = parseFeatureLabels(map);
-  const floorBase =
-    tiles.backgrounds.get(tileJobKeyForCode('.')) ?? [...tiles.backgrounds.values()][0] ?? null;
-  // Keyed object art has transparent margins, so it's inset slightly within the
-  // cell (never bleeding past the grid line) and grounded with a contact shadow.
-  const inset = cellPx * 0.06;
-
-  for (let r = 0; r < wRows; r++) {
-    for (let c = 0; c < wCols; c++) {
-      const mapCol = w.colStart + c, mapRow = w.rowStart + r;
-      const job = tileJobAt(map, labels, mapCol, mapRow);
-      if (!job) continue;
-      const x = c * cellPx, y = r * cellPx;
-      const objectTile = tiles.objects.get(job.key);
-
-      if (objectTile) {
-        if (floorBase) drawBackgroundCell(ctx, floorBase, mapCol, mapRow, x, y, cellPx);
-        else drawFloor(ctx, x, y, cellPx);
-        ctx.save();
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
-        ctx.filter = `blur(${Math.max(1, cellPx * 0.06)}px)`;
-        ctx.beginPath();
-        ctx.ellipse(x + cellPx * 0.5, y + cellPx * 0.74, cellPx * 0.34, cellPx * 0.15, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        ctx.drawImage(objectTile, x + inset, y + inset, cellPx - inset * 2, cellPx - inset * 2);
-      } else {
-        const bg = tiles.backgrounds.get(job.key);
-        if (bg) drawBackgroundCell(ctx, bg, mapCol, mapRow, x, y, cellPx);
-        else drawTile(ctx, job.code, x, y, cellPx);
-      }
-    }
-  }
-
-  ctx.strokeStyle = COLORS.grid;
-  ctx.lineWidth = 1;
-  for (let r = 0; r < wRows; r++) {
-    for (let c = 0; c < wCols; c++) {
-      const code = map.grid[w.rowStart + r]?.[w.colStart + c] ?? ' ';
-      if (code === ' ') continue;
-      ctx.strokeRect(c * cellPx, r * cellPx, cellPx, cellPx);
-    }
-  }
-
-  // Independently-seeded swatches can drift slightly in overall hue/exposure
-  // from each other; a single flat color-grade pass over the whole composite
-  // pulls them back toward one consistent tone so it reads as one scene
-  // rather than a patchwork of stickers.
-  const grade = ctx.createRadialGradient(
-    canvas.width / 2, canvas.height / 2, 0,
-    canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) * 0.7
-  );
-  grade.addColorStop(0, 'rgba(20,16,10,0)');
-  grade.addColorStop(1, 'rgba(20,16,10,0.22)');
-  ctx.fillStyle = grade;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
   return canvas;
 }
 
 /** Draws the coordinate ruler (A../1..) around a content layer and returns
- *  the composed full-size canvas — same output shape `renderBattleMapToCanvas`
- *  always produced. `content` is drawn into the content rect via `drawImage`
- *  (so it's rescaled to fit if an AI pass returned a different resolution)
- *  and the ruler is always painted fresh afterward, from the map data, never
- *  from pixels that passed through a stylize call. This split exists because
- *  img2img diffusion models cannot reliably preserve small baked-in text or
- *  thin straight lines through their VAE encode/decode round trip — testing
- *  against a live ComfyUI/Flux install showed the ruler coming back as
- *  scrambled digits and, worse, hallucinated extra walls where the model
- *  "reinterpreted" grid lines it couldn't faithfully reproduce. Composing the
- *  ruler afterward, in code, guarantees it's always pixel-exact regardless of
- *  which provider (or model) ran the stylize pass, or whether one ran at all. */
+ *  the composed full-size canvas. */
 function composeRulerFrame(
   map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, content: CanvasImageSource
 ): HTMLCanvasElement {
@@ -907,39 +819,9 @@ function composeRulerFrame(
 
 /** Renders a (sub-)grid to a fresh canvas, with a coordinate ruler (A.. / 1..)
  *  down the left and across the top so cells are referenceable on the print.
- *  `win` defaults to the whole map. `cellPx` sets resolution. Plain/no-AI
- *  render path — see `battleMapToStylizedPngDataUrl` for the AI-pass path. */
+ *  `win` defaults to the whole map. `cellPx` sets resolution. */
 export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow): HTMLCanvasElement {
   return composeRulerFrame(map, cellPx, win, renderBattleMapContent(map, cellPx, win));
-}
-
-function loadImage(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Could not load the stylized image data.'));
-    img.src = dataUrl;
-  });
-}
-
-/** Same result as `battleMapToPngDataUrl`, but runs `stylize` once per
- *  distinct tile type (no ruler, no whole-scene layout — see the "Per-tile-
- *  type stylization" comment above) before compositing the ruler back on
- *  top — see `composeRulerFrame`'s doc comment. Pass no `stylize` for a
- *  plain render. */
-export async function battleMapToStylizedPngDataUrl(
-  spec: string, cellPx: number, stylize?: TileStylizeFn
-): Promise<string | null> {
-  const map = parseBattleMap(spec);
-  if (!map) return null;
-  let source: CanvasImageSource;
-  if (stylize) {
-    const tiles = await stylizeTileSet(collectTileJobs(map), stylize);
-    source = renderStylizedContentFromTiles(map, cellPx, undefined, tiles);
-  } else {
-    source = renderBattleMapContent(map, cellPx);
-  }
-  return composeRulerFrame(map, cellPx, undefined, source).toDataURL('image/png');
 }
 
 /** Spreadsheet-style column label: 0→A, 25→Z, 26→AA. */
@@ -977,25 +859,14 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 
 /** Builds a print-scaled PDF: every grid square is exactly 1 inch, and a map
  *  bigger than one page is tiled across multiple Letter sheets (with the
- *  coordinate ruler repeated on each) to tape together.
- *
- *  `stylize`, if given, is run once per DISTINCT tile type across the WHOLE
- *  map (not per page — see the "Per-tile-type stylization" comment above),
- *  so a multi-page export costs the same handful of AI calls as a one-page
- *  one, and every page reuses the identical stylized swatches — seams
- *  between pages line up exactly because they're literally the same tile
- *  image repeated, not independently re-generated per page. */
-export async function battleMapToPdfBytes(
-  spec: string,
-  stylize?: TileStylizeFn
-): Promise<Uint8Array | null> {
+ *  coordinate ruler repeated on each) to tape together. */
+export async function battleMapToPdfBytes(spec: string): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
 
   const usableSquaresX = Math.floor((PAGE_W - 2 * MARGIN) / PT_PER_SQUARE);
   const usableSquaresY = Math.floor((PAGE_H - 2 * MARGIN) / PT_PER_SQUARE);
   const pdf = await PDFDocument.create();
-  const tiles = stylize ? await stylizeTileSet(collectTileJobs(map), stylize) : null;
 
   for (let ry = 0; ry < map.rows; ry += usableSquaresY) {
     for (let rx = 0; rx < map.cols; rx += usableSquaresX) {
@@ -1003,9 +874,7 @@ export async function battleMapToPdfBytes(
         colStart: rx, colEnd: Math.min(map.cols, rx + usableSquaresX),
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
-      const source: CanvasImageSource = tiles
-        ? renderStylizedContentFromTiles(map, RENDER_PX, win, tiles)
-        : renderBattleMapContent(map, RENDER_PX, win);
+      const source = renderBattleMapContent(map, RENDER_PX, win);
       const canvas = composeRulerFrame(map, RENDER_PX, win, source);
       const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));

@@ -680,8 +680,14 @@ pub async fn ask_dm(
 /// `model` overrides the CLI's default (e.g. `Some("opus")`) for calls where
 /// quality matters more than per-turn latency — a one-time module import, not
 /// the live turn loop, which stays on the default/faster model.
-pub fn ask_claude_once(prompt: String, model: Option<&str>) -> Result<String, String> {
-    run_claude(prompt, None, None, model, None).map(|r| r.text)
+///
+/// `effort` defaults to the CLI's own default when `None` — every existing
+/// caller passes `None` here and is unaffected. See `ask_ingest_once_low_effort`
+/// for why some ingestion work (battle-map generation) opts into `Some("low")`
+/// instead: the DM turn loop already forces `low` for exactly this reason
+/// (see build_claude_args's doc comment) and this is the same tradeoff.
+pub fn ask_claude_once(prompt: String, model: Option<&str>, effort: Option<&str>) -> Result<String, String> {
+    run_claude(prompt, None, None, model, effort).map(|r| r.text)
 }
 
 /// Like `ask_claude_once`, but runs IN a campaign's own directory — so `claude`

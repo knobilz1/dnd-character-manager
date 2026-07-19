@@ -1,11 +1,10 @@
 mod campaign;
-mod comfyui;
 mod dm;
-mod gemini_image;
 mod local_llm;
 mod oauth;
 mod party_listener;
 mod terrain;
+mod tile_library;
 mod tts;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +17,7 @@ pub fn run() {
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_opener::init())
     .manage(dm::DmTurnControl::default())
+    .manage(tile_library::TileLibraryState::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -92,16 +92,15 @@ pub fn run() {
       campaign::suggest_session_plan,
       campaign::regenerate_session_plan,
       campaign::generate_battle_map,
+      campaign::regenerate_one_plan_map,
       campaign::list_battle_maps,
       campaign::read_battle_map,
       campaign::save_battle_map,
-      comfyui::comfyui_stylize_map,
-      gemini_image::save_gemini_api_key,
-      gemini_image::has_gemini_api_key,
-      gemini_image::clear_gemini_api_key,
-      gemini_image::gemini_stylize_map,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
+      tile_library::import_tile_library,
+      tile_library::get_tile_library_summary,
+      tile_library::search_tile_catalog,
       tts::speak_text,
       tts::warmup_tts,
       tts::probe_cuda,

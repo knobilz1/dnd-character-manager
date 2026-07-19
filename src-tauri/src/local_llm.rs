@@ -446,6 +446,16 @@ pub fn set_ingestion_provider(use_local: bool, base_url: String, model: String) 
     *ingest_config().lock().unwrap() = IngestConfig { use_local, base_url, model };
 }
 
+/// Whether `ask_ingest_once` is currently routing to a local model rather
+/// than Claude — for callers whose PROMPT (not just their tolerance for a
+/// weaker reply) needs to change depending on which one is about to answer
+/// it. See campaign.rs's battle_map_format_instructions: a small local model
+/// reliably lost track of a long, two-example prompt in a way Claude never
+/// did (confirmed live), so that prompt has a streamlined variant for local.
+pub fn is_local_ingestion() -> bool {
+    ingest_config().lock().unwrap().use_local
+}
+
 #[derive(Serialize)]
 struct OneShotRequest {
     model: String,
@@ -504,7 +514,29 @@ pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: 
         }
         ask_local_once(&cfg.base_url, &cfg.model, &prompt, expect_json)
     } else {
-        crate::dm::ask_claude_once(prompt, claude_model)
+        crate::dm::ask_claude_once(prompt, claude_model, None)
+    }
+}
+
+/// Same dispatch as `ask_ingest_once`, but forces `low` extended-thinking
+/// effort on the Claude path — see build_claude_args's doc comment (dm.rs):
+/// the live DM turn loop already forces `low` for ordinary turns, measured
+/// to cut real wall-clock latency by roughly a quarter with no quality
+/// regression even on nuanced judgment calls. Battle-map generation (its
+/// only caller today) is a structural/spatial layout task, not a nuanced
+/// judgment call, so it's at least as good a fit — and its prompts are much
+/// bigger than an ordinary turn's, where default effort has more room to
+/// spend minutes "thinking" before any output starts (live-measured: a
+/// single map-spec call took 362s for 11552 chars in / 2161 chars out, a
+/// ratio default effort's raw generation speed doesn't explain on its own).
+/// Local path is identical to `ask_ingest_once` — effort is a Claude CLI
+/// concept, meaningless to a local server.
+pub fn ask_ingest_once_low_effort(prompt: String, claude_model: Option<&str>) -> Result<String, String> {
+    let cfg = ingest_config().lock().unwrap().clone();
+    if cfg.use_local {
+        ask_ingest_once(prompt, claude_model, false)
+    } else {
+        crate::dm::ask_claude_once(prompt, claude_model, Some("low"))
     }
 }
 
