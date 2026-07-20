@@ -2457,6 +2457,25 @@ const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*', ',']
 /// need seamless edge-to-edge tiles, which discrete catalog art isn't.
 const RESOLVABLE_GLYPHS: &[char] = &['=', 'o', '*', 'T', '^'];
 
+/// Glyphs that are a FIELD of many discrete small things, not one contiguous
+/// object. A `T` run ("Pine treeline at B2-M2") is a dozen separate trees; a
+/// `^` run is a scatter of rubble piles. Connecting them into one placement (as
+/// `=` correctly does for a bar counter) resolved a 12-cell treeline to a
+/// single wide tile (a clothesline, once) and left the rest to a uniform
+/// procedural sprite. Field cells are resolved individually, with variety.
+const FIELD_GLYPHS: &[char] = &['T', '^'];
+
+/// Canonical search noun for a field glyph, so a `T` cell searches for a TREE
+/// regardless of whether the DM labelled it "treeline", "foliage", or "woods"
+/// — the glyph's meaning is fixed by the legend even when the label isn't a
+/// catalog word.
+fn field_glyph_noun(glyph: char) -> &'static str {
+    match glyph {
+        '^' => "rubble",
+        _ => "tree",
+    }
+}
+
 /// Words that mean "this is furniture" in a Features label. `=` is the ONLY
 /// legend code for furniture (see MAP_LEGEND) — if a line named this way
 /// points at any other object code, the model drew the wrong character for
@@ -2971,6 +2990,11 @@ struct Placement {
     cells: Vec<(usize, usize)>,
     w: u32,
     h: u32,
+    /// A single cell of a FIELD glyph (foliage/rubble) — resolved individually
+    /// with variety and no vision, rather than vision-picking one tile for a
+    /// whole connected run. `glyph` is its source code, so the resolver can
+    /// search the canonical noun (see `field_glyph_noun`).
+    field_glyph: Option<char>,
 }
 
 /// 4-connected components of a cell set — so "Bar counter at C3-J3" (one
@@ -3028,18 +3052,36 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
         return Vec::new();
     };
     let mut out = Vec::new();
+    // Field cells (foliage/rubble) are self-describing — a `T` is a tree
+    // whether or not the DM wrote a Features line for it, and the model often
+    // draws a whole treeline in the grid and names none of it. So collect any
+    // labels a Features line DOES give (for "pine" flavour), then resolve
+    // EVERY field glyph straight from the grid. Non-field glyphs still need
+    // their Features line — a `=` could be a bar or a table.
+    let mut field_label: HashMap<(usize, usize), String> = HashMap::new();
     for line in feature_lines(&suffix) {
         let label = feature_line_name(&line).to_string();
-        let cells: Vec<(usize, usize)> = cell_refs_in(&line)
-            .into_iter()
-            .filter_map(|(_, c, r)| match cell_at(&rows, c, r) {
-                Some(ch) if RESOLVABLE_GLYPHS.contains(&ch) => Some((c, r)),
-                _ => None,
-            })
-            .collect();
-        for comp in connected_components(&cells) {
+        let mut solid: Vec<(usize, usize)> = Vec::new();
+        for (_, c, r) in cell_refs_in(&line) {
+            match cell_at(&rows, c, r) {
+                Some(ch) if FIELD_GLYPHS.contains(&ch) => {
+                    field_label.entry((c, r)).or_insert_with(|| label.clone());
+                }
+                Some(ch) if RESOLVABLE_GLYPHS.contains(&ch) => solid.push((c, r)),
+                _ => {}
+            }
+        }
+        for comp in connected_components(&solid) {
             let (w, h) = bbox_wh(&comp);
-            out.push(Placement { label: label.clone(), cells: comp, w, h });
+            out.push(Placement { label: label.clone(), cells: comp, w, h, field_glyph: None });
+        }
+    }
+    for (r, row) in rows.iter().enumerate() {
+        for (c, ch) in row.chars().enumerate() {
+            if FIELD_GLYPHS.contains(&ch) {
+                let label = field_label.get(&(c, r)).cloned().unwrap_or_else(|| field_glyph_noun(ch).to_string());
+                out.push(Placement { label, cells: vec![(c, r)], w: 1, h: 1, field_glyph: Some(ch) });
+            }
         }
     }
     for line in object_lines(&suffix) {
@@ -3048,7 +3090,7 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
                 .flat_map(|dc| (0..h as usize).map(move |dr| (dc, dr)))
                 .map(|(dc, dr)| (c + dc, r + dr))
                 .collect();
-            out.push(Placement { label, cells, w, h });
+            out.push(Placement { label, cells, w, h, field_glyph: None });
         }
     }
     out
@@ -3058,6 +3100,12 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
 
 /// How many real candidate tiles the vision picker is shown per slot.
 const VISION_SHORTLIST_K: usize = 8;
+
+/// How many of a field's ranked candidates to vary across its cells. Small on
+/// purpose: field cells skip vision, so this leans on the ranking to keep the
+/// pool to the genuine top matches and off the novelty (Christmas/Gingerbread
+/// trees) that sits just below them.
+const FIELD_VARIETY_POOL: usize = 5;
 
 /// What the UI shows while a map is being made. `elapsed_s` is the whole
 /// operation's age, re-emitted on a timer — a number that keeps climbing is
@@ -3565,32 +3613,76 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     // art down into the footprint (`Math.min(stepX, t.w - dx)`), and a 2x2
     // pine shrunk into one cell is simply a small pine.
     let size_guide = crate::tile_library::structured_footprint_guide_for_app(app);
-    let search_size = |label: &str, w: u32, h: u32| -> (u32, u32) {
-        // HEAD word only — "bar stool" must not hit the "bar" guide entry and
-        // get offered actual bars. The last word is the object's identity,
-        // same rule the shortlist itself scores by.
-        let lower = label.to_lowercase();
-        let Some(head) = lower.split(|ch: char| !ch.is_alphanumeric()).filter(|t| !t.is_empty()).last() else {
-            return (w, h);
-        };
-        let word_hits = |word: &str, noun: &str| word == noun || word.strip_suffix('s') == Some(noun) || noun.strip_suffix('s') == Some(word);
-        match size_guide.iter().find(|(noun, _, _)| word_hits(head, noun)) {
+    // A label word matches a guide noun by exact/plural OR prefix ("treeline"
+    // -> "tree", "woodland" -> "wood"), so a DM's natural phrasing still finds
+    // the object's real size. Prefix only when the noun is >= 4 chars, so short
+    // nouns don't over-match.
+    let word_hits = |word: &str, noun: &str| word == noun || word.strip_suffix('s') == Some(noun) || noun.strip_suffix('s') == Some(word) || (noun.len() >= 4 && word.starts_with(noun));
+    let guide_size = |noun: &str, w: u32, h: u32| -> (u32, u32) {
+        match size_guide.iter().find(|(g, _, _)| word_hits(noun, g)) {
             Some((_, gw, gh)) => (w.max(*gw), h.max(*gh)),
             None => (w, h),
         }
     };
+    let search_size = |label: &str, w: u32, h: u32| -> (u32, u32) {
+        // HEAD word only — "bar stool" must not hit the "bar" guide entry and
+        // get offered actual bars.
+        let lower = label.to_lowercase();
+        match lower.split(|ch: char| !ch.is_alphanumeric()).filter(|t| !t.is_empty()).last() {
+            Some(head) => guide_size(head, w, h),
+            None => (w, h),
+        }
+    };
+
+    // ── Field placements (foliage/rubble) — resolved per cell with VARIETY and
+    // no vision. A treeline is many trees: vision-picking one tile for a whole
+    // run gave a uniform wall of the same sprite (and, for a wide run, a wrong
+    // wide tile). Instead, shortlist ONCE per distinct label at the glyph's
+    // real size, then stamp each cell with a candidate chosen by its position,
+    // so adjacent trees differ. The shortlist is biome-ranked, so the top few
+    // are real local trees, not the novelty a lone vision pick sometimes grabbed.
+    let mut field_objects: Vec<ResolvedTile> = Vec::new();
+    let mut field_shortlists: HashMap<(String, char), Vec<crate::tile_library::TileCandidate>> = HashMap::new();
+    for p in placements.iter().filter(|p| p.field_glyph.is_some()) {
+        let glyph = p.field_glyph.unwrap();
+        let cands = field_shortlists.entry((p.label.clone(), glyph)).or_insert_with(|| {
+            let noun = field_glyph_noun(glyph);
+            let (sw, sh) = guide_size(noun, 1, 1);
+            // Append the canonical noun so it's an EXACT head match. Without it,
+            // "Pine treeline" bridged to both "tree" AND "line" — and matched a
+            // clothesLINE, eleven of them. "Pine treeline tree" makes real trees
+            // (exact head "tree") outrank any bridge, while "pine" keeps flavour.
+            let query = format!("{} {noun}", p.label);
+            crate::tile_library::shortlist(app, &query, &biome, sw, sh, VISION_SHORTLIST_K)
+        });
+        if cands.is_empty() {
+            continue; // nothing real to place — the procedural foliage glyph carries it
+        }
+        // Vary only among the TOP few. Skipping vision lost the novelty filter,
+        // and a forest scene doesn't demote a Christmas/Gingerbread tree by
+        // biome (both it and real trees are on-biome), so it ranks just below
+        // the real ones — cycling the whole shortlist occasionally stamped one.
+        // The ranking's top handful are the genuine varied trees.
+        let pool = cands.len().min(FIELD_VARIETY_POOL);
+        // Deterministic per-cell spread so a Green/Red/Yellow mix repeats
+        // stably across re-renders but neighbours differ.
+        let (c, r) = p.cells[0];
+        let pick = &cands[(c.wrapping_mul(7) ^ r.wrapping_mul(13)) % pool];
+        field_objects.push(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw: pick.w, th: pick.h, root: pick.root.clone(), rel_path: pick.rel_path.clone(), sub: None });
+    }
+
     let slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
         .iter()
+        .filter(|p| p.field_glyph.is_none())
         .map(|p| {
             let (sw, sh) = search_size(&p.label, p.w, p.h);
             (p, crate::tile_library::shortlist(app, &p.label, &biome, sw, sh, VISION_SHORTLIST_K))
         })
         .filter(|(_, cands)| !cands.is_empty())
         .collect();
-    eprintln!("[map-timing] shortlist: {:.1}s for {} placement(s)", t_short.elapsed().as_secs_f64(), placements.len());
-    let mut objects: Vec<ResolvedTile> = if slots.is_empty() {
-        Vec::new()
-    } else {
+    eprintln!("[map-timing] shortlist: {:.1}s for {} placement(s), {} field cell(s)", t_short.elapsed().as_secs_f64(), placements.len(), field_objects.len());
+    let mut objects: Vec<ResolvedTile> = field_objects;
+    if !slots.is_empty() {
         crate::maplog::log(
             "TILE RESOLUTION START",
             &format!("{slug}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
@@ -3603,25 +3695,20 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         // silently doesn't render. Counting resolved-vs-placed by hand is how
         // that used to get noticed, so say it outright in the trace.
         let mut dropped: Vec<&str> = Vec::new();
-        let resolved: Vec<ResolvedTile> = slots
-            .iter()
-            .zip(picks)
-            .filter_map(|((p, cands), pick)| match pick.and_then(|i| cands.get(i)) {
-                Some(c) => Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw: c.w, th: c.h, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None }),
-                None => {
-                    dropped.push(p.label.as_str());
-                    None
-                }
-            })
-            .collect();
+        objects.extend(slots.iter().zip(picks).filter_map(|((p, cands), pick)| match pick.and_then(|i| cands.get(i)) {
+            Some(c) => Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw: c.w, th: c.h, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None }),
+            None => {
+                dropped.push(p.label.as_str());
+                None
+            }
+        }));
         if !dropped.is_empty() {
             crate::maplog::log(
                 "PLACEMENTS LEFT UNRESOLVED",
                 &format!("{} of {} got no tile — vision declined every candidate. They fall back to the built-in glyph:\n  {}", dropped.len(), slots.len(), dropped.join("\n  ")),
             );
         }
-        resolved
-    };
+    }
     // Light every resolved fire vessel that came through unlit. The catalog
     // ships fireplaces (and empty braziers) with no flame — the fire is a
     // separate !Effects/Fire sprite meant to be stacked on top. So a lit hearth
@@ -6789,7 +6876,7 @@ mod tests {
 
     #[test]
     fn vision_message_asks_for_variety_across_repeated_slots() {
-        let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1 };
+        let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: None };
         let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None };
         let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
         assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
@@ -9147,6 +9234,40 @@ mod example_map_tests {
     /// physical set-dressing. Pin that the exclusion is actually in both
     /// prompt variants whenever objects_enabled is true — this is a real DM
     /// error (Nabil runs combat with physical miniatures), not just cosmetic.
+    /// A treeline is MANY trees, not one object. Foliage/rubble runs must split
+    /// into per-cell placements so each resolves to its own varied tree — a
+    /// connected 12-cell `T` run resolved to a single wide clothesline once, and
+    /// left the rest to a uniform procedural sprite.
+    #[test]
+    fn a_foliage_run_splits_into_one_placement_per_cell() {
+        let spec = "# X\nGrid: 9x6, 5 ft squares.\nLegend: . floor  # wall  T tree  = furniture\nMap:\n#########\n#TTTT...#\n#......=#\n#..^^...#\n#.......#\n#########\nFeatures:\n- Pine treeline at B2-E2\n- Rubble at D4-E4\n- Table at H3\nTactics:\n- x";
+        let p = parse_placements(spec);
+        // The 4-cell treeline -> 4 separate 1x1 field placements, each carrying
+        // its glyph, NOT one 4x1 object.
+        let trees: Vec<_> = p.iter().filter(|x| x.field_glyph == Some('T')).collect();
+        assert_eq!(trees.len(), 4, "each tree cell is its own placement: {:?}", p.iter().map(|x| (&x.label, x.w, x.h)).collect::<Vec<_>>());
+        assert!(trees.iter().all(|t| t.w == 1 && t.h == 1));
+        // Rubble is a field glyph too.
+        assert_eq!(p.iter().filter(|x| x.field_glyph == Some('^')).count(), 2);
+        // The table is NOT a field — it stays a single connected object.
+        let table = p.iter().find(|x| x.label == "Table").unwrap();
+        assert_eq!(table.field_glyph, None);
+    }
+
+    /// Live bug (2026-07-20): the model drew 54 tree cells but wrote NO Features
+    /// line for any of them, so nothing resolved and all 54 fell to the uniform
+    /// procedural sprite. A `T` is a tree whether the DM named it or not, so
+    /// field glyphs resolve straight from the grid.
+    #[test]
+    fn field_glyphs_resolve_from_the_grid_even_with_no_features_line() {
+        let spec = "# X\nGrid: 8x5, 5 ft squares.\nLegend: . floor  # wall  T tree\nMap:\n########\n#TTT..T#\n#......#\n#T....T#\n########\nFeatures:\n- West trail at A3\nTactics:\n- x";
+        let p = parse_placements(spec);
+        let trees: Vec<_> = p.iter().filter(|x| x.field_glyph == Some('T')).collect();
+        assert_eq!(trees.len(), 6, "every T in the grid resolves, named or not: {:?}", p.len());
+        // With no Features label, it falls back to the glyph's canonical noun.
+        assert!(trees.iter().all(|t| t.label == "tree"), "{:?}", trees.iter().map(|t| &t.label).collect::<Vec<_>>());
+    }
+
     /// The guide is BINDING, not advice: an under-sized object either grows in
     /// place (free) or becomes a cheap-retry issue — because with the guide as
     /// a prompt line alone, the model wrote eleven 1x1 pine trees straight past
