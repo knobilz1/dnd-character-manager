@@ -44,3 +44,10 @@ pdf-extract = "0.12.0"
 # Extracting the downloaded F5 runtime archive (task #86). deflate-only: the
 # archive is built with Deflate/Fastest (see scripts/build-f5-runtime.ps1).
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Measuring what a tile ACTUALLY is (see tile_library::art_signals) instead of
+# trusting a vendor's folder names — so a pack whose layout we've never seen
+# still gets ground art kept out of object slots and unusably dark textures kept
+# off the floor. Only the three formats the catalogs ship; decoding is done on
+# the ~12 shortlisted candidates per placement, never on the whole library (a
+# full scan measured out at 17.6 min for 183k files).
+image = { version = "0.25", default-features = false, features = ["webp", "png", "jpeg"] }
