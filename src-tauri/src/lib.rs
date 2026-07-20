@@ -102,6 +102,8 @@ pub fn run() {
       terrain::save_terrain_catalog,
       tile_library::import_tile_library,
       tile_library::get_tile_library_summary,
+      tile_library::audit_tile_library,
+      tile_library::import_tile_overrides,
       tile_library::search_tile_catalog,
       tts::speak_text,
       tts::warmup_tts,

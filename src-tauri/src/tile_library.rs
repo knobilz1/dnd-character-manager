@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const IMAGE_EXTS: &[&str] = &["webp", "png", "jpg", "jpeg"];
 /// How many candidate matches `search_tile_catalog` reads off disk and
@@ -56,6 +56,25 @@ struct TileLibraryManifest {
     /// this with a single-element list; a merge Import appends to it.
     roots: Vec<String>,
     entries: Vec<TileLibraryEntry>,
+    /// What `audit_tile_library` measured, keyed by `rel_path`. Absent until the
+    /// library has been audited, and absent for entries a later merge-import
+    /// added, in which case the shortlist falls back to decoding on demand.
+    ///
+    /// Kept as a side map rather than fields on `TileLibraryEntry` so it shares
+    /// the override keying, and so an un-audited manifest costs nothing.
+    #[serde(default)]
+    measured: HashMap<String, MeasuredArt>,
+}
+
+/// The audit's verdict for one tile, in the smallest form the hot paths need:
+/// what it is, and whether it's legible enough to be a floor. Persisting this
+/// is what turns a one-time full-catalog decode into a permanent saving — the
+/// shortlist stops decoding its candidates entirely.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeasuredArt {
+    pub kind: ArtKind,
+    /// Mean luminance 0-255, rounded — the floor band only needs whole numbers.
+    pub lum: u8,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -87,6 +106,133 @@ pub struct TileLibraryState {
     /// transparently recomputes it. Built lazily on first shortlist. See
     /// `load_idf_cached`.
     idf: Mutex<Option<(usize, std::sync::Arc<HashMap<String, f64>>)>>,
+    /// Human corrections to `classify_art`, `rel_path -> kind`. Loaded once and
+    /// shared; `None` means "not read from disk yet", an empty map means "read,
+    /// and there aren't any".
+    overrides: Mutex<Option<std::sync::Arc<HashMap<String, ArtKind>>>>,
+}
+
+// ── Classification overrides: the CSV round trip ─────────────────────────────
+//
+// `classify_art` is ~99.6% right, which still leaves a tail on a 183k catalog —
+// and on somebody else's pack the tail is whatever their art happens to look
+// like. So the audit exports what it could NOT decide from pixels, a human
+// settles it in a spreadsheet, and the corrections come back and win.
+//
+// Keyed by `rel_path`, not by absolute path: overrides then survive re-importing
+// the same pack from a different folder, and can be shared between people using
+// the same pack.
+
+/// One row of the audit CSV. `override_kind` is what the human writes back;
+/// every other column is there so they can see WHY it was uncertain.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditRow {
+    pub rel_path: String,
+    pub category: String,
+    pub w: u32,
+    pub h: u32,
+    pub opaque: f64,
+    pub edges: u8,
+    pub luminance: f64,
+    pub classified_as: ArtKind,
+    pub decided_by: &'static str,
+    pub override_kind: Option<ArtKind>,
+}
+
+const AUDIT_CSV_HEADER: &str = "rel_path,category,w,h,opaque,edges,luminance,classified_as,decided_by,override";
+
+fn kind_str(k: ArtKind) -> &'static str {
+    match k {
+        ArtKind::Ground => "ground",
+        ArtKind::Prop => "prop",
+        ArtKind::Undecided => "undecided",
+    }
+}
+
+fn parse_kind(s: &str) -> Option<ArtKind> {
+    match s.trim().to_lowercase().as_str() {
+        "ground" => Some(ArtKind::Ground),
+        "prop" => Some(ArtKind::Prop),
+        _ => None,
+    }
+}
+
+/// Minimal RFC4180 quoting — a rel_path may legitimately contain a comma.
+fn csv_escape(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Split ONE csv line, honouring quotes and doubled-quote escapes.
+fn csv_split(line: &str) -> Vec<String> {
+    let (mut out, mut cur, mut in_q) = (Vec::new(), String::new(), false);
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if in_q && chars.peek() == Some(&'"') => {
+                cur.push('"');
+                chars.next();
+            }
+            '"' => in_q = !in_q,
+            ',' if !in_q => out.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    out.push(cur);
+    out
+}
+
+pub fn audit_rows_to_csv(rows: &[AuditRow]) -> String {
+    let mut s = String::from(AUDIT_CSV_HEADER);
+    s.push('\n');
+    for r in rows {
+        s.push_str(&format!(
+            "{},{},{},{},{:.3},{},{:.1},{},{},{}\n",
+            csv_escape(&r.rel_path),
+            csv_escape(&r.category),
+            r.w,
+            r.h,
+            r.opaque,
+            r.edges,
+            r.luminance,
+            kind_str(r.classified_as),
+            r.decided_by,
+            r.override_kind.map(kind_str).unwrap_or(""),
+        ));
+    }
+    s
+}
+
+/// Pull `rel_path -> kind` out of an edited audit CSV. Rows with an empty or
+/// unrecognised `override` column are skipped, so a user can fill in only the
+/// handful they care about and leave the rest untouched. Unknown column ORDER is
+/// tolerated by reading the header.
+pub fn parse_override_csv(csv: &str) -> HashMap<String, ArtKind> {
+    let mut lines = csv.lines().filter(|l| !l.trim().is_empty());
+    let Some(header) = lines.next() else { return HashMap::new() };
+    let cols = csv_split(header);
+    let idx = |name: &str| cols.iter().position(|c| c.trim().eq_ignore_ascii_case(name));
+    let (Some(path_i), Some(ovr_i)) = (idx("rel_path"), idx("override")) else {
+        return HashMap::new();
+    };
+    let mut out = HashMap::new();
+    for line in lines {
+        let f = csv_split(line);
+        let (Some(p), Some(o)) = (f.get(path_i), f.get(ovr_i)) else { continue };
+        if let Some(k) = parse_kind(o) {
+            if !p.trim().is_empty() {
+                out.insert(p.trim().to_string(), k);
+            }
+        }
+    }
+    out
+}
+
+fn overrides_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(manifest_path(app)?.with_file_name("tile_overrides.json"))
 }
 
 fn manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -392,7 +538,8 @@ pub struct ArtSignals {
 }
 
 /// What a tile is, once the pixels have had their say.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ArtKind {
     /// Seamless surface art. Never a placeable object.
     Ground,
@@ -426,13 +573,15 @@ impl ArtSignals {
         }
     }
 
-    /// Whether this reads as a battle-map floor a DM could actually place minis
-    /// on. `Gravel_05_F` (luminance 48) rendered a cave where wall, floor and
-    /// objects were all mud; `Cave_Floor_02_A` (92) read correctly. Too bright
-    /// blows out the art drawn over it.
-    pub fn is_usable_floor(&self) -> bool {
-        (FLOOR_LUM_MIN..=FLOOR_LUM_MAX).contains(&self.luminance)
-    }
+}
+
+/// Whether a texture is legible enough to be the board. `Gravel_05_F`
+/// (luminance 48) rendered a cave where wall, floor and objects were all one
+/// dark smear; `Cave_Floor_02_A` (92) read correctly. Too bright blows out the
+/// art drawn on top. Takes a bare number so it works off either a fresh
+/// measurement or the audit's stored value.
+pub fn luminance_is_usable_floor(lum: f64) -> bool {
+    (FLOOR_LUM_MIN..=FLOOR_LUM_MAX).contains(&lum)
 }
 
 const GROUND_OPAQUE_MIN: f64 = 0.92;
@@ -679,7 +828,7 @@ pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<
     let manifest = if merge {
         merge_manifest(load_manifest_cached(&app)?.map(|m| (*m).clone()).unwrap_or_default(), &root, scanned)
     } else {
-        TileLibraryManifest { roots: vec![root.clone()], entries: scanned }
+        TileLibraryManifest { roots: vec![root.clone()], entries: scanned, measured: HashMap::new() }
     };
     save_manifest(&app, &manifest)?;
     let summary = summarize(&manifest);
@@ -690,6 +839,183 @@ pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<
 #[tauri::command]
 pub fn get_tile_library_summary(app: AppHandle) -> Result<Option<TileLibrarySummary>, String> {
     Ok(load_manifest_cached(&app)?.map(|m| summarize(&m)))
+}
+
+fn load_overrides_cached(app: &AppHandle) -> std::sync::Arc<HashMap<String, ArtKind>> {
+    let state = app.state::<TileLibraryState>();
+    let mut guard = state.overrides.lock().unwrap();
+    if let Some(cached) = guard.as_ref() {
+        return cached.clone();
+    }
+    let map = overrides_path(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<HashMap<String, ArtKind>>(&s).ok())
+        .unwrap_or_default();
+    let arc = std::sync::Arc::new(map);
+    *guard = Some(arc.clone());
+    arc
+}
+
+/// What the audit found, for the UI to report without re-reading the CSV.
+#[derive(Serialize, Clone, Debug)]
+pub struct TileAuditSummary {
+    pub total: usize,
+    pub ground: usize,
+    pub prop: usize,
+    /// Low-confidence ground calls a human should confirm — the CSV's contents.
+    pub needs_review: usize,
+    /// Files that couldn't be read even after retries (a cold Drive mount, a
+    /// permissions issue). Left UNMEASURED, not persisted as prop — re-running
+    /// the audit once the cache is warm picks them up. Surfaced so a big number
+    /// here reads as "re-run me", not "these are all props".
+    pub unread: usize,
+    pub csv_path: String,
+}
+
+#[derive(Clone, Serialize)]
+struct AuditProgress {
+    done: usize,
+    total: usize,
+}
+
+/// Read a file, retrying a few times with a short backoff. A Google-Drive
+/// (or any network) mount times out reads under the load of a full-library
+/// audit; the same file reads fine moments later. Three tries clears the
+/// transient failures that were poisoning ~1% of a Drive-backed catalog.
+fn read_with_retry(path: &Path) -> Option<Vec<u8>> {
+    for attempt in 0..3 {
+        match fs::read(path) {
+            Ok(b) => return Some(b),
+            Err(_) if attempt < 2 => std::thread::sleep(std::time::Duration::from_millis(50 * (attempt + 1))),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// Decode and classify the WHOLE library, then write the rows the pixel pass
+/// couldn't decide on its own to `csv_path` for a human to settle.
+///
+/// This is the one place the full catalog gets decoded — measured at ~17.6 min
+/// single-threaded for 183k files, hence the worker pool and the progress
+/// events. Everything else in this module only ever measures the handful of
+/// candidates a shortlist already read.
+#[tauri::command]
+pub fn audit_tile_library(app: AppHandle, csv_path: String) -> Result<TileAuditSummary, String> {
+    let Some(manifest) = load_manifest_cached(&app)? else {
+        return Err("No tile library imported yet.".into());
+    };
+    let overrides = load_overrides_cached(&app);
+    let entries = &manifest.entries;
+    let total = entries.len();
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16);
+    let chunk = total.div_ceil(threads.max(1));
+
+    let collected: Vec<Vec<(AuditRow, Option<MeasuredArt>)>> = std::thread::scope(|s| {
+        let handles: Vec<_> = entries
+            .chunks(chunk.max(1))
+            .map(|slice| {
+                let (done, app, overrides) = (&done, &app, &overrides);
+                s.spawn(move || {
+                    let mut rows: Vec<(AuditRow, Option<MeasuredArt>)> = Vec::new();
+                    for (i, e) in slice.iter().enumerate() {
+                        let path = Path::new(&e.root).join(&e.rel_path);
+                        // A READ failure on a Drive-backed pack is usually a
+                        // transient I/O timeout, not a bad file — retry before
+                        // giving up. A DECODE failure (bytes read, image crate
+                        // said no) is genuine and needs no retry.
+                        let bytes = read_with_retry(&path);
+                        let read_ok = bytes.is_some();
+                        let signals = bytes.and_then(|b| art_signals(&b));
+                        let pixel_kind = signals.map(|s| s.kind());
+                        let classified = classify_art(&e.rel_path, signals);
+                        // Only persist a verdict we actually measured. A file we
+                        // couldn't even READ stays UNMEASURED so the shortlist
+                        // decodes it on demand later (when the Drive cache is
+                        // warm) instead of baking in a wrong "prop, lum 0".
+                        let measured = signals.map(|sg| MeasuredArt { kind: classified, lum: sg.luminance.round().clamp(0.0, 255.0) as u8 });
+                        rows.push((AuditRow {
+                            rel_path: e.rel_path.clone(),
+                            category: e.category.clone(),
+                            w: e.w,
+                            h: e.h,
+                            opaque: signals.map(|s| s.opaque).unwrap_or(0.0),
+                            edges: signals.map(|s| s.edges).unwrap_or(0),
+                            luminance: signals.map(|s| s.luminance).unwrap_or(0.0),
+                            classified_as: classified,
+                            decided_by: match (read_ok, pixel_kind) {
+                                (_, Some(ArtKind::Undecided)) => "name",
+                                (_, Some(_)) => "pixels",
+                                (false, None) => "unread",   // couldn't read the bytes — retry-later
+                                (true, None) => "undecodable", // read fine, not a valid image
+                            },
+                            override_kind: overrides.get(&e.rel_path).copied(),
+                        }, measured));
+                        if i % 512 == 0 {
+                            let n = done.fetch_add(512, std::sync::atomic::Ordering::Relaxed);
+                            let _ = app.emit("tile-audit-progress", AuditProgress { done: n.min(total), total });
+                        }
+                    }
+                    rows
+                })
+            })
+            .collect();
+        handles.into_iter().filter_map(|h| h.join().ok()).collect()
+    });
+
+    let all: Vec<(AuditRow, Option<MeasuredArt>)> = collected.into_iter().flatten().collect();
+    // Persist the verdicts. This is the point of paying for a full decode once:
+    // every later shortlist reads `measured` instead of decoding its candidates.
+    let measured: HashMap<String, MeasuredArt> = all.iter().filter_map(|(r, m)| m.map(|m| (r.rel_path.clone(), m))).collect();
+    let mut updated = (*manifest).clone();
+    updated.measured = measured;
+    save_manifest(&app, &updated)?;
+    *app.state::<TileLibraryState>().manifest.lock().unwrap() = Some(std::sync::Arc::new(updated));
+    let all: Vec<AuditRow> = all.into_iter().map(|(r, _)| r).collect();
+    let ground = all.iter().filter(|r| r.classified_as == ArtKind::Ground).count();
+    // The review list is NOT the whole undecided band — that's 18% of the
+    // catalog, almost all correctly defaulted to prop, and nobody reviews 30k
+    // rows. Surface only the calls that are BOTH uncertain AND high-impact:
+    //
+    //   name->ground : pixels were unsure and only the FILENAME said ground. If
+    //                  wrong, a real object silently vanishes from the map. This
+    //                  is the direction worth a human's eyes.
+    //   unread       : a read that never succeeded even with retries — flagged
+    //                  so the user knows it wasn't measured, not that it's prop.
+    //
+    // A confident pixel-ground (99.9% right on sampling) and an undecided that
+    // fell to prop (the safe default, and a wrong one is only a bad pick vision
+    // rejects) both stay OUT. Sorted by path so name families sit together and
+    // fill down in one drag.
+    let needs_review = |r: &&AuditRow| matches!(r.decided_by, "name") && r.classified_as == ArtKind::Ground || r.decided_by == "unread";
+    let mut review: Vec<AuditRow> = all.iter().filter(needs_review).cloned().collect();
+    review.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    let path = PathBuf::from(&csv_path);
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, audit_rows_to_csv(&review)).map_err(|e| format!("Couldn't write {csv_path}: {e}"))?;
+    let _ = app.emit("tile-audit-progress", AuditProgress { done: total, total });
+    let unread = all.iter().filter(|r| r.decided_by == "unread").count();
+    Ok(TileAuditSummary { total, ground, prop: all.len() - ground - unread, needs_review: review.len(), unread, csv_path })
+}
+
+/// Read an edited audit CSV back in. Replaces the stored override set with
+/// whatever the file specifies, so deleting a row's override un-sets it.
+#[tauri::command]
+pub fn import_tile_overrides(app: AppHandle, csv_path: String) -> Result<usize, String> {
+    let csv = fs::read_to_string(&csv_path).map_err(|e| format!("Couldn't read {csv_path}: {e}"))?;
+    let map = parse_override_csv(&csv);
+    let path = overrides_path(&app)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let n = map.len();
+    *app.state::<TileLibraryState>().overrides.lock().unwrap() = Some(std::sync::Arc::new(map));
+    Ok(n)
 }
 
 /// Keyword search over the imported catalog — resolves an `Objects:` label
@@ -952,10 +1278,13 @@ pub struct TileCandidate {
     pub w: u32,
     pub h: u32,
     pub data_url: String,
-    /// Measured from the bytes we just read for `data_url`, so callers can
-    /// judge the art itself rather than the vendor's folder names. `None` if
-    /// the file didn't decode.
-    pub signals: Option<ArtSignals>,
+    /// What this tile IS, with overrides and the audit already applied — so
+    /// callers never need to know whether it came from the manifest or from
+    /// decoding the bytes just now.
+    pub kind: ArtKind,
+    /// Mean luminance 0-255, when known. `None` only if the art was neither
+    /// audited nor decodable.
+    pub luminance: Option<f64>,
 }
 
 /// The shortlist as loadable candidates (image bytes read + base64'd) for a
@@ -1019,14 +1348,27 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
     // the ones we don't, which is the whole point.
     let object_slot = category.is_none();
     let want = if object_slot { k + GROUND_FILTER_MARGIN } else { k };
+    let overrides = load_overrides_cached(app);
     shortlist_entries(entries, &tokens, &idf, scene, fw, fh, want, !object_slot)
         .into_iter()
         .filter_map(|e| {
-            let (data_url, signals) = load_tile_art(&e.root, &e.rel_path)?;
-            if object_slot && classify_art(&e.rel_path, signals) == ArtKind::Ground {
+            // Prefer the audit's stored verdict; only decode when this entry has
+            // never been measured (un-audited library, or a pack merged in since
+            // the last audit).
+            let audited = manifest.measured.get(&e.rel_path).copied();
+            let decoded = if audited.is_none() { load_tile_art(&e.root, &e.rel_path)? } else { (load_tile_data_url(&e.root, &e.rel_path)?, None) };
+            let (data_url, signals) = decoded;
+            // A human's correction always wins over anything we worked out.
+            let kind = overrides
+                .get(&e.rel_path)
+                .copied()
+                .or(audited.map(|m| m.kind))
+                .unwrap_or_else(|| classify_art(&e.rel_path, signals));
+            if object_slot && kind == ArtKind::Ground {
                 return None;
             }
-            Some(TileCandidate { root: e.root.clone(), rel_path: e.rel_path.clone(), w: e.w, h: e.h, data_url, signals })
+            let luminance = audited.map(|m| m.lum as f64).or(signals.map(|s| s.luminance));
+            Some(TileCandidate { root: e.root.clone(), rel_path: e.rel_path.clone(), w: e.w, h: e.h, data_url, kind, luminance })
         })
         .take(k)
         .collect()
@@ -1288,10 +1630,79 @@ mod tests {
 
         // Floor usability, calibrated on two real textures: Cave_Floor_02_A
         // rendered correctly, Gravel_05_F rendered as mud.
-        assert!(sig(1.0, 4, 91.9).is_usable_floor(), "Cave_Floor_02_A must stay");
-        assert!(!sig(1.0, 4, 48.2).is_usable_floor(), "Gravel_05_F is too dark to play on");
-        assert!(sig(1.0, 4, 162.8).is_usable_floor(), "bright sand is fine");
-        assert!(!sig(1.0, 4, 250.0).is_usable_floor(), "blown-out white swamps the art on top");
+        assert!(luminance_is_usable_floor(91.9), "Cave_Floor_02_A must stay");
+        assert!(!luminance_is_usable_floor(48.2), "Gravel_05_F is too dark to play on");
+        assert!(luminance_is_usable_floor(162.8), "bright sand is fine");
+        assert!(!luminance_is_usable_floor(250.0), "blown-out white swamps the art on top");
+    }
+
+    fn audit_row(rel_path: &str, kind: ArtKind, by: &'static str) -> AuditRow {
+        AuditRow {
+            rel_path: rel_path.into(), category: "Textures".into(), w: 1, h: 1,
+            opaque: 0.75, edges: 4, luminance: 92.0, classified_as: kind, decided_by: by, override_kind: None,
+        }
+    }
+
+    /// The review list is the small, high-impact subset — not the whole
+    /// undecided band. Getting this scope wrong is what turned a "verify ~1,100"
+    /// into a 33,643-row CSV nobody would open.
+    #[test]
+    fn review_list_is_only_low_confidence_ground_and_unread_files() {
+        // Mirror of the `needs_review` closure in audit_tile_library.
+        let needs_review = |kind: ArtKind, by: &str| matches!(by, "name") && kind == ArtKind::Ground || by == "unread";
+
+        // IN: name said ground (if wrong, an object silently vanishes) …
+        assert!(needs_review(ArtKind::Ground, "name"));
+        // … and a file that never read (flag it, don't call it prop).
+        assert!(needs_review(ArtKind::Prop, "unread"));
+
+        // OUT: confident pixel calls — 99.9% right, not worth a human.
+        assert!(!needs_review(ArtKind::Ground, "pixels"));
+        assert!(!needs_review(ArtKind::Prop, "pixels"));
+        // OUT: the 30k that defaulted to prop — safe default, wrong one is only
+        // a bad pick vision rejects, and there are far too many to review.
+        assert!(!needs_review(ArtKind::Prop, "name"));
+        // OUT: read fine but not a valid image — genuinely a prop fallback.
+        assert!(!needs_review(ArtKind::Prop, "undecodable"));
+    }
+
+    /// The round trip has to survive a spreadsheet: a human opens the CSV,
+    /// fills in a handful of `override` cells, saves, and re-imports.
+    #[test]
+    fn an_edited_audit_csv_round_trips_back_into_overrides() {
+        let csv = audit_rows_to_csv(&[audit_row("a/Grate_Metal_D_01.webp", ArtKind::Ground, "name"), audit_row("b/Altar_Stone_E_2x1.webp", ArtKind::Prop, "name")]);
+        assert!(csv.starts_with(AUDIT_CSV_HEADER), "{csv}");
+        // Nothing overridden yet, so importing it back changes nothing.
+        assert!(parse_override_csv(&csv).is_empty());
+
+        // Now the human fills in two cells and blanks are left alone.
+        let edited = csv.replace("ground,name,\n", "ground,name,prop\n").replace("prop,name,\n", "prop,name,ground\n");
+        let got = parse_override_csv(&edited);
+        assert_eq!(got.get("a/Grate_Metal_D_01.webp"), Some(&ArtKind::Prop));
+        assert_eq!(got.get("b/Altar_Stone_E_2x1.webp"), Some(&ArtKind::Ground));
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn audit_csv_survives_paths_with_commas_and_quotes() {
+        let row = audit_row(r#"packs/Odd, "Vendor"/tile.webp"#, ArtKind::Undecided, "name");
+        let csv = audit_rows_to_csv(&[row]).replace(",name,\n", ",name,ground\n");
+        let got = parse_override_csv(&csv);
+        assert_eq!(got.get(r#"packs/Odd, "Vendor"/tile.webp"#), Some(&ArtKind::Ground), "{csv}");
+    }
+
+    /// Someone will reorder or delete columns in Excel. Read by header name, and
+    /// ignore anything unparseable rather than throwing the whole file away.
+    #[test]
+    fn override_import_tolerates_reordered_columns_and_junk_rows() {
+        let csv = "override,junk,rel_path\nground,x,a/one.webp\n,x,a/two.webp\nnonsense,x,a/three.webp\n,,\nprop,x,a/four.webp\n";
+        let got = parse_override_csv(csv);
+        assert_eq!(got.get("a/one.webp"), Some(&ArtKind::Ground));
+        assert_eq!(got.get("a/four.webp"), Some(&ArtKind::Prop));
+        assert_eq!(got.len(), 2, "blank and unrecognised overrides are skipped, not errors: {got:?}");
+        // A file with no usable header yields nothing rather than panicking.
+        assert!(parse_override_csv("").is_empty());
+        assert!(parse_override_csv("a,b,c\n1,2,3\n").is_empty());
     }
 
     /// Stage 2 of the cascade: the filename only ever adjudicates art the pixels
@@ -1647,7 +2058,7 @@ mod tests {
 
     #[test]
     fn merge_manifest_adds_a_new_root_without_touching_existing_ones() {
-        let existing = TileLibraryManifest { roots: vec!["C:/packA".into()], entries: vec![entry_at("C:/packA", "table.webp")] };
+        let existing = TileLibraryManifest { roots: vec!["C:/packA".into()], entries: vec![entry_at("C:/packA", "table.webp")], measured: HashMap::new() };
         let scanned = vec![entry_at("C:/packB", "barrel.webp")];
         let merged = merge_manifest(existing, "C:/packB", scanned);
         assert_eq!(merged.roots, vec!["C:/packA".to_string(), "C:/packB".to_string()]);
@@ -1664,6 +2075,7 @@ mod tests {
         let existing = TileLibraryManifest {
             roots: vec!["C:/packA".into()],
             entries: vec![entry_at("C:/packA", "old_table.webp"), entry_at("C:/packA", "old_barrel.webp")],
+            measured: HashMap::new(),
         };
         let rescanned = vec![entry_at("C:/packA", "new_table.webp")];
         let merged = merge_manifest(existing, "C:/packA", rescanned);

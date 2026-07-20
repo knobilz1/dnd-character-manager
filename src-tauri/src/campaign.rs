@@ -3415,7 +3415,7 @@ fn resolve_floor(app: &AppHandle, biome: &str) -> Option<TileRef> {
     // whole cave — floor, walls, objects — rendered as one dark smear, while
     // Cave_Floor_02_A (92) read correctly. Keep everything if the filter would
     // empty the list; a dark floor still beats no floor.
-    let usable: Vec<_> = all.iter().filter(|c| c.signals.is_none_or(|s| s.is_usable_floor())).cloned().collect();
+    let usable: Vec<_> = all.iter().filter(|c| c.luminance.is_none_or(crate::tile_library::luminance_is_usable_floor)).cloned().collect();
     let dropped = all.len() - usable.len();
     let cands = if usable.is_empty() { all } else { usable };
     crate::maplog::log(
@@ -6653,7 +6653,7 @@ mod tests {
     #[test]
     fn vision_message_asks_for_variety_across_repeated_slots() {
         let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1 };
-        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), signals: None };
+        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None };
         let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
         assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
     }
