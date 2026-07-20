@@ -401,6 +401,89 @@ fn summarize(manifest: &TileLibraryManifest) -> TileLibrarySummary {
 /// for categorization purposes.
 const OBJECT_VOCAB_CATEGORIES: &[&str] = &["Furniture", "Decor", "Clutter", "Workplace_Equipment", "Lightsources", "Natural_Decor", "Burial_and_Graves", "Flora", "Vehicles"];
 
+/// Nouns whose 1x1 pool is too thin to shortlist, with the smallest footprint
+/// that actually has one — derived from the catalog, not hand-written.
+///
+/// This retires a whole bug class one prompt rule at a time was chasing: the
+/// DM writes "Pine tree at X (1x1)", but every real tree in the pack is canopy
+/// art at 2x2+ — so the only 1x1 "tree" is novelty clutter, and the map's
+/// defining vegetation renders as a gingerbread cookie (live, 2026-07-20;
+/// before that it was a 1x1 chandelier becoming a laundry iron). Instead of
+/// teaching the prompt about chandeliers, then tables, then trees, tell it
+/// what THIS pack actually stocks — which also makes it true for a pack we
+/// have never seen.
+///
+/// Identity is the filename's LEADING token (`Tree_Pine_...` -> "tree"): FA
+/// names lead with the object noun, and the gingerbread counter-example
+/// (`Gingerbread_Tree_...` -> "gingerbread") files itself under the modifier,
+/// which is exactly what we want. Words with a healthy 1x1 pool need no
+/// guidance and stay out; rare nouns (< MIN_IDENTITY files) are noise and
+/// stay out.
+fn footprint_guide(entries: &[TileLibraryEntry]) -> Vec<(String, u32, u32)> {
+    /// A "real" pool = at least a full vision shortlist's worth of art.
+    const MIN_POOL: usize = 8;
+    const MIN_IDENTITY: usize = 20;
+    let mut by: HashMap<&str, Vec<(u32, u32)>> = HashMap::new();
+    for e in entries {
+        if !OBJECT_VOCAB_CATEGORIES.iter().any(|c| c.eq_ignore_ascii_case(&e.category)) {
+            continue;
+        }
+        let Some(first) = e.keywords.first() else { continue };
+        if is_artifact_word(first) {
+            continue;
+        }
+        by.entry(first.as_str()).or_default().push((e.w, e.h));
+    }
+    let mut out: Vec<(String, u32, u32, usize)> = Vec::new();
+    for (word, sizes) in by {
+        if sizes.len() < MIN_IDENTITY {
+            continue;
+        }
+        if sizes.iter().filter(|s| **s == (1, 1)).count() >= MIN_POOL {
+            continue; // 1x1 genuinely works for this noun — no guidance needed
+        }
+        let mut hist: HashMap<(u32, u32), usize> = HashMap::new();
+        for s in &sizes {
+            *hist.entry(*s).or_insert(0) += 1;
+        }
+        // Smallest footprint that is both a real pool AND part of the noun's
+        // BULK (by area, then width). The pool floor alone was not enough:
+        // "tree" has twelve 2x2 entries — every one a fallen BRANCH — against
+        // 290 standing trees at 3x3+, and deriving "tree 2x2" sent every
+        // search into branch-and-novelty territory (vision then preferred a
+        // gingerbread cookie to a stick). 10% of identity screens out fringe
+        // variants while keeping honest minority sizes like boulder 1x2 (15%).
+        let min_share = sizes.len().div_ceil(10);
+        let Some(((w, h), _)) = hist.into_iter().filter(|(_, n)| *n >= MIN_POOL.max(min_share)).min_by_key(|((w, h), _)| (w * h, *w)) else {
+            continue;
+        };
+        out.push((word.to_string(), w, h, sizes.len()));
+    }
+    // Most common nouns first — they're the ones the model will actually write.
+    out.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| a.0.cmp(&b.0)));
+    out.truncate(FOOTPRINT_GUIDE_CAP);
+    out.into_iter().map(|(word, w, h, _)| (word, w, h)).collect()
+}
+
+/// Keeps the prompt line bounded on any pack. 40 covers every noun that
+/// matters on the 103k-object reference catalog.
+const FOOTPRINT_GUIDE_CAP: usize = 40;
+
+/// The guide with its structure intact — for callers that need to ACT on it
+/// (the resolver bumping a search footprint) rather than print it.
+pub fn structured_footprint_guide_for_app(app: &AppHandle) -> Vec<(String, u32, u32)> {
+    match load_manifest_cached(app) {
+        Ok(Some(m)) => footprint_guide(&m.entries),
+        _ => Vec::new(),
+    }
+}
+
+/// The footprint guide formatted for the map prompt ("tree 2x2"). Empty when
+/// no library is imported.
+pub fn object_footprint_guide_for_app(app: &AppHandle) -> Vec<String> {
+    structured_footprint_guide_for_app(app).into_iter().map(|(word, w, h)| format!("{word} {w}x{h}")).collect()
+}
+
 /// How many words `object_vocabulary` returns at most — keeps the prompt
 /// bounded regardless of library size, without starving it of real nouns.
 /// Validated live against the real 162,538-file catalog: restricted to
@@ -1641,6 +1724,45 @@ mod tests {
             rel_path: rel_path.into(), category: "Textures".into(), w: 1, h: 1,
             opaque: 0.75, edges: 4, luminance: 92.0, classified_as: kind, decided_by: by, override_kind: None,
         }
+    }
+
+    /// Live bug (2026-07-20, forest map): "Pine tree (1x1)" — every real tree
+    /// in the pack is canopy art at 2x2+, so the only 1x1 match was a
+    /// GINGERBREAD TREE, eight of which became the map's vegetation. The guide
+    /// tells the prompt what sizes this pack actually stocks, per noun, so the
+    /// model never writes a footprint that only novelty clutter can fill.
+    #[test]
+    fn footprint_guide_flags_nouns_with_no_real_1x1_pool_and_only_those() {
+        let mk = |first: &str, w: u32, h: u32| TileLibraryEntry {
+            root: "r".into(), rel_path: format!("{first}_{w}x{h}"), biome: "Woodlands".into(),
+            category: "Flora".into(), keywords: vec![first.into(), "green".into()], w, h,
+        };
+        let mut entries = Vec::new();
+        // trees: plenty of identity files, none at 1x1, real pool at 2x2
+        for _ in 0..30 { entries.push(mk("tree", 2, 2)); }
+        for _ in 0..10 { entries.push(mk("tree", 3, 3)); }
+        // the trap: a novelty 1x1 whose LEADING token is the modifier — it
+        // files under "gingerbread", so it can't launder "tree" into 1x1
+        for _ in 0..25 { entries.push(mk("gingerbread", 1, 1)); }
+        // statues: healthy 1x1 pool — needs no guidance
+        for _ in 0..30 { entries.push(mk("statue", 1, 1)); }
+        // a rare noun below MIN_IDENTITY — noise, stays out
+        for _ in 0..5 { entries.push(mk("obelisk", 4, 4)); }
+
+        let guide = footprint_guide(&entries);
+        assert_eq!(guide, vec![("tree".to_string(), 2, 2)], "{guide:?}");
+
+        // A fringe size must not become the guide minimum. Live: twelve 2x2
+        // "Tree_Branch" entries against 278 standing trees derived "tree 2x2",
+        // and every search landed in branch-and-novelty territory.
+        let mut fringe = Vec::new();
+        for _ in 0..12 { fringe.push(mk("tree", 2, 2)); }   // branches: 4%
+        for _ in 0..150 { fringe.push(mk("tree", 3, 3)); }  // the real bulk
+        for _ in 0..128 { fringe.push(mk("tree", 5, 5)); }
+        let g2 = footprint_guide(&fringe);
+        assert_eq!(g2, vec![("tree".to_string(), 3, 3)], "fringe 2x2 must be skipped: {g2:?}");
+        // gingerbread itself has a fine 1x1 pool (25 >= 8) so it needs no line;
+        // statue's 1x1 pool disqualifies it; obelisk is too rare.
     }
 
     /// The review list is the small, high-impact subset — not the whole

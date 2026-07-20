@@ -2140,7 +2140,7 @@ fn battle_maps_dir(root: &Path, id: &str) -> PathBuf {
 /// path (generate_battle_maps_for_plan_at), which is driven by the
 /// already-decided, already-persisted plan instead of asking the model to
 /// independently re-guess "what's coming up" a second time.
-fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str, objects_enabled: bool, vocabulary: &[String]) -> String {
+fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String]) -> String {
     format!(
         "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
         Design ONE battle map for this specific encounter the DM described: {hint}\n\n\
@@ -2148,7 +2148,7 @@ fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &s
         Current chapter (what's coming up):\n{current_chapter}\n\n\
         Recent memory/recaps:\n{memory}\n\n\
         {}",
-        battle_map_format_instructions(crate::local_llm::is_local_ingestion(), objects_enabled, vocabulary)
+        battle_map_format_instructions(crate::local_llm::is_local_ingestion(), objects_enabled, vocabulary, footprint_guide)
     )
 }
 
@@ -2219,11 +2219,11 @@ fn copies_the_example(spec: &str) -> bool {
 /// barely moving the issue count. A shorter, single-example prompt gives a
 /// small model a shot at self-consistency instead of setting it up to fail
 /// the same way every time.
-fn battle_map_format_instructions(use_local: bool, objects_enabled: bool, vocabulary: &[String]) -> String {
+fn battle_map_format_instructions(use_local: bool, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String]) -> String {
     if use_local {
-        battle_map_format_instructions_streamlined(objects_enabled, vocabulary)
+        battle_map_format_instructions_streamlined(objects_enabled, vocabulary, footprint_guide)
     } else {
-        battle_map_format_instructions_full(objects_enabled, vocabulary)
+        battle_map_format_instructions_full(objects_enabled, vocabulary, footprint_guide)
     }
 }
 
@@ -2255,13 +2255,22 @@ fn objects_format_line() -> &'static str {
 /// guaranteed matchable. Empty when nothing's imported (shouldn't happen —
 /// this whole section is only interpolated in when it's configured — but
 /// tolerated rather than assumed).
-fn objects_rule_line(vocabulary: &[String]) -> String {
+fn objects_rule_line(vocabulary: &[String], footprint_guide: &[String]) -> String {
     let vocab_line = if vocabulary.is_empty() {
         String::new()
     } else {
         format!(
             "    - Real object vocabulary available in the imported tile library — STRONGLY prefer these words in your description; only a word that's actually in this list can be found and rendered, anything else just won't appear: {}.\n",
             vocabulary.join(", ")
+        )
+    };
+    let guide_line = if footprint_guide.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "    - SIZE GUIDE (derived from the imported library) — these objects only exist as LARGER art; write at least the size shown or nothing real will be found and the object silently won't appear: {}.
+",
+            footprint_guide.join(", ")
         )
     };
     format!(
@@ -2271,7 +2280,7 @@ fn objects_rule_line(vocabulary: &[String]) -> String {
         - A TABLE longer than 2 cells must be 2 cells DEEP — write `3x2` or `4x2`, never `3x1` or `4x1`. A long table only one cell deep matches almost nothing real in the catalog: it lands on a table RUNNER (a decorative cloth) and renders as a strip of fabric lying on the floor. Small tables at `1x1` and `2x1` are fine as they are.\n\
         - A hanging CHANDELIER is a 2x2 object — every chandelier in the catalog is a 2x2 piece, so a 1x1 one finds nothing and simply won't appear. Write \"iron chandelier at <cell> (2x2)\" over OPEN FLOOR (it hangs above the room, not against a wall). A single wall sconce, candelabra, or lantern is the 1x1 option instead.\n\
         - DRESS THE WALLS. A lived-in room stores things along its edges, and a bare-walled room reads as empty. Add 1-3 `Objects:` entries of WALL STORAGE stocked to fit the scene, each sitting in the floor cells directly against a wall (typically 2x1 or 3x1): behind a bar, shelves of bottles and a keg or two; a study, bookshelves; an armoury, weapon racks; a pantry or warehouse, crates and a cupboard. Name the contents (\"shelf of bottles\", \"bookshelf\", \"stacked crates\") so the right stocked piece is found, not a bare plank.\n\
-        {vocab_line}"
+        {vocab_line}{guide_line}"
     )
 }
 
@@ -2282,9 +2291,9 @@ fn objects_rule_line(vocabulary: &[String]) -> String {
 /// rules) is cut, not because it's wrong, but because a model that can't
 /// reliably hold its own row width steady has no spare capacity for nuance,
 /// and the extra length was actively working against it.
-fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary: &[String]) -> String {
+fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String]) -> String {
     let objects_format = if objects_enabled { objects_format_line() } else { "" };
-    let objects_rule = if objects_enabled { objects_rule_line(vocabulary) } else { String::new() };
+    let objects_rule = if objects_enabled { objects_rule_line(vocabulary, footprint_guide) } else { String::new() };
     format!(
         "Format the map EXACTLY like this, with a line containing only {MAP_SPEC_DELIMITER} before it:\n\n\
         {MAP_SPEC_DELIMITER}\n\
@@ -2328,9 +2337,9 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
     )
 }
 
-fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[String]) -> String {
+fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String]) -> String {
     let objects_format = if objects_enabled { objects_format_line() } else { "" };
-    let objects_rule = if objects_enabled { objects_rule_line(vocabulary) } else { String::new() };
+    let objects_rule = if objects_enabled { objects_rule_line(vocabulary, footprint_guide) } else { String::new() };
     format!(
         "Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
         {MAP_SPEC_DELIMITER}\n\
@@ -2851,6 +2860,83 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
 /// h). `None` if it doesn't match that shape, which `validate_map_spec`
 /// reports as an issue rather than silently dropping — same treatment as a
 /// malformed Features line.
+/// Make the library's footprint guide ("tree 2x2") BINDING on Objects lines
+/// instead of advisory. Returns the spec with every under-sized object grown in
+/// place when the extra cells are open floor, plus an issue for each one it
+/// couldn't safely grow (cheap-retry material — same family as the other
+/// `Objects says` issues).
+///
+/// Exists because advice measurably wasn't enough: with "tree 2x2" in the
+/// prompt's SIZE GUIDE, the model still wrote eleven `Pine trees (1x1)`, and a
+/// 1x1 tree in this pack can only resolve to novelty clutter (fifteen
+/// gingerbread trees, live 2026-07-20). Deterministic repair costs nothing;
+/// a retry costs a model call; the prompt line alone cost a whole map.
+fn enforce_object_sizes(spec: &str, guide: &[(String, u32, u32)]) -> (String, Vec<String>) {
+    if guide.is_empty() {
+        return (spec.to_string(), Vec::new());
+    }
+    let Some((_, rows, _)) = split_spec_grid(spec) else {
+        return (spec.to_string(), Vec::new());
+    };
+    // Singular/plural tolerant word match, both directions ("trees" ~ "tree").
+    let word_hits = |word: &str, noun: &str| word == noun || word.strip_suffix('s') == Some(noun) || noun.strip_suffix('s') == Some(word);
+    let mut issues = Vec::new();
+    let mut out_lines: Vec<String> = Vec::new();
+    // Only rewrite inside the `Objects:` section — a Tactics sentence like
+    // "shove the boulder at E5 (2x2)" parses identically and must not be
+    // touched.
+    let mut in_objects = false;
+    for line in spec.lines() {
+        let t = line.trim();
+        if t == "Objects:" {
+            in_objects = true;
+            out_lines.push(line.to_string());
+            continue;
+        }
+        if in_objects && (t.ends_with(':') && !t.starts_with('-') || t.starts_with("# ")) {
+            in_objects = false;
+        }
+        if !in_objects {
+            out_lines.push(line.to_string());
+            continue;
+        }
+        let Some((label, c, r, w, h)) = parse_object_line(t.trim_start_matches('-').trim()) else {
+            out_lines.push(line.to_string());
+            continue;
+        };
+        let lower = label.to_lowercase();
+        let hit = guide.iter().find(|(noun, _, _)| lower.split(|ch: char| !ch.is_alphanumeric()).any(|word| word_hits(word, noun)));
+        let Some((noun, gw, gh)) = hit else {
+            out_lines.push(line.to_string());
+            continue;
+        };
+        // Either orientation of the minimum size satisfies the guide.
+        if (w >= *gw && h >= *gh) || (w >= *gh && h >= *gw) {
+            out_lines.push(line.to_string());
+            continue;
+        }
+        // Grow in place if every cell of the enlarged footprint is open floor —
+        // anchor stays put, footprint extends right/down, wider-first when the
+        // original was wider than tall.
+        let all_floor = |fw: u32, fh: u32| (0..fw as usize).all(|dc| (0..fh as usize).all(|dr| matches!(cell_at(&rows, c + dc, r + dr), Some('.'))));
+        let orientations = if w >= h { [(*gw, *gh), (*gh, *gw)] } else { [(*gh, *gw), (*gw, *gh)] };
+        if let Some((nw, nh)) = orientations.iter().find(|(fw, fh)| all_floor(*fw, *fh)) {
+            out_lines.push(line.replacen(&format!("({w}x{h})"), &format!("({nw}x{nh})"), 1));
+        } else {
+            issues.push(format!(
+                "Objects says \"{label}\" at {}{} ({w}x{h}), but in this tile library \"{noun}\" art only exists at {gw}x{gh} or larger — move it somewhere with {gw}x{gh} of open floor, or replace it with something small.",
+                column_label(c), r + 1
+            ));
+            out_lines.push(line.to_string());
+        }
+    }
+    let mut out = out_lines.join("\n");
+    if spec.ends_with('\n') {
+        out.push('\n');
+    }
+    (out, issues)
+}
+
 fn parse_object_line(line: &str) -> Option<(String, usize, usize, u32, u32)> {
     let lower = line.to_lowercase();
     let at_idx = lower.find(" at ")?;
@@ -3471,9 +3557,33 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     let biome = classify_biome(&spec);
     let placements = parse_placements(&spec);
     let t_short = std::time::Instant::now();
+    // Search at the library's real size for guide nouns even when the placement
+    // is smaller. A `T` cell is 1x1 BY DEFINITION, so no prompt rule can ever
+    // make "Pine tree" bigger — and this pack's only 1x1 "tree" is a
+    // gingerbread cookie (live, twice). The renderer already scales oversized
+    // art down into the footprint (`Math.min(stepX, t.w - dx)`), and a 2x2
+    // pine shrunk into one cell is simply a small pine.
+    let size_guide = crate::tile_library::structured_footprint_guide_for_app(app);
+    let search_size = |label: &str, w: u32, h: u32| -> (u32, u32) {
+        // HEAD word only — "bar stool" must not hit the "bar" guide entry and
+        // get offered actual bars. The last word is the object's identity,
+        // same rule the shortlist itself scores by.
+        let lower = label.to_lowercase();
+        let Some(head) = lower.split(|ch: char| !ch.is_alphanumeric()).filter(|t| !t.is_empty()).last() else {
+            return (w, h);
+        };
+        let word_hits = |word: &str, noun: &str| word == noun || word.strip_suffix('s') == Some(noun) || noun.strip_suffix('s') == Some(word);
+        match size_guide.iter().find(|(noun, _, _)| word_hits(head, noun)) {
+            Some((_, gw, gh)) => (w.max(*gw), h.max(*gh)),
+            None => (w, h),
+        }
+    };
     let slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
         .iter()
-        .map(|p| (p, crate::tile_library::shortlist(app, &p.label, &biome, p.w, p.h, VISION_SHORTLIST_K)))
+        .map(|p| {
+            let (sw, sh) = search_size(&p.label, p.w, p.h);
+            (p, crate::tile_library::shortlist(app, &p.label, &biome, sw, sh, VISION_SHORTLIST_K))
+        })
         .filter(|(_, cands)| !cands.is_empty())
         .collect();
     eprintln!("[map-timing] shortlist: {:.1}s for {} placement(s)", t_short.elapsed().as_secs_f64(), placements.len());
@@ -3758,7 +3868,17 @@ fn normalize_map_spec(spec: &str) -> String {
 /// we have at least one spec in hand, a retry failing (network error, or a
 /// reply with no `Map:` block) just ends the loop early and keeps the best
 /// attempt so far, same as running out of retries.
-fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, String> {
+fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[String]) -> Result<String, String> {
+    // "tree 2x2" -> ("tree", 2, 2); the prompt-formatted strings are the one
+    // form threaded everywhere, so parse here rather than thread a second type.
+    let size_guide: Vec<(String, u32, u32)> = footprint_guide
+        .iter()
+        .filter_map(|s| {
+            let (noun, wh) = s.rsplit_once(' ')?;
+            let (w, h) = wh.split_once('x')?;
+            Some((noun.to_string(), w.parse().ok()?, h.parse().ok()?))
+        })
+        .collect();
     // Tried Opus + high effort here (2026-07-17): ~10 minutes and a real
     // usage-budget hit per map, for output that wasn't measurably better —
     // reverted to Sonnet. That comparison never actually tried LOW effort
@@ -3804,11 +3924,20 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, Str
                     &format!("row widths {:?} -> {:?}", widths(&raw), widths(&fixed)),
                 );
             }
-            fixed
+            // Deterministic size repair: grow under-sized guide objects in
+            // place when the floor allows it. Free, and unlike the prompt's
+            // SIZE GUIDE it can't be ignored (live: eleven 1x1 pine trees
+            // written straight past the guide line).
+            let (resized, _) = enforce_object_sizes(&fixed, &size_guide);
+            if resized != fixed {
+                crate::maplog::log("OBJECT SIZES REPAIRED (saved a retry)", "under-sized guide objects grown in place on open floor");
+            }
+            resized
         }))
     };
     let issues_for = |spec: &str| -> Vec<String> {
         let mut issues = validate_map_spec(spec);
+        issues.extend(enforce_object_sizes(spec, &size_guide).1);
         if copies_the_example(spec) {
             issues.push(
                 "You returned the example map (The Bent Nail) verbatim instead of drawing the encounter you were asked for. The example only demonstrates habits — irregular spacing, mixed object sizes, an occupied centre, a bar with floor behind it. Draw a DIFFERENT room that has those habits."
@@ -3971,7 +4100,9 @@ fn fold_best_real_map_attempt(
 /// starts with this exact literal prefix; kept in sync with that function by
 /// the shipped-spec regression tests below. Pure.
 fn issue_is_features_only(issue: &str) -> bool {
-    issue.starts_with("Features says \"")
+    // `Objects says` issues are the same shape — one caption line to rewrite,
+    // no redraw — so they ride the same cheap retry.
+    issue.starts_with("Features says \"") || issue.starts_with("Objects says \"")
 }
 
 /// True when EVERY remaining issue is a Features mismatch and the grid
@@ -4029,12 +4160,12 @@ const MAP_SPEC_HEDGE_CLAUDE: usize = 2;
 ///
 /// An error only surfaces if EVERY call failed; one provider hiccup shouldn't
 /// sink a map when its twin succeeded.
-fn race_map_spec(prompt: &str, n: usize, max_retries: usize) -> Result<String, String> {
+fn race_map_spec(prompt: &str, n: usize, max_retries: usize, footprint_guide: &[String]) -> Result<String, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     for _ in 0..n {
-        let (tx, prompt) = (tx.clone(), prompt.to_string());
+        let (tx, prompt, guide) = (tx.clone(), prompt.to_string(), footprint_guide.to_vec());
         std::thread::spawn(move || {
-            let _ = tx.send(generate_one_map_spec(&prompt, max_retries));
+            let _ = tx.send(generate_one_map_spec(&prompt, max_retries, &guide));
         });
     }
     drop(tx); // so the loop below ends once every racer has reported
@@ -4071,7 +4202,7 @@ fn race_map_spec(prompt: &str, n: usize, max_retries: usize) -> Result<String, S
 /// hidden). A later candidate failing just means judging runs on however many
 /// did succeed; with only one candidate there's nothing to judge, so it ships
 /// directly and costs nothing extra.
-fn generate_map_spec(prompt: &str) -> Result<String, String> {
+fn generate_map_spec(prompt: &str, footprint_guide: &[String]) -> Result<String, String> {
     let use_local = crate::local_llm::is_local_ingestion();
     let candidate_count = if use_local { MAP_SPEC_CANDIDATE_COUNT_LOCAL } else { MAP_SPEC_CANDIDATE_COUNT_CLAUDE };
     let max_retries = if use_local { MAP_SPEC_MAX_RETRIES_LOCAL } else { MAP_SPEC_MAX_RETRIES_CLAUDE };
@@ -4080,7 +4211,7 @@ fn generate_map_spec(prompt: &str) -> Result<String, String> {
     // candidates to completion ON PURPOSE so it can judge between them —
     // there, more candidates is a quality mechanism, not a latency one.
     if !use_local && MAP_SPEC_HEDGE_CLAUDE > 1 {
-        return race_map_spec(prompt, MAP_SPEC_HEDGE_CLAUDE, max_retries);
+        return race_map_spec(prompt, MAP_SPEC_HEDGE_CLAUDE, max_retries, footprint_guide);
     }
 
     // Each candidate is an independent LLM call (no shared state) — running
@@ -4088,7 +4219,7 @@ fn generate_map_spec(prompt: &str) -> Result<String, String> {
     // "Plan Next Session" from minutes to seconds per encounter.
     let results: Vec<Result<String, String>> = std::thread::scope(|s| {
         (0..candidate_count)
-            .map(|_| s.spawn(move || generate_one_map_spec(prompt, max_retries)))
+            .map(|_| s.spawn(move || generate_one_map_spec(prompt, max_retries, footprint_guide)))
             .collect::<Vec<_>>()
             .into_iter()
             .map(|h| h.join().unwrap())
@@ -4303,9 +4434,9 @@ fn battle_map_context_at(root: &Path, id: &str) -> (String, String, String) {
     (combined_plan, current_chapter, combined_memory)
 }
 
-fn generate_battle_maps_at(root: &Path, id: &str, hint: &str, objects_enabled: bool, vocabulary: &[String]) -> Result<(Vec<BattleMapMeta>, String), String> {
+fn generate_battle_maps_at(root: &Path, id: &str, hint: &str, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String]) -> Result<(Vec<BattleMapMeta>, String), String> {
     let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
-    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint, objects_enabled, vocabulary);
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint, objects_enabled, vocabulary, footprint_guide);
     crate::maplog::banner(&format!(
         "on-demand map, hint={hint:?}, objects_enabled={objects_enabled}, vocabulary={} words",
         vocabulary.len()
@@ -4318,7 +4449,7 @@ fn generate_battle_maps_at(root: &Path, id: &str, hint: &str, objects_enabled: b
     // The prompt asks for exactly ONE map. generate_map_spec generates 3
     // independent, individually-validated candidates and has the model judge
     // between them rather than trusting whichever the first attempt was.
-    let spec = generate_map_spec(&prompt)?;
+    let spec = generate_map_spec(&prompt, footprint_guide)?;
     crate::maplog::log("FINAL SPEC WRITTEN TO DISK", &spec);
     let slug = slugify(&map_title(&spec));
     write_map_spec_at(root, id, &spec)?;
@@ -4425,6 +4556,7 @@ fn generate_battle_maps_for_plan_at(
     encounters: &[PlanEncounter],
     objects_enabled: bool,
     vocabulary: &[String],
+    footprint_guide: &[String],
     on_progress: ProgressFn,
 ) -> Result<(Vec<BattleMapMeta>, Vec<String>), String> {
     let dir = battle_maps_dir(root, id);
@@ -4465,11 +4597,11 @@ fn generate_battle_maps_for_plan_at(
             .iter()
             .map(|encounter| {
                 let hint = format!("{} — {}", encounter.name, encounter.description);
-                let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint, objects_enabled, vocabulary);
+                let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint, objects_enabled, vocabulary, footprint_guide);
                 crate::maplog::log(&format!("FULL PROMPT — encounter {:?}", encounter.name), &prompt);
                 let done_count = done_count.clone();
                 s.spawn(move || {
-                    let result = generate_map_spec(&prompt);
+                    let result = generate_map_spec(&prompt, footprint_guide);
                     let done = done_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                     on_progress("maps", done, total);
                     result
@@ -4531,7 +4663,7 @@ struct PlanProgress {
 /// derived from THIS SAME plan rather than independently re-guessed — asks
 /// Claude once per combat encounter (see generate_battle_maps_for_plan_at)
 /// for exactly the maps that plan calls for.
-fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool, objects_enabled: bool, vocabulary: &[String], on_progress: ProgressFn) -> Result<SessionPlanResult, String> {
+fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String], on_progress: ProgressFn) -> Result<SessionPlanResult, String> {
     if !force {
         if let Some(cached) = read_session_plan_at(root, id) {
             return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id), failed_maps: Vec::new() });
@@ -4565,7 +4697,7 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
         on_progress("maps", 0, encounters.len());
     }
     let t1 = std::time::Instant::now();
-    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters, objects_enabled, vocabulary, on_progress)?;
+    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters, objects_enabled, vocabulary, footprint_guide, on_progress)?;
     eprintln!("[plan-timing] all maps: {:.1}s total", t1.elapsed().as_secs_f64());
     Ok(SessionPlanResult { plan_text, maps, failed_maps })
 }
@@ -4580,7 +4712,7 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
 /// map" was actually burning a full plan regeneration's worth of calls every
 /// time). Errors if `slug` isn't one of the plan's own maps — an ad-hoc or
 /// hand-crafted map has no encounter context to regenerate from.
-fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled: bool, vocabulary: &[String]) -> Result<BattleMapMeta, String> {
+fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String]) -> Result<BattleMapMeta, String> {
     let entry = read_plan_manifest_at(root, id)
         .into_iter()
         .find(|e| e.slug == slug)
@@ -4588,8 +4720,8 @@ fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled
 
     let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
     let hint = format!("{} — {}", entry.name, entry.description);
-    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, &hint, objects_enabled, vocabulary);
-    let spec = generate_map_spec(&prompt)?;
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, &hint, objects_enabled, vocabulary, footprint_guide);
+    let spec = generate_map_spec(&prompt, footprint_guide)?;
     let titled = force_map_title(&spec, &entry.name);
     write_map_spec_with_slug_at(root, id, &entry.slug, &titled)?;
     rebuild_battle_maps_index_at(root, id)?;
@@ -4633,10 +4765,11 @@ pub async fn generate_battle_map(app: AppHandle, id: String, hint: String) -> Re
         let t0 = std::time::Instant::now();
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let footprint_guide = crate::tile_library::object_footprint_guide_for_app(&app);
         let t_vocab = t0.elapsed();
         let root = campaigns_root(&app)?;
         let t1 = std::time::Instant::now();
-        let (metas, slug) = with_map_ticker(&app, "drawing the map", t0, || generate_battle_maps_at(&root, &id, &hint, objects_enabled, &vocabulary))?;
+        let (metas, slug) = with_map_ticker(&app, "drawing the map", t0, || generate_battle_maps_at(&root, &id, &hint, objects_enabled, &vocabulary, &footprint_guide))?;
         let t_spec = t1.elapsed();
         let t2 = std::time::Instant::now();
         with_map_ticker(&app, "matching tile art", t0, || {
@@ -4661,10 +4794,11 @@ pub async fn regenerate_one_plan_map(app: AppHandle, id: String, slug: String) -
         let t0 = std::time::Instant::now();
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let footprint_guide = crate::tile_library::object_footprint_guide_for_app(&app);
         let t_vocab = t0.elapsed();
         let root = campaigns_root(&app)?;
         let t1 = std::time::Instant::now();
-        let meta = with_map_ticker(&app, "drawing the map", t0, || regenerate_one_plan_map_at(&root, &id, &slug, objects_enabled, &vocabulary))?;
+        let meta = with_map_ticker(&app, "drawing the map", t0, || regenerate_one_plan_map_at(&root, &id, &slug, objects_enabled, &vocabulary, &footprint_guide))?;
         let t_spec = t1.elapsed();
         let t2 = std::time::Instant::now();
         with_map_ticker(&app, "matching tile art", t0, || {
@@ -5803,13 +5937,14 @@ pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionP
     tokio::task::spawn_blocking(move || {
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let footprint_guide = crate::tile_library::object_footprint_guide_for_app(&app);
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
         let app_emit = app.clone();
         let on_progress = move |phase: &str, done: usize, total: usize| {
             let _ = app_emit.emit("plan-progress", PlanProgress { phase: phase.to_string(), done, total });
         };
-        let result = plan_next_session_at(&root, &id, &terrain_catalog, false, objects_enabled, &vocabulary, &on_progress)?;
+        let result = plan_next_session_at(&root, &id, &terrain_catalog, false, objects_enabled, &vocabulary, &footprint_guide, &on_progress)?;
         resolve_result_tiles(&app, &root, &id, &result);
         Ok(result)
     })
@@ -5837,13 +5972,14 @@ pub async fn regenerate_session_plan(app: AppHandle, id: String) -> Result<Sessi
     tokio::task::spawn_blocking(move || {
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
         let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let footprint_guide = crate::tile_library::object_footprint_guide_for_app(&app);
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
         let app_emit = app.clone();
         let on_progress = move |phase: &str, done: usize, total: usize| {
             let _ = app_emit.emit("plan-progress", PlanProgress { phase: phase.to_string(), done, total });
         };
-        let result = plan_next_session_at(&root, &id, &terrain_catalog, true, objects_enabled, &vocabulary, &on_progress)?;
+        let result = plan_next_session_at(&root, &id, &terrain_catalog, true, objects_enabled, &vocabulary, &footprint_guide, &on_progress)?;
         resolve_result_tiles(&app, &root, &id, &result);
         Ok(result)
     })
@@ -6665,7 +6801,7 @@ mod tests {
     /// prompt — the streamlined one deliberately drops qualitative advice.
     #[test]
     fn full_prompt_teaches_the_battlefield_design_principles() {
-        let p = battle_map_format_instructions_full(false, &[]).to_lowercase();
+        let p = battle_map_format_instructions_full(false, &[], &[]).to_lowercase();
         for needle in ["line of sight", "half cover", "two ways in", "choke point", "set piece", "moves"] {
             assert!(p.contains(needle), "full prompt must teach {needle:?}: {p}");
         }
@@ -6683,7 +6819,7 @@ mod tests {
 
     #[test]
     fn full_prompt_warns_against_overcrowding_the_combat_map() {
-        assert!(battle_map_format_instructions(false, false, &[]).to_lowercase().contains("overcrowd"));
+        assert!(battle_map_format_instructions(false, false, &[], &[]).to_lowercase().contains("overcrowd"));
     }
 
     #[test]
@@ -6864,7 +7000,7 @@ mod tests {
 
     #[test]
     fn build_battle_maps_prompt_includes_content_and_hint() {
-        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush", false, &[]);
+        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush", false, &[], &[]);
         assert!(one.contains("chapter goblins"));
         assert!(one.contains("a bridge ambush"));
         assert!(one.contains("ONE battle map"));
@@ -6972,7 +7108,7 @@ mod tests {
             &[PlanMapEntry { slug: "bridge-ambush".to_string(), name: "Bridge Ambush".to_string(), description: "Goblins attack.".to_string() }],
         ).unwrap();
 
-        let result = plan_next_session_at(&root.0, &meta.id, "", false, false, &[], &no_progress).unwrap();
+        let result = plan_next_session_at(&root.0, &meta.id, "", false, false, &[], &[], &no_progress).unwrap();
         assert!(result.plan_text.contains("Bridge Ambush"));
         assert_eq!(result.maps.len(), 1);
         assert_eq!(result.maps[0].slug, "bridge-ambush");
@@ -7065,7 +7201,7 @@ mod tests {
             &[PlanMapEntry { slug: "old-fight".to_string(), name: "Old Fight".to_string(), description: "x".to_string() }],
         ).unwrap();
 
-        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[], false, &[], &no_progress).unwrap();
+        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[], false, &[], &[], &no_progress).unwrap();
 
         assert!(maps.is_empty());
         assert!(failed.is_empty());
@@ -7085,7 +7221,7 @@ mod tests {
         write_map_spec_with_slug_at(&root.0, &meta.id, "hand-crafted", SAMPLE_MAP_SPEC).unwrap();
         // No plan_manifest.json entry for "hand-crafted" — it's not plan-owned.
 
-        let err = regenerate_one_plan_map_at(&root.0, &meta.id, "hand-crafted", false, &[]).unwrap_err();
+        let err = regenerate_one_plan_map_at(&root.0, &meta.id, "hand-crafted", false, &[], &[]).unwrap_err();
         assert!(err.contains("hand-crafted"), "{err}");
         assert!(err.contains("isn't one of the current plan's maps"), "{err}");
     }
@@ -8969,7 +9105,7 @@ mod example_map_tests {
     /// them. Pin it against the real validator.
     #[test]
     fn the_prompts_worked_example_passes_our_own_validator() {
-        let instr = battle_map_format_instructions(false, false, &[]);
+        let instr = battle_map_format_instructions(false, false, &[], &[]);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# The Bent Nail"))
@@ -8988,11 +9124,11 @@ mod example_map_tests {
     /// the prompt the model sees.
     #[test]
     fn battle_map_format_instructions_explicitly_forbids_drawing_a_seat_as_rubble() {
-        let full = battle_map_format_instructions(false, false, &[]);
+        let full = battle_map_format_instructions(false, false, &[], &[]);
         assert!(full.contains("NEVER draw a seat with `^`"), "{full}");
         // The streamlined variant phrases it more tersely, but the same
         // correction — stools are `=`, never `^` — must still be in there.
-        let streamlined = battle_map_format_instructions(true, false, &[]);
+        let streamlined = battle_map_format_instructions(true, false, &[], &[]);
         assert!(streamlined.contains("never `^`"), "{streamlined}");
         // Live evidence (test-campaign "Tavern Brawl", 2026-07-19): the model
         // used `^` for "overturned chairs" as difficult terrain, which the
@@ -9010,19 +9146,105 @@ mod example_map_tests {
     /// physical set-dressing. Pin that the exclusion is actually in both
     /// prompt variants whenever objects_enabled is true — this is a real DM
     /// error (Nabil runs combat with physical miniatures), not just cosmetic.
+    /// The guide is BINDING, not advice: an under-sized object either grows in
+    /// place (free) or becomes a cheap-retry issue — because with the guide as
+    /// a prompt line alone, the model wrote eleven 1x1 pine trees straight past
+    /// it and the map got fifteen gingerbread trees.
+    #[test]
+    fn enforce_object_sizes_grows_in_place_or_raises_a_cheap_issue() {
+        let guide = vec![("tree".to_string(), 2, 2)];
+        // C2 has open floor right/down -> grown to (2x2) in place. The one at
+        // H2 is jammed against the east wall -> can't grow -> issue.
+        let spec = "# X
+Grid: 9x6, 5 ft squares.
+Legend: . floor  # wall
+Map:
+#########
+#.......#
+#.......#
+#.......#
+#.......#
+#########
+Objects:
+- Pine trees at C2 (1x1)
+- Lone pine tree at H2 (1x1)
+- wooden crate at E3 (1x1)
+Tactics:
+- x";
+        let (fixed, issues) = enforce_object_sizes(spec, &guide);
+        assert!(fixed.contains("- Pine trees at C2 (2x2)"), "{fixed}");
+        // Plural matched; the crate has no guide entry and is untouched.
+        assert!(fixed.contains("- wooden crate at E3 (1x1)"), "{fixed}");
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].starts_with("Objects says \"Lone pine tree"), "{issues:?}");
+        // And that issue rides the cheap retry, like other Objects issues.
+        assert!(all_features_only_issues(&issues), "{issues:?}");
+        // Already-large placements pass untouched either orientation.
+        let ok = "# X
+Grid: 9x6, 5 ft squares.
+Legend: . floor  # wall
+Map:
+#########
+#.......#
+#.......#
+#.......#
+#.......#
+#########
+Objects:
+- Pine tree at C2 (2x2)
+Tactics:
+- x";
+        let (same, none) = enforce_object_sizes(ok, &guide);
+        assert_eq!(same, ok);
+        assert!(none.is_empty());
+        // A Tactics sentence that happens to parse like an object line is
+        // OUTSIDE the Objects section and must never be rewritten.
+        let tactics = "# X
+Grid: 9x6, 5 ft squares.
+Legend: . floor  # wall
+Map:
+#########
+#.......#
+#.......#
+#.......#
+#.......#
+#########
+Objects:
+Tactics:
+- topple the dead tree at C2 (1x1) onto pursuers";
+        let (t_same, t_none) = enforce_object_sizes(tactics, &guide);
+        assert_eq!(t_same, tactics);
+        assert!(t_none.is_empty());
+    }
+
+    /// The derived size guide reaches the model verbatim — and only when the
+    /// library actually produced one.
+    #[test]
+    fn objects_rule_line_carries_the_derived_size_guide() {
+        let vocab = vec!["tree".to_string(), "table".to_string()];
+        let guide = vec!["tree 2x2".to_string(), "wagon 2x3".to_string()];
+        let with = objects_rule_line(&vocab, &guide);
+        assert!(with.contains("SIZE GUIDE"), "{with}");
+        assert!(with.contains("tree 2x2, wagon 2x3"), "{with}");
+        // No guide -> no line; the vocabulary line is untouched either way.
+        let without = objects_rule_line(&vocab, &[]);
+        assert!(!without.contains("SIZE GUIDE"), "{without}");
+        assert!(without.contains("tree, table"), "{without}");
+    }
+
     #[test]
     fn battle_map_format_instructions_explicitly_forbids_npcs_in_objects_when_enabled() {
         let vocab = vec!["table".to_string(), "barrel".to_string()];
-        let full = battle_map_format_instructions(false, true, &vocab);
+        let full = battle_map_format_instructions(false, true, &vocab, &[]);
         assert!(full.to_lowercase().contains("never a creature, npc, or monster"), "{full}");
         assert!(full.contains("table, barrel"), "real vocabulary must reach the prompt: {full}");
-        let streamlined = battle_map_format_instructions(true, true, &vocab);
+        let streamlined = battle_map_format_instructions(true, true, &vocab, &[]);
         assert!(streamlined.to_lowercase().contains("never a creature, npc, or monster"), "{streamlined}");
         assert!(streamlined.contains("table, barrel"), "{streamlined}");
         // With no tile library imported, the whole Objects: section (rule
         // included) must be absent — nothing to guard against if the model
         // never sees the section at all.
-        let disabled = battle_map_format_instructions(false, false, &[]);
+        let disabled = battle_map_format_instructions(false, false, &[], &[]);
         assert!(!disabled.contains("Objects:"), "{disabled}");
     }
 
@@ -9030,7 +9252,7 @@ mod example_map_tests {
     /// the one example that must NOT contain `=` anywhere.
     #[test]
     fn the_prompts_cave_example_passes_our_own_validator_and_has_no_furniture() {
-        let instr = battle_map_format_instructions(false, false, &[]);
+        let instr = battle_map_format_instructions(false, false, &[], &[]);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# Flooded Grotto"))
@@ -9050,7 +9272,7 @@ mod example_map_tests {
     /// that they can't drift.
     #[test]
     fn copies_the_example_catches_the_grid_the_prompt_actually_shows() {
-        let instr = battle_map_format_instructions(false, false, &[]);
+        let instr = battle_map_format_instructions(false, false, &[], &[]);
         for row in EXAMPLE_MAP_GRID {
             assert!(instr.contains(row), "prompt lost tavern row {row}");
         }
@@ -9059,7 +9281,7 @@ mod example_map_tests {
         }
         // The streamlined (local-model) variant only shows one example, but
         // it's the SAME tavern grid — copying it must still be caught.
-        let streamlined = battle_map_format_instructions(true, false, &[]);
+        let streamlined = battle_map_format_instructions(true, false, &[], &[]);
         for row in EXAMPLE_MAP_GRID {
             assert!(streamlined.contains(row), "streamlined prompt lost tavern row {row}");
         }
@@ -9085,7 +9307,7 @@ mod example_map_tests {
     /// one example has to actually be sound, same as the full prompt's.
     #[test]
     fn the_streamlined_prompts_example_passes_our_own_validator() {
-        let instr = battle_map_format_instructions(true, false, &[]);
+        let instr = battle_map_format_instructions(true, false, &[], &[]);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# The Bent Nail"))
@@ -9100,8 +9322,8 @@ mod example_map_tests {
     /// not just reworded them.
     #[test]
     fn the_streamlined_prompt_is_meaningfully_shorter_and_drops_the_cave_example() {
-        let full = battle_map_format_instructions(false, false, &[]);
-        let streamlined = battle_map_format_instructions(true, false, &[]);
+        let full = battle_map_format_instructions(false, false, &[], &[]);
+        let streamlined = battle_map_format_instructions(true, false, &[], &[]);
         assert!(streamlined.len() < full.len() / 2, "full={} streamlined={}", full.len(), streamlined.len());
         assert!(!streamlined.contains("Flooded Grotto"), "{streamlined}");
     }

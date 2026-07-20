@@ -715,6 +715,14 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       break;
     }
     case '+':
+      // In a natural biome there's nothing to hang a door on — `+` is a cave
+      // mouth or a trail gap, and the normal-brightness cell breaking the
+      // darkened wall band already reads as the opening. Red plank doors
+      // floating on grass (live: every forest/cave map) read as a bug.
+      if (terrain?.naturalWalls) {
+        if (drawGround(ctx, x, y, px, terrain, style)) return;
+        break;
+      }
       if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.door, x, y, px, style.filter)) return;
       break;
     case 'o':
