@@ -22,7 +22,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
@@ -36,6 +36,12 @@ const SEARCH_LIMIT: usize = 3;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TileLibraryEntry {
+    /// Which imported folder this came from — lets entries from different
+    /// Import calls coexist in one manifest (see `import_tile_library`'s
+    /// `merge` flag) without losing track of where to actually read the
+    /// file from. `rel_path` is relative to THIS, not to some single global
+    /// root.
+    pub root: String,
     pub rel_path: String,
     pub biome: String,
     pub category: String,
@@ -44,15 +50,17 @@ pub struct TileLibraryEntry {
     pub h: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 struct TileLibraryManifest {
-    root: String,
+    /// Every folder that's contributed entries — a plain Import replaces
+    /// this with a single-element list; a merge Import appends to it.
+    roots: Vec<String>,
     entries: Vec<TileLibraryEntry>,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct TileLibrarySummary {
-    pub root: String,
+    pub roots: Vec<String>,
     pub total: usize,
     pub by_category: HashMap<String, usize>,
 }
@@ -69,7 +77,16 @@ pub struct TileCatalogMatch {
 /// run (or right after a fresh Import), then served from memory.
 #[derive(Default)]
 pub struct TileLibraryState {
-    manifest: Mutex<Option<TileLibraryManifest>>,
+    /// Held behind an `Arc` so the hot paths (one shortlist PER SLOT, plus
+    /// the vocabulary build) share one copy. This used to hand out a full deep
+    /// CLONE of all ~183k entries on every call — ~20 clones of a 56 MB
+    /// manifest to generate a single map.
+    manifest: Mutex<Option<std::sync::Arc<TileLibraryManifest>>>,
+    /// Cached keyword → IDF (inverse document frequency) for shortlist rarity
+    /// weighting, keyed by entry count so a re-import (which changes the count)
+    /// transparently recomputes it. Built lazily on first shortlist. See
+    /// `load_idf_cached`.
+    idf: Mutex<Option<(usize, std::sync::Arc<HashMap<String, f64>>)>>,
 }
 
 fn manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -123,27 +140,69 @@ fn is_variant_token(tok: &str) -> bool {
 
 /// Lowercased, filtered filename tokens for keyword search — the footprint
 /// suffix is already gone (see split_footprint) and variant-id tokens (see
-/// is_variant_token) are dropped.
+/// is_variant_token) are dropped. Bare single-character tokens (some FA
+/// files use a lone letter — no digit — as a style marker, e.g.
+/// `..._A_1x1.webp`) are dropped too: confirmed live, replaying this against
+/// the real 162k-entry catalog put single letters "a"/"b" into the object
+/// vocabulary as if they were real descriptive words.
 fn keywords_from_stem(stem_without_size: &str) -> Vec<String> {
-    stem_without_size.split('_').filter(|t| !t.is_empty() && !is_variant_token(t)).map(|t| t.to_lowercase()).collect()
+    stem_without_size.split('_').filter(|t| t.chars().count() > 1 && !is_variant_token(t)).map(|t| t.to_lowercase()).collect()
 }
 
-/// (biome, category) from a path relative to the imported root. Forgotten
-/// Adventures' own layout is `.../FA_Assets(_Webp)/<Biome>/<Category>/...` —
-/// verified against the real pack this session — so the segment right after
-/// one starting with `FA_Assets` is the biome, the next one the category.
-/// Falls back to "the first two segments under the root" for any other
-/// vendor's pack, so this isn't hard-coded to one source.
+/// Real Forgotten Adventures object-type folder names, observed across the
+/// actual imported library — both directly under a biome
+/// (`!Core_Settlements/Furniture/...`) and nested under a named settlement
+/// (`Woodlands/Base_Woodlands_Settlement/Furniture/...`). `biome_category_from_rel`
+/// walks every directory segment after the biome, at any depth, for the
+/// first one of these — settlement names and `!Wilderness` get skipped over
+/// rather than matched, since neither says what the thing actually is.
+/// Case-insensitive (vendor packs aren't perfectly consistent).
+const OBJECT_TYPE_FOLDERS: &[&str] = &[
+    "Furniture", "Decor", "Clutter", "Workplace_Equipment", "Lightsources", "Natural_Decor", "Burial_and_Graves", "Flora", "Structures", "Combat",
+    "Vehicles", "Textures", "Elevation",
+];
+
+/// (biome, category) from a path relative to the imported root.
+///
+/// Biome: the segment after the LAST path component starting with
+/// `FA_Assets`, not the first — some pack folder NAMES also start with that
+/// string (e.g. `FA_Assets_Expansion_Webp_v1.12/FA_Assets_Webp/Arctic/...`),
+/// and anchoring on the first occurrence there mis-reads `"FA_Assets_Webp"`
+/// itself as the biome. Confirmed live: ~3,000 real entries were affected.
+///
+/// Category: the first directory segment after the biome that matches
+/// OBJECT_TYPE_FOLDERS, at whatever depth it sits — NOT just "the next
+/// segment". A biome with its own named settlement
+/// (`Woodlands/Base_Woodlands_Settlement/Structures/...`) put the settlement
+/// name where category used to be read from; walking past it instead of
+/// stopping there was also confirmed live (the Import summary's by-category
+/// breakdown was already visibly wrong for every named-settlement biome).
+/// Falls back to the first directory segment when nothing recognized is
+/// found, and to "the first two segments under the root" when there's no
+/// `FA_Assets`-prefixed segment at all, for a non-FA vendor pack.
 fn biome_category_from_rel(rel: &Path) -> (String, String) {
     let parts: Vec<&str> = rel.components().filter_map(|c| match c { Component::Normal(s) => s.to_str(), _ => None }).collect();
-    if let Some(i) = parts.iter().position(|p| p.starts_with("FA_Assets")) {
-        return (parts.get(i + 1).copied().unwrap_or("misc").to_string(), parts.get(i + 2).copied().unwrap_or("misc").to_string());
+    if let Some(i) = parts.iter().rposition(|p| p.starts_with("FA_Assets")) {
+        let biome = parts.get(i + 1).copied().unwrap_or("misc").to_string();
+        let end = parts.len().saturating_sub(1); // exclude the filename itself
+        let dirs = parts.get(i + 2..end).unwrap_or(&[]);
+        let category = dirs
+            .iter()
+            .find(|p| OBJECT_TYPE_FOLDERS.iter().any(|f| f.eq_ignore_ascii_case(p)))
+            .or_else(|| dirs.first())
+            .copied()
+            .unwrap_or("misc")
+            .to_string();
+        return (biome, category);
     }
     (parts.first().copied().unwrap_or("misc").to_string(), parts.get(1).copied().unwrap_or("misc").to_string())
 }
 
 /// Pure: one entry from a root-relative file path, or `None` if it's not an
-/// image file this catalog indexes.
+/// image file this catalog indexes. `root` is left empty — `scan_dir` (the
+/// only real caller) fills it in, since a merge Import needs to know which
+/// folder each entry came from (see `TileLibraryEntry::root`) but this
+/// function's own unit tests only care about the path-derived fields.
 fn parse_entry(rel: &Path) -> Option<TileLibraryEntry> {
     let ext = rel.extension()?.to_str()?.to_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
@@ -155,7 +214,7 @@ fn parse_entry(rel: &Path) -> Option<TileLibraryEntry> {
     let mut keywords = keywords_from_stem(stem_no_size);
     keywords.push(biome.to_lowercase());
     keywords.push(category.to_lowercase());
-    Some(TileLibraryEntry { rel_path: rel.to_string_lossy().replace('\\', "/"), biome, category, keywords, w, h })
+    Some(TileLibraryEntry { root: String::new(), rel_path: rel.to_string_lossy().replace('\\', "/"), biome, category, keywords, w, h })
 }
 
 fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<TileLibraryEntry>) {
@@ -165,7 +224,8 @@ fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<TileLibraryEntry>) {
         if path.is_dir() {
             scan_dir(root, &path, out);
         } else if let Ok(rel) = path.strip_prefix(root) {
-            if let Some(e) = parse_entry(rel) {
+            if let Some(mut e) = parse_entry(rel) {
+                e.root = root.to_string_lossy().replace('\\', "/");
                 out.push(e);
             }
         }
@@ -183,7 +243,83 @@ fn summarize(manifest: &TileLibraryManifest) -> TileLibrarySummary {
     for e in &manifest.entries {
         *by_category.entry(e.category.clone()).or_insert(0) += 1;
     }
-    TileLibrarySummary { root: manifest.root.clone(), total: manifest.entries.len(), by_category }
+    TileLibrarySummary { roots: manifest.roots.clone(), total: manifest.entries.len(), by_category }
+}
+
+/// Categories worth drawing Objects: vocabulary from — genuinely placeable,
+/// small-footprint physical set-dressing. Deliberately excludes Structures
+/// (multi-tile buildings), Combat (damage/blood decals), Textures (tileable
+/// surface material, not a discrete object), Elevation (cliff/bank path
+/// pieces, terrain not objects) — none of those are what a 1-4 cell
+/// Objects: placement is for, even though they're valid OBJECT_TYPE_FOLDERS
+/// for categorization purposes.
+const OBJECT_VOCAB_CATEGORIES: &[&str] = &["Furniture", "Decor", "Clutter", "Workplace_Equipment", "Lightsources", "Natural_Decor", "Burial_and_Graves", "Flora", "Vehicles"];
+
+/// How many words `object_vocabulary` returns at most — keeps the prompt
+/// bounded regardless of library size, without starving it of real nouns.
+/// Validated live against the real 162,538-file catalog: restricted to
+/// OBJECT_VOCAB_CATEGORIES the whole vocabulary is only ~1,978 distinct
+/// words, but frequency-ranking skews hard toward color/material modifiers
+/// ("wood", "metal", "red", ...) that appear across every category — an
+/// earlier cap of 400 cut off plainly-useful nouns like "bookshelf" (real
+/// rank 436) and "cauldron" (real rank 564). 1500 comfortably covers the
+/// real long tail of actual object nouns while still bounding the ~500
+/// rarest/noisiest words out.
+///
+/// Trimmed 1500 → 900 (2026-07-19) on measurement: at 1500 this block was
+/// 11,696 chars (~2,900 tokens) — about 40% of the whole ~30k map prompt, and
+/// re-sent on every validation retry too. The tail it was buying is dead
+/// weight (rank 975 "lettuce", 24 uses; rank 1462 "bobbin", 6 uses). 900 is
+/// set deliberately WIDE of the deepest real noun spot-checked against the
+/// live catalog — bookshelf 482, cauldron 610, tankard 729, anvil 788 — since
+/// the earlier cap of 400 is on record for cutting exactly those off. Saves
+/// ~4,800 chars/call with no word worth having lost.
+const VOCAB_CAP: usize = 900;
+
+/// True for a pure filename artifact that is not a describable word — a bare
+/// number ("01") or a digit-suffixed variant tag ("multicolor2", "green1").
+/// These rank absurdly high on raw frequency ("multicolor2" was 100th, 781
+/// uses) while being useless as vocabulary to write an object label with.
+fn is_artifact_word(w: &str) -> bool {
+    w.bytes().all(|b| b.is_ascii_digit()) || w.bytes().last().is_some_and(|b| b.is_ascii_digit())
+}
+
+/// Pure: the real, bounded vocabulary to ground the DM's `Objects:` prompt
+/// in — every word returned is guaranteed to appear in at least one real
+/// catalog entry's keywords (restricted to genuinely object-like
+/// categories, see OBJECT_VOCAB_CATEGORIES), so search_tile_catalog's
+/// existing overlap matcher can always find something for any word the
+/// model actually uses. Frequency-sorted (ties broken alphabetically for
+/// deterministic output) and capped at VOCAB_CAP.
+fn object_vocabulary(entries: &[TileLibraryEntry]) -> Vec<String> {
+    let mut counts: HashMap<&str, u32> = HashMap::new();
+    for e in entries {
+        if !OBJECT_VOCAB_CATEGORIES.iter().any(|c| c.eq_ignore_ascii_case(&e.category)) {
+            continue;
+        }
+        let biome_lc = e.biome.to_lowercase();
+        let category_lc = e.category.to_lowercase();
+        for kw in &e.keywords {
+            // Structural (which biome/category this came from), not
+            // descriptive of the object itself — excluded so the vocabulary
+            // surfaces what the thing actually IS, not where it lives.
+            if *kw == biome_lc || *kw == category_lc || is_artifact_word(kw) {
+                continue;
+            }
+            *counts.entry(kw.as_str()).or_insert(0) += 1;
+        }
+    }
+    let mut words: Vec<(&str, u32)> = counts.into_iter().collect();
+    words.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    words.into_iter().take(VOCAB_CAP).map(|(w, _)| w.to_string()).collect()
+}
+
+/// `object_vocabulary` for the currently-imported library, or empty when
+/// nothing's imported. Plain function, not a `#[tauri::command]` — called
+/// directly from campaign.rs's prompt builder in the same process, same
+/// pattern as `tile_library_configured`.
+pub fn object_vocabulary_for_app(app: &AppHandle) -> Vec<String> {
+    load_manifest_cached(app).ok().flatten().map(|m| object_vocabulary(&m.entries)).unwrap_or_default()
 }
 
 fn save_manifest(app: &AppHandle, manifest: &TileLibraryManifest) -> Result<(), String> {
@@ -195,33 +331,172 @@ fn save_manifest(app: &AppHandle, manifest: &TileLibraryManifest) -> Result<(), 
     fs::write(&path, json).map_err(|e| e.to_string())
 }
 
-fn load_manifest_cached(app: &AppHandle) -> Result<Option<TileLibraryManifest>, String> {
+fn load_manifest_cached(app: &AppHandle) -> Result<Option<std::sync::Arc<TileLibraryManifest>>, String> {
     let state = app.state::<TileLibraryState>();
-    if let Some(cached) = state.manifest.lock().unwrap().clone() {
-        return Ok(Some(cached));
+    // Arc::clone — a refcount bump, NOT a copy of the 183k entries.
+    if let Some(cached) = state.manifest.lock().unwrap().as_ref() {
+        return Ok(Some(cached.clone()));
     }
     let path = manifest_path(app)?;
     if !path.exists() {
         return Ok(None);
     }
     let json = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let manifest: TileLibraryManifest = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let manifest = std::sync::Arc::new(serde_json::from_str::<TileLibraryManifest>(&json).map_err(|e| e.to_string())?);
     *state.manifest.lock().unwrap() = Some(manifest.clone());
     Ok(Some(manifest))
 }
 
 // ── Search (pure scoring, unit-tested directly) ──────────────────────────────
 
-fn tokenize_query(q: &str) -> Vec<String> {
-    q.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|t| t.len() >= 3).map(|t| t.to_string()).collect()
+/// Catalog categories that are GROUND ART — seamless tiling textures and
+/// overlays — and so can never be a placeable object. Dropped into an object
+/// slot they render as a rectangle of patterned floor rather than a thing.
+///
+/// Live (2026-07-19, underdark map): "bone pile" resolved to
+/// `Horror/!Wilderness/Textures/Bones/Bones_Dirt_A_01.jpg`, a tiling bone-dirt
+/// GROUND texture, because an exact head match is worth 1000x and outweighed
+/// even the 0.15 off-biome penalty for Horror art in an underdark scene.
+///
+/// `resolve_floor` asks for the `Textures` category explicitly, so excluding
+/// these from object placements costs the floor path nothing.
+const GROUND_ONLY_CATEGORIES: &[&str] = &["Textures", "Texture_Overlays"];
+
+fn is_ground_only(category: &str) -> bool {
+    GROUND_ONLY_CATEGORIES.iter().any(|c| category.eq_ignore_ascii_case(c))
 }
 
-/// Overlap count between a query's tokens and an entry's keywords —
-/// substring match both directions so "table" matches a keyword of "tables"
-/// and vice versa. Simple on purpose: there's no need for real ranking when
-/// the catalog's own filenames are this descriptive.
+fn tokenize_query(q: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = normalize_query(q).split(|c: char| !c.is_alphanumeric()).filter(|t| t.len() >= 3).map(|t| t.to_string()).collect();
+    // A trailing COLLECTIVE noun is not the object's identity: "bone pile" is
+    // about bones, "mushroom cluster" about mushrooms. Since the HEAD is the
+    // last token, move the real noun there and keep the collective as a
+    // scoring hint rather than dropping it.
+    //
+    // `normalize_query` already refuses to promote a quantifier in the "X of Y"
+    // phrasing, but a bare compound never reaches that branch. Live
+    // (2026-07-19, cave map): "dark mushroom cluster" resolved to
+    // Crystal_Black_Cluster and "bone pile" to Stuffing_Pile (pillow stuffing),
+    // while 1,844 mushroom tiles sat unmatched.
+    if tokens.last().is_some_and(|t| is_quantifier(t)) {
+        if let Some(pos) = tokens.iter().rposition(|t| !is_quantifier(t)) {
+            let real = tokens.remove(pos);
+            tokens.push(real);
+        }
+    }
+    tokens
+}
+
+/// Rewrites "<container> of <contents>" so the CONTAINER ends up last, because
+/// the ranker treats the last token as the head noun (the object's identity).
+/// Live bug: "Shelf of bottles" made "bottles" the head, so every candidate was
+/// loose glassware (Ink_Bottle, Milk_Bottle) and not one shelf — the contents
+/// should only ever be a modifier that biases WHICH shelf gets picked.
+fn normalize_query(q: &str) -> String {
+    let lower = q.to_lowercase();
+    match lower.split_once(" of ") {
+        // Only swap for a real CONTAINER. "Stack of wooden crates" is still
+        // about crates — a quantifier is not the object, and swapping made
+        // "stack" the head, which matched Coal_Stack and Planks_Stack instead.
+        Some((container, contents)) if !container.trim().is_empty() && !is_quantifier(container.trim()) => {
+            format!("{} {}", contents.trim(), container.trim())
+        }
+        _ => lower,
+    }
+}
+
+/// Words that count a thing rather than being the thing — "a stack of crates"
+/// is crates, not a stack. Checked on the phrase left of "of".
+fn is_quantifier(w: &str) -> bool {
+    const QUANTIFIERS: &[&str] = &[
+        "stack", "stacks", "pile", "piles", "heap", "heaps", "row", "rows", "set", "sets", "pair", "pairs", "bunch",
+        "group", "cluster", "collection", "handful", "scattering", "assortment", "line", "bundle", "load", "mound",
+    ];
+    QUANTIFIERS.contains(&w.rsplit(' ').next().unwrap_or(w))
+}
+
+/// Keywords that change what an object IS — damaged, or a different specific
+/// thing — rather than merely what it's made of. Unless the label actually
+/// asks for one, an entry carrying it is the wrong pick: a "Communal table"
+/// must not resolve to `Table_Rectangle_Fallen`, nor a "Stool" to
+/// `Piano_Stool_Black`. Material and colour words are deliberately NOT here —
+/// those are free variation and the whole point of the material scoring.
+const CONDITION_WORDS: &[&str] = &[
+    "fallen", "broken", "cracked", "burnt", "ruined", "spilled", "overturned", "sooty", "destroyed", "toppled",
+    "damaged", "dead", "hot", "empty", "piano", "baby", "toy", "doll", "miniature",
+];
+
+/// How hard an entry is demoted per unrequested condition word it carries.
+const CONDITION_PENALTY: f64 = 0.25;
+
+fn is_condition_word(w: &str) -> bool {
+    CONDITION_WORDS.contains(&w)
+}
+
+/// Multiplier for an entry given the query: 1.0 when it carries no condition
+/// word the label didn't ask for, otherwise demoted once per offending word.
+fn condition_fit(entry: &TileLibraryEntry, tokens: &[String]) -> f64 {
+    let unrequested = entry
+        .keywords
+        .iter()
+        .filter(|k| is_condition_word(k) && !tokens.iter().any(|t| token_matches(k, t)))
+        .count();
+    CONDITION_PENALTY.powi(unrequested as i32)
+}
+
+/// Whether the entry matches some query token that actually names an OBJECT —
+/// an exact (non-bridge) match on a token that isn't a mere condition word.
+/// "Broken crockery" has no catalog word for "crockery", so its only exact
+/// match is "broken", which is why it proposed a broken WINDOW. Requiring a
+/// real identity match is what lets the shortlist return nothing and fall back
+/// to the built-in glyph, instead of confidently drawing the wrong object.
+fn has_identity_match(entry: &TileLibraryEntry, tokens: &[String]) -> bool {
+    tokens
+        .iter()
+        .filter(|t| !is_condition_word(t))
+        // A bridge counts: "gravestone" legitimately reaches a grave+stone
+        // tile. What must NOT count is matching only a condition word.
+        .any(|t| entry.keywords.iter().any(|k| token_matches(k, t) || bridges(k, t)))
+}
+
+/// Bigger than any realistic number of adjective matches, so an entry that
+/// matches the description's HEAD NOUN (its object identity) always outranks
+/// one that only shares color/size/material words. See `score`.
+const HEAD_WEIGHT: u32 = 100;
+
+/// Whole-word-ish match: exact, or one string is the other plus a 1-2 char
+/// suffix (a plural or simple adjective form — "table"/"tables",
+/// "wood"/"wooden"). Deliberately NOT the old free substring test, which
+/// matched a short keyword ANYWHERE inside a longer query word — "rat" inside
+/// "crate", "bar" inside "barrel", "can" inside "candle" — and put a rat trap
+/// where a crate belonged (found live, "small wooden crate" → Rat_Trap).
+fn token_matches(keyword: &str, token: &str) -> bool {
+    if keyword == token {
+        return true;
+    }
+    let (short, long) = if keyword.len() < token.len() { (keyword, token) } else { (token, keyword) };
+    // Only a genuine plural/adjective ENDING counts, not any ≤2-char tail — a
+    // bare length check let "heart"+"h" match "hearth" (a human heart where a
+    // hearth belonged). Keywords/queries are lowercase ASCII, so slicing at
+    // short.len() is a safe char boundary.
+    long.starts_with(short) && matches!(&long[short.len()..], "s" | "es" | "en")
+}
+
+/// Relevance of one catalog entry to a query. The LAST query token is the
+/// head noun — the thing actually being placed ("small wooden crate" →
+/// crate) — and MUST match, worth HEAD_WEIGHT; every earlier (adjective)
+/// token that also matches adds 1. So identity dominates description: a real
+/// crate (crate + wood) beats an "Aquarium_Small_Wood" that only shares the
+/// adjectives, and an entry matching no object noun at all scores 0 and is
+/// dropped rather than rendering an unrelated lookalike. Equal scores are
+/// ordered by the caller (plainer object wins).
 fn score(entry: &TileLibraryEntry, query_tokens: &[String]) -> u32 {
-    query_tokens.iter().filter(|qt| entry.keywords.iter().any(|k| k.contains(qt.as_str()) || qt.contains(k.as_str()))).count() as u32
+    let Some((head, rest)) = query_tokens.split_last() else { return 0 };
+    let matches = |t: &String| entry.keywords.iter().any(|k| token_matches(k, t));
+    if !matches(head) {
+        return 0;
+    }
+    HEAD_WEIGHT + rest.iter().filter(|t| matches(t)).count() as u32
 }
 
 fn to_data_url(bytes: &[u8], ext: &str) -> String {
@@ -235,26 +510,49 @@ fn to_data_url(bytes: &[u8], ext: &str) -> String {
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
+/// Pure: folds freshly-`scanned` entries from `root` into `existing` —
+/// replaces just `root`'s own prior contribution (matched by exact root
+/// path) rather than duplicating it if this same folder was already part of
+/// the catalog, leaves every OTHER root's entries untouched, and records
+/// `root` in the roots list if it's new.
+fn merge_manifest(mut existing: TileLibraryManifest, root: &str, scanned: Vec<TileLibraryEntry>) -> TileLibraryManifest {
+    existing.entries.retain(|e| e.root != root);
+    existing.entries.extend(scanned);
+    if !existing.roots.iter().any(|r| r == root) {
+        existing.roots.push(root.to_string());
+    }
+    existing
+}
+
+/// Scans `root` and either replaces the whole catalog with just this folder
+/// (`merge: false` — the original behavior, still the default for a first
+/// Import) or folds it into whatever's already imported (`merge: true`, see
+/// `merge_manifest`), so a second asset pack can be added without losing
+/// the first.
 #[tauri::command]
-pub fn import_tile_library(app: AppHandle, root: String) -> Result<TileLibrarySummary, String> {
+pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<TileLibrarySummary, String> {
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
         return Err(format!("\"{root}\" isn't a folder."));
     }
-    let entries = scan_tile_library(&root_path);
-    if entries.is_empty() {
+    let scanned = scan_tile_library(&root_path);
+    if scanned.is_empty() {
         return Err(format!("No image files found under \"{root}\"."));
     }
-    let manifest = TileLibraryManifest { root: root.clone(), entries };
+    let manifest = if merge {
+        merge_manifest(load_manifest_cached(&app)?.map(|m| (*m).clone()).unwrap_or_default(), &root, scanned)
+    } else {
+        TileLibraryManifest { roots: vec![root.clone()], entries: scanned }
+    };
     save_manifest(&app, &manifest)?;
     let summary = summarize(&manifest);
-    *app.state::<TileLibraryState>().manifest.lock().unwrap() = Some(manifest);
+    *app.state::<TileLibraryState>().manifest.lock().unwrap() = Some(std::sync::Arc::new(manifest));
     Ok(summary)
 }
 
 #[tauri::command]
 pub fn get_tile_library_summary(app: AppHandle) -> Result<Option<TileLibrarySummary>, String> {
-    Ok(load_manifest_cached(&app)?.as_ref().map(summarize))
+    Ok(load_manifest_cached(&app)?.map(|m| summarize(&m)))
 }
 
 /// Keyword search over the imported catalog — resolves an `Objects:` label
@@ -264,24 +562,360 @@ pub fn get_tile_library_summary(app: AppHandle) -> Result<Option<TileLibrarySumm
 /// (draw nothing extra) is the same code path either way.
 #[tauri::command]
 pub fn search_tile_catalog(app: AppHandle, query: String) -> Result<Vec<TileCatalogMatch>, String> {
-    let Some(manifest) = load_manifest_cached(&app)? else { return Ok(Vec::new()) };
+    let Some(manifest) = load_manifest_cached(&app)? else {
+        crate::maplog::log("TILE SEARCH", &format!("query {query:?} → no library imported, returning nothing"));
+        return Ok(Vec::new());
+    };
     let tokens = tokenize_query(&query);
     if tokens.is_empty() {
+        crate::maplog::log("TILE SEARCH", &format!("query {query:?} → no usable search tokens (all <3 chars), returning nothing"));
         return Ok(Vec::new());
     }
     let mut scored: Vec<(u32, &TileLibraryEntry)> = manifest.entries.iter().map(|e| (score(e, &tokens), e)).filter(|(s, _)| *s > 0).collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    let root = Path::new(&manifest.root);
+    // Score first, then prefer the PLAINER entry among ties: fewer keywords
+    // (a bare "Barrel" over a "Barrel_Torture", a plain "Chair" over an
+    // "Electric_Torture_Chair"), then the shorter path. Without this the tie
+    // resolves by manifest order, which surfaced the oddest themed variant of
+    // whatever object was asked for.
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.keywords.len().cmp(&b.1.keywords.len()))
+            .then_with(|| a.1.rel_path.len().cmp(&b.1.rel_path.len()))
+    });
+    // TEMP debug trace: what the model asked for vs. what the catalog actually
+    // had for it — the top of the ranking (more than we'll return) so a bad
+    // match is visible as "these were the best available", plus which ones we
+    // then read and handed back. See maplog.rs.
+    let preview: String = scored
+        .iter()
+        .take(SEARCH_LIMIT + 10)
+        .map(|(s, e)| format!("  score {s}  [{}/{}]  {}", e.biome, e.category, e.rel_path))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::maplog::log(
+        "TILE SEARCH",
+        &format!(
+            "query {query:?}\ntokens searched: {tokens:?}\n{} entr(y/ies) matched at all; returning top {}:\n{}",
+            scored.len(),
+            SEARCH_LIMIT.min(scored.len()),
+            if preview.is_empty() { "  (nothing matched — this Objects: word rendered nothing)".to_string() } else { preview },
+        ),
+    );
     let out: Vec<TileCatalogMatch> = scored
         .into_iter()
         .take(SEARCH_LIMIT)
         .filter_map(|(_, e)| {
-            let bytes = fs::read(root.join(&e.rel_path)).ok()?;
+            let bytes = fs::read(Path::new(&e.root).join(&e.rel_path)).ok()?;
             let ext = Path::new(&e.rel_path).extension()?.to_str()?;
             Some(TileCatalogMatch { rel_path: e.rel_path.clone(), w: e.w, h: e.h, data_url: to_data_url(&bytes, ext) })
         })
         .collect();
     Ok(out)
+}
+
+// ── Vision shortlist (footprint-aware candidate set for the tile resolver) ────
+
+/// Pure: the top `k` real catalog entries for `query` that FIT inside a
+/// `fw`x`fh` footprint (so a chosen tile can be scaled/tiled into the slot
+/// without overflowing into neighbouring cells). Same head-noun ranking and
+/// plainer-object tiebreak as `search_tile_catalog`, plus a larger-tile-first
+/// preference so a slot is filled with as few repeats as possible. Returned to
+/// the vision picker, which looks at these and chooses the exact one.
+/// Ranking for the vision SHORTLIST (not the final pick) — deliberately looser
+/// than `score`: an entry qualifies if it matches ANY query token, so a
+/// compound label whose last word isn't a catalog noun still surfaces the
+/// right tile ("bar counter" → the `bar` tile, where strict head-noun scoring
+/// returned nothing and the bar fell back to `=` tables). Matching the last
+/// (head) token still gets HEAD_WEIGHT so the true object ranks first and makes
+/// the top-`k` cut; the vision picker then looks at the images and rejects any
+/// that don't actually fit (choice 0). `None` = matches nothing.
+/// A looser "compound bridge" between a catalog keyword and a query token, for
+/// the SHORTLIST only (the vision picker still filters): a substantive word
+/// (both ≥4 chars) that is a component of the other — "grave" in "gravestone",
+/// "lamp" in "lamppost", "shell" in "seashell". The ≥4 floor keeps the short
+/// false positives we already killed (rat/bar/can, all ≤3) out; anything wrong
+/// that still slips through is shown to vision, which rejects it (choice 0).
+fn bridges(keyword: &str, token: &str) -> bool {
+    if keyword.len() < 4 || token.len() < 4 {
+        return false;
+    }
+    // Must be a PREFIX or SUFFIX (a real word boundary), not any internal
+    // substring — "grave"/"stone" are the start/end of "gravestone", but "vest"
+    // buried in gra-VEST-one, or "table" inside "s-table-s", are coincidences.
+    // (Rarity weighting made this matter: a spurious rare substring would
+    // otherwise get promoted, e.g. gravestone → a Vest tile.)
+    let (short, long) = if keyword.len() < token.len() { (keyword, token) } else { (token, keyword) };
+    long.starts_with(short) || long.ends_with(short)
+}
+
+/// The head noun (last token) is the object's identity — weight it far above
+/// modifier tokens so a match on it dominates.
+const HEAD_MULT: f64 = 8.0;
+/// A compound-bridge match ("grave" in "gravestone") counts less than an exact
+/// or plural match, so a real exact match of equal rarity still wins.
+const BRIDGE_DISCOUNT: f64 = 0.5;
+/// A flat tier added when the HEAD noun matches EXACTLY (not via a bridge),
+/// large enough that no bridge match — however rare its word — can ever
+/// outrank a real exact one. Fixes a rare false-friend beating the real thing:
+/// "tableau" (idf 8.9) was bridge-matching "table" (idf 4.1) and burying every
+/// actual table. Rarity still orders entries WITHIN a tier (so gravestone,
+/// which has no exact match, still prefers `grave` over generic `stone`).
+const EXACT_HEAD_TIER: f64 = 1000.0;
+
+/// keyword → IDF (`ln(N / df)`), so a rare, specific word ("grave", idf ~8)
+/// counts far more than a ubiquitous modifier ("wood", idf ~1.6). Each keyword
+/// counted once per entry. Pure.
+fn compute_idf(entries: &[TileLibraryEntry]) -> HashMap<String, f64> {
+    let n = entries.len().max(1) as f64;
+    let mut df: HashMap<&str, u32> = HashMap::new();
+    for e in entries {
+        let mut seen = std::collections::HashSet::new();
+        for k in &e.keywords {
+            if seen.insert(k.as_str()) {
+                *df.entry(k.as_str()).or_insert(0) += 1;
+            }
+        }
+    }
+    df.into_iter().map(|(k, d)| (k.to_string(), (n / d as f64).ln())).collect()
+}
+
+/// Rarity-weighted shortlist rank: each query token contributes the IDF of the
+/// RAREST keyword it matches (so a match on a specific word beats a match on a
+/// generic one — "gravestone" prefers the `grave` tile over a plain `stone`
+/// one), scaled up for the head noun and down for a compound bridge. `None` if
+/// nothing matches. An unknown keyword defaults to IDF 1.0.
+fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<String, f64>) -> Option<f64> {
+    let mut total = 0.0;
+    let mut any = false;
+    for (i, t) in tokens.iter().enumerate() {
+        // Best (rarest) keyword matching this token, and whether it was exact.
+        let mut best: Option<(f64, bool)> = None;
+        for k in &entry.keywords {
+            let strict = token_matches(k, t);
+            if !strict && !bridges(k, t) {
+                continue;
+            }
+            let w = idf.get(k.as_str()).copied().unwrap_or(1.0);
+            if best.map_or(true, |(bw, _)| w > bw) {
+                best = Some((w, strict));
+            }
+        }
+        if let Some((w, strict)) = best {
+            any = true;
+            let is_head = i == tokens.len() - 1;
+            let head = if is_head { HEAD_MULT } else { 1.0 };
+            total += w * head * if strict { 1.0 } else { BRIDGE_DISCOUNT };
+            // An exact match on the head noun is the object's true identity —
+            // lift it into a tier no bridge match can reach.
+            if is_head && strict {
+                total += EXACT_HEAD_TIER;
+            }
+        }
+    }
+    any.then_some(total)
+}
+
+fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf: &HashMap<String, f64>, scene: &str, fw: u32, fh: u32, k: usize, allow_ground: bool) -> Vec<&'a TileLibraryEntry> {
+    let want = scene_biome(scene);
+    // Keep only tiles that match a word actually NAMING the object. If nothing
+    // does, the shortlist is deliberately EMPTY so the caller falls back to the
+    // built-in glyph — better to draw the plain sprite than to confidently
+    // draw the wrong object (live: "Broken crockery" → a broken window).
+    let identified: Vec<&TileLibraryEntry> = entries
+        .iter()
+        .filter(|e| e.w <= fw && e.h <= fh && (allow_ground || !is_ground_only(&e.category)) && has_identity_match(e, tokens))
+        .collect();
+    if identified.is_empty() {
+        return Vec::new();
+    }
+    // The catalog KNOWS this object, just not at a size that fits the
+    // placement — so everything left matches an adjective only, and picking one
+    // draws a different object confidently. Live: "hanging iron chandelier"
+    // (1x1) — all 8 catalog chandeliers are 2x2, so the sole survivor matched
+    // "iron" and rendered a LAUNDRY IRON as the map's set piece. Refuse, the
+    // same as for an object the catalog has never heard of.
+    //
+    // Gated on the head being findable SOMEWHERE so this never fires for a
+    // label whose last word simply isn't catalog vocabulary ("Bar counter" —
+    // no "counter" tile exists, and the bar tile it does find is correct).
+    let head_matches = |e: &&TileLibraryEntry| tokens.last().map_or(false, |h| e.keywords.iter().any(|k| token_matches(k, h) || bridges(k, h)));
+    if entries.iter().any(|e| head_matches(&e)) && !identified.iter().any(head_matches) {
+        return Vec::new();
+    }
+    let mut scored: Vec<(f64, &TileLibraryEntry)> = identified
+        .into_iter()
+        .filter_map(|e| shortlist_rank(e, tokens, idf).map(|s| (s * biome_affinity(want, &e.biome) * condition_fit(e, tokens), e)))
+        .collect();
+    scored.sort_by(|a, b| {
+        b.0.total_cmp(&a.0) // higher rarity-weighted rank first
+            .then_with(|| (b.1.w * b.1.h).cmp(&(a.1.w * a.1.h)))
+            .then_with(|| a.1.keywords.len().cmp(&b.1.keywords.len()))
+            .then_with(|| a.1.rel_path.len().cmp(&b.1.rel_path.len()))
+    });
+    // Diversify: every exact-head match scores IDENTICALLY (same head keyword →
+    // same idf), so the tiebreak alone decided the whole top-K and returned K
+    // variants of ONE tile family — live, "Pillar" returned eight
+    // Flesh_Pale_Pillar_* and the vision picker had no tavern pillar to choose.
+    // Show one per family first, then backfill with the leftover variants.
+    // Family = keywords (which already exclude variant tokens) PLUS footprint:
+    // two sizes of the same object are a real choice for a slot, not redundant
+    // copies, so a 2x2 and a 1x1 table must both survive — only the A1/B1/C1
+    // style variants of one identically-sized tile collapse.
+    let mut seen: HashSet<(String, u32, u32)> = HashSet::new();
+    let (mut firsts, mut rest): (Vec<&TileLibraryEntry>, Vec<&TileLibraryEntry>) = (Vec::new(), Vec::new());
+    for (_, e) in scored {
+        if seen.insert((e.keywords.join("_"), e.w, e.h)) {
+            firsts.push(e);
+        } else {
+            rest.push(e);
+        }
+    }
+    firsts.into_iter().chain(rest).take(k).collect()
+}
+
+/// Which catalog biome a scene wants. The scene word comes from
+/// `classify_biome` (tavern, cave, forest, …); catalog biomes are the
+/// top-level pack folders. `!Core_Settlements` is the generic human-built set
+/// and fits almost any civilised scene, so it's always allowed.
+fn scene_biome(scene: &str) -> &'static str {
+    let s = scene.to_lowercase();
+    for (needle, biome) in [
+        ("cave", "Underdark"), ("underdark", "Underdark"), ("forest", "Woodlands"), ("jungle", "Jungle"),
+        ("desert", "Desert"), ("snow", "Arctic"), ("arctic", "Arctic"), ("swamp", "Swamp"), ("marsh", "Swamp"),
+        ("volcan", "Volcanic"), ("mountain", "Mountain"), ("water", "Aquatic"), ("coast", "Aquatic"),
+        ("sea", "Aquatic"), ("horror", "Horror"), ("astral", "Astral"), ("fey", "Feywilds"),
+    ] {
+        if s.contains(needle) {
+            return biome;
+        }
+    }
+    "!Core_Settlements"
+}
+
+/// How much an entry's own biome disqualifies it for this scene. A tile from
+/// the scene's biome, or from the universal `!Core_Settlements` set, is
+/// unpenalised; anything from an unrelated biome is knocked far down so it
+/// can't crowd the shortlist. This is what keeps Horror flesh pillars and
+/// Arctic "Frosty" floorboards out of a tavern — the ranking itself is
+/// otherwise entirely biome-blind.
+fn biome_affinity(scene_biome: &str, entry_biome: &str) -> f64 {
+    if entry_biome == scene_biome || entry_biome == "!Core_Settlements" {
+        1.0
+    } else {
+        0.15
+    }
+}
+
+/// A shortlist entry the vision picker is shown: the loaded image plus enough
+/// identity (`root` + `rel_path`) to persist the pick and reload it later.
+#[derive(Serialize, Clone, Debug)]
+pub struct TileCandidate {
+    pub root: String,
+    pub rel_path: String,
+    pub w: u32,
+    pub h: u32,
+    pub data_url: String,
+}
+
+/// The shortlist as loadable candidates (image bytes read + base64'd) for a
+/// footprint slot — what the vision picker looks at. Empty when nothing's
+/// imported, the query has no usable tokens, or nothing fits.
+/// `scene` is the classified biome word for the map being built (tavern, cave,
+/// …) — it keeps tiles from unrelated biomes (Horror flesh, Arctic frost) from
+/// crowding out the ones that belong. Pass "" for no scene preference.
+pub fn shortlist(app: &AppHandle, query: &str, scene: &str, fw: u32, fh: u32, k: usize) -> Vec<TileCandidate> {
+    shortlist_impl(app, query, None, scene, fw, fh, k)
+}
+
+/// Like `shortlist`, but restricted to a single catalog category (e.g.
+/// "Textures") — used to resolve BIOME GROUND, where only tileable ground
+/// textures qualify, never a sand-coloured crate that happens to keyword-match.
+pub fn shortlist_in_category(app: &AppHandle, query: &str, category: &str, scene: &str, fw: u32, fh: u32, k: usize) -> Vec<TileCandidate> {
+    shortlist_impl(app, query, Some(category), scene, fw, fh, k)
+}
+
+/// keyword → IDF for the currently-imported library, cached in state and keyed
+/// by entry count so a re-import recomputes it. Built once on first shortlist.
+fn load_idf_cached(app: &AppHandle, manifest: &TileLibraryManifest) -> std::sync::Arc<HashMap<String, f64>> {
+    let state = app.state::<TileLibraryState>();
+    let mut guard = state.idf.lock().unwrap();
+    if let Some((n, idf)) = guard.as_ref() {
+        if *n == manifest.entries.len() {
+            return idf.clone();
+        }
+    }
+    let idf = std::sync::Arc::new(compute_idf(&manifest.entries));
+    *guard = Some((manifest.entries.len(), idf.clone()));
+    idf
+}
+
+fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &str, fw: u32, fh: u32, k: usize) -> Vec<TileCandidate> {
+    let Some(manifest) = load_manifest_cached(app).ok().flatten() else { return Vec::new() };
+    let tokens = tokenize_query(query);
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    // IDF is computed over the WHOLE catalog (a keyword's rarity doesn't depend
+    // on which category we're currently searching), then applied to the pool.
+    let idf = load_idf_cached(app, &manifest);
+    let pool: Vec<&TileLibraryEntry> = match category {
+        Some(cat) => manifest.entries.iter().filter(|e| e.category.eq_ignore_ascii_case(cat)).collect(),
+        None => manifest.entries.iter().collect(),
+    };
+    // shortlist_entries wants a slice; build one of references' clones only when
+    // filtered (cheap — Textures is ~3.5k of 183k).
+    let filtered: Vec<TileLibraryEntry>;
+    let entries: &[TileLibraryEntry] = if category.is_some() {
+        filtered = pool.into_iter().cloned().collect();
+        &filtered
+    } else {
+        &manifest.entries
+    };
+    shortlist_entries(entries, &tokens, &idf, scene, fw, fh, k, category.is_some())
+        .into_iter()
+        .filter_map(|e| {
+            Some(TileCandidate {
+                root: e.root.clone(),
+                rel_path: e.rel_path.clone(),
+                w: e.w,
+                h: e.h,
+                data_url: load_tile_data_url(&e.root, &e.rel_path)?,
+            })
+        })
+        .collect()
+}
+
+/// A warm flame effect sprite (`!Effects/Fire/Fire_Red|Orange|Yellow_*`) to
+/// stack in a hearth's firebox, sized to fit within `fw`x`fh`. The catalog
+/// ships every fireplace UNLIT — the flame lives as a separate effect sprite
+/// meant to be overlaid — so a "lit hearth" is hearth base + this. Returns
+/// `(root, rel_path, w, h)`; deterministic (largest flame that fits, then
+/// alphabetically-first path) so a regenerate is stable. `None` if nothing
+/// imported or no flame fits.
+pub fn pick_flame_overlay(app: &AppHandle, fw: u32, fh: u32) -> Option<(String, String, u32, u32)> {
+    let manifest = load_manifest_cached(app).ok().flatten()?;
+    manifest
+        .entries
+        .iter()
+        .filter(|e| {
+            let name = e.rel_path.rsplit(['/', '\\']).next().unwrap_or("");
+            (name.starts_with("Fire_Red_") || name.starts_with("Fire_Orange_") || name.starts_with("Fire_Yellow_"))
+                && !name.contains("Embers")
+                && !name.contains("Area")
+                && !name.contains("Path")
+        })
+        .filter(|e| e.w <= fw && e.h <= fh && e.w > 0 && e.h > 0)
+        .max_by_key(|e| (e.w * e.h, std::cmp::Reverse(e.rel_path.clone())))
+        .map(|e| (e.root.clone(), e.rel_path.clone(), e.w, e.h))
+}
+
+/// Reads one catalog tile and base64-encodes it as a data URL — `None` if the
+/// file is gone. Used both to build the shortlist and, later, to reload a
+/// resolved pick for rendering (`get_map_tiles`).
+pub fn load_tile_data_url(root: &str, rel_path: &str) -> Option<String> {
+    let bytes = fs::read(Path::new(root).join(rel_path)).ok()?;
+    let ext = Path::new(rel_path).extension()?.to_str()?;
+    Some(to_data_url(&bytes, ext))
 }
 
 #[cfg(test)]
@@ -316,16 +950,54 @@ mod tests {
         assert_eq!(kws, vec!["adornments", "furniture", "corner", "metal", "black"]);
     }
 
+    /// Real bug, found live: some FA files use a bare single letter (no
+    /// digit) as a style marker — `is_variant_token` only catches
+    /// letter+digit combos, so "A" alone slipped through. Replaying the real
+    /// 162k-entry catalog through the (then-)current logic put "a"/"b" into
+    /// the object vocabulary as if they were real descriptive words.
+    #[test]
+    fn keywords_from_stem_drops_bare_single_letter_tokens() {
+        let kws = keywords_from_stem("Table_Round_Wood_A");
+        assert_eq!(kws, vec!["table", "round", "wood"]);
+    }
+
     #[test]
     fn biome_category_from_rel_reads_the_fa_assets_layout() {
+        // "!Wilderness" is skipped over, not matched — Flora (found one level
+        // deeper) is the real, useful category, same fix as the settlement-name
+        // case below.
         let rel = Path::new("FA_Assets_Webp/Woodlands/!Wilderness/Flora/Trees/Tree_Yellow_D8_3x3.webp");
-        assert_eq!(biome_category_from_rel(rel), ("Woodlands".to_string(), "!Wilderness".to_string()));
+        assert_eq!(biome_category_from_rel(rel), ("Woodlands".to_string(), "Flora".to_string()));
     }
 
     #[test]
     fn biome_category_from_rel_falls_back_for_a_non_fa_layout() {
         let rel = Path::new("Dungeon/Furniture/table_01.png");
         assert_eq!(biome_category_from_rel(rel), ("Dungeon".to_string(), "Furniture".to_string()));
+    }
+
+    /// Real bug, found live: a pack folder NAME (not a nested "FA_Assets"
+    /// content root) can itself start with "FA_Assets" —
+    /// `FA_Assets_Expansion_Webp_v1.12` — so anchoring on the FIRST match
+    /// mis-reads the literal string "FA_Assets_Webp" as the biome and
+    /// swallows the real biome (Arctic) into category. ~3,000 real entries
+    /// were affected before this was fixed to anchor on the LAST match.
+    #[test]
+    fn biome_category_from_rel_anchors_on_the_last_fa_assets_segment_not_the_first() {
+        let rel = Path::new("FA_Assets_Expansion_Webp_v1.12/FA_Assets_Webp/Arctic/!Wilderness/Decor/Cairns/Cairn_Stone_Slate_Snowy_A1_1x1.webp");
+        assert_eq!(biome_category_from_rel(rel), ("Arctic".to_string(), "Decor".to_string()));
+    }
+
+    /// Real bug, found live: a biome with its own named settlement puts the
+    /// SETTLEMENT NAME where category used to be read from, one level too
+    /// shallow — `Base_Woodlands_Settlement` is not a category, `Structures`
+    /// (found one level deeper) is. This also means the Import UI's
+    /// by-category summary was silently wrong for every named-settlement
+    /// biome before this fix.
+    #[test]
+    fn biome_category_from_rel_skips_a_settlement_name_to_find_the_real_category() {
+        let rel = Path::new("Core_Mapmaking_Pack_Webp_v1.01/FA_Assets_Webp/Woodlands/Base_Woodlands_Settlement/Structures/Building/Doors/Shack_Door_Wood_Ashen_A1_1x1.webp");
+        assert_eq!(biome_category_from_rel(rel), ("Woodlands".to_string(), "Structures".to_string()));
     }
 
     #[test]
@@ -350,6 +1022,7 @@ mod tests {
     #[test]
     fn score_counts_overlapping_tokens_case_and_pluralization_insensitively() {
         let entry = TileLibraryEntry {
+            root: "r".into(),
             rel_path: "x".into(),
             biome: "Woodlands".into(),
             category: "Furniture".into(),
@@ -357,13 +1030,403 @@ mod tests {
             w: 2,
             h: 2,
         };
-        assert_eq!(score(&entry, &tokenize_query("round wooden dining table")), 3);
-        assert_eq!(score(&entry, &tokenize_query("tables")), 1);
+        // Head noun "table" matches (HEAD_WEIGHT) + two adjectives (round,
+        // wooden→wood... here "wooden" IS the keyword); "dining" matches
+        // nothing.
+        assert_eq!(score(&entry, &tokenize_query("round wooden dining table")), HEAD_WEIGHT + 2);
+        // Plural of the head noun still matches, no adjectives.
+        assert_eq!(score(&entry, &tokenize_query("tables")), HEAD_WEIGHT);
+        // Head noun doesn't match anything → dropped entirely.
         assert_eq!(score(&entry, &tokenize_query("campfire")), 0);
+    }
+
+    /// The exact live failure (2026-07-19): "small wooden crate" placed a
+    /// Rat_Trap at B9, because the old both-ways substring match let the
+    /// keyword "rat" match INSIDE the query word "crate". token_matches must
+    /// reject that while still accepting real plural/suffix forms.
+    #[test]
+    fn token_matches_accepts_plurals_and_suffixes_but_not_buried_substrings() {
+        assert!(token_matches("table", "tables")); // plural
+        assert!(token_matches("wood", "wooden")); // adjective form (2-char suffix)
+        assert!(token_matches("crate", "crate")); // exact
+        assert!(!token_matches("rat", "crate")); // "rat" is buried in "crate"
+        assert!(!token_matches("bar", "barrel")); // "bar" is a prefix but 3 chars short
+        assert!(!token_matches("can", "candle")); // ditto
+        assert!(!token_matches("heart", "hearth")); // "h" is not a plural/adjective ending
+        assert!(token_matches("bench", "benches")); // real "es" plural still matches
+    }
+
+    /// The head noun (last token) is the object's identity and is REQUIRED —
+    /// an entry that only shares adjectives ("small", "wood") with the query
+    /// but not the noun scores 0, so it never renders a lookalike.
+    #[test]
+    fn shortlist_only_keeps_tiles_that_fit_and_prefers_the_largest() {
+        let sized = |kw: &[&str], w: u32, h: u32, path: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: path.into(),
+            biome: "b".into(),
+            category: "Furniture".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w,
+            h,
+        };
+        let entries = vec![
+            sized(&["table", "wood"], 2, 2, "table_2x2"),
+            sized(&["table", "wood"], 1, 1, "table_1x1"),
+            sized(&["table", "wood"], 3, 3, "table_3x3"), // too big for a 2x2 slot
+            sized(&["chair", "wood"], 2, 2, "chair_2x2"), // wrong head noun
+        ];
+        let tokens = tokenize_query("wooden table");
+        let idf = compute_idf(&entries);
+        let got: Vec<&str> = shortlist_entries(&entries, &tokens, &idf, "", 2, 2, 10, false).iter().map(|e| e.rel_path.as_str()).collect();
+        // 3x3 excluded (doesn't fit the footprint). The two real tables rank
+        // first by head noun (2x2 before 1x1 — fewer repeats); the chair still
+        // appears LAST because it shares the "wood" adjective — that's the
+        // intended recall, since the vision picker looks and rejects it.
+        assert_eq!(got, vec!["table_2x2", "table_1x1", "chair_2x2"]);
+    }
+
+    /// Live bug (2026-07-19): "Shelf of bottles" made "bottles" the head noun,
+    /// so all 8 candidates were loose glassware (Ink_Bottle, Milk_Bottle) and
+    /// not one shelf. The CONTAINER is the identity; the contents are a hint.
+    #[test]
+    fn normalize_query_makes_the_container_the_head_not_its_contents() {
+        assert_eq!(normalize_query("Shelf of bottles"), "bottles shelf");
+        assert_eq!(tokenize_query("Shelf of bottles").last().unwrap(), "shelf");
+        assert_eq!(tokenize_query("Shelf of filled bottles").last().unwrap(), "shelf");
+        // No "of" — untouched, last word stays the head.
+        assert_eq!(tokenize_query("wooden crate").last().unwrap(), "crate");
+    }
+
+    /// Regression in the "X of Y" fix itself: swapping made "stack" the head
+    /// of "Stack of wooden crates", which matched Coal_Stack/Planks_Stack
+    /// instead of crates. A quantifier is not the object.
+    #[test]
+    fn normalize_query_does_not_swap_a_quantifier_for_the_real_noun() {
+        assert_eq!(tokenize_query("Stack of wooden crates").last().unwrap(), "crates");
+        assert_eq!(tokenize_query("Pile of rubble").last().unwrap(), "rubble");
+        // A real container still swaps — that's the case the rule exists for.
+        assert_eq!(tokenize_query("Shelf of bottles").last().unwrap(), "shelf");
+    }
+
+    /// Live bug (2026-07-19, underdark map): "bone pile" resolved to
+    /// `Textures/Bones/Bones_Dirt_A_01.jpg` — a seamless GROUND texture — which
+    /// would render as a 2x1 rectangle of bone-patterned floor. Ground art is
+    /// never a placeable object, but the floor resolver still needs it.
+    #[test]
+    fn ground_textures_are_never_offered_as_an_object_but_still_reachable_as_a_floor() {
+        let mk = |cat: &str, path: &str| TileLibraryEntry {
+            root: "r".into(), rel_path: path.into(), biome: "!Core_Settlements".into(),
+            category: cat.into(), keywords: vec!["bone".into(), "dirt".into()], w: 1, h: 1,
+        };
+        let entries = vec![mk("Textures", "bones_dirt_texture"), mk("Clutter", "bone_pile_prop")];
+        let idf = compute_idf(&entries);
+        let q = tokenize_query("bone pile");
+
+        let as_object = shortlist_entries(&entries, &q, &idf, "underdark", 1, 1, 8, false);
+        assert_eq!(as_object.len(), 1, "ground art must not be an object candidate: {as_object:?}");
+        assert_eq!(as_object[0].rel_path, "bone_pile_prop");
+
+        // The floor path asks for Textures by name and must still see it.
+        let as_floor = shortlist_entries(&entries, &q, &idf, "underdark", 1, 1, 8, true);
+        assert_eq!(as_floor.len(), 2, "the floor resolver still needs ground textures: {as_floor:?}");
+
+        assert!(is_ground_only("Textures") && is_ground_only("texture_overlays"));
+        assert!(!is_ground_only("Clutter") && !is_ground_only("Structures") && !is_ground_only("Flora"));
+    }
+
+    /// Live bug (2026-07-19, cave map): a trailing collective noun took the
+    /// head slot, so "dark mushroom cluster" resolved to Crystal_Black_Cluster
+    /// and "bone pile" to Stuffing_Pile — pillow stuffing. The quantifier list
+    /// already existed; it just wasn't reachable from a bare compound.
+    #[test]
+    fn a_trailing_collective_noun_is_not_the_head() {
+        assert_eq!(tokenize_query("dark mushroom cluster").last().unwrap(), "mushroom");
+        assert_eq!(tokenize_query("bone pile").last().unwrap(), "bone");
+        assert_eq!(tokenize_query("Rubble pile").last().unwrap(), "rubble");
+        assert_eq!(tokenize_query("stack of crates").last().unwrap(), "crates");
+        // The collective is kept as a hint, not discarded — a tile that really
+        // is a pile should still score for it.
+        assert!(tokenize_query("bone pile").contains(&"pile".to_string()));
+        // Nothing to promote: a bare collective stays exactly as it is.
+        assert_eq!(tokenize_query("pile"), vec!["pile".to_string()]);
+        // And an ordinary compound is untouched.
+        assert_eq!(tokenize_query("wooden crate").last().unwrap(), "crate");
+    }
+
+    /// A "Communal table" must not resolve to a FALLEN table, nor a "Stool" to
+    /// a PIANO stool, just because the head noun matches.
+    #[test]
+    fn condition_words_demote_a_tile_the_label_never_asked_for() {
+        let plain = entry("Furniture", &["table", "wood"]);
+        let fallen = entry("Furniture", &["table", "fallen"]);
+        let q = tokenize_query("communal table");
+        assert_eq!(condition_fit(&plain, &q), 1.0);
+        assert!(condition_fit(&fallen, &q) < 1.0);
+        // ...but if the label DOES ask for it, no penalty.
+        assert_eq!(condition_fit(&fallen, &tokenize_query("fallen table")), 1.0);
+    }
+
+    /// Live bug: "Broken crockery" has no catalog word for "crockery", so its
+    /// only exact match was "broken" — and it proposed a broken WINDOW. With
+    /// no real identity match the shortlist must return NOTHING so the caller
+    /// falls back to the built-in glyph.
+    #[test]
+    fn shortlist_returns_nothing_rather_than_the_wrong_object() {
+        let window = TileLibraryEntry {
+            root: "r".into(), rel_path: "window_broken".into(), biome: "!Core_Settlements".into(),
+            category: "Structures".into(), keywords: vec!["window".into(), "wood".into(), "broken".into()], w: 2, h: 1,
+        };
+        let idf = compute_idf(std::slice::from_ref(&window));
+        let got = shortlist_entries(std::slice::from_ref(&window), &tokenize_query("Broken crockery"), &idf, "", 2, 1, 8, false);
+        assert!(got.is_empty(), "a condition-word-only match is not an identity match: {got:?}");
+        // The same tile IS a valid answer when the label really means a window.
+        let got2 = shortlist_entries(std::slice::from_ref(&window), &tokenize_query("Broken window"), &idf, "", 2, 1, 8, false);
+        assert_eq!(got2.len(), 1);
+    }
+
+    /// Live bug (2026-07-19): "hanging iron chandelier" at 1x1 rendered a
+    /// LAUNDRY IRON (Workplace_Equipment/Cleaning/Laundry/Ironing) — every
+    /// catalog chandelier is 2x2, so the size filter dropped them all and the
+    /// only survivor matched the material word "iron". A known object that
+    /// doesn't fit must refuse, not substitute something sharing an adjective.
+    #[test]
+    fn shortlist_refuses_when_the_object_exists_but_never_at_a_fitting_size() {
+        let mk = |kw: &[&str], w: u32, h: u32, path: &str| TileLibraryEntry {
+            root: "r".into(), rel_path: path.into(), biome: "!Core_Settlements".into(),
+            category: "Decor".into(), keywords: kw.iter().map(|s| s.to_string()).collect(), w, h,
+        };
+        let entries = vec![
+            mk(&["chandelier", "metal", "gray"], 2, 2, "chandelier_2x2"), // real thing, too big
+            mk(&["iron", "wood", "red", "metal"], 1, 1, "laundry_iron_1x1"), // shares "iron" only
+        ];
+        let idf = compute_idf(&entries);
+        let q = tokenize_query("hanging iron chandelier");
+        let got = shortlist_entries(&entries, &q, &idf, "tavern", 1, 1, 8, false);
+        assert!(got.is_empty(), "a 1x1 slot must get NOTHING, not a laundry iron: {got:?}");
+        // Give it the room the chandelier actually needs and it resolves fine.
+        let got2 = shortlist_entries(&entries, &q, &idf, "tavern", 2, 2, 8, false);
+        assert_eq!(got2.first().map(|e| e.rel_path.as_str()), Some("chandelier_2x2"), "{got2:?}");
+    }
+
+    /// Live bug: "Pillar" in a TAVERN returned eight `Flesh_Pale_Pillar_*` from
+    /// the Horror pack, because ranking never looked at biome at all.
+    #[test]
+    fn biome_affinity_demotes_a_tile_from_an_unrelated_biome() {
+        assert_eq!(biome_affinity("!Core_Settlements", "!Core_Settlements"), 1.0);
+        assert_eq!(biome_affinity("Underdark", "Underdark"), 1.0);
+        // The universal settlement set is welcome in any scene.
+        assert_eq!(biome_affinity("Underdark", "!Core_Settlements"), 1.0);
+        // Horror flesh has no business in a tavern.
+        assert!(biome_affinity("!Core_Settlements", "Horror") < 0.5);
+        assert!(biome_affinity("!Core_Settlements", "Arctic") < 0.5);
+    }
+
+    #[test]
+    fn scene_biome_maps_scene_words_and_defaults_to_the_settlement_set() {
+        assert_eq!(scene_biome("tavern"), "!Core_Settlements");
+        assert_eq!(scene_biome("cave"), "Underdark");
+        assert_eq!(scene_biome("forest"), "Woodlands");
+        assert_eq!(scene_biome("anything unknown"), "!Core_Settlements");
+    }
+
+    /// Every exact-head match scores identically, so without diversification
+    /// the tiebreak alone filled the whole top-K with variants of ONE family —
+    /// which is exactly how the vision picker ended up with no real choice.
+    #[test]
+    fn shortlist_shows_one_per_family_before_repeating_a_variant() {
+        let v = |kw: &[&str], path: &str| TileLibraryEntry {
+            root: "r".into(), rel_path: path.into(), biome: "!Core_Settlements".into(),
+            category: "Furniture".into(), keywords: kw.iter().map(|s| s.to_string()).collect(), w: 1, h: 1,
+        };
+        let entries = vec![
+            v(&["flesh", "pale", "pillar"], "flesh_a"),
+            v(&["flesh", "pale", "pillar"], "flesh_b"),
+            v(&["flesh", "pale", "pillar"], "flesh_c"),
+            v(&["pillar", "stone"], "stone_a"),
+            v(&["pillar", "wood"], "wood_a"),
+        ];
+        let idf = compute_idf(&entries);
+        let got: Vec<&str> = shortlist_entries(&entries, &tokenize_query("pillar"), &idf, "", 1, 1, 3, false)
+            .iter().map(|e| e.rel_path.as_str()).collect();
+        assert_eq!(got.len(), 3);
+        // Three DIFFERENT families, not three flesh variants.
+        assert!(got.contains(&"stone_a") && got.contains(&"wood_a"), "shortlist must diversify families: {got:?}");
+        assert_eq!(got.iter().filter(|p| p.starts_with("flesh")).count(), 1, "only one variant per family up front: {got:?}");
+    }
+
+    #[test]
+    fn bridges_compound_words_to_a_base_keyword_but_never_short_words() {
+        assert!(bridges("grave", "gravestone")); // prefix
+        assert!(bridges("lamp", "lamppost")); // prefix
+        assert!(bridges("shell", "seashell")); // suffix
+        assert!(!bridges("rat", "crate")); // ≤3 chars — the false positive we already killed
+        assert!(!bridges("bar", "barrel"));
+        assert!(!bridges("vest", "gravestone")); // buried substring, not a boundary
+        assert!(!bridges("table", "stables")); // ditto — "table" is mid-word in "stables"
+    }
+
+    fn idf_map(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
+        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    }
+
+    #[test]
+    fn shortlist_bridges_a_compound_label_the_model_wrote_to_the_catalog_base() {
+        // "gravestone" isn't a plural of "grave", so strict scoring missed it;
+        // the compound bridge surfaces the grave tile, and vision confirms.
+        let idf = idf_map(&[("grave", 8.0), ("stone", 2.0), ("crate", 6.0), ("wood", 1.5)]);
+        let grave = entry("Burial_and_Graves", &["grave", "stone"]);
+        let got = shortlist_entries(std::slice::from_ref(&grave), &tokenize_query("gravestone"), &idf, "", 2, 2, 8, false);
+        assert_eq!(got.len(), 1, "a compound label must reach its base-word tile");
+        // An exact head match still outranks a bridge one.
+        let exact_crate = entry("Decor", &["crate", "wood"]);
+        assert!(shortlist_rank(&exact_crate, &tokenize_query("wooden crate"), &idf).unwrap() > shortlist_rank(&grave, &tokenize_query("gravestone"), &idf).unwrap());
+    }
+
+    /// Rarity weighting: for "gravestone" (which bridges both "grave" and the
+    /// ubiquitous "stone"), the tile carrying the RARE, specific word must
+    /// outrank a plain generic-stone tile — the compound-dilution fix.
+    #[test]
+    fn shortlist_rarity_prefers_the_specific_word_over_the_generic_one() {
+        let idf = idf_map(&[("grave", 8.0), ("stone", 2.0), ("gray", 3.0)]);
+        let grave = entry("Burial_and_Graves", &["grave", "stone"]);
+        let rock = entry("Textures", &["stone", "gray"]);
+        let q = tokenize_query("gravestone");
+        let g = shortlist_rank(&grave, &q, &idf).unwrap();
+        let r = shortlist_rank(&rock, &q, &idf).unwrap();
+        assert!(g > r, "grave ({g}) must outrank generic stone ({r}) for 'gravestone'");
+    }
+
+    /// Live bug: "tableau" (a rare metal plaque, idf ~8.9) prefix-bridges
+    /// "table" (common, idf ~4.1) and — with rarity weighting — buried every
+    /// real table. An EXACT head match must always beat a bridge one.
+    #[test]
+    fn shortlist_exact_head_beats_a_rare_bridge_false_friend() {
+        let idf = idf_map(&[("table", 4.1), ("tableau", 8.9), ("wood", 1.6), ("metal", 3.0)]);
+        let table = entry("Furniture", &["table", "wood"]);
+        let tableau = entry("Decor", &["tableau", "metal"]);
+        let q = tokenize_query("table");
+        assert!(shortlist_rank(&table, &q, &idf).unwrap() > shortlist_rank(&tableau, &q, &idf).unwrap());
+    }
+
+    /// The real "bar counter" failure: the model names the bar "Bar counter",
+    /// but only "bar" is a catalog keyword. Strict scoring returned nothing (so
+    /// the bar rendered as `=` tables); the shortlist must now surface the bar.
+    #[test]
+    fn shortlist_finds_a_compound_label_whose_last_word_isnt_a_catalog_noun() {
+        let bar = TileLibraryEntry { root: "r".into(), rel_path: "bar_5x1".into(), biome: "b".into(), category: "Furniture".into(), keywords: vec!["bar".into(), "wood".into()], w: 5, h: 1 };
+        let idf = idf_map(&[("bar", 7.5), ("wood", 1.6)]);
+        let got = shortlist_entries(std::slice::from_ref(&bar), &tokenize_query("Bar counter"), &idf, "", 6, 1, 8, false);
+        assert_eq!(got.len(), 1, "the real bar tile must be shortlisted for 'Bar counter'");
+        assert_eq!(got[0].rel_path, "bar_5x1");
+    }
+
+    #[test]
+    fn score_requires_the_head_noun_not_just_shared_adjectives() {
+        let crate_entry = entry("Decor", &["crate", "wood", "red"]);
+        let aquarium = entry("Decor", &["aquarium", "small", "wood"]);
+        let q = tokenize_query("small wooden crate");
+        assert!(score(&crate_entry, &q) >= HEAD_WEIGHT, "the real crate must match its head noun");
+        assert_eq!(score(&aquarium, &q), 0, "adjective-only overlap must not match");
     }
 
     #[test]
     fn tokenize_query_drops_short_words() {
         assert_eq!(tokenize_query("a Round Table"), vec!["round".to_string(), "table".to_string()]);
+    }
+
+    fn entry(category: &str, keywords: &[&str]) -> TileLibraryEntry {
+        TileLibraryEntry {
+            root: "r".into(),
+            rel_path: "x".into(),
+            biome: "Woodlands".into(),
+            category: category.into(),
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        }
+    }
+
+    #[test]
+    fn object_vocabulary_only_draws_from_object_like_categories() {
+        let entries = vec![
+            entry("Furniture", &["table", "round", "woodlands", "furniture"]),
+            entry("Structures", &["wall", "stone", "woodlands", "structures"]),
+        ];
+        let vocab = object_vocabulary(&entries);
+        assert!(vocab.contains(&"table".to_string()));
+        assert!(vocab.contains(&"round".to_string()));
+        assert!(!vocab.contains(&"wall".to_string()), "Structures isn't placeable set-dressing: {vocab:?}");
+        assert!(!vocab.contains(&"stone".to_string()), "{vocab:?}");
+    }
+
+    #[test]
+    fn object_vocabulary_excludes_the_entrys_own_biome_and_category_words() {
+        let entries = vec![entry("Furniture", &["table", "woodlands", "furniture"])];
+        let vocab = object_vocabulary(&entries);
+        assert_eq!(vocab, vec!["table".to_string()], "biome/category words are structural, not descriptive: {vocab:?}");
+    }
+
+    #[test]
+    fn object_vocabulary_sorts_by_frequency_then_alphabetically() {
+        let entries = vec![
+            entry("Furniture", &["table"]),
+            entry("Furniture", &["table"]),
+            entry("Decor", &["candle"]),
+            entry("Decor", &["candle"]),
+            entry("Clutter", &["barrel"]),
+        ];
+        assert_eq!(object_vocabulary(&entries), vec!["candle".to_string(), "table".to_string(), "barrel".to_string()]);
+    }
+
+    /// "multicolor2" ranked 100th on raw frequency (781 uses) — a filename
+    /// variant tag, not a word anyone would write an object label with.
+    #[test]
+    fn object_vocabulary_drops_filename_artifacts() {
+        assert!(is_artifact_word("01") && is_artifact_word("multicolor2") && is_artifact_word("green1"));
+        assert!(!is_artifact_word("table") && !is_artifact_word("bookshelf"));
+        let entries = vec![entry("Furniture", &["table", "multicolor2", "01"])];
+        assert_eq!(object_vocabulary(&entries), vec!["table".to_string()]);
+    }
+
+    #[test]
+    fn object_vocabulary_is_capped() {
+        let entries: Vec<TileLibraryEntry> = (0..VOCAB_CAP + 50)
+            // Trailing "w" keeps these off `is_artifact_word`'s digit-suffix
+            // rule — this is testing the CAP, not the artifact filter.
+            .map(|i| TileLibraryEntry { root: "r".into(), rel_path: "x".into(), biome: "Woodlands".into(), category: "Furniture".into(), keywords: vec![format!("word{i}w")], w: 1, h: 1 })
+            .collect();
+        assert_eq!(object_vocabulary(&entries).len(), VOCAB_CAP);
+    }
+
+    fn entry_at(root: &str, rel_path: &str) -> TileLibraryEntry {
+        TileLibraryEntry { root: root.into(), rel_path: rel_path.into(), biome: "Woodlands".into(), category: "Furniture".into(), keywords: vec!["table".into()], w: 1, h: 1 }
+    }
+
+    #[test]
+    fn merge_manifest_adds_a_new_root_without_touching_existing_ones() {
+        let existing = TileLibraryManifest { roots: vec!["C:/packA".into()], entries: vec![entry_at("C:/packA", "table.webp")] };
+        let scanned = vec![entry_at("C:/packB", "barrel.webp")];
+        let merged = merge_manifest(existing, "C:/packB", scanned);
+        assert_eq!(merged.roots, vec!["C:/packA".to_string(), "C:/packB".to_string()]);
+        assert_eq!(merged.entries.len(), 2);
+        assert!(merged.entries.iter().any(|e| e.root == "C:/packA" && e.rel_path == "table.webp"));
+        assert!(merged.entries.iter().any(|e| e.root == "C:/packB" && e.rel_path == "barrel.webp"));
+    }
+
+    /// Re-Importing (with merge) a root that's already part of the catalog
+    /// must replace just that root's own entries, not duplicate them — and
+    /// must not add a second copy of the root to the roots list.
+    #[test]
+    fn merge_manifest_replaces_its_own_root_instead_of_duplicating() {
+        let existing = TileLibraryManifest {
+            roots: vec!["C:/packA".into()],
+            entries: vec![entry_at("C:/packA", "old_table.webp"), entry_at("C:/packA", "old_barrel.webp")],
+        };
+        let rescanned = vec![entry_at("C:/packA", "new_table.webp")];
+        let merged = merge_manifest(existing, "C:/packA", rescanned);
+        assert_eq!(merged.roots, vec!["C:/packA".to_string()], "root must not be duplicated in the roots list");
+        assert_eq!(merged.entries.len(), 1, "the old scan of this exact root must be fully replaced, not accumulated: {:?}", merged.entries);
+        assert_eq!(merged.entries[0].rel_path, "new_table.webp");
     }
 }

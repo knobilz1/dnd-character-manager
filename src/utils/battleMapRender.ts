@@ -22,7 +22,6 @@
  */
 
 import { PDFDocument } from 'pdf-lib';
-import { invoke } from '@tauri-apps/api/core';
 import wallLeftUrl from '../assets/battle-tiles/wall_left.png';
 import wallMidUrl from '../assets/battle-tiles/wall_mid.png';
 import wallRightUrl from '../assets/battle-tiles/wall_right.png';
@@ -56,7 +55,9 @@ export interface ParsedBattleMap {
   /** Raw `Objects:` section text — a free-object placement layer independent
    *  of the legend grid, only ever present when the DM was told a tile
    *  library is configured (see campaign.rs's build_battle_maps_prompt).
-   *  See parseObjectPlacements/preloadMapObjectSprites. */
+   *  Resolved to real catalog art by the backend vision picker; the renderer
+   *  draws that via the `tiles` param (see get_map_tiles / MapTileArt), not
+   *  from this text directly. */
   objects: string;
   tactics: string;
 }
@@ -431,6 +432,50 @@ function drawSprite(ctx: Ctx, url: string, x: number, y: number, px: number, fil
   return true;
 }
 
+/** The ground for one cell: the resolved biome floor texture if there is one
+ *  (drawn WITHOUT the style filter — it's real full-colour biome art, not the
+ *  dungeon tile that gets darkened), else the built-in style floor. This is
+ *  what makes a beach read as sand and a cave as rock instead of dungeon
+ *  stone. Falls through to the built-in floor if the biome texture hasn't
+ *  loaded yet. */
+/** The catalog-resolved terrain for one map: the ground under `.`, the water
+ *  under `~`, and whether `#` is living rock or built masonry. Resolved in
+ *  campaign.rs (`resolve_floor` / `resolve_liquid` / `NATURAL_WALL_BIOMES`) —
+ *  everything here just draws what it's handed. */
+export type MapTerrain = {
+  floor?: string | null;
+  liquid?: string | null;
+  /** `#` is living rock — draw the ground darkened rather than the masonry
+   *  sprites. True for caves and wilderness, false for taverns and towns,
+   *  whose walls really are mortared stone and already read correctly. */
+  naturalWalls?: boolean;
+};
+
+function drawGround(ctx: Ctx, x: number, y: number, px: number, terrain: MapTerrain | undefined, style: StyleSpriteSet): boolean {
+  if (terrain?.floor && drawSprite(ctx, terrain.floor, x, y, px)) return true;
+  return drawSprite(ctx, style.floor, x, y, px, style.filter);
+}
+
+/** Draw a texture, then wash it with black. How a natural biome's `#` (the
+ *  living rock the cave is cut from) and ` ` (solid rock past the map edge)
+ *  are made to read as clearly NOT-floor while staying the same material —
+ *  which is what a top-down cave actually looks like. Doing it by shading the
+ *  floor rather than resolving a separate wall texture is deliberate: the
+ *  catalog's Textures are all GROUND art, and its best "rock" candidate is tan
+ *  crazy-paving that reads as a patio. */
+/** How hard `#` and ` ` are shaded down from the floor texture. Wall must read
+ *  as impassable at a glance next to lit floor; void is darker still so the
+ *  map's outline stays legible where wall meets nothing. */
+const WALL_DARKNESS = 0.55;
+const VOID_DARKNESS = 0.78;
+
+function drawShaded(ctx: Ctx, url: string, x: number, y: number, px: number, darkness: number): boolean {
+  if (!drawSprite(ctx, url, x, y, px)) return false;
+  ctx.fillStyle = `rgba(0,0,0,${darkness})`;
+  ctx.fillRect(x, y, px, px);
+  return true;
+}
+
 /** Same as drawSprite but for a non-square footprint — the Objects: layer's
  *  catalog art spans `w`x`h` cells rather than always exactly one. */
 function drawSpriteScaled(ctx: Ctx, url: string, x: number, y: number, w: number, h: number): boolean {
@@ -586,66 +631,34 @@ function cellRefsInText(text: string): string[] {
   return out;
 }
 
-export interface ObjectPlacement { label: string; col: number; row: number; w: number; h: number }
 
-/** `- <label> at <cell> (<W>x<H>)` → placements, mirroring campaign.rs's
- *  parse_object_line (same shape, same tolerances) closely enough for our
- *  purpose here — picking what to draw, not validating correctness (that's
- *  the backend's job; a spec that fails validate_map_spec never reaches
- *  this renderer with a bad Objects line left in). Pure. */
-function parseObjectPlacements(objectsText: string): ObjectPlacement[] {
-  const out: ObjectPlacement[] = [];
-  for (const raw of objectsText.split('\n')) {
-    const line = raw.trim().replace(/^-\s*/, '');
-    if (!line) continue;
-    const atIdx = line.toLowerCase().indexOf(' at ');
-    if (atIdx === -1) continue;
-    const label = line.slice(0, atIdx).trim();
-    const rest = line.slice(atIdx + 4).trim();
-    const open = rest.lastIndexOf('(');
-    const close = rest.lastIndexOf(')');
-    if (open === -1 || close === -1 || close <= open) continue;
-    const cellTok = (rest.slice(0, open).trim().match(/^[A-Za-z0-9]+/) ?? [''])[0];
-    const cell = parseCellRefToken(cellTok);
-    const sizeMatch = /^(\d+)\s*[xX]\s*(\d+)$/.exec(rest.slice(open + 1, close).trim());
-    if (!cell || !sizeMatch) continue;
-    out.push({ label, col: cell[0], row: cell[1], w: parseInt(sizeMatch[1], 10), h: parseInt(sizeMatch[2], 10) });
-  }
-  return out;
+/** One catalog tile the vision resolver chose for a placement (see
+ *  campaign.rs get_map_tiles / MapTileArt). `cells` are [col,row]; `w`/`h` the
+ *  footprint in cells; `tw`/`th` the tile's native cell size so a small piece
+ *  can be TILED across a wider run (a 1x1 bar segment across a 6x1 counter)
+ *  instead of stretched. `data_url` is the loaded image. */
+export interface MapTileArt {
+  cells: [number, number][];
+  w: number;
+  h: number;
+  tw: number;
+  th: number;
+  data_url: string;
+  /** Optional sub-cell placement [x, y, w, h] in fractional cells (absolute
+   *  grid coords). When set, the tile is drawn ONCE inside that rect instead of
+   *  tiled across the footprint — a hearth's flame in its firebox. */
+  sub?: [number, number, number, number] | null;
 }
 
-/** label → resolved sprite URL (or null: no library / no match), warmed by
- *  preloadMapObjectSprites and read synchronously by the object draw pass
- *  in renderBattleMapContent — same "resolve once, render from a warm
- *  cache" split as spriteCache/preloadBattleTileSprites. Memoized across
- *  calls so re-rendering an already-resolved spec costs nothing. */
-const resolvedObjectUrls = new Map<string, string | null>();
-
-/** Resolves and preloads every unique Objects: label in `spec` against the
- *  user's imported tile catalog (see tile_library.rs's search_tile_catalog),
- *  so the synchronous render pass that follows can draw them from a warm
- *  cache. Call this once before battleMapToPngDataUrl/battleMapToPdfBytes
- *  for a spec that might have changed — safe to call for every spec, since
- *  already-resolved labels are free. No library imported, or no match for a
- *  label, both resolve to `null` (nothing extra drawn) — same as a broken
- *  sprite URL today: silent fallback, never an error. */
-export async function preloadMapObjectSprites(spec: string): Promise<void> {
-  const map = parseBattleMap(spec);
-  if (!map || !map.objects) return;
-  const labels = [...new Set(parseObjectPlacements(map.objects).map((p) => p.label))].filter((l) => !resolvedObjectUrls.has(l));
-  if (labels.length === 0) return;
-  await Promise.all(
-    labels.map(async (label) => {
-      try {
-        const matches = await invoke<{ data_url: string }[]>('search_tile_catalog', { query: label });
-        const url = matches[0]?.data_url ?? null;
-        if (url) await loadOneSprite(url);
-        resolvedObjectUrls.set(label, url);
-      } catch {
-        resolvedObjectUrls.set(label, null);
-      }
-    })
-  );
+/** Preloads the resolved tiles' art into the shared sprite cache so the
+ *  synchronous render pass can draw them — same warm-cache split as
+ *  preloadBattleTileSprites. Safe to call for any list; already-loaded URLs
+ *  are free. */
+export async function preloadResolvedTileArt(tiles: MapTileArt[], terrain?: MapTerrain | null): Promise<void> {
+  const urls = tiles.map((t) => t.data_url);
+  if (terrain?.floor) urls.push(terrain.floor);
+  if (terrain?.liquid) urls.push(terrain.liquid);
+  await Promise.all(urls.map((u) => loadOneSprite(u)));
 }
 
 /** Which furniture look best fits a Features label — real variety instead
@@ -680,32 +693,49 @@ function hazardVariantFor(label: string | undefined): keyof HazardSet {
  *  where it defaults to a plain wall face (see NEUTRAL_WALL_NEIGHBORS).
  *  `featureLabel` is only meaningful for `=`/`*` cells (see
  *  furnitureVariantFor/hazardVariantFor) — omit it for the fallback look. */
-function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string) {
+function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string, terrain?: MapTerrain) {
   const style = TILE_STYLE_SPRITES[activeTileStyle];
   switch (code) {
     case '.':
-      if (drawSprite(ctx, style.floor, x, y, px, style.filter)) return;
+      if (drawGround(ctx, x, y, px, terrain, style)) return;
+      break;
+    case ' ':
+      // Void past the map edge. In a natural biome that's not nothing, it's
+      // the rock the cave was cut from — so shade the ground hard rather than
+      // punching a flat near-black hole. The prompt now actively asks for
+      // irregular outlines (alcoves, jogs), and every one of them was landing
+      // as a black rectangle that read like a rendering glitch.
+      if (terrain?.naturalWalls && terrain.floor && drawShaded(ctx, terrain.floor, x, y, px, VOID_DARKNESS)) return;
       break;
     case '#': {
+      // Living rock in the wilderness; mortared masonry in a building.
+      if (terrain?.naturalWalls && terrain.floor && drawShaded(ctx, terrain.floor, x, y, px, WALL_DARKNESS)) return;
       const key = wallSpriteFor(wallNeighbors ?? NEUTRAL_WALL_NEIGHBORS);
       if (drawSprite(ctx, style.wall[key], x, y, px, style.filter)) return;
       break;
     }
     case '+':
-      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.door, x, y, px, style.filter)) return;
+      if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.door, x, y, px, style.filter)) return;
       break;
     case 'o':
-      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.column, x, y, px, style.filter)) return;
+      // Intentionally NOT the column sprite: column.png is 16x48 (a pillar
+      // drawn three cells TALL, a side-on view), but an `o` is a single 1x1
+      // cell, so drawSprite crushes it to a third height into a stubby,
+      // barrel-looking blob nobody can identify. A pillar on a TOP-DOWN grid
+      // is a round stone cross-section anyway — fall through to the
+      // procedural `case 'o'` (floor + stone disc + highlight), which draws
+      // exactly that and reads correctly.
       break;
     case '=': {
       const sprite = style.furniture[furnitureVariantFor(featureLabel)];
-      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, sprite, x, y, px, style.filter)) return;
+      if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, sprite, x, y, px, style.filter)) return;
       break;
     }
     case '_':
       if (drawSprite(ctx, style.stairs, x, y, px, style.filter)) return;
       break;
     case '~':
+      if (terrain?.liquid && drawSprite(ctx, terrain.liquid, x, y, px)) return;
       if (drawSprite(ctx, style.water, x, y, px, style.filter)) return;
       break;
     case '*': {
@@ -716,16 +746,16 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       // needs a floor pass underneath or it'd float on a transparent cell.
       if (variant === 'lava') {
         if (drawSprite(ctx, sprite, x, y, px, style.filter)) return;
-      } else if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, sprite, x, y, px, style.filter)) {
+      } else if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, sprite, x, y, px, style.filter)) {
         return;
       }
       break;
     }
     case '^':
-      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.rubble, x, y, px, style.filter)) return;
+      if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.rubble, x, y, px, style.filter)) return;
       break;
     case 'T':
-      if (drawSprite(ctx, style.floor, x, y, px, style.filter) && drawSprite(ctx, style.foliage, x, y, px, style.filter)) return;
+      if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.foliage, x, y, px, style.filter)) return;
       break;
   }
   drawTileProcedural(ctx, code, x, y, px);
@@ -738,7 +768,7 @@ export interface RenderWindow { colStart: number; colEnd: number; rowStart: numb
 /** Renders ONLY the grid content — tiles + thin cell-boundary lines, no
  *  coordinate ruler — sized exactly `wCols*cellPx` by `wRows*cellPx`. The
  *  ruler is composited separately (see `composeRulerFrame`). */
-function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow): HTMLCanvasElement {
+function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
   const wRows = w.rowEnd - w.rowStart;
@@ -750,28 +780,52 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // Cells a resolved catalog tile will cover — the base pass draws plain floor
+  // there (not the built-in glyph sprite) so the real tile sits on floor with
+  // no squished-column / campfire artefact peeking out from under it.
+  const covered = new Set<string>();
+  for (const t of tiles) for (const [c, r] of t.cells) covered.add(`${c},${r}`);
+
   const featureLabels = parseFeatureLabels(map.features);
   for (let r = 0; r < wRows; r++) {
     for (let c = 0; c < wCols; c++) {
       const mapRow = w.rowStart + r, mapCol = w.colStart + c;
-      const code = map.grid[mapRow]?.[mapCol] ?? ' ';
+      let code = map.grid[mapRow]?.[mapCol] ?? ' ';
+      if (covered.has(`${mapCol},${mapRow}`) && code !== '#' && code !== ' ') code = '.'; // resolved tile replaces the glyph
       const neighbors = code === '#' ? wallNeighborsAt(map.grid, mapRow, mapCol) : undefined;
       const featureLabel = code === '=' || code === '*' ? featureLabels.get(`${mapCol},${mapRow}`) : undefined;
-      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel);
+      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel, terrain);
     }
   }
 
-  // Objects: layer — free placements independent of the legend grid, drawn
-  // on top of it (see preloadMapObjectSprites, which must have already run
-  // for `resolvedObjectUrls` to have anything in it). An object anchored
-  // outside the current render window is skipped rather than clipped —
-  // acceptable for a print-paginated map, since the same map's other pages
-  // still show it in full where it actually belongs.
-  for (const p of map.objects ? parseObjectPlacements(map.objects) : []) {
-    if (p.col < w.colStart || p.col >= w.colEnd || p.row < w.rowStart || p.row >= w.rowEnd) continue;
-    const url = resolvedObjectUrls.get(p.label);
-    if (!url) continue;
-    drawSpriteScaled(ctx, url, (p.col - w.colStart) * cellPx, (p.row - w.rowStart) * cellPx, p.w * cellPx, p.h * cellPx);
+  // Resolved-tile layer — the exact catalog art the vision picker chose for
+  // each placement, drawn over the floor. A tile smaller than its footprint is
+  // repeated (tiled) across it in native steps rather than stretched; a
+  // placement entirely outside the current render window is skipped (its other
+  // print pages still show it where it belongs).
+  for (const t of tiles) {
+    const originCol = Math.min(...t.cells.map(([c]) => c));
+    const originRow = Math.min(...t.cells.map(([, r]) => r));
+    if (originCol < w.colStart || originCol >= w.colEnd || originRow < w.rowStart || originRow >= w.rowEnd) continue;
+    // Sub-cell placement (a hearth's flame): draw once inside the given rect.
+    if (t.sub) {
+      const [sx, sy, sw, sh] = t.sub;
+      drawSpriteScaled(ctx, t.data_url, (sx - w.colStart) * cellPx, (sy - w.rowStart) * cellPx, sw * cellPx, sh * cellPx);
+      continue;
+    }
+    const stepX = Math.max(1, t.tw), stepY = Math.max(1, t.th);
+    for (let dy = 0; dy < t.h; dy += stepY) {
+      for (let dx = 0; dx < t.w; dx += stepX) {
+        const px = (originCol + dx - w.colStart) * cellPx;
+        const py = (originRow + dy - w.rowStart) * cellPx;
+        // Clamp the last (partial) repeat so a tile whose size doesn't evenly
+        // divide the footprint — a 5x1 bar in a 6x1 run — squishes to fit
+        // rather than overflowing into the next cells.
+        const drawW = Math.min(stepX, t.w - dx) * cellPx;
+        const drawH = Math.min(stepY, t.h - dy) * cellPx;
+        drawSpriteScaled(ctx, t.data_url, px, py, drawW, drawH);
+      }
+    }
   }
 
   ctx.strokeStyle = COLORS.grid;
@@ -820,8 +874,8 @@ function composeRulerFrame(
 /** Renders a (sub-)grid to a fresh canvas, with a coordinate ruler (A.. / 1..)
  *  down the left and across the top so cells are referenceable on the print.
  *  `win` defaults to the whole map. `cellPx` sets resolution. */
-export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow): HTMLCanvasElement {
-  return composeRulerFrame(map, cellPx, win, renderBattleMapContent(map, cellPx, win));
+export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain): HTMLCanvasElement {
+  return composeRulerFrame(map, cellPx, win, renderBattleMapContent(map, cellPx, win, tiles, terrain));
 }
 
 /** Spreadsheet-style column label: 0→A, 25→Z, 26→AA. */
@@ -835,11 +889,13 @@ export function columnLabel(index: number): string {
   return s;
 }
 
-/** Renders the whole map to a PNG data URL (dialog preview + PNG export). */
-export function battleMapToPngDataUrl(spec: string, cellPx = 64): string | null {
+/** Renders the whole map to a PNG data URL (dialog preview + PNG export).
+ *  `tiles` are the resolved catalog tiles (preload their art first with
+ *  preloadResolvedTileArt); omit for the plain built-in-sprite render. */
+export function battleMapToPngDataUrl(spec: string, cellPx = 64, tiles: MapTileArt[] = [], terrain?: MapTerrain): string | null {
   const map = parseBattleMap(spec);
   if (!map) return null;
-  return renderBattleMapToCanvas(map, cellPx).toDataURL('image/png');
+  return renderBattleMapToCanvas(map, cellPx, undefined, tiles, terrain).toDataURL('image/png');
 }
 
 // ── PDF export (true 1-inch-per-square, tiled across pages) ───────────────────
@@ -860,7 +916,7 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 /** Builds a print-scaled PDF: every grid square is exactly 1 inch, and a map
  *  bigger than one page is tiled across multiple Letter sheets (with the
  *  coordinate ruler repeated on each) to tape together. */
-export async function battleMapToPdfBytes(spec: string): Promise<Uint8Array | null> {
+export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = [], terrain?: MapTerrain): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
 
@@ -874,7 +930,7 @@ export async function battleMapToPdfBytes(spec: string): Promise<Uint8Array | nu
         colStart: rx, colEnd: Math.min(map.cols, rx + usableSquaresX),
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
-      const source = renderBattleMapContent(map, RENDER_PX, win);
+      const source = renderBattleMapContent(map, RENDER_PX, win, tiles, terrain);
       const canvas = composeRulerFrame(map, RENDER_PX, win, source);
       const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));

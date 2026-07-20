@@ -461,6 +461,58 @@ fn spawn_claude(args: &[String], prompt: &str, cwd: Option<PathBuf>) -> Result<s
     Ok(child)
 }
 
+/// One-shot MULTIMODAL Claude call over the subscription CLI: pipes a prebuilt
+/// stream-json USER message (text + base64 image content blocks) via stdin and
+/// returns the model's final text `result`. The ordinary text path
+/// (`ask_claude_once`) can't carry images, and the CLI only accepts image
+/// blocks through `--input-format stream-json` (which forces
+/// `--output-format stream-json`, so the answer arrives as the terminal
+/// `result` line, same as run_claude_streaming). Stateless, tools disabled.
+/// Only caller: the battle-map tile resolver — a gen-time-only, occasional
+/// call, never a live DM turn.
+pub(crate) fn run_claude_vision(user_message_json: &str, model: Option<&str>) -> Result<String, String> {
+    let mut args: Vec<String> = vec![
+        "-p".into(),
+        "--input-format".into(),
+        "stream-json".into(),
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+        "--tools".into(),
+        "".into(),
+    ];
+    if let Some(m) = model {
+        args.push("--model".into());
+        args.push(m.to_string());
+    }
+    // stream-json input is read line-by-line; the message must be one line.
+    let child = spawn_claude(&args, &format!("{user_message_json}\n"), None)?;
+    let out = child.wait_with_output().map_err(|e| format!("claude vision wait failed: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The terminal result line carries both the answer AND (on an API error like
+    // "Prompt is too long") the error text + is_error flag — a non-zero exit
+    // leaves stderr empty, so the real reason is here on stdout, not stderr.
+    let result_line = stdout
+        .lines()
+        .rev()
+        .find_map(|l| serde_json::from_str::<serde_json::Value>(l).ok().filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("result")));
+    if let Some(v) = result_line {
+        let text = v.get("result").and_then(|r| r.as_str()).unwrap_or("").to_string();
+        if v.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false) {
+            return Err(format!("Claude vision API error: {text}"));
+        }
+        if out.status.success() {
+            return Ok(text);
+        }
+    }
+    Err(format!(
+        "Claude vision call failed (exit {:?}). stderr: {} | stdout tail: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr).trim(),
+        stdout.lines().rev().take(2).collect::<Vec<_>>().join(" ⏎ ")
+    ))
+}
+
 fn run_claude(prompt: String, session_id: Option<String>, cwd: Option<PathBuf>, model: Option<&str>, effort: Option<&str>) -> Result<DmReply, String> {
     let args = build_claude_args(session_id.as_deref(), model, effort, false);
     let child = spawn_claude(&args, &prompt, cwd)?;

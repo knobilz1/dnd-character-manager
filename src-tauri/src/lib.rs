@@ -1,6 +1,7 @@
 mod campaign;
 mod dm;
 mod local_llm;
+mod maplog;
 mod oauth;
 mod party_listener;
 mod terrain;
@@ -96,6 +97,7 @@ pub fn run() {
       campaign::list_battle_maps,
       campaign::read_battle_map,
       campaign::save_battle_map,
+      campaign::get_map_tiles,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tile_library::import_tile_library,

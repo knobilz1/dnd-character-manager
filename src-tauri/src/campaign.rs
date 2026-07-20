@@ -219,7 +219,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ difficult terrain (rubble)  = furniture/altar  T tree/foliage  _ stairs  * hazard (fire/brazier)  , sand/beach  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -2140,7 +2140,7 @@ fn battle_maps_dir(root: &Path, id: &str) -> PathBuf {
 /// path (generate_battle_maps_for_plan_at), which is driven by the
 /// already-decided, already-persisted plan instead of asking the model to
 /// independently re-guess "what's coming up" a second time.
-fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str, objects_enabled: bool) -> String {
+fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &str, hint: &str, objects_enabled: bool, vocabulary: &[String]) -> String {
     format!(
         "You are designing printable top-down battle maps for an upcoming Dungeons & Dragons session. Each map is a grid a Dungeon Master will print and place miniatures on, so it must be laid out precisely — you are authoring the exact layout, not describing a mood.\n\n\
         Design ONE battle map for this specific encounter the DM described: {hint}\n\n\
@@ -2148,7 +2148,7 @@ fn build_battle_maps_prompt(module_plan: &str, current_chapter: &str, memory: &s
         Current chapter (what's coming up):\n{current_chapter}\n\n\
         Recent memory/recaps:\n{memory}\n\n\
         {}",
-        battle_map_format_instructions(crate::local_llm::is_local_ingestion(), objects_enabled)
+        battle_map_format_instructions(crate::local_llm::is_local_ingestion(), objects_enabled, vocabulary)
     )
 }
 
@@ -2219,11 +2219,11 @@ fn copies_the_example(spec: &str) -> bool {
 /// barely moving the issue count. A shorter, single-example prompt gives a
 /// small model a shot at self-consistency instead of setting it up to fail
 /// the same way every time.
-fn battle_map_format_instructions(use_local: bool, objects_enabled: bool) -> String {
+fn battle_map_format_instructions(use_local: bool, objects_enabled: bool, vocabulary: &[String]) -> String {
     if use_local {
-        battle_map_format_instructions_streamlined(objects_enabled)
+        battle_map_format_instructions_streamlined(objects_enabled, vocabulary)
     } else {
-        battle_map_format_instructions_full(objects_enabled)
+        battle_map_format_instructions_full(objects_enabled, vocabulary)
     }
 }
 
@@ -2233,12 +2233,46 @@ fn battle_map_format_instructions(use_local: bool, objects_enabled: bool) -> Str
 /// Only ever interpolated in when `tile_library_configured` is true (see
 /// this function's callers) — with nothing imported, the model never sees
 /// this text and never writes the section, so behavior is unchanged.
+///
+/// NEVER a creature, NPC, or monster — confirmed live (test-campaign
+/// "Tavern Brawl (Watchmen)", 2026-07-19) that without an explicit
+/// exclusion the model reached for this section to mark an NPC's position
+/// ("Hilda Brightmantle (downed, unconscious) at D2"), not just physical
+/// set-dressing. That's a real DM error, not just an unhelpful one: Nabil
+/// runs combat with physical miniatures — the app has no business deciding
+/// where a person is standing, only Features/Tactics prose does that, same
+/// as before this layer existed.
 fn objects_format_line() -> &'static str {
-    "Objects:\n- <free description of a real object, e.g. \"round wooden dining table\"> at <cell> (<W>x<H>)\n"
+    "Objects:\n- <free description of a real physical OBJECT — furniture, decor, terrain dressing, e.g. \"round wooden dining table\" — never a creature, NPC, or monster> at <cell> (<W>x<H>)\n"
 }
 
-fn objects_rule_line() -> &'static str {
-    "- An `Objects:` line places something with NO legend code of its own, anywhere on real floor you drew: `<description> at <cell> (<W>x<H>)`, where `W`/`H` are whole numbers 1-4 (the object's footprint in cells). This is extra set-dressing variety (a unique chair, a tree, a barrel) on top of the legend codes — it does not replace drawing the room's defining feature with `=`/`*` and a matching Features: line, which still works exactly as before.\n"
+/// `vocabulary` — real, bounded words drawn from the actual imported catalog
+/// (see tile_library.rs's `object_vocabulary`) — grounds what the model
+/// writes in what can actually be found. Without this, the model was
+/// choosing words blind and `search_tile_catalog`'s keyword-overlap match
+/// only worked by luck; every word offered here is guaranteed to appear in
+/// at least one real catalog entry, so a description built from it is
+/// guaranteed matchable. Empty when nothing's imported (shouldn't happen —
+/// this whole section is only interpolated in when it's configured — but
+/// tolerated rather than assumed).
+fn objects_rule_line(vocabulary: &[String]) -> String {
+    let vocab_line = if vocabulary.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "    - Real object vocabulary available in the imported tile library — STRONGLY prefer these words in your description; only a word that's actually in this list can be found and rendered, anything else just won't appear: {}.\n",
+            vocabulary.join(", ")
+        )
+    };
+    format!(
+        "- An `Objects:` line places something with NO legend code of its own, anywhere on real floor you drew: `<description> at <cell> (<W>x<H>)`, where `W`/`H` are whole numbers 1-4 (the object's footprint in cells). This is extra set-dressing variety (a unique chair, a tree, a barrel) on top of the legend codes — it does not replace drawing the room's defining feature with `=`/`*` and a matching Features: line, which still works exactly as before.\n\
+        - `Objects:` is PHYSICAL SET-DRESSING ONLY — furniture, decor, terrain, clutter. NEVER a creature, NPC, or monster, downed/unconscious or otherwise. A character's position belongs ONLY in Features/Tactics prose, exactly as it already did before this section existed — the DM plays with physical miniatures and places people themselves.\n\
+        - A built-in HEARTH or FIREPLACE (the kind set into a tavern or hall wall) is NOT the `*` code — `*` only ever draws an open campfire on the floor. For a real fireplace, put an `Objects:` entry \"stone fireplace at <cell> (2x2)\" against a wall — size it AT LEAST 2x2 so it reads as a proper hearth (a 1x1 fireplace only matches tiny grates). Reserve `*` for an actual campfire, brazier, or fire pit out on the floor.\n\
+        - A TABLE longer than 2 cells must be 2 cells DEEP — write `3x2` or `4x2`, never `3x1` or `4x1`. A long table only one cell deep matches almost nothing real in the catalog: it lands on a table RUNNER (a decorative cloth) and renders as a strip of fabric lying on the floor. Small tables at `1x1` and `2x1` are fine as they are.\n\
+        - A hanging CHANDELIER is a 2x2 object — every chandelier in the catalog is a 2x2 piece, so a 1x1 one finds nothing and simply won't appear. Write \"iron chandelier at <cell> (2x2)\" over OPEN FLOOR (it hangs above the room, not against a wall). A single wall sconce, candelabra, or lantern is the 1x1 option instead.\n\
+        - DRESS THE WALLS. A lived-in room stores things along its edges, and a bare-walled room reads as empty. Add 1-3 `Objects:` entries of WALL STORAGE stocked to fit the scene, each sitting in the floor cells directly against a wall (typically 2x1 or 3x1): behind a bar, shelves of bottles and a keg or two; a study, bookshelves; an armoury, weapon racks; a pantry or warehouse, crates and a cupboard. Name the contents (\"shelf of bottles\", \"bookshelf\", \"stacked crates\") so the right stocked piece is found, not a bare plank.\n\
+        {vocab_line}"
+    )
 }
 
 /// The streamlined prompt for a local model: one worked example instead of
@@ -2248,9 +2282,9 @@ fn objects_rule_line() -> &'static str {
 /// rules) is cut, not because it's wrong, but because a model that can't
 /// reliably hold its own row width steady has no spare capacity for nuance,
 /// and the extra length was actively working against it.
-fn battle_map_format_instructions_streamlined(objects_enabled: bool) -> String {
+fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary: &[String]) -> String {
     let objects_format = if objects_enabled { objects_format_line() } else { "" };
-    let objects_rule = if objects_enabled { objects_rule_line() } else { "" };
+    let objects_rule = if objects_enabled { objects_rule_line(vocabulary) } else { String::new() };
     format!(
         "Format the map EXACTLY like this, with a line containing only {MAP_SPEC_DELIMITER} before it:\n\n\
         {MAP_SPEC_DELIMITER}\n\
@@ -2270,9 +2304,10 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool) -> String {
         - Enclose the room with `#` walls; a space is outside the map.\n\
         - A `+` door needs `#` directly on both sides (left+right, or above+below) — never on open floor.\n\
         - Every `Features:` line must point at a cell that really has that code right now. \"Bar at A2\" means A2 must actually be `=`.\n\
-        - A stool, chair, or bench is `=` (furniture) — never `^`. `^` only means rubble/difficult terrain.\n\
+        - A stool, chair, or bench is `=` (furniture) — never `^`. `^` renders as a pile of grey STONE rocks, so use it ONLY for actual stone rubble (caves, ruins, collapsed masonry). Overturned or broken furniture, spilled crates, and other clutter that slows movement is still `=` — draw it as the thing it is and note \"difficult terrain here\" in Tactics; do NOT scatter `^` in a wooden interior, it looks like a rockslide indoors.\n\
         {objects_rule}\
-        - Draw the encounter's main feature for real, not just in words: a bar needs an actual run of `=`, a shrine needs an actual altar cell.\n\n\
+        - Draw the encounter's main feature for real, not just in words: a bar needs an actual run of `=`, a shrine needs an actual altar cell.\n\
+        - Don't overcrowd — this is a combat map, so keep at least half the floor open for movement and leave clear lanes; a few pieces of furniture beat a room packed wall-to-wall.\n\n\
         One example:\n\n\
         {MAP_SPEC_DELIMITER}\n\
         # The Bent Nail\n\
@@ -2293,9 +2328,9 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool) -> String {
     )
 }
 
-fn battle_map_format_instructions_full(objects_enabled: bool) -> String {
+fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[String]) -> String {
     let objects_format = if objects_enabled { objects_format_line() } else { "" };
-    let objects_rule = if objects_enabled { objects_rule_line() } else { "" };
+    let objects_rule = if objects_enabled { objects_rule_line(vocabulary) } else { String::new() };
     format!(
         "Format EACH map EXACTLY like this, and separate successive maps with a line containing only {MAP_SPEC_DELIMITER} (also put one {MAP_SPEC_DELIMITER} line before the very first map):\n\n\
         {MAP_SPEC_DELIMITER}\n\
@@ -2320,10 +2355,15 @@ fn battle_map_format_instructions_full(objects_enabled: bool) -> String {
         - Name each feature by what it actually is (\"Bar counter\", \"Hearth\", \"Main entrance\"), not by its legend code — those names are what the map's art is generated from, so \"Furniture at D4\" produces a generic table where \"Bar counter at B2-K2\" produces a bar.\n\
         - The encounter's defining feature must physically exist on the grid, not just in the Features text: a barroom needs an actual bar (a contiguous run of `=`), a forge needs the forge, a shrine needs the altar. Draw it, then name it in Features.\n\
         - Lay the room out like a real place, not a spreadsheet. Concretely: do NOT mirror one half of the room onto the other; do NOT line objects up in matching columns down both walls; do NOT repeat one identical furniture block more than twice. Vary the SIZE of things (a 1-cell stool, a 2-cell bench, a 2x2 table). Leave irregular gaps.\n\
-        - A stool, chair, or bench is FURNITURE — draw it with `=`, one cell each, the same as a table just smaller. NEVER draw a seat with `^`: `^` means rubble/debris difficult terrain, it is not a size variant of furniture, and drawing seating with it renders as a pile of rocks, not a place to sit.\n\
+        - Break the OUTER WALL out of a plain rectangle. A bare box is the dullest possible battlefield: give it an alcove, a jog in one wall, a recessed nook, a corner cut off by a stair or chimney breast, a side passage. Those irregularities are what players hide behind and fight over — one or two are enough, and they should make sense for the building.\n\
+        - A stool, chair, or bench is FURNITURE — draw it with `=`, one cell each, the same as a table just smaller. NEVER draw a seat with `^`.\n\
+        - `^` renders as a pile of grey STONE rocks. Use it ONLY where actual stone rubble fits the fiction — caves, ruins, a collapsed wall. Do NOT use `^` for difficult terrain made of anything else: overturned or smashed furniture in a brawl, spilled crates, scattered debris, mud, or bushes are drawn as the thing they are (`=` furniture or `T` foliage) and their movement penalty is stated in Tactics. Scattering `^` across a tavern or wooden floor looks like an indoor rockslide and is wrong.\n\
         - Put something in the MIDDLE. A room whose objects all hug the walls, leaving a large empty void through the centre, is wrong — that is the most common layout failure.\n\
         - A counter or bar needs open floor along at least one of its long sides — somebody has to stand behind it to work it. A bar drawn flat against a wall with no gap is wrong.\n\
-        - Make it tactically interesting (cover, difficult terrain, choke points) but faithful to the encounter's fiction.\n\n\
+        - Make it tactically interesting but faithful to the encounter's fiction. Terrain is defined by what it DOES, not by how it looks, and a good map mixes FUNCTIONS rather than repeating one. Include at least one of each: something that blocks BOTH movement and line of sight (a wall jog, a solid pillar, a stacked crate wall); something that blocks MOVEMENT but not sight (a counter, a railing, water, a pit); and something that gives HALF cover to fight from behind (a table, a barrel, a low bench). Anything that only slows movement (rubble, mud, spilled cargo) is difficult terrain — say so in Tactics.\n\
+        - Give the room at LEAST TWO ways in, placed so the lanes from them are genuinely different — not two doors that feed the same approach. At most ONE deliberate choke point; if every route is a bottleneck the fight stops being a choice. Remember distance is measured in MOVES (about 5-6 squares each), so a piece of blocking terrain in the middle of a lane buys more distance than making the room bigger.\n\
+        - Give the map ONE set piece — a single thing that is unexpected and worth interacting with (a collapsing floor, a chandelier, a well, a fire that spreads, a lever). Exactly one: two or more competing gimmicks overload the scene. It must be visible and fair — never a hidden instant-kill, never a feature that removes a character from the fight with no counterplay.\n\
+        - Do NOT overcrowd. This is a COMBAT map — most of the floor must stay OPEN so miniatures can move and there are real lines of sight. Furniture and clutter ARE the cover and obstacles, so a handful of well-placed pieces beats a room packed wall-to-wall. Keep at least half the interior cells as empty floor, and leave clear lanes to move and flank through.\n\n\
         Here is a COMPLETE, correct example. Copy its habits — the irregular spacing, the mix of object sizes, the bar with room behind it, the occupied centre — not its specific contents:\n\n\
         {MAP_SPEC_DELIMITER}\n\
         # The Bent Nail\n\
@@ -2400,6 +2440,13 @@ const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*', '
 /// must point at. Plain floor, void and wall are not "things".
 const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*', ','];
 
+/// The DISCRETE-object codes the vision tile-resolver will try to replace with
+/// a real catalog sprite (see `parse_placements`): furniture, pillar, fire,
+/// foliage, rubble. Deliberately NOT the tiling terrain/architecture codes
+/// (`#` wall, `.` floor, `+` door, `~` water, `_` stairs, `,` sand) — those
+/// need seamless edge-to-edge tiles, which discrete catalog art isn't.
+const RESOLVABLE_GLYPHS: &[char] = &['=', 'o', '*', 'T', '^'];
+
 /// Words that mean "this is furniture" in a Features label. `=` is the ONLY
 /// legend code for furniture (see MAP_LEGEND) — if a line named this way
 /// points at any other object code, the model drew the wrong character for
@@ -2427,10 +2474,17 @@ fn feature_line_names_furniture(line: &str) -> bool {
     FURNITURE_WORDS.iter().any(|w| name.contains(w))
 }
 
+// Battlefield sizing. DM map-design guides put the useful range at roughly 6x6
+// (smallest) / 8x8 (average) / 10x10 (large) / 12x12 (huge) squares — the
+// question that matters is how many MOVES it takes to cross, not how much space
+// there is. The old 24x18 cap (432 squares) was ~3x "huge", and combined with
+// the half-the-floor-stays-open rule it produced cavernous, empty-reading maps.
+// This range stays deliberately on the generous side of the guidance (the min
+// is already "large") while cutting the barn-sized upper end roughly in half.
 const MAP_MIN_COLS: usize = 10;
 const MAP_MIN_ROWS: usize = 10;
-const MAP_MAX_COLS: usize = 24;
-const MAP_MAX_ROWS: usize = 18;
+const MAP_MAX_COLS: usize = 16;
+const MAP_MAX_ROWS: usize = 14;
 /// How many extra attempts `generate_one_map_spec` gets after the first, each
 /// fed the concrete errors from the one before. Bounded rather than "until
 /// clean" — this is a real network call each time, and the caller needs a
@@ -2820,6 +2874,732 @@ fn parse_object_line(line: &str) -> Option<(String, usize, usize, u32, u32)> {
     Some((label, col, row, w, h))
 }
 
+/// One thing on the map worth resolving to a real catalog tile — a named
+/// Features feature (its cells and the box they span) or an Objects entry.
+/// `cells` are (col,row) 0-indexed; `w`/`h` are the footprint in cells that a
+/// chosen tile is scaled/tiled to fill.
+#[derive(Debug, Clone, PartialEq)]
+struct Placement {
+    label: String,
+    cells: Vec<(usize, usize)>,
+    w: u32,
+    h: u32,
+}
+
+/// 4-connected components of a cell set — so "Bar counter at C3-J3" (one
+/// contiguous run) is ONE placement, while "Pillars at C4, G4" (two separate
+/// cells) splits into two, each resolved and sized on its own. Pure.
+fn connected_components(cells: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
+    use std::collections::HashSet;
+    let set: HashSet<(usize, usize)> = cells.iter().copied().collect();
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    let mut comps = Vec::new();
+    for &start in cells {
+        if !seen.insert(start) {
+            continue;
+        }
+        let mut stack = vec![start];
+        let mut comp = Vec::new();
+        while let Some((c, r)) = stack.pop() {
+            comp.push((c, r));
+            for (dc, dr) in [(1i32, 0), (-1, 0), (0, 1), (0, -1)] {
+                let (nc, nr) = (c as i32 + dc, r as i32 + dr);
+                if nc >= 0 && nr >= 0 {
+                    let n = (nc as usize, nr as usize);
+                    if set.contains(&n) && seen.insert(n) {
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+        comp.sort_unstable();
+        comps.push(comp);
+    }
+    comps
+}
+
+/// Footprint (width, height) in cells of a component's bounding box. Pure.
+fn bbox_wh(cells: &[(usize, usize)]) -> (u32, u32) {
+    let (mut min_c, mut max_c, mut min_r, mut max_r) = (usize::MAX, 0usize, usize::MAX, 0usize);
+    for &(c, r) in cells {
+        min_c = min_c.min(c);
+        max_c = max_c.max(c);
+        min_r = min_r.min(r);
+        max_r = max_r.max(r);
+    }
+    ((max_c - min_c + 1) as u32, (max_r - min_r + 1) as u32)
+}
+
+/// Every discrete object on a finished spec that the vision resolver should
+/// try to swap for a real catalog tile: each Features feature (split into
+/// connected objects, restricted to RESOLVABLE_GLYPHS cells) and each Objects
+/// entry (its whole WxH footprint). Structural terrain is skipped entirely.
+/// Pure — the orchestration around it (search, vision pick, persist) lives
+/// elsewhere so this stays directly unit-testable on a spec string.
+fn parse_placements(spec: &str) -> Vec<Placement> {
+    let Some((_, rows, suffix)) = split_spec_grid(spec) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in feature_lines(&suffix) {
+        let label = feature_line_name(&line).to_string();
+        let cells: Vec<(usize, usize)> = cell_refs_in(&line)
+            .into_iter()
+            .filter_map(|(_, c, r)| match cell_at(&rows, c, r) {
+                Some(ch) if RESOLVABLE_GLYPHS.contains(&ch) => Some((c, r)),
+                _ => None,
+            })
+            .collect();
+        for comp in connected_components(&cells) {
+            let (w, h) = bbox_wh(&comp);
+            out.push(Placement { label: label.clone(), cells: comp, w, h });
+        }
+    }
+    for line in object_lines(&suffix) {
+        if let Some((label, c, r, w, h)) = parse_object_line(&line) {
+            let cells = (0..w as usize)
+                .flat_map(|dc| (0..h as usize).map(move |dr| (dc, dr)))
+                .map(|(dc, dr)| (c + dc, r + dr))
+                .collect();
+            out.push(Placement { label, cells, w, h });
+        }
+    }
+    out
+}
+
+// ── Vision tile resolution (gen-time only; see the plan) ─────────────────────
+
+/// How many real candidate tiles the vision picker is shown per slot.
+const VISION_SHORTLIST_K: usize = 8;
+
+/// What the UI shows while a map is being made. `elapsed_s` is the whole
+/// operation's age, re-emitted on a timer — a number that keeps climbing is
+/// the only honest "it hasn't hung" signal available, because the expensive
+/// phase is one opaque model call that reports nothing until it returns.
+#[derive(Serialize, Clone)]
+struct MapProgress {
+    phase: &'static str,
+    elapsed_s: u64,
+}
+
+/// Runs `f` while emitting `map-progress` every couple of seconds, so a long
+/// silent phase still visibly ticks. The ticker is a plain detached thread
+/// stopped by a flag; it never blocks or fails the work it's reporting on.
+fn with_map_ticker<T>(app: &AppHandle, phase: &'static str, started: std::time::Instant, f: impl FnOnce() -> T) -> T {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let (app, stop) = (app.clone(), stop.clone());
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = app.emit("map-progress", MapProgress { phase, elapsed_s: started.elapsed().as_secs() });
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        });
+    }
+    let out = f();
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    out
+}
+
+/// One line per map generation naming where the wall-clock actually went, to
+/// both stderr and the map log. Added because the visible cost of "regenerate"
+/// was being attributed by guesswork — the phases are a model call, a catalog
+/// scan, and a vision pass, and they differ by orders of magnitude.
+fn log_map_phase_timing(entry: &str, vocab: std::time::Duration, spec: std::time::Duration, tiles: std::time::Duration) {
+    let total = vocab + spec + tiles;
+    let line = format!(
+        "{entry}: total {:.1}s = vocabulary {:.1}s + spec {:.1}s + tiles {:.1}s",
+        total.as_secs_f64(),
+        vocab.as_secs_f64(),
+        spec.as_secs_f64(),
+        tiles.as_secs_f64()
+    );
+    eprintln!("[map-timing] {line}");
+    crate::maplog::log("PHASE TIMING", &line);
+}
+
+/// Where a flame overlay sits within a fire vessel's footprint, as
+/// `[x, y, w, h]` in fractional cells (absolute grid coords).
+///
+/// The firebox is a property of the SPRITE, not of the map. All 372
+/// fireplace/brazier sprites in the catalog are drawn with their art centred
+/// on the tile (art-bbox centre x 0.53-0.57, y 0.497-0.499), so there is no
+/// per-map orientation to infer. An earlier version read which walls the
+/// vessel backed onto and shoved the flame diagonally toward the open side —
+/// off the firebox the artist had already centred.
+///
+/// Measured off the sprites instead: across all four hearth families
+/// (Rectangle/Rounded/Corner 2x2, Chimneyless 1x2) the ash bed sits at
+/// x 0.49-0.57, y 0.49-0.50 of the tile, and a warm flame sprite fills only
+/// ~0.82 x 0.90 of its own canvas — so the drawn rect is that ash bed divided
+/// by the fill, which is why it is wider than the bed itself. A brazier is a
+/// bowl seen top-down: centred, with the flame filling it. Pure.
+fn firebox_rect(cells: &[(usize, usize)], hearth: bool) -> [f32; 4] {
+    let (minc, maxc) = (cells.iter().map(|&(c, _)| c).min().unwrap_or(0), cells.iter().map(|&(c, _)| c).max().unwrap_or(0));
+    let (minr, maxr) = (cells.iter().map(|&(_, r)| r).min().unwrap_or(0), cells.iter().map(|&(_, r)| r).max().unwrap_or(0));
+    let (fw, fh) = ((maxc - minc + 1) as f32, (maxr - minr + 1) as f32);
+    // Centre + size as fractions of the footprint.
+    let (cx, cy, w, h) = if hearth { (0.545, 0.50, 0.34, 0.49) } else { (0.50, 0.50, 0.62, 0.62) };
+    [minc as f32 + (cx - w / 2.0) * fw, minr as f32 + (cy - h / 2.0) * fh, w * fw, h * fh]
+}
+
+/// True when `tiles` exists and is at least as new as `spec` — i.e. the
+/// resolved sidecar already reflects the current map and needn't be redone.
+/// A missing/unreadable sidecar is "not up to date" → resolve.
+fn tiles_up_to_date(tiles: &Path, spec: &Path) -> bool {
+    let mtime = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (mtime(tiles), mtime(spec)) {
+        (Some(t), Some(s)) => t >= s,
+        _ => false,
+    }
+}
+
+/// The model tier for the tile-pick vision call — Sonnet is multimodal and
+/// much cheaper than Opus for what is a visual matching task, not a reasoning
+/// one. (Verified live that the subscription CLI accepts image blocks and
+/// Sonnet identifies tiles correctly.)
+const VISION_PICK_MODEL: &str = "sonnet";
+
+/// One resolved placement persisted to `<slug>.tiles.json` and reloaded (with
+/// fresh art) by `get_map_tiles` at render time. `w`/`h` are the placement's
+/// footprint in cells; `tw`/`th` are the CHOSEN tile's native size, so the
+/// renderer can tile a small piece across a bigger run (a 1x1 bar segment
+/// across a 6x1 counter) instead of stretching it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct ResolvedTile {
+    cells: Vec<(usize, usize)>,
+    w: u32,
+    h: u32,
+    tw: u32,
+    th: u32,
+    root: String,
+    rel_path: String,
+    /// Optional sub-cell placement `[x, y, w, h]` in fractional cells (absolute
+    /// grid coords). When set, the renderer draws this tile ONCE inside that
+    /// rect instead of tiling it across the footprint — used for a hearth's
+    /// flame overlay, sized smaller than the hearth and pushed into the firebox.
+    #[serde(default)]
+    sub: Option<[f32; 4]>,
+}
+
+/// A catalog tile's identity (which folder + relative path) — enough to reload
+/// its art. Used for the biome ground texture, which has no cells of its own.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct TileRef {
+    root: String,
+    rel_path: String,
+}
+
+/// The whole resolved sidecar for one map (`<slug>.tiles.json`): the picked
+/// object tiles plus the biome ground texture (None = keep the built-in floor).
+#[derive(Serialize, Deserialize, Default)]
+struct ResolvedMap {
+    #[serde(default)]
+    objects: Vec<ResolvedTile>,
+    #[serde(default)]
+    floor: Option<TileRef>,
+    /// The `~` cells' texture. `None` when the grid has no `~` at all (so no
+    /// vision call is spent) or when nothing suitable resolved.
+    #[serde(default)]
+    liquid: Option<TileRef>,
+    /// True when `#` should be drawn as this biome's own ground, darkened,
+    /// instead of the built-in masonry sprites — see `NATURAL_WALL_BIOMES`.
+    #[serde(default)]
+    natural_walls: bool,
+}
+
+/// Splits a `data:<media>;base64,<b64>` URL into (media_type, base64). Falls
+/// back to webp if it's not shaped as expected. Pure.
+fn split_data_url(u: &str) -> (&str, &str) {
+    let rest = u.strip_prefix("data:").unwrap_or(u);
+    let (media, tail) = rest.split_once(';').unwrap_or(("image/webp", rest));
+    let b64 = tail.split_once(',').map(|(_, b)| b).unwrap_or(tail);
+    (media, b64)
+}
+
+/// The JSON object substring of a possibly-chatty model reply (first `{` to
+/// last `}`), so a `{"picks":[...]}` answer survives surrounding prose. Pure.
+fn extract_json_object(s: &str) -> String {
+    match (s.find('{'), s.rfind('}')) {
+        (Some(a), Some(b)) if b > a => s[a..=b].to_string(),
+        _ => s.to_string(),
+    }
+}
+
+/// Parses the vision reply into one pick per slot: `Some(candidate_index)`
+/// (0-based) or `None` (the model chose 0/"none", or didn't answer for that
+/// slot). Tolerant of surrounding prose and missing/extra entries. Pure.
+fn parse_vision_picks(reply: &str, n_slots: usize) -> Vec<Option<usize>> {
+    let mut picks = vec![None; n_slots];
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&extract_json_object(reply)) else {
+        return picks;
+    };
+    let Some(arr) = v.get("picks").and_then(|p| p.as_array()) else {
+        return picks;
+    };
+    for item in arr {
+        // Accept a FRACTIONAL choice. Live (2026-07-19) one chunk came back
+        // `{"choice":1.8},{"choice":2.5},{"choice":3.1}` — `as_u64` is None for
+        // a float, so all three picks were silently dropped and that map lost
+        // its shelf, keg AND fireplace. The intent is obvious; round it rather
+        // than throw the slot away. Same for a stringly-typed number.
+        let as_index = |v: Option<&serde_json::Value>| -> Option<u64> {
+            let v = v?;
+            v.as_u64()
+                .or_else(|| v.as_f64().filter(|f| f.is_finite() && *f >= 0.0).map(|f| f.round() as u64))
+                .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()).filter(|f| f.is_finite() && *f >= 0.0).map(|f| f.round() as u64))
+        };
+        let (Some(slot), Some(choice)) = (as_index(item.get("slot")), as_index(item.get("choice"))) else {
+            continue;
+        };
+        let si = (slot as usize).wrapping_sub(1);
+        if si < n_slots && choice >= 1 {
+            picks[si] = Some((choice - 1) as usize);
+        }
+    }
+    picks
+}
+
+/// Builds the multimodal user-message JSON string: every slot's label +
+/// footprint, its candidate tiles (each as an indexed image), and the final
+/// instruction to answer with a `picks` array. Pure. Instruction is verbose on
+/// purpose — the model must key its choice to footprint and identity, and know
+/// 0 means "none of these fit".
+fn build_vision_message(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> String {
+    use serde_json::json;
+    let mut content = vec![json!({"type":"text","text": format!(
+        "This is a {biome} scene. When a slot's options differ mainly in MATERIAL or COLOUR, prefer the one that best suits a {biome} setting — e.g. a wooden tavern wants wooden furniture, a cave or dungeon wants stone, an outdoor camp wants rough/rustic pieces. Match the mood, not just the shape."
+    )})];
+    for (i, (p, cands)) in slots.iter().enumerate() {
+        let n = i + 1;
+        content.push(json!({"type":"text","text": format!("[slot {n}] \"{}\" — must fit a {}x{}-cell footprint. Options:", p.label, p.w, p.h)}));
+        for (j, c) in cands.iter().enumerate() {
+            content.push(json!({"type":"text","text": format!("[{n}.{}] this tile is {}x{} cells:", j + 1, c.w, c.h)}));
+            let (media, b64) = split_data_url(&c.data_url);
+            content.push(json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}));
+        }
+    }
+    content.push(json!({"type":"text","text":
+        "For EACH slot, pick the option number whose picture best matches that slot's description AND fits its footprint. \
+         If none of a slot's options actually look like the thing described, choose 0 for that slot (better nothing than a wrong object). \
+         When several slots are the SAME kind of object (e.g. three separate tables), prefer DIFFERENT options across them so the scene has natural variety — unless they should obviously match, like a row of identical benches at one long table. \
+         Reply with ONLY this JSON, one entry per slot, nothing else: {\"picks\":[{\"slot\":1,\"choice\":2},{\"slot\":2,\"choice\":0}]}"
+    }));
+    json!({"type":"user","message":{"role":"user","content":content}}).to_string()
+}
+
+/// Max candidate images in a single vision request. One call for a whole map
+/// (12 slots x 8 = 96 images) is rejected as "Prompt is too long" — each image
+/// costs ~1.5k tokens and the CLI also loads the project's CLAUDE.md/plugin
+/// context. Live-checked: 40 images is comfortably fine, so 24 leaves generous
+/// headroom for larger multi-cell tiles that cost more per image.
+const MAX_IMAGES_PER_VISION_CALL: usize = 24;
+
+/// Contiguous chunk boundaries over `slots` so each chunk's total candidate
+/// count stays within `MAX_IMAGES_PER_VISION_CALL` (always at least one slot
+/// per chunk, even if that one slot alone exceeds the cap). Pure. Returns
+/// (start, len) pairs.
+fn vision_chunks(slot_candidate_counts: &[usize], cap: usize) -> Vec<(usize, usize)> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < slot_candidate_counts.len() {
+        let (mut end, mut imgs) = (start, 0usize);
+        while end < slot_candidate_counts.len() {
+            let n = slot_candidate_counts[end];
+            if end > start && imgs + n > cap {
+                break;
+            }
+            imgs += n;
+            end += 1;
+        }
+        chunks.push((start, end - start));
+        start = end;
+    }
+    chunks
+}
+
+/// Shows Claude the candidate tiles and returns its pick per slot. Splits the
+/// slots into image-budget-sized chunks run IN PARALLEL (mirrors
+/// generate_map_spec's parallel candidate calls) — one giant request is
+/// "Prompt is too long", and a chunk failing only loses its own slots (they
+/// fall back to built-in sprites), not the whole map. Never fatal.
+fn pick_tiles_via_vision(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> Vec<Option<usize>> {
+    let counts: Vec<usize> = slots.iter().map(|(_, c)| c.len()).collect();
+    let chunks = vision_chunks(&counts, MAX_IMAGES_PER_VISION_CALL);
+    let results: Vec<(usize, Vec<Option<usize>>)> = std::thread::scope(|s| {
+        chunks
+            .iter()
+            .map(|&(start, len)| {
+                let chunk = &slots[start..start + len];
+                s.spawn(move || (start, pick_one_chunk(chunk, biome)))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect()
+    });
+    let mut picks = vec![None; slots.len()];
+    for (start, chunk_picks) in results {
+        for (i, p) in chunk_picks.into_iter().enumerate() {
+            picks[start + i] = p;
+        }
+    }
+    picks
+}
+
+/// One vision call for one chunk of slots — picks aligned to the chunk's own
+/// 1-based numbering. Failure → all-`None` for this chunk (built-in fallback).
+fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> Vec<Option<usize>> {
+    match crate::dm::run_claude_vision(&build_vision_message(chunk, biome), Some(VISION_PICK_MODEL)) {
+        Ok(reply) => {
+            crate::maplog::log("VISION TILE PICK (raw reply)", &reply);
+            parse_vision_picks(&reply, chunk.len())
+        }
+        Err(e) => {
+            crate::maplog::log("VISION TILE PICK FAILED", &format!("{e}\n(this chunk falls back to built-in sprites)"));
+            vec![None; chunk.len()]
+        }
+    }
+}
+
+/// Biome ids the ground resolver understands, each mapped to the catalog
+/// Textures search that finds its floor. Small fixed set — `classify_biome`
+/// picks one. "dungeon" is deliberately absent: it IS the built-in look, so a
+/// dungeon map keeps the current stone floor (no override, no vision call).
+/// CAREFUL: never end one of these queries with the bare word "floor". The
+/// head noun (last token) takes a 1000x exact-match tier, `Brick_Floor_*` is
+/// `!Core_Settlements` (which biome affinity always scores 1.0), and every
+/// biome-specific texture is scored 0.15 for being off-biome — so ANY "… floor"
+/// query resolves to brick. That silently cost tavern ("wooden floor"), cave
+/// ("cave rock floor") and underdark ("drow floor") their ground for months.
+/// Name the material instead and probe the result before trusting it.
+const BIOME_FLOORS: &[(&str, &str)] = &[
+    ("cave", "cave"),
+    ("forest", "grass"),
+    ("desert", "desert sand"),
+    ("snow", "snow"),
+    ("swamp", "marsh mud"),
+    ("coast", "beach sand"),
+    ("volcanic", "volcanic rock"),
+    ("town", "cobblestone"),
+    ("tavern", "brick floor"),
+    ("underdark", "drow stone"),
+    ("jungle", "jungle grass"),
+];
+
+/// Scenes that honestly read with more than one ground material, so the floor
+/// is ROLLED each time a map resolves instead of always landing on the same
+/// board. `(biome, alternate query, d20 the alternate wins on)`.
+///
+/// Only the MATERIAL is rolled. Which particular brick or plank gets used still
+/// comes from the normal ranking + vision pick, so both branches get a good
+/// tile rather than a random one.
+///
+/// Note the tavern alternate is "wooden FLOORING", not "wooden floor": the
+/// catalog names these `Wooden_Flooring_A_Light.jpg` (keyword `flooring`), and
+/// `floor` is not a plural of `flooring` — see the warning on `BIOME_FLOORS`.
+///
+/// Every pair here is COSMETIC ONLY: both materials play identically, because
+/// the roll changes the texture without touching the grid or the Tactics prose.
+/// That's why snow and volcanic are deliberately absent — their tempting
+/// alternates are ice (slippery) and lava (lethal), and rendering either one
+/// under Tactics that never mention it would make the map lie about itself.
+///
+/// Every query below was probed against the live catalog; the ones that only
+/// LOOK reasonable ("dirt road" → dirt-STAINED brick, "moss" → mossy roof
+/// tiles) were dropped rather than shipped on the strength of the wording.
+const BIOME_FLOOR_ALTS: &[(&str, &str, u32)] = &[
+    ("forest", "forest floor", 11),  // leaf litter is as common as open grass
+    ("swamp", "marsh grass", 12),
+    ("underdark", "dwarven", 13),    // drow-cut stone vs dwarven hall
+    ("tavern", "wooden flooring", 14),
+    ("cave", "gravel", 15),
+    ("desert", "sand rock", 15),
+    ("jungle", "wet mud", 15),
+    ("coast", "gravel", 16),         // a shingle beach instead of soft sand
+    ("town", "gravel", 16),
+];
+
+/// Biomes whose `#` cells are LIVING ROCK rather than built masonry, so the
+/// renderer should draw them as the biome's own ground darkened instead of the
+/// built-in brick sprites. A tavern or town wall really is mortared stone and
+/// reads correctly today; a limestone cave ringed in brick reads as a dungeon
+/// room, which is exactly what every cave map looked like.
+///
+/// Deliberately NOT resolved as its own texture: the catalog's `Textures` are
+/// all GROUND art, and the best "rock" candidate (`Rock_Tiles_A_01`) is tan
+/// crazy-paving — a patio, not a rock face. Reusing the floor darkened needs no
+/// extra query, no extra vision call, and can't disagree with the floor.
+const NATURAL_WALL_BIOMES: &[&str] = &["cave", "underdark", "volcanic", "snow", "swamp", "forest", "jungle", "desert", "coast"];
+
+fn has_natural_walls(biome: &str) -> bool {
+    NATURAL_WALL_BIOMES.contains(&biome)
+}
+
+/// The catalog search for `~` cells. One query for every biome — water is
+/// water — and only ever run when the grid actually contains a `~`, so a map
+/// without any spends no vision call on it.
+const LIQUID_QUERY: &str = "water";
+
+/// The ground query for `biome` given a d20 `roll` — the alternate material if
+/// the roll reaches its threshold, else the biome's default. Pure, so the odds
+/// are testable without the RNG.
+fn roll_floor_query(biome: &str, roll: u32) -> Option<&'static str> {
+    let primary = biome_floor_query(biome)?;
+    match BIOME_FLOOR_ALTS.iter().find(|(b, _, _)| *b == biome) {
+        Some((_, alt, at)) if roll >= *at => Some(alt),
+        _ => Some(primary),
+    }
+}
+
+/// Every biome the classifier may return — the ground-swap set plus "dungeon"
+/// (the default / built-in floor).
+fn biome_ids() -> Vec<&'static str> {
+    std::iter::once("dungeon").chain(BIOME_FLOORS.iter().map(|(b, _)| *b)).collect()
+}
+
+/// Cheap TEXT classification of a finished map's biome from its title +
+/// Features + Tactics (never the grid or images), constrained to `biome_ids`.
+/// Keeps biome detection OUT of the fragile map-generation prompt — it runs at
+/// resolution time on the already-written spec. Defaults to "dungeon" on any
+/// miss, which is a no-op (built-in floor).
+fn classify_biome(spec: &str) -> String {
+    let ids = biome_ids();
+    let context: String = spec
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            t.starts_with('#') || t.starts_with('-') || t.starts_with("Features") || t.starts_with("Tactics")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "A tabletop battle map is described below. Which single setting best fits where it takes place? Reply with EXACTLY one word from this list and nothing else: {}.\n\n{}",
+        ids.join(", "),
+        context
+    );
+    let reply = crate::local_llm::ask_ingest_once_low_effort(prompt, Some("sonnet")).unwrap_or_default();
+    let lc = reply.to_lowercase();
+    ids.iter().find(|id| lc.contains(**id)).map(|s| s.to_string()).unwrap_or_else(|| "dungeon".to_string())
+}
+
+/// Vision-pick the best-looking ground texture for `biome` from its candidate
+/// tiles. `None` on any transport/parse failure (keep the built-in floor).
+fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandidate]) -> Option<usize> {
+    use serde_json::json;
+    let mut content = vec![json!({"type":"text","text": format!("These are candidate texture tiles for a {biome} battle map. Pick the one that best reads as {kind}. Prefer a SOLID, fully-opaque tile that fills the whole square — avoid any that look like a sparse, mostly-transparent decal or overlay.")})];
+    for (j, c) in cands.iter().enumerate() {
+        content.push(json!({"type":"text","text": format!("[{}]", j + 1)}));
+        let (m, b) = split_data_url(&c.data_url);
+        content.push(json!({"type":"image","source":{"type":"base64","media_type":m,"data":b}}));
+    }
+    content.push(json!({"type":"text","text":"Reply with ONLY this JSON: {\"choice\":N} where N is the best option's number."}));
+    let msg = json!({"type":"user","message":{"role":"user","content":content}}).to_string();
+    let reply = crate::dm::run_claude_vision(&msg, Some(VISION_PICK_MODEL)).ok()?;
+    crate::maplog::log("VISION TEXTURE PICK (raw reply)", &format!("{kind}: {reply}"));
+    let v: serde_json::Value = serde_json::from_str(&extract_json_object(&reply)).ok()?;
+    let choice = v.get("choice")?.as_u64()?;
+    (1..=cands.len() as u64).contains(&choice).then(|| (choice - 1) as usize)
+}
+
+/// Resolve the biome ground texture for a finished spec: classify the biome,
+/// then vision-pick a ground tile from the catalog's Textures. `None` for a
+/// dungeon (keep the built-in stone floor), an unknown biome, or no candidates.
+fn resolve_floor(app: &AppHandle, biome: &str) -> Option<TileRef> {
+    use rand::Rng;
+    let roll = rand::thread_rng().gen_range(1..=20);
+    let query = roll_floor_query(biome, roll)?; // "dungeon" isn't in BIOME_FLOORS → None → keep built-in
+    let cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    crate::maplog::log("FLOOR RESOLUTION", &format!("biome={biome}, d20={roll} → query={query:?}, {} texture candidate(s)", cands.len()));
+    let idx = pick_texture(biome, &format!("natural {biome} ground underfoot"), &cands)?;
+    let c = cands.get(idx)?;
+    Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
+}
+
+/// The `~` cells' texture. Skipped entirely — no shortlist, no vision call —
+/// when the grid contains no `~`, which is most maps. Replaces a flat blue
+/// square drawn in code (`COLORS.water`) that read as a swimming pool next to
+/// the catalog art around it.
+fn resolve_liquid(app: &AppHandle, biome: &str, rows: &[String]) -> Option<TileRef> {
+    if !rows.iter().any(|r| r.contains('~')) {
+        return None;
+    }
+    let cands = crate::tile_library::shortlist_in_category(app, LIQUID_QUERY, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={LIQUID_QUERY:?}, {} texture candidate(s)", cands.len()));
+    let idx = pick_texture(biome, "still, natural water seen from directly above", &cands)?;
+    let c = cands.get(idx)?;
+    Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
+}
+
+fn biome_floor_query(biome: &str) -> Option<&'static str> {
+    BIOME_FLOORS.iter().find(|(b, _)| b.eq_ignore_ascii_case(biome)).map(|(_, q)| *q)
+}
+
+/// Resolve one just-generated map's discrete objects to exact catalog tiles
+/// and persist them to `<slug>.tiles.json`. No-op (and no file written) when no
+/// tile library is imported or the map has no resolvable placements — the
+/// renderer then just uses its built-in sprites, exactly as before this
+/// existed. Command-layer helper (needs `AppHandle` for the manifest + the
+/// vision call), called right after a spec is written.
+fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Result<(), String> {
+    if !crate::tile_library::tile_library_configured(app) {
+        return Ok(());
+    }
+    // Skip when the sidecar is already at least as new as the spec — so this is
+    // safe to call from every path: a fresh/regenerated map (newer .md) gets
+    // resolved, a plan cache-hit (unchanged .md, existing .tiles.json) self-
+    // skips and spends no vision call.
+    let dir = battle_maps_dir(root, id);
+    let (spec_path, tiles_path) = (dir.join(format!("{slug}.md")), dir.join(format!("{slug}.tiles.json")));
+    if tiles_up_to_date(&tiles_path, &spec_path) {
+        return Ok(());
+    }
+    let spec = read_battle_map_at(root, id, slug)?;
+    // Classify the scene ONCE — it drives both the object picks (material fit)
+    // and the ground texture.
+    let biome = classify_biome(&spec);
+    let placements = parse_placements(&spec);
+    let t_short = std::time::Instant::now();
+    let slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
+        .iter()
+        .map(|p| (p, crate::tile_library::shortlist(app, &p.label, &biome, p.w, p.h, VISION_SHORTLIST_K)))
+        .filter(|(_, cands)| !cands.is_empty())
+        .collect();
+    eprintln!("[map-timing] shortlist: {:.1}s for {} placement(s)", t_short.elapsed().as_secs_f64(), placements.len());
+    let mut objects: Vec<ResolvedTile> = if slots.is_empty() {
+        Vec::new()
+    } else {
+        crate::maplog::log(
+            "TILE RESOLUTION START",
+            &format!("{slug}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
+                slots.iter().enumerate().map(|(i, (p, c))| format!("  [slot {}] \"{}\" {}x{} — {} candidates", i + 1, p.label, p.w, p.h, c.len())).collect::<Vec<_>>().join("\n")),
+        );
+        let picks = pick_tiles_via_vision(&slots, &biome);
+        // Track the ones that come back empty. A placement can drop out here
+        // because vision declined every candidate (it answers `choice: 0`) or
+        // returned an out-of-range number — both land as `None` and the object
+        // silently doesn't render. Counting resolved-vs-placed by hand is how
+        // that used to get noticed, so say it outright in the trace.
+        let mut dropped: Vec<&str> = Vec::new();
+        let resolved: Vec<ResolvedTile> = slots
+            .iter()
+            .zip(picks)
+            .filter_map(|((p, cands), pick)| match pick.and_then(|i| cands.get(i)) {
+                Some(c) => Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw: c.w, th: c.h, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None }),
+                None => {
+                    dropped.push(p.label.as_str());
+                    None
+                }
+            })
+            .collect();
+        if !dropped.is_empty() {
+            crate::maplog::log(
+                "PLACEMENTS LEFT UNRESOLVED",
+                &format!("{} of {} got no tile — vision declined every candidate. They fall back to the built-in glyph:\n  {}", dropped.len(), slots.len(), dropped.join("\n  ")),
+            );
+        }
+        resolved
+    };
+    // Light every resolved fire vessel that came through unlit. The catalog
+    // ships fireplaces (and empty braziers) with no flame — the fire is a
+    // separate !Effects/Fire sprite meant to be stacked on top. So a lit hearth
+    // = hearth base + a warm flame in its firebox. Appended AFTER the base so
+    // it draws on top; the `sub` rect sizes and places it (see `firebox_rect`).
+    let flames: Vec<ResolvedTile> = objects
+        .iter()
+        .filter_map(|o| {
+            let name = o.rel_path.rsplit(['/', '\\']).next().unwrap_or("");
+            // A toppled vessel stays dark. Every `Fallen` brazier is drawn on
+            // its side (bowl and stem laid out across the tile), so a centred
+            // flame lands on the stem — and a knocked-over brazier still
+            // merrily alight reads as a bug, not as atmosphere.
+            if name.contains("Fallen") {
+                return None;
+            }
+            let is_hearth = name.contains("Fireplace") && name.contains("Stone");
+            let is_unlit_brazier = name.contains("Brazier") && !name.contains("Lit") && !name.contains("Embers");
+            // A `*` cell is BY DEFINITION an open fire that's burning — the
+            // legend calls it "open fire — campfire/brazier/fire pit". But the
+            // picker is free to choose an Ash, Embers or bare Stone ring, and
+            // it did: the cave map's set piece, a campfire the Tactics lean on
+            // for a 30-ft light radius, came out as cold `Campfire_Embers_A1`.
+            // Light anything that isn't already a `_Lit_` variant (unlike the
+            // brazier rule, Embers counts here — glowing coals are the BASE a
+            // campfire's flame sits on, not a deliberately dying fire).
+            let is_unlit_campfire = name.contains("Campfire") && !name.contains("Lit");
+            if !(is_hearth || is_unlit_brazier || is_unlit_campfire) {
+                return None;
+            }
+            let (root, rel_path, tw, th) = crate::tile_library::pick_flame_overlay(app, o.w, o.h)?;
+            Some(ResolvedTile { cells: o.cells.clone(), w: o.w, h: o.h, tw, th, root, rel_path, sub: Some(firebox_rect(&o.cells, is_hearth)) })
+        })
+        .collect();
+    objects.extend(flames);
+    let floor = resolve_floor(app, &biome);
+    let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
+    let liquid = resolve_liquid(app, &biome, &grid_rows);
+    let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&biome) };
+    // Always write (even if nothing resolved) so the mtime gate marks this spec
+    // done and we don't re-run the vision/classify calls on every dialog open.
+    let path = battle_maps_dir(root, id).join(format!("{slug}.tiles.json"));
+    write_atomic(&path, &serde_json::to_string_pretty(&resolved).map_err(|e| e.to_string())?)?;
+    let basename = |p: &str| p.rsplit('/').next().unwrap_or("").to_string();
+    crate::maplog::log(
+        "TILE RESOLUTION DONE",
+        &format!(
+            "{slug}: {} object tile(s) resolved; biome floor = {}\nchosen object tiles:\n{}",
+            resolved.objects.len(),
+            resolved.floor.as_ref().map(|f| basename(&f.rel_path)).unwrap_or_else(|| "kept built-in".into()),
+            resolved.objects.iter().map(|o| format!("  {}", basename(&o.rel_path))).collect::<Vec<_>>().join("\n"),
+        ),
+    );
+    Ok(())
+}
+
+/// One resolved tile with fresh art, for the renderer. `cells` are (col,row);
+/// `w`/`h` the footprint; `tw`/`th` the tile's native cell size (for tiling).
+#[derive(Serialize, Clone, Debug)]
+pub struct MapTileArt {
+    cells: Vec<(usize, usize)>,
+    w: u32,
+    h: u32,
+    tw: u32,
+    th: u32,
+    data_url: String,
+    /// See `ResolvedTile::sub` — sub-cell placement for a flame overlay.
+    sub: Option<[f32; 4]>,
+}
+
+/// The resolved art for a map: the picked object tiles plus the biome ground
+/// texture (a data URL, or null to keep the built-in floor). Empty/null when
+/// nothing resolved or no sidecar exists.
+#[derive(Serialize, Clone, Debug)]
+pub struct MapTiles {
+    tiles: Vec<MapTileArt>,
+    floor: Option<String>,
+    liquid: Option<String>,
+    natural_walls: bool,
+}
+
+#[tauri::command]
+pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
+    let root = campaigns_root(&app)?;
+    let path = battle_maps_dir(&root, &id).join(format!("{slug}.tiles.json"));
+    let Ok(json) = fs::read_to_string(&path) else {
+        return Ok(MapTiles { tiles: Vec::new(), floor: None, liquid: None, natural_walls: false });
+    };
+    let resolved: ResolvedMap = serde_json::from_str(&json).unwrap_or_default();
+    let tiles = resolved
+        .objects
+        .into_iter()
+        .filter_map(|t| {
+            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub })
+        })
+        .collect();
+    let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
+    Ok(MapTiles { tiles, floor: load(resolved.floor), liquid: load(resolved.liquid), natural_walls: resolved.natural_walls })
+}
+
 /// True when every cell `line` refers to would pass `validate_map_spec`'s
 /// Features checks — same three rules (in grid, an object code, and the
 /// right KIND of object code if the label names furniture), just as a bool
@@ -2986,7 +3766,35 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, Str
         let prompt_len = p.len();
         let reply = crate::local_llm::ask_ingest_once_low_effort(p, Some("sonnet"))?;
         eprintln!("[plan-timing] one claude call (low effort): {:.1}s, {prompt_len} chars in / {} chars out", t.elapsed().as_secs_f64(), reply.len());
-        Ok(split_map_specs(&reply).into_iter().next())
+        // Normalize BEFORE validating. `normalize_map_spec` already ran
+        // unconditionally on the way out (see the end of this fn), so
+        // validating the raw reply meant judging a spec that is not the one
+        // that ships — and paying a full retry call to fix ragged rows and a
+        // wrong `Grid:` header that the repair fixes deterministically for
+        // free. Measured live (2026-07-19): ragged rows showed up in 3 of 8
+        // first attempts, and because a width issue is not "features-only" it
+        // forced every one of those retries down the EXPENSIVE full-redraw
+        // branch (~27k chars) instead of the cheap caption branch (~3k).
+        Ok(split_map_specs(&reply).into_iter().next().map(|raw| {
+            let fixed = normalize_map_spec(&raw);
+            // Say so when the repair actually did something. Without this the
+            // trace can't distinguish "the model drew a clean grid" from "the
+            // model drew a ragged one and this silently saved a retry" — they
+            // both log zero issues, which makes the fix unfalsifiable.
+            if fixed != raw {
+                let widths = |s: &str| {
+                    let mut w: Vec<usize> = split_spec_grid(s).map(|(_, r, _)| r.iter().map(|l| l.chars().count()).collect()).unwrap_or_default();
+                    w.sort_unstable();
+                    w.dedup();
+                    w
+                };
+                crate::maplog::log(
+                    "NORMALIZE REPAIRED THE GRID (saved a retry)",
+                    &format!("row widths {:?} -> {:?}", widths(&raw), widths(&fixed)),
+                );
+            }
+            fixed
+        }))
     };
     let issues_for = |spec: &str| -> Vec<String> {
         let mut issues = validate_map_spec(spec);
@@ -3007,6 +3815,10 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, Str
     eprintln!(
         "[battle-map] attempt 1: {} issue(s), copied_example={first_is_copy}: {:?}\n--- raw ---\n{first}\n--- end ---",
         issues.len(), issues
+    );
+    crate::maplog::log(
+        "MODEL ATTEMPT 1 (raw reply)",
+        &format!("{} validation issue(s), copied_example={first_is_copy}\nissues: {issues:?}\n--- reply ---\n{first}", issues.len()),
     );
     // What the retry prompt shows back as "here's what you drew" — every
     // ask_ingest_once call is a stateless one-shot completion (no
@@ -3034,14 +3846,30 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, Str
         // real furniture but only one surviving Features line after
         // pruning), so once the grid stops being the bottleneck, keep it out
         // of what's being asked to change.
-        let retry_prompt = if all_features_only_issues(&issues) {
+        let issues_before_retry = issues.len();
+        let all_features_only = all_features_only_issues(&issues);
+        let retry_prompt = if all_features_only {
+            // Deliberately does NOT re-send `prompt`. This branch is pure
+            // captioning — the grid is already correct and must be copied
+            // verbatim — so the design brief it would re-send (layout rules,
+            // worked examples, the ~900-word object vocabulary, campaign
+            // context: ~30k chars) is entirely dead weight for the task. All
+            // this needs is the legend, the map, and the mismatches. The
+            // full-redraw branch below still gets the whole brief, because
+            // that one really is being asked to design a room again.
             format!(
-                "{prompt}\n\nHere is EXACTLY what you drew last time — its Map: grid is fine, keep every \
+                "You are fixing the text of a battle map that has ALREADY been drawn correctly.\n\n\
+                 Legend: {MAP_LEGEND}\n\n\
+                 Here is EXACTLY what you drew last time — its Map: grid is fine, keep every \
                  character of it EXACTLY unchanged:\n\n{MAP_SPEC_DELIMITER}\n{previous_spec}\n{MAP_SPEC_DELIMITER}\n\n\
                  Only your Features: text is wrong — it names cells that don't actually hold what it claims. Fix \
                  EXACTLY these mismatches by rewriting Features (and Tactics, if it needs updating too) to \
                  describe what's ACTUALLY in the grid above; do NOT touch the Map: block at all:\n{}\n\n\
-                 Output the map in exactly the same format, with the Map: block copied over character-for-character.",
+                 Rules that still apply: a Features line must point at a cell that really holds the matching code; \
+                 a range like \"Bar counter at B2-K2\" means EVERY cell in that rectangle holds it; name each \
+                 feature by what it IS (\"Bar counter\", \"Hearth\"), never by its legend code.\n\n\
+                 Output the WHOLE map in exactly the same format, between {MAP_SPEC_DELIMITER} lines, with the \
+                 Map: block and every other section copied over character-for-character.",
                 issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")
             )
         } else {
@@ -3062,6 +3890,13 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, Str
             "[battle-map] retry {}: {} issue(s), copied_example={is_copy}: {:?}\n--- raw ---\n{retry_spec}\n--- end ---",
             attempt + 2, issues.len(), issues
         );
+        crate::maplog::log(
+            &format!("MODEL RETRY {} (raw reply)", attempt + 2),
+            &format!(
+                "asked to fix {} issue(s) from prior attempt (features-only retry={})\nremaining issues now: {issues:?}\n--- reply ---\n{retry_spec}",
+                issues_before_retry, all_features_only,
+            ),
+        );
         previous_spec = retry_spec.clone();
         best_real = fold_best_real_map_attempt(best_real, retry_spec, issues.len(), is_copy);
     }
@@ -3077,9 +3912,20 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize) -> Result<String, Str
         "[battle-map] kept the attempt with {best_issue_count} issue(s) as the candidate{}",
         if is_fallback_copy { " (WARNING: every attempt copied the example; shipping the copy as a last resort)" } else { "" }
     );
+    crate::maplog::log(
+        "CANDIDATE CHOSEN (best of this candidate's attempts)",
+        &format!(
+            "kept the attempt with {best_issue_count} unresolved issue(s){}\n--- spec ---\n{best}",
+            if is_fallback_copy { " (WARNING: every attempt copied the example; shipping the copy)" } else { "" },
+        ),
+    );
     let pruned = prune_invalid_features(&best);
     if pruned != best {
         eprintln!("[battle-map] prune_invalid_features dropped one or more Features lines\n--- before ---\n{best}\n--- after ---\n{pruned}\n--- end ---");
+        crate::maplog::log(
+            "PRUNED UNMATCHED FEATURES LINES",
+            &format!("--- before ---\n{best}\n--- after ---\n{pruned}"),
+        );
     }
     Ok(normalize_map_spec(&pruned))
 }
@@ -3149,6 +3995,55 @@ fn all_features_only_issues(issues: &[String]) -> bool {
 const MAP_SPEC_CANDIDATE_COUNT_LOCAL: usize = 3;
 const MAP_SPEC_CANDIDATE_COUNT_CLAUDE: usize = 1;
 
+/// How many spec calls to race against each other on the Claude path, taking
+/// whichever lands FIRST (a "hedged request"). Not about quality — the Claude
+/// path never judged anyway, it ships its single candidate directly — this is
+/// purely to escape tail latency. Measured across one session, the SAME prompt
+/// (23,447 chars in, ~2,700 out) took 87s, 203s and 484s: a 5.5x spread with
+/// no input-size explanation, so a single call leaves you hostage to the worst
+/// draw. Racing two turns a p95 wait back into roughly a p50 one.
+///
+/// The cost is real and deliberate: up to 2x the spec tokens per map. The
+/// loser keeps generating in the background until its own subprocess exits —
+/// its result is simply dropped — so this trades quota for wall-clock, which
+/// is the trade worth making for an interactive "regenerate" button.
+const MAP_SPEC_HEDGE_CLAUDE: usize = 2;
+
+/// Fires `n` independent spec calls and returns the FIRST usable one, without
+/// waiting for the rest. Deliberately uses detached threads and a channel
+/// rather than `thread::scope`: a scope joins every thread before it returns,
+/// which would put the slowest call right back on the critical path and defeat
+/// the entire point. The losers finish into a dropped receiver — their `send`
+/// fails and is ignored.
+///
+/// An error only surfaces if EVERY call failed; one provider hiccup shouldn't
+/// sink a map when its twin succeeded.
+fn race_map_spec(prompt: &str, n: usize, max_retries: usize) -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    for _ in 0..n {
+        let (tx, prompt) = (tx.clone(), prompt.to_string());
+        std::thread::spawn(move || {
+            let _ = tx.send(generate_one_map_spec(&prompt, max_retries));
+        });
+    }
+    drop(tx); // so the loop below ends once every racer has reported
+    let started = std::time::Instant::now();
+    let mut first_err = None;
+    for result in rx {
+        match result {
+            Ok(spec) => {
+                eprintln!("[battle-map] hedge of {n}: first usable spec in {:.1}s, abandoning the rest", started.elapsed().as_secs_f64());
+                return Ok(spec);
+            }
+            Err(e) => {
+                eprintln!("[battle-map] hedge of {n}: one racer failed: {e}");
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_err.unwrap_or_else(|| "No map-spec attempt returned a usable map.".to_string()))
+}
+
 /// Generates several independent map specs for the SAME prompt and asks the
 /// model to pick the best one, instead of shipping whichever the first
 /// attempt happened to be. Each candidate is a full, independently generated
@@ -3169,6 +4064,13 @@ fn generate_map_spec(prompt: &str) -> Result<String, String> {
     let use_local = crate::local_llm::is_local_ingestion();
     let candidate_count = if use_local { MAP_SPEC_CANDIDATE_COUNT_LOCAL } else { MAP_SPEC_CANDIDATE_COUNT_CLAUDE };
     let max_retries = if use_local { MAP_SPEC_MAX_RETRIES_LOCAL } else { MAP_SPEC_MAX_RETRIES_CLAUDE };
+    // Claude path: race N and take the first that lands (see
+    // MAP_SPEC_HEDGE_CLAUDE). Kept off the local path, which runs its
+    // candidates to completion ON PURPOSE so it can judge between them —
+    // there, more candidates is a quality mechanism, not a latency one.
+    if !use_local && MAP_SPEC_HEDGE_CLAUDE > 1 {
+        return race_map_spec(prompt, MAP_SPEC_HEDGE_CLAUDE, max_retries);
+    }
 
     // Each candidate is an independent LLM call (no shared state) — running
     // them on their own threads instead of one after another is what cut
@@ -3248,7 +4150,16 @@ fn judge_best_map_spec(candidates: &[String]) -> String {
         return candidates[0].clone();
     };
     eprintln!("[battle-map] judge reply:\n--- raw ---\n{reply}\n--- end ---");
-    match parse_judge_choice(&reply, candidates.len()) {
+    let picked = parse_judge_choice(&reply, candidates.len());
+    crate::maplog::log(
+        "JUDGE DECISION (comparing candidates)",
+        &format!(
+            "{} candidate(s) judged; picked {}\n--- judge reply ---\n{reply}",
+            candidates.len(),
+            match picked { Some(i) => format!("candidate {}", i + 1), None => "nothing parseable → falling back to candidate 1".to_string() },
+        ),
+    );
+    match picked {
         Some(i) => {
             eprintln!("[battle-map] judge picked candidate {}", i + 1);
             candidates[i].clone()
@@ -3381,17 +4292,29 @@ fn battle_map_context_at(root: &Path, id: &str) -> (String, String, String) {
     (combined_plan, current_chapter, combined_memory)
 }
 
-fn generate_battle_maps_at(root: &Path, id: &str, hint: &str, objects_enabled: bool) -> Result<Vec<BattleMapMeta>, String> {
+fn generate_battle_maps_at(root: &Path, id: &str, hint: &str, objects_enabled: bool, vocabulary: &[String]) -> Result<(Vec<BattleMapMeta>, String), String> {
     let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
-    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint, objects_enabled);
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, hint, objects_enabled, vocabulary);
+    crate::maplog::banner(&format!(
+        "on-demand map, hint={hint:?}, objects_enabled={objects_enabled}, vocabulary={} words",
+        vocabulary.len()
+    ));
+    crate::maplog::log(
+        "VOCABULARY OFFERED TO MODEL",
+        &if vocabulary.is_empty() { "(none — tile library not imported or objects disabled)".to_string() } else { vocabulary.join(", ") },
+    );
+    crate::maplog::log("FULL PROMPT SENT TO MODEL", &prompt);
     // The prompt asks for exactly ONE map. generate_map_spec generates 3
     // independent, individually-validated candidates and has the model judge
     // between them rather than trusting whichever the first attempt was.
     let spec = generate_map_spec(&prompt)?;
+    crate::maplog::log("FINAL SPEC WRITTEN TO DISK", &spec);
+    let slug = slugify(&map_title(&spec));
     write_map_spec_at(root, id, &spec)?;
     // Rebuild over ALL maps (new + pre-existing) so the UI reflects the whole
-    // current set, not just this batch.
-    rebuild_battle_maps_index_at(root, id)
+    // current set, not just this batch. Return the new map's slug so the
+    // command layer can resolve its catalog tiles (vision pick).
+    Ok((rebuild_battle_maps_index_at(root, id)?, slug))
 }
 
 fn plan_manifest_path(root: &Path, id: &str) -> PathBuf {
@@ -3490,6 +4413,7 @@ fn generate_battle_maps_for_plan_at(
     memory: &str,
     encounters: &[PlanEncounter],
     objects_enabled: bool,
+    vocabulary: &[String],
     on_progress: ProgressFn,
 ) -> Result<(Vec<BattleMapMeta>, Vec<String>), String> {
     let dir = battle_maps_dir(root, id);
@@ -3516,13 +4440,22 @@ fn generate_battle_maps_for_plan_at(
     // (`.map(|h| h.join().unwrap())` blocks on handle 0 before handle 1 even
     // if handle 1 finished first, so that order alone would misreport pacing).
     let total = encounters.len();
+    crate::maplog::banner(&format!(
+        "Plan Next Session — {total} encounter map(s) generated concurrently (logs below will interleave; each entry names its encounter). objects_enabled={objects_enabled}, vocabulary={} words",
+        vocabulary.len()
+    ));
+    crate::maplog::log(
+        "VOCABULARY OFFERED TO MODEL",
+        &if vocabulary.is_empty() { "(none — tile library not imported or objects disabled)".to_string() } else { vocabulary.join(", ") },
+    );
     let done_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let specs: Vec<Result<String, String>> = std::thread::scope(|s| {
         encounters
             .iter()
             .map(|encounter| {
                 let hint = format!("{} — {}", encounter.name, encounter.description);
-                let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint, objects_enabled);
+                let prompt = build_battle_maps_prompt(module_plan, current_chapter, memory, &hint, objects_enabled, vocabulary);
+                crate::maplog::log(&format!("FULL PROMPT — encounter {:?}", encounter.name), &prompt);
                 let done_count = done_count.clone();
                 s.spawn(move || {
                     let result = generate_map_spec(&prompt);
@@ -3587,7 +4520,7 @@ struct PlanProgress {
 /// derived from THIS SAME plan rather than independently re-guessed — asks
 /// Claude once per combat encounter (see generate_battle_maps_for_plan_at)
 /// for exactly the maps that plan calls for.
-fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool, objects_enabled: bool, on_progress: ProgressFn) -> Result<SessionPlanResult, String> {
+fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool, objects_enabled: bool, vocabulary: &[String], on_progress: ProgressFn) -> Result<SessionPlanResult, String> {
     if !force {
         if let Some(cached) = read_session_plan_at(root, id) {
             return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id), failed_maps: Vec::new() });
@@ -3621,7 +4554,7 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
         on_progress("maps", 0, encounters.len());
     }
     let t1 = std::time::Instant::now();
-    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters, objects_enabled, on_progress)?;
+    let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters, objects_enabled, vocabulary, on_progress)?;
     eprintln!("[plan-timing] all maps: {:.1}s total", t1.elapsed().as_secs_f64());
     Ok(SessionPlanResult { plan_text, maps, failed_maps })
 }
@@ -3636,7 +4569,7 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
 /// map" was actually burning a full plan regeneration's worth of calls every
 /// time). Errors if `slug` isn't one of the plan's own maps — an ad-hoc or
 /// hand-crafted map has no encounter context to regenerate from.
-fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled: bool) -> Result<BattleMapMeta, String> {
+fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled: bool, vocabulary: &[String]) -> Result<BattleMapMeta, String> {
     let entry = read_plan_manifest_at(root, id)
         .into_iter()
         .find(|e| e.slug == slug)
@@ -3644,7 +4577,7 @@ fn regenerate_one_plan_map_at(root: &Path, id: &str, slug: &str, objects_enabled
 
     let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
     let hint = format!("{} — {}", entry.name, entry.description);
-    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, &hint, objects_enabled);
+    let prompt = build_battle_maps_prompt(&combined_plan, &current_chapter, &combined_memory, &hint, objects_enabled, vocabulary);
     let spec = generate_map_spec(&prompt)?;
     let titled = force_map_title(&spec, &entry.name);
     write_map_spec_with_slug_at(root, id, &entry.slug, &titled)?;
@@ -3686,9 +4619,23 @@ fn sync_battle_maps_index_at(root: &Path, id: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn generate_battle_map(app: AppHandle, id: String, hint: String) -> Result<Vec<BattleMapMeta>, String> {
     tokio::task::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
+        let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let t_vocab = t0.elapsed();
         let root = campaigns_root(&app)?;
-        generate_battle_maps_at(&root, &id, &hint, objects_enabled)
+        let t1 = std::time::Instant::now();
+        let (metas, slug) = with_map_ticker(&app, "drawing the map", t0, || generate_battle_maps_at(&root, &id, &hint, objects_enabled, &vocabulary))?;
+        let t_spec = t1.elapsed();
+        let t2 = std::time::Instant::now();
+        with_map_ticker(&app, "matching tile art", t0, || {
+            if let Err(e) = resolve_map_tiles(&app, &root, &id, &slug) {
+                crate::maplog::log("TILE RESOLUTION ERROR", &e); // never block the map on tile art
+            }
+        });
+        let _ = app.emit("map-progress", MapProgress { phase: "done", elapsed_s: t0.elapsed().as_secs() });
+        log_map_phase_timing("generate_battle_map", t_vocab, t_spec, t2.elapsed());
+        Ok(metas)
     })
     .await
     .map_err(|e| format!("Battle map generation task failed: {e}"))?
@@ -3700,9 +4647,23 @@ pub async fn generate_battle_map(app: AppHandle, id: String, hint: String) -> Re
 #[tauri::command]
 pub async fn regenerate_one_plan_map(app: AppHandle, id: String, slug: String) -> Result<BattleMapMeta, String> {
     tokio::task::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
+        let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let t_vocab = t0.elapsed();
         let root = campaigns_root(&app)?;
-        regenerate_one_plan_map_at(&root, &id, &slug, objects_enabled)
+        let t1 = std::time::Instant::now();
+        let meta = with_map_ticker(&app, "drawing the map", t0, || regenerate_one_plan_map_at(&root, &id, &slug, objects_enabled, &vocabulary))?;
+        let t_spec = t1.elapsed();
+        let t2 = std::time::Instant::now();
+        with_map_ticker(&app, "matching tile art", t0, || {
+            if let Err(e) = resolve_map_tiles(&app, &root, &id, &meta.slug) {
+                crate::maplog::log("TILE RESOLUTION ERROR", &e);
+            }
+        });
+        let _ = app.emit("map-progress", MapProgress { phase: "done", elapsed_s: t0.elapsed().as_secs() });
+        log_map_phase_timing("regenerate_one_plan_map", t_vocab, t_spec, t2.elapsed());
+        Ok(meta)
     })
     .await
     .map_err(|e| format!("Battle map regeneration task failed: {e}"))?
@@ -4830,16 +5791,31 @@ pub fn read_cached_session_plan(app: AppHandle, id: String) -> Result<Option<Ses
 pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionPlanResult, String> {
     tokio::task::spawn_blocking(move || {
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
+        let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
         let app_emit = app.clone();
         let on_progress = move |phase: &str, done: usize, total: usize| {
             let _ = app_emit.emit("plan-progress", PlanProgress { phase: phase.to_string(), done, total });
         };
-        plan_next_session_at(&root, &id, &terrain_catalog, false, objects_enabled, &on_progress)
+        let result = plan_next_session_at(&root, &id, &terrain_catalog, false, objects_enabled, &vocabulary, &on_progress)?;
+        resolve_result_tiles(&app, &root, &id, &result);
+        Ok(result)
     })
     .await
     .map_err(|e| format!("Session-plan task failed: {e}"))?
+}
+
+/// Resolve catalog tiles for every map a session-plan result owns. Each call
+/// self-skips maps whose sidecar is already current (see resolve_map_tiles's
+/// staleness gate), so a plan cache-hit spends no vision calls; only the maps
+/// actually (re)generated this run get resolved. Never fatal.
+fn resolve_result_tiles(app: &AppHandle, root: &Path, id: &str, result: &SessionPlanResult) {
+    for m in &result.maps {
+        if let Err(e) = resolve_map_tiles(app, root, id, &m.slug) {
+            crate::maplog::log("TILE RESOLUTION ERROR", &format!("{}: {e}", m.slug));
+        }
+    }
 }
 
 /// Forces a fresh session plan (and, since maps are derived from it, a fresh
@@ -4849,13 +5825,16 @@ pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionP
 pub async fn regenerate_session_plan(app: AppHandle, id: String) -> Result<SessionPlanResult, String> {
     tokio::task::spawn_blocking(move || {
         let objects_enabled = crate::tile_library::tile_library_configured(&app);
+        let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
         let root = campaigns_root(&app)?;
         let terrain_catalog = crate::terrain::read_terrain_catalog_at(&crate::terrain::terrain_catalog_path(&app)?);
         let app_emit = app.clone();
         let on_progress = move |phase: &str, done: usize, total: usize| {
             let _ = app_emit.emit("plan-progress", PlanProgress { phase: phase.to_string(), done, total });
         };
-        plan_next_session_at(&root, &id, &terrain_catalog, true, objects_enabled, &on_progress)
+        let result = plan_next_session_at(&root, &id, &terrain_catalog, true, objects_enabled, &vocabulary, &on_progress)?;
+        resolve_result_tiles(&app, &root, &id, &result);
+        Ok(result)
     })
     .await
     .map_err(|e| format!("Session-plan task failed: {e}"))?
@@ -5044,6 +6023,114 @@ mod tests {
 
     fn heading(h: &str, s: &str) -> ChapterHeading {
         ChapterHeading { title: h.into(), heading: h.into(), summary: s.into() }
+    }
+
+    /// The repair is deterministic and always ran on the way out, so a width
+    /// problem should never have been worth a model call. Guards the ordering:
+    /// once normalized, a ragged spec must raise no width/Grid-header issue —
+    /// which is also what demotes the remaining issues to "features-only" and
+    /// routes the retry down the cheap caption branch.
+    #[test]
+    fn normalizing_before_validating_removes_the_width_issues_entirely() {
+        // Match the two STRUCTURAL messages precisely — "actually" also occurs
+        // in the Features boilerplate ("a cell you actually drew"), which
+        // normalize is not responsible for and prune handles separately.
+        let structural = |i: &String| i.contains("not all the same width") || i.contains("the map block you drew is actually");
+        let raw = validate_map_spec(BROKEN_BARROOM_SPEC);
+        assert!(raw.iter().any(structural), "fixture must really have a width/header problem: {raw:?}");
+        let fixed = validate_map_spec(&normalize_map_spec(BROKEN_BARROOM_SPEC));
+        assert!(!fixed.iter().any(structural), "normalize must settle width + Grid header without a retry: {fixed:?}");
+        // And with those gone, what's left is Features-only — which is what
+        // routes the retry down the cheap caption branch instead of a redraw.
+        assert!(all_features_only_issues(&fixed), "remaining issues should be features-only: {fixed:?}");
+    }
+
+    /// The floor material is rolled, so a tavern isn't the same board every
+    /// session — but only the MATERIAL. Which brick or which plank is still
+    /// the ranking's job, not the die's.
+    #[test]
+    fn roll_floor_query_swaps_material_on_a_high_roll_only() {
+        // Brick on the low rolls, wood from 14 up — both reachable, brick favoured.
+        assert_eq!(roll_floor_query("tavern", 1), Some("brick floor"));
+        assert_eq!(roll_floor_query("tavern", 13), Some("brick floor"));
+        assert_eq!(roll_floor_query("tavern", 14), Some("wooden flooring"));
+        assert_eq!(roll_floor_query("tavern", 20), Some("wooden flooring"));
+        // Neither branch may be unreachable — that was the bug being fixed.
+        let rolls: Vec<&str> = (1..=20).filter_map(|r| roll_floor_query("tavern", r)).collect();
+        assert!(rolls.contains(&"brick floor") && rolls.contains(&"wooden flooring"), "{rolls:?}");
+        // A biome with no alternate ignores the roll entirely.
+        assert_eq!(roll_floor_query("snow", 1), roll_floor_query("snow", 20));
+        // And "dungeon" still opts out of the whole ground swap.
+        assert_eq!(roll_floor_query("dungeon", 20), None);
+    }
+
+    /// Snow and volcanic must NOT gain an alternate on autopilot: the only
+    /// candidates are ice and lava, which change how the map plays while the
+    /// Tactics prose — written before the floor is rolled — says nothing of it.
+    #[test]
+    fn floor_alternates_stay_cosmetic_and_skip_the_hazard_biomes() {
+        for biome in ["snow", "volcanic"] {
+            assert!(!BIOME_FLOOR_ALTS.iter().any(|(b, _, _)| *b == biome), "{biome} must not roll: its alternate would change the tactics");
+        }
+        for (biome, alt, at) in BIOME_FLOOR_ALTS {
+            assert!(BIOME_FLOORS.iter().any(|(b, _)| b == biome), "alternate for unknown biome {biome:?}");
+            assert!((2..=20).contains(at), "{biome}: a threshold outside 2..=20 makes one branch unreachable");
+            assert_ne!(Some(*alt), biome_floor_query(biome), "{biome}: alternate is identical to the primary");
+        }
+    }
+
+    /// A query whose HEAD token is the bare word "floor" is a TRAP: it takes
+    /// the 1000x exact-match tier, and `Brick_Floor_*` is `!Core_Settlements`
+    /// (biome affinity always 1.0) while a biome's own texture may be scored
+    /// 0.15 for being off-biome — so brick wins and nobody notices. It cost
+    /// tavern, cave and underdark their ground.
+    ///
+    /// Whether it actually fires depends on the biome's affinity, not on the
+    /// wording, so this can't be decided from the string. Each survivor below
+    /// was PROBED against the live manifest; anything new must be probed too
+    /// rather than reasoned about.
+    #[test]
+    fn floor_ending_queries_are_limited_to_ones_probed_against_the_real_catalog() {
+        const PROBED: &[(&str, &str)] = &[
+            ("tavern", "brick floor"),  // brick IS the intent here
+            ("forest", "forest floor"), // → Forest_Floor_Twigs_*; Woodlands affinity carries it
+        ];
+        let queries = BIOME_FLOORS.iter().map(|(b, q)| (*b, *q)).chain(BIOME_FLOOR_ALTS.iter().map(|(b, q, _)| (*b, *q)));
+        for (biome, q) in queries {
+            if q.split_whitespace().last() == Some("floor") {
+                assert!(PROBED.contains(&(biome, q)), "{biome}: query {q:?} ends in \"floor\" — probe it against the real catalog and add it to PROBED, or it may silently resolve to brick");
+            }
+        }
+    }
+
+    /// The whole point of the rewrite: the flame lands on the sprite's own
+    /// firebox, which the artist centred, so the surrounding walls must not
+    /// move it. The old version pushed it away from whatever it backed onto
+    /// and landed it in a corner of the footprint, off the ash bed.
+    #[test]
+    fn firebox_rect_ignores_the_walls_the_hearth_backs_onto() {
+        // Same 2x2 hearth, once in open floor and once jammed into a corner.
+        let open = firebox_rect(&[(3, 1), (4, 1), (3, 2), (4, 2)], true);
+        let cornered = firebox_rect(&[(0, 0), (1, 0), (0, 1), (1, 1)], true);
+        // Identical placement relative to the footprint's own origin.
+        assert!((open[0] - 3.0 - cornered[0]).abs() < 1e-3, "x must not depend on surroundings: {open:?} vs {cornered:?}");
+        assert!((open[1] - 1.0 - cornered[1]).abs() < 1e-3, "y must not depend on surroundings: {open:?} vs {cornered:?}");
+        // And it sits ON the ash bed: centred vertically, a touch right of
+        // centre horizontally, well inside the 2x2 stone surround.
+        let (cx, cy) = (open[0] + open[2] / 2.0, open[1] + open[3] / 2.0);
+        assert!((cx - (3.0 + 0.545 * 2.0)).abs() < 1e-3, "x centre {cx}");
+        assert!((cy - (1.0 + 1.0)).abs() < 1e-3, "y centre {cy}");
+        assert!(open[2] < 1.0 && open[3] < 1.0, "flame must stay inside the firebox, not fill the footprint: {open:?}");
+    }
+
+    #[test]
+    fn firebox_rect_fills_a_brazier_bowl() {
+        // A brazier is a bowl seen top-down — flame centred, and much larger
+        // relative to the tile than a hearth's, because it fills the bowl.
+        let [x, y, w, h] = firebox_rect(&[(2, 1)], false);
+        assert!((w - 0.62).abs() < 1e-3 && (h - 0.62).abs() < 1e-3);
+        assert!((x - (2.0 + (1.0 - 0.62) / 2.0)).abs() < 1e-3);
+        assert!((y - (1.0 + (1.0 - 0.62) / 2.0)).abs() < 1e-3);
     }
 
     #[test]
@@ -5523,6 +6610,110 @@ mod tests {
         assert_eq!(parse_cell_ref("A0"), None);
     }
 
+    const PLACEMENT_SPEC: &str = "# T\nGrid: 10x8, 5 ft squares.\nLegend: x\nMap:\n##########\n#........#\n#.======.#\n#........#\n#.o....o.#\n#........#\n#....*...#\n##########\nFeatures:\n- Bar counter at C3-H3\n- Pillars at C5, H5\n- Brazier at F7\n- Main entrance at A1\nObjects:\n- wooden crate at D6 (1x1)\nTactics:\n- x";
+
+    #[test]
+    fn parse_placements_groups_a_range_into_one_object_and_a_list_into_many() {
+        let p = parse_placements(PLACEMENT_SPEC);
+        // Bar counter (one contiguous 6-cell run), two separate pillars, one
+        // brazier, one crate = 5. "Main entrance at A1" is a `#` wall cell —
+        // not a resolvable object — so it contributes nothing.
+        assert_eq!(p.len(), 5, "{p:#?}");
+
+        let bar = p.iter().find(|x| x.label == "Bar counter").unwrap();
+        assert_eq!((bar.w, bar.h), (6, 1));
+        assert_eq!(bar.cells.len(), 6);
+
+        // The two pillars are disconnected → two 1x1 placements, not one 6-wide box.
+        let pillars: Vec<_> = p.iter().filter(|x| x.label == "Pillars").collect();
+        assert_eq!(pillars.len(), 2);
+        assert!(pillars.iter().all(|x| (x.w, x.h) == (1, 1)));
+
+        let crate_p = p.iter().find(|x| x.label == "wooden crate").unwrap();
+        assert_eq!(crate_p.cells, vec![(3, 5)]); // D6, 0-indexed
+    }
+
+    #[test]
+    fn split_data_url_separates_media_and_base64() {
+        assert_eq!(split_data_url("data:image/webp;base64,AAAA"), ("image/webp", "AAAA"));
+        assert_eq!(split_data_url("data:image/png;base64,Qk0="), ("image/png", "Qk0="));
+    }
+
+    #[test]
+    fn vision_message_asks_for_variety_across_repeated_slots() {
+        let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1 };
+        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into() };
+        let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
+        assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
+    }
+
+    /// The battlefield-design guidance distilled from DM map-design guides: a
+    /// map is a set of terrain FUNCTIONS (sight-blocker / mover-blocker / half
+    /// cover), reached by more than one approach, with exactly one set piece,
+    /// in a room that isn't a bare rectangle. These live only in the FULL
+    /// prompt — the streamlined one deliberately drops qualitative advice.
+    #[test]
+    fn full_prompt_teaches_the_battlefield_design_principles() {
+        let p = battle_map_format_instructions_full(false, &[]).to_lowercase();
+        for needle in ["line of sight", "half cover", "two ways in", "choke point", "set piece", "moves"] {
+            assert!(p.contains(needle), "full prompt must teach {needle:?}: {p}");
+        }
+        // A bare box is the dullest battlefield — the outer wall rule.
+        assert!(p.contains("alcove") || p.contains("jog"), "full prompt must push an irregular outer wall: {p}");
+    }
+
+    /// Battlefield sizing: the guides top out around 12x12 "huge", so the cap
+    /// stays generous but must not drift back to the old barn-sized 24x18.
+    #[test]
+    fn map_size_cap_stays_within_a_playable_battlefield() {
+        assert!(MAP_MAX_COLS <= 16 && MAP_MAX_ROWS <= 14, "map cap drifted back up: {MAP_MAX_COLS}x{MAP_MAX_ROWS}");
+        assert!(MAP_MIN_COLS <= MAP_MAX_COLS && MAP_MIN_ROWS <= MAP_MAX_ROWS);
+    }
+
+    #[test]
+    fn full_prompt_warns_against_overcrowding_the_combat_map() {
+        assert!(battle_map_format_instructions(false, false, &[]).to_lowercase().contains("overcrowd"));
+    }
+
+    #[test]
+    fn vision_chunks_stay_within_the_image_budget() {
+        // 12 slots of 8 candidates each, cap 24 → chunks of 3 slots (24 imgs).
+        assert_eq!(vision_chunks(&[8; 12], 24), vec![(0, 3), (3, 3), (6, 3), (9, 3)]);
+        // A single slot bigger than the cap still gets its own chunk (never 0).
+        assert_eq!(vision_chunks(&[30, 8], 24), vec![(0, 1), (1, 1)]);
+        assert_eq!(vision_chunks(&[], 24), vec![]);
+    }
+
+    #[test]
+    fn parse_vision_picks_reads_choices_and_tolerates_prose_and_zero() {
+        // Prose around the JSON, 1-based choices, 0 = "none" → None, missing slot → None.
+        let reply = "Sure! Here you go:\n{\"picks\":[{\"slot\":1,\"choice\":2},{\"slot\":2,\"choice\":0}]}\nThat's my pick.";
+        assert_eq!(parse_vision_picks(reply, 3), vec![Some(1), None, None]);
+        // Garbage → all None, never panics.
+        assert_eq!(parse_vision_picks("no json here", 2), vec![None, None]);
+    }
+
+    /// The real failure that ate a map's fireplace, shelf AND keg in one go:
+    /// the model answered with fractional indices, `as_u64` said None, and the
+    /// whole chunk's picks were dropped without a trace.
+    #[test]
+    fn parse_vision_picks_rounds_a_fractional_choice_instead_of_dropping_it() {
+        let reply = r#"{"picks":[{"slot":1,"choice":1.8},{"slot":2,"choice":2.5},{"slot":3,"choice":3.1}]}"#;
+        // 1.8→2, 2.5→3, 3.1→3, then 1-based → 0-based.
+        assert_eq!(parse_vision_picks(reply, 3), vec![Some(1), Some(2), Some(2)]);
+        // A number sent as a string is the same intent, too.
+        assert_eq!(parse_vision_picks(r#"{"picks":[{"slot":"1","choice":"2"}]}"#, 1), vec![Some(1)]);
+        // Still never panics on nonsense, and 0 still means "none of these".
+        assert_eq!(parse_vision_picks(r#"{"picks":[{"slot":1,"choice":0.2}]}"#, 1), vec![None]);
+    }
+
+    #[test]
+    fn parse_placements_skips_structural_terrain_glyphs() {
+        // A door/water/stairs feature must never become a catalog placement.
+        let spec = "# T\nGrid: 10x8, 5 ft squares.\nLegend: x\nMap:\n####+#####\n#........#\n#..~~....#\n#........#\n#..._....#\n#........#\n#........#\n##########\nFeatures:\n- Door at E1\n- Pool at D3-E3\n- Stairs at D5\nTactics:\n- x";
+        assert!(parse_placements(spec).is_empty(), "{:#?}", parse_placements(spec));
+    }
+
     #[test]
     fn cell_refs_in_finds_every_cell_in_a_features_line_and_ignores_prose() {
         let refs: Vec<String> = cell_refs_in("Furniture at B5, D5, and F5 (5 ft)")
@@ -5662,7 +6853,7 @@ mod tests {
 
     #[test]
     fn build_battle_maps_prompt_includes_content_and_hint() {
-        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush", false);
+        let one = build_battle_maps_prompt("arc", "chapter goblins", "memory", "a bridge ambush", false, &[]);
         assert!(one.contains("chapter goblins"));
         assert!(one.contains("a bridge ambush"));
         assert!(one.contains("ONE battle map"));
@@ -5770,7 +6961,7 @@ mod tests {
             &[PlanMapEntry { slug: "bridge-ambush".to_string(), name: "Bridge Ambush".to_string(), description: "Goblins attack.".to_string() }],
         ).unwrap();
 
-        let result = plan_next_session_at(&root.0, &meta.id, "", false, false, &no_progress).unwrap();
+        let result = plan_next_session_at(&root.0, &meta.id, "", false, false, &[], &no_progress).unwrap();
         assert!(result.plan_text.contains("Bridge Ambush"));
         assert_eq!(result.maps.len(), 1);
         assert_eq!(result.maps[0].slug, "bridge-ambush");
@@ -5863,7 +7054,7 @@ mod tests {
             &[PlanMapEntry { slug: "old-fight".to_string(), name: "Old Fight".to_string(), description: "x".to_string() }],
         ).unwrap();
 
-        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[], false, &no_progress).unwrap();
+        let (maps, failed) = generate_battle_maps_for_plan_at(&root.0, &meta.id, "arc", "chapter", "memory", &[], false, &[], &no_progress).unwrap();
 
         assert!(maps.is_empty());
         assert!(failed.is_empty());
@@ -5883,7 +7074,7 @@ mod tests {
         write_map_spec_with_slug_at(&root.0, &meta.id, "hand-crafted", SAMPLE_MAP_SPEC).unwrap();
         // No plan_manifest.json entry for "hand-crafted" — it's not plan-owned.
 
-        let err = regenerate_one_plan_map_at(&root.0, &meta.id, "hand-crafted", false).unwrap_err();
+        let err = regenerate_one_plan_map_at(&root.0, &meta.id, "hand-crafted", false, &[]).unwrap_err();
         assert!(err.contains("hand-crafted"), "{err}");
         assert!(err.contains("isn't one of the current plan's maps"), "{err}");
     }
@@ -7767,7 +8958,7 @@ mod example_map_tests {
     /// them. Pin it against the real validator.
     #[test]
     fn the_prompts_worked_example_passes_our_own_validator() {
-        let instr = battle_map_format_instructions(false, false);
+        let instr = battle_map_format_instructions(false, false, &[]);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# The Bent Nail"))
@@ -7786,19 +8977,49 @@ mod example_map_tests {
     /// the prompt the model sees.
     #[test]
     fn battle_map_format_instructions_explicitly_forbids_drawing_a_seat_as_rubble() {
-        let full = battle_map_format_instructions(false, false);
+        let full = battle_map_format_instructions(false, false, &[]);
         assert!(full.contains("NEVER draw a seat with `^`"), "{full}");
         // The streamlined variant phrases it more tersely, but the same
         // correction — stools are `=`, never `^` — must still be in there.
-        let streamlined = battle_map_format_instructions(true, false);
+        let streamlined = battle_map_format_instructions(true, false, &[]);
         assert!(streamlined.contains("never `^`"), "{streamlined}");
+        // Live evidence (test-campaign "Tavern Brawl", 2026-07-19): the model
+        // used `^` for "overturned chairs" as difficult terrain, which the
+        // renderer paints as grey rocks in the middle of a wooden tavern. Both
+        // variants must now warn `^` is stone-only, so brawl clutter routes to
+        // furniture/Objects instead.
+        assert!(full.to_lowercase().contains("grey stone rocks"), "{full}");
+        assert!(streamlined.to_lowercase().contains("grey stone rocks"), "{streamlined}");
+    }
+
+    /// Live-observed failure (test-campaign "Tavern Brawl (Watchmen)",
+    /// 2026-07-19): with the Objects: layer enabled but no explicit
+    /// exclusion, the model used it to mark an NPC's position
+    /// ("Hilda Brightmantle (downed, unconscious) at D2") instead of
+    /// physical set-dressing. Pin that the exclusion is actually in both
+    /// prompt variants whenever objects_enabled is true — this is a real DM
+    /// error (Nabil runs combat with physical miniatures), not just cosmetic.
+    #[test]
+    fn battle_map_format_instructions_explicitly_forbids_npcs_in_objects_when_enabled() {
+        let vocab = vec!["table".to_string(), "barrel".to_string()];
+        let full = battle_map_format_instructions(false, true, &vocab);
+        assert!(full.to_lowercase().contains("never a creature, npc, or monster"), "{full}");
+        assert!(full.contains("table, barrel"), "real vocabulary must reach the prompt: {full}");
+        let streamlined = battle_map_format_instructions(true, true, &vocab);
+        assert!(streamlined.to_lowercase().contains("never a creature, npc, or monster"), "{streamlined}");
+        assert!(streamlined.contains("table, barrel"), "{streamlined}");
+        // With no tile library imported, the whole Objects: section (rule
+        // included) must be absent — nothing to guard against if the model
+        // never sees the section at all.
+        let disabled = battle_map_format_instructions(false, false, &[]);
+        assert!(!disabled.contains("Objects:"), "{disabled}");
     }
 
     /// Same pin, for the cave example — it's teaching material too, and it's
     /// the one example that must NOT contain `=` anywhere.
     #[test]
     fn the_prompts_cave_example_passes_our_own_validator_and_has_no_furniture() {
-        let instr = battle_map_format_instructions(false, false);
+        let instr = battle_map_format_instructions(false, false, &[]);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# Flooded Grotto"))
@@ -7818,7 +9039,7 @@ mod example_map_tests {
     /// that they can't drift.
     #[test]
     fn copies_the_example_catches_the_grid_the_prompt_actually_shows() {
-        let instr = battle_map_format_instructions(false, false);
+        let instr = battle_map_format_instructions(false, false, &[]);
         for row in EXAMPLE_MAP_GRID {
             assert!(instr.contains(row), "prompt lost tavern row {row}");
         }
@@ -7827,7 +9048,7 @@ mod example_map_tests {
         }
         // The streamlined (local-model) variant only shows one example, but
         // it's the SAME tavern grid — copying it must still be caught.
-        let streamlined = battle_map_format_instructions(true, false);
+        let streamlined = battle_map_format_instructions(true, false, &[]);
         for row in EXAMPLE_MAP_GRID {
             assert!(streamlined.contains(row), "streamlined prompt lost tavern row {row}");
         }
@@ -7853,7 +9074,7 @@ mod example_map_tests {
     /// one example has to actually be sound, same as the full prompt's.
     #[test]
     fn the_streamlined_prompts_example_passes_our_own_validator() {
-        let instr = battle_map_format_instructions(true, false);
+        let instr = battle_map_format_instructions(true, false, &[]);
         let spec = instr
             .split(MAP_SPEC_DELIMITER)
             .find(|s| s.contains("# The Bent Nail"))
@@ -7868,8 +9089,8 @@ mod example_map_tests {
     /// not just reworded them.
     #[test]
     fn the_streamlined_prompt_is_meaningfully_shorter_and_drops_the_cave_example() {
-        let full = battle_map_format_instructions(false, false);
-        let streamlined = battle_map_format_instructions(true, false);
+        let full = battle_map_format_instructions(false, false, &[]);
+        let streamlined = battle_map_format_instructions(true, false, &[]);
         assert!(streamlined.len() < full.len() / 2, "full={} streamlined={}", full.len(), streamlined.len());
         assert!(!streamlined.contains("Flooded Grotto"), "{streamlined}");
     }

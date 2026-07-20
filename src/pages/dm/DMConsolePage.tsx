@@ -14,7 +14,7 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapToPdfBytes, preloadBattleTileSprites, preloadMapObjectSprites, setActiveTileStyle } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapToPdfBytes, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain } from '../../utils/battleMapRender';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -341,6 +341,12 @@ interface MapCard {
   summary: string;
   spec: string;
   png: string | null;
+  /** Resolved catalog tiles (vision-picked at generation) — the render draws
+   *  these over the base grid. Empty when no library / nothing resolved. */
+  tiles: MapTileArt[];
+  /** Resolved catalog terrain — ground, water, and whether `#` is living
+   *  rock. Empty object keeps the built-in tileset (dungeon / no library). */
+  terrain: MapTerrain;
 }
 
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
@@ -578,7 +584,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, tileLibraryPath, setTileLibraryPath } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, setTileLibraryPath } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -814,10 +820,15 @@ export function DMConsolePage() {
    *  completion order). Reset to null whenever a new generate/regenerate
    *  starts, same lifecycle as planBusy. */
   const [planProgress, setPlanProgress] = React.useState<{ phase: string; done: number; total: number } | null>(null);
+  /** Live phase + age of an in-flight map generation, re-emitted every ~2s by
+   *  the backend (see MapProgress). Its whole job is to prove the thing is
+   *  still alive while one silent model call runs for minutes. */
+  const [mapProgress, setMapProgress] = React.useState<{ phase: string; elapsed_s: number } | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
   const [failedMaps, setFailedMaps] = React.useState<string[]>([]);
   const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
+  const [tileLibraryRootCount, setTileLibraryRootCount] = React.useState(0);
   const [tileLibraryBusy, setTileLibraryBusy] = React.useState(false);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
   const [modulePlan, setModulePlan] = React.useState('');
@@ -1392,9 +1403,16 @@ export function DMConsolePage() {
   React.useEffect(() => {
     const unlistenPlan = listen<{ phase: string; done: number; total: number }>('plan-progress', (e) => setPlanProgress(e.payload));
     const unlistenIngest = listen<{ phase: string; done: number; total: number }>('ingest-progress', (e) => setIngestProgress(e.payload));
+    // Map generation re-emits on a timer while it works, so a climbing
+    // elapsed_s is visible proof it hasn't hung during the one long, silent
+    // model call. 'done' clears it.
+    const unlistenMap = listen<{ phase: string; elapsed_s: number }>('map-progress', (e) =>
+      setMapProgress(e.payload.phase === 'done' ? null : e.payload)
+    );
     return () => {
       unlistenPlan.then((f) => f());
       unlistenIngest.then((f) => f());
+      unlistenMap.then((f) => f());
     };
   }, []);
 
@@ -2699,20 +2717,36 @@ export function DMConsolePage() {
   // whatever the (cached) session plan says is coming up. One card per
   // combat encounter the plan identified.
 
+  /** The vision-resolved catalog tiles for one map, with their art preloaded
+   *  so the synchronous render can draw them. Empty (silent) when no library is
+   *  imported or nothing resolved — the render then uses built-in sprites. */
+  async function fetchMapTiles(slug: string): Promise<{ tiles: MapTileArt[]; terrain: MapTerrain }> {
+    try {
+      const res = await invoke<{ tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean }>('get_map_tiles', { id: activeCampaignId, slug });
+      const terrain: MapTerrain = { floor: res.floor, liquid: res.liquid, naturalWalls: res.natural_walls };
+      await preloadResolvedTileArt(res.tiles, terrain);
+      return { tiles: res.tiles, terrain };
+    } catch {
+      return { tiles: [], terrain: {} };
+    }
+  }
+
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
-    await preloadMapObjectSprites(spec);
-    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, png: battleMapToPngDataUrl(spec) };
+    const { tiles, terrain } = await fetchMapTiles(meta.slug);
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, png: battleMapToPngDataUrl(spec, 64, tiles, terrain) };
   }
 
   /** Loads the currently-imported tile library's summary (if any) — called
    *  on Plan dialog open so the count shown is never stale after a restart. */
   async function refreshTileLibrarySummary() {
     try {
-      const summary = await invoke<{ total: number } | null>('get_tile_library_summary');
+      const summary = await invoke<{ total: number; roots: string[] } | null>('get_tile_library_summary');
       setTileLibraryTotal(summary?.total ?? null);
+      setTileLibraryRootCount(summary?.roots.length ?? 0);
     } catch {
       setTileLibraryTotal(null);
+      setTileLibraryRootCount(0);
     }
   }
 
@@ -2720,19 +2754,24 @@ export function DMConsolePage() {
     if (planOpen) void refreshTileLibrarySummary();
   }, [planOpen]);
 
-  /** "Import…" for the optional local tile library (see tile_library.rs) —
-   *  a folder picker, then a one-shot scan+index command. Nothing here ever
-   *  touches git or the app bundle: the art stays exactly where the DM put
-   *  it, only a small filename manifest is cached locally (see
-   *  import_tile_library's doc comment for why). */
-  async function importTileLibrary() {
+  /** "Import…"/"Add another folder…"/"Replace…" for the optional local tile
+   *  library (see tile_library.rs) — a folder picker, then a one-shot
+   *  scan+index command. `merge` folds the picked folder into whatever's
+   *  already imported, so a second asset pack can be added without losing
+   *  the first; without it, the picked folder REPLACES the whole catalog
+   *  (see import_tile_library's doc comment — re-picking the SAME folder
+   *  either way just refreshes that folder's own entries, never dupes).
+   *  Nothing here ever touches git or the app bundle: the art stays exactly
+   *  where the DM put it, only a small filename manifest is cached locally. */
+  async function importTileLibrary(merge: boolean) {
     const root = await open({ directory: true, multiple: false });
     if (!root || typeof root !== 'string') return;
     setTileLibraryBusy(true);
     try {
-      const summary = await invoke<{ total: number }>('import_tile_library', { root });
+      const summary = await invoke<{ total: number; roots: string[] }>('import_tile_library', { root, merge });
       setTileLibraryPath(root);
       setTileLibraryTotal(summary.total);
+      setTileLibraryRootCount(summary.roots.length);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -2745,7 +2784,7 @@ export function DMConsolePage() {
    *  (see setActiveTileStyle), so switching styles doesn't touch any map's
    *  saved spec, just what art the already-loaded cards redraw with. */
   function refreshMapCardPreviews() {
-    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec) });
+    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain) });
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }
@@ -2777,8 +2816,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Exporting PNG…');
     try {
-      await preloadMapObjectSprites(card.spec);
-      const dataUrl = await battleMapToPngDataUrl(card.spec, 96);
+      await preloadResolvedTileArt(card.tiles, card.terrain);
+      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.tiles, card.terrain);
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -2798,8 +2837,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Exporting print-scaled PDF…');
     try {
-      await preloadMapObjectSprites(card.spec);
-      const bytes = await battleMapToPdfBytes(card.spec);
+      await preloadResolvedTileArt(card.tiles, card.terrain);
+      const bytes = await battleMapToPdfBytes(card.spec, card.tiles, card.terrain);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -2815,8 +2854,10 @@ export function DMConsolePage() {
    *  also re-renders the png — set false on every keystroke (cheap text
    *  update only) and true on "Re-render preview" / after a successful save. */
   async function patchMapCardSpec(slug: string, spec: string, updatePreview: boolean) {
-    if (updatePreview) await preloadMapObjectSprites(spec);
-    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec) : c.png } : c));
+    // Hand edits keep the card's already-resolved tiles (a live edit doesn't
+    // re-run the vision resolver — that happens on regenerate); the preview
+    // just redraws the edited grid under the existing tile art.
+    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec, 64, c.tiles, c.terrain) : c.png } : c));
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
   }
@@ -2897,10 +2938,20 @@ export function DMConsolePage() {
     setFailedMaps([]);
     try {
       const cached = await invoke<SessionPlanResult | null>('read_cached_session_plan', { id: activeCampaignId });
+      const planned = cached?.maps ?? [];
       if (cached) {
         setPlanText(cached.plan_text);
-        setPlanMapCards(await Promise.all(cached.maps.map(loadMapCard)));
+        setPlanMapCards(await Promise.all(planned.map(loadMapCard)));
       }
+      // Rehydrate the ad-hoc maps too. They persist on disk exactly like the
+      // plan's own, but nothing ever read them back: `adHocMapCards` was only
+      // ever appended to by generateHintMap, so every map made with "…or
+      // describe one more encounter" disappeared from the console on the next
+      // reload or campaign switch and could never be reached again.
+      const ownedSlugs = new Set(planned.map((m) => m.slug));
+      const onDisk = await invoke<BattleMapMeta[]>('list_battle_maps', { id: activeCampaignId });
+      const extras = onDisk.filter((m) => !ownedSlugs.has(m.slug));
+      setAdHocMapCards(await Promise.all(extras.map(loadMapCard)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -3577,15 +3628,43 @@ export function DMConsolePage() {
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span className="text-xs text-slate-400">
-                    Tileset library: {tileLibraryTotal != null ? `${tileLibraryTotal.toLocaleString()} objects imported` : 'not imported'}
+                    Tileset library:{' '}
+                    {tileLibraryTotal != null
+                      ? `${tileLibraryTotal.toLocaleString()} objects imported${tileLibraryRootCount > 1 ? ` (${tileLibraryRootCount} folders)` : ''}`
+                      : 'not imported'}
                   </span>
-                  <Button size="sm" variant="outline" onClick={importTileLibrary} disabled={tileLibraryBusy}>
-                    {tileLibraryBusy ? 'Importing…' : tileLibraryPath ? 'Re-import…' : 'Import…'}
-                  </Button>
+                  {tileLibraryTotal == null ? (
+                    <Button size="sm" variant="outline" onClick={() => importTileLibrary(false)} disabled={tileLibraryBusy}>
+                      {tileLibraryBusy ? 'Importing…' : 'Import…'}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => importTileLibrary(true)} disabled={tileLibraryBusy}>
+                        {tileLibraryBusy ? 'Importing…' : 'Add another folder…'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => importTileLibrary(false)} disabled={tileLibraryBusy}>
+                        {tileLibraryBusy ? 'Importing…' : 'Replace…'}
+                      </Button>
+                    </>
+                  )}
                 </div>
-                {planBusy && <p className="text-xs text-amber-400 mb-2">{planBusy}</p>}
+                {tileLibraryTotal != null && (
+                  <p className="text-xs text-slate-500 mb-2">
+                    "Add another folder…" keeps everything already imported; "Replace…" wipes it and starts over with only the new folder. Re-picking the same folder either way just refreshes it, never duplicates.
+                  </p>
+                )}
+                {planBusy && (
+                  <p className="text-xs text-amber-400 mb-2">
+                    {planBusy}
+                    {mapProgress && (
+                      // The climbing clock is the point: it says "still alive"
+                      // through the multi-minute model call that reports nothing.
+                      <span className="text-amber-300/70"> {mapProgress.phase} — {formatElapsed(mapProgress.elapsed_s)}</span>
+                    )}
+                  </p>
+                )}
 
                 <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
                   {[...planMapCards, ...adHocMapCards].length === 0 && !planBusy && (
