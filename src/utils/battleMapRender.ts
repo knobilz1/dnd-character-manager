@@ -821,6 +821,21 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
       drawSpriteScaled(ctx, t.data_url, (sx - w.colStart) * cellPx, (sy - w.rowStart) * cellPx, sw * cellPx, sh * cellPx);
       continue;
     }
+    // Art bigger than its footprint — a 3x3 pine on a single `T` cell. The
+    // resolver searches at the object's real catalog size (see
+    // `structured_footprint_guide`), so the CHOSEN art is a proper tree, but
+    // the grid cell it anchors is still 1x1. Draw it at native size, CENTERED
+    // on the footprint, overhanging the neighbours rather than crushed into
+    // one square — which is what a tree on a battle map actually looks like,
+    // and (with several overlapping) reads as real canopy instead of shrubs.
+    // Tactically it stays a 1-cell object; this is purely how it's drawn.
+    if (t.tw > t.w || t.th > t.h) {
+      const cx = (originCol - w.colStart + t.w / 2) * cellPx;
+      const cy = (originRow - w.rowStart + t.h / 2) * cellPx;
+      const dw = t.tw * cellPx, dh = t.th * cellPx;
+      drawSpriteScaled(ctx, t.data_url, cx - dw / 2, cy - dh / 2, dw, dh);
+      continue;
+    }
     const stepX = Math.max(1, t.tw), stepY = Math.max(1, t.th);
     for (let dy = 0; dy < t.h; dy += stepY) {
       for (let dx = 0; dx < t.w; dx += stepX) {
