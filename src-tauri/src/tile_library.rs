@@ -1541,6 +1541,10 @@ pub fn load_tile_art(root: &str, rel_path: &str) -> Option<(String, Option<ArtSi
 /// was timed at 17.6 minutes.
 const GROUND_CANDIDATES_PER_BIOME: usize = 6;
 const GROUND_SAMPLES_PER_CANDIDATE: usize = 5;
+/// Filenames shown per ground candidate. More than one specifically so a word
+/// that bridges two art families (`rock` reaching both `Rock_*` and
+/// `Lava_Rocks_*`) shows it instead of looking like a clean single material.
+const GROUND_EXAMPLES: usize = 3;
 const SAMPLE_OBJECT_NAMES: usize = 8;
 
 /// Mean luminance for one tile: the audit's stored measurement when there is
@@ -1574,32 +1578,66 @@ fn build_biome_evidence(entries: &[TileLibraryEntry], profile: &PackProfile, mea
             // same notion footprint_guide uses) over this biome's terrain art.
             // Falls back to every category when the profile doesn't yet know
             // which are terrain — a first profile of an unknown pack.
-            let terrain: Vec<&&TileLibraryEntry> =
-                tiles.iter().filter(|e| profile.terrain_categories.is_empty() || profile.is_terrain_category(&e.category)).collect();
-            let mut groups: HashMap<&str, Vec<&TileLibraryEntry>> = HashMap::new();
-            for e in &terrain {
+            // A `Textures/Liquids/*` tile is a POOL, not ground — resolve_floor
+            // excludes them, so the evidence must too or the numbers describe a
+            // set the resolver will never return.
+            let ground_pool: Vec<&TileLibraryEntry> = tiles
+                .iter()
+                .copied()
+                .filter(|e| (profile.terrain_categories.is_empty() || profile.is_terrain_category(&e.category)) && !e.rel_path.contains("/Liquids/"))
+                .collect();
+            // Candidate WORDS come from the filename's leading token — the pack's
+            // own identity word for a material, same notion footprint_guide uses.
+            let mut words: HashMap<&str, usize> = HashMap::new();
+            for e in &ground_pool {
                 if let Some(w) = e.keywords.first().filter(|w| !is_artifact_word(w)) {
-                    groups.entry(w.as_str()).or_default().push(e);
+                    *words.entry(w.as_str()).or_insert(0) += 1;
                 }
             }
-            let mut ranked: Vec<(&str, Vec<&TileLibraryEntry>)> = groups.into_iter().collect();
-            ranked.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
+            let mut ranked: Vec<(&str, usize)> = words.into_iter().collect();
+            ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+            // ...but the STATS must describe the set that word will actually
+            // select, which is a different set: the resolver matches any
+            // keyword, plurals included, not just the leading one. Live, and the
+            // reason this exists — Volcanic offered "rock" as 14 files at
+            // luminance 60 (Rock_A_*), so the profiler picked it as the
+            // non-hazard ground; `resolve_floor` then searched "rock", matched
+            // "rocks" too, and pulled in 70 Lava_Rocks_* — BRIGHTER, so the
+            // legibility filter preferred them and every volcano map rendered as
+            // a sheet of molten lava. Reuses the resolver's own matcher so the
+            // two cannot drift again.
             let ground = ranked
                 .into_iter()
                 .take(GROUND_CANDIDATES_PER_BIOME)
-                .filter_map(|(word, files)| {
-                    let lums: Vec<f64> = files.iter().take(GROUND_SAMPLES_PER_CANDIDATE).filter_map(|e| tile_luminance(e, measured)).collect();
+                .filter_map(|(word, _)| {
+                    let tokens = tokenize_query(word);
+                    let selected: Vec<&&TileLibraryEntry> = ground_pool.iter().filter(|e| has_identity_match(e, &tokens)).collect();
+                    if selected.is_empty() {
+                        return None;
+                    }
+                    // Sample ACROSS the selection, never off the front: the
+                    // families a word pulls together sit in folder order, so the
+                    // first five files are all one family and would report that
+                    // family's luminance as the whole word's.
+                    let spread = |n: usize| {
+                        let step = (selected.len() / n).max(1);
+                        selected.iter().step_by(step).take(n).collect::<Vec<_>>()
+                    };
+                    let lums: Vec<f64> = spread(GROUND_SAMPLES_PER_CANDIDATE).into_iter().filter_map(|e| tile_luminance(e, measured)).collect();
                     if lums.is_empty() {
                         return None; // unreadable (cold network drive) — say nothing rather than guess
                     }
                     let mean = lums.iter().sum::<f64>() / lums.len() as f64;
                     Some(crate::pack_profile::GroundCandidate {
                         word: word.to_string(),
-                        files: files.len(),
+                        files: selected.len(),
                         lum_min: lums.iter().cloned().fold(f64::MAX, f64::min) as u8,
                         lum_max: lums.iter().cloned().fold(0.0, f64::max) as u8,
                         lum_mean: mean as u8,
-                        example: files[0].rel_path.rsplit('/').next().unwrap_or("").to_string(),
+                        // Several, spread the same way: one filename cannot show
+                        // that a word bridges two families, and that bridging is
+                        // exactly what has to be visible to be avoided.
+                        example: spread(GROUND_EXAMPLES).into_iter().map(|e| e.rel_path.rsplit('/').next().unwrap_or("").to_string()).collect::<Vec<_>>().join(", "),
                     })
                 })
                 .collect();
@@ -2568,6 +2606,41 @@ mod tests {
             w: 1,
             h: 1,
         }
+    }
+
+    /// The evidence must describe the set the RESOLVER selects, not the set the
+    /// leading filename token groups. Volcanic is the live case: 14 `Rock_*` at
+    /// luminance 60 and 70 `Lava_Rocks_*` at 117. Grouping by leading token
+    /// reported "rock" as 14 dark files, so the profiler chose it as the
+    /// non-hazard ground — and resolve_floor, matching any keyword, searched
+    /// "rock", found the lava rocks too, and preferred them for being brighter.
+    #[test]
+    fn a_ground_candidate_reports_what_its_word_will_actually_select() {
+        let tex = |name: &str, keywords: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("Volcanic/Textures/{name}"),
+            biome: "Volcanic".into(),
+            category: "Textures".into(),
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        let mut entries = Vec::new();
+        let mut measured = HashMap::new();
+        for i in 0..4 {
+            entries.push(tex(&format!("Rock_A_{i}.jpg"), &["rock", "volcanic"]));
+            measured.insert(format!("Volcanic/Textures/Rock_A_{i}.jpg"), MeasuredArt { kind: ArtKind::Ground, lum: 60 });
+        }
+        for i in 0..8 {
+            entries.push(tex(&format!("Lava_Rocks_B_{i}.jpg"), &["lava", "rocks", "volcanic"]));
+            measured.insert(format!("Volcanic/Textures/Lava_Rocks_B_{i}.jpg"), MeasuredArt { kind: ArtKind::Ground, lum: 117 });
+        }
+        let ev = build_biome_evidence(&entries, &prof(), &measured);
+        let rock = ev[0].ground.iter().find(|g| g.word == "rock").expect("rock is offered as a candidate");
+
+        assert_eq!(rock.files, 12, "\"rock\" selects the lava rocks too — reporting 4 is the bug");
+        assert!(rock.lum_max > 100, "the bright family it drags in must show in the range, not be sampled away: {rock:?}");
+        assert!(rock.example.contains("Lava_Rocks"), "the examples must reveal the second family: {}", rock.example);
     }
 
     /// Both live failures from the re-profile that motivated this, and the
