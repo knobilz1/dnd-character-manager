@@ -5117,7 +5117,8 @@ fn build_chapterize_prompt(candidates: &[(usize, &str)]) -> String {
         About the line index: it is a mechanical shortlist of every line in the document that looked like it might be a heading, so most of its entries are NOT chapter starts — subsection titles, table headers, stat-block labels and running page headers all end up in it. Two things to watch for. A running page header repeats many times, once per page of the chapter it belongs to, often garbled differently each time; the chapter really starts at the first of them that is actually followed by the start of that chapter's text, NOT simply the first one that appears. And the same heading text can legitimately occur several times as genuinely different sections (six episodes may each end with a \"Conclusion\"); those are separate real boundaries, not duplicates. The surrounding document text is below the index — use it to tell these apart.\n\n\
         3. Self-audit your own breakdown above and list any STRUCTURAL concerns as short strings — e.g. a heading you weren't fully confident matched a unique exact point in the source text, or narrative chapters that still came out very uneven in size. The person reading this may be a PLAYER in the game, not the DM, so these strings must never reveal plot content, twists, names of secrets, or anything that would spoil the adventure — describe only the structural problem itself. If you have no concerns, return an empty array.\n\n\
         Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
-        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"line\": <line number>, \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
+        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"line\": <line number>, \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"narrative_ends_at_line\": <line number or null>, \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
+        \"narrative_ends_at_line\" is the line where the pure-reference material at the BACK of the document begins — the first stat-block appendix, item table, or index. The last chapter stops there instead of running to the end of the document, so leaving those sections out of the chapter list above is not enough on its own; without this they all get swallowed into the final chapter. Use null if the document is narrative all the way to the end.\n\n\
         If the document has no clear internal chapter structure, still return a single chapters entry pointing at line 1, whose title is a short readable name for the whole document and whose summary describes the whole document.\n\n\
         LINE INDEX (candidate headings, numbered — pick from these):\n{index}"
     )
@@ -5211,7 +5212,7 @@ fn subdivide_once(module_title: &str, chapters: Vec<(String, String, String)>) -
         let (title, summary, body) = chapter;
         let scenes = parse_chapterize_reply(&reply)
             .ok()
-            .map(|parsed| split_by_headings(&body, &candidate_heading_lines(&body), &parsed.chapters))
+            .map(|parsed| split_by_headings(&body, &candidate_heading_lines(&body), &parsed.chapters, None))
             .unwrap_or_default();
         // One scene covering the whole thing is the documented "doesn't
         // subdivide" answer, and is indistinguishable from not having asked.
@@ -5420,6 +5421,15 @@ struct ChapterizeReply {
     /// uneven" — safe to show a player without spoiling the adventure.
     #[serde(default)]
     concerns: Vec<String>,
+    /// The line where pure-reference material begins — stat-block appendices,
+    /// item tables, the index. The LAST chapter otherwise runs to the end of
+    /// the document and swallows all of it: measured, "Episode 6" of
+    /// Acquisitions Incorporated absorbed five appendices and the book's own
+    /// index, 114k chars of tables, which then sat in `current.md` on every
+    /// turn. The chapter list correctly excluded them; nothing bounded the
+    /// slice. `None` means the document is narrative all the way down.
+    #[serde(default)]
+    narrative_ends_at_line: Option<usize>,
 }
 
 /// Parses Claude's combined chapterize+plan reply, tolerating stray markdown
@@ -5452,7 +5462,10 @@ fn parse_chapterize_reply(reply: &str) -> Result<ChapterizeReply, String> {
 /// - not strictly after the previous chapter's start. Chapters are asked for in
 ///   document order, so an index that goes backwards is a mistake, and taking
 ///   it would produce an inverted or empty slice.
-fn split_by_headings(text: &str, candidates: &[(usize, &str)], headings: &[ChapterHeading]) -> Vec<(String, String, String)> {
+///
+/// `ends_at` bounds the LAST chapter, which otherwise runs to the end of the
+/// document and drags every trailing appendix into it.
+fn split_by_headings(text: &str, candidates: &[(usize, &str)], headings: &[ChapterHeading], ends_at: Option<usize>) -> Vec<(String, String, String)> {
     let mut positions: Vec<(usize, &ChapterHeading)> = vec![];
     for h in headings {
         let Some((offset, _)) = h.line.checked_sub(1).and_then(|i| candidates.get(i)) else {
@@ -5476,7 +5489,10 @@ fn split_by_headings(text: &str, candidates: &[(usize, &str)], headings: &[Chapt
         .iter()
         .enumerate()
         .map(|(i, (pos, h))| {
-            let end = positions.get(i + 1).map(|(p, _)| *p).unwrap_or(text.len());
+            // A bound that lands before this chapter even starts would invert
+            // the slice — ignore it rather than panic; the concern about
+            // coverage will surface the odd answer anyway.
+            let end = positions.get(i + 1).map(|(p, _)| *p).unwrap_or_else(|| ends_at.filter(|e| *e > *pos).unwrap_or(text.len()).min(text.len()));
             (display_title(h, candidates), h.summary.clone(), text[*pos..end].to_string())
         })
         .collect()
@@ -6001,7 +6017,10 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     let candidates = candidate_heading_lines(raw_text);
     let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(&candidates), Some("opus"), true)?;
     let parsed = parse_chapterize_reply(&reply)?;
-    let chapters = split_by_headings(raw_text, &candidates, &parsed.chapters);
+    // Resolve the narrative end through the SAME numbered skeleton the
+    // chapters came from, so a line number means one thing everywhere.
+    let narrative_end = parsed.narrative_ends_at_line.and_then(|n| n.checked_sub(1)).and_then(|i| candidates.get(i)).map(|(off, _)| *off);
+    let chapters = split_by_headings(raw_text, &candidates, &parsed.chapters, narrative_end);
     let module_title = if parsed.module_title.trim().is_empty() {
         chapters[0].0.clone()
     } else {
@@ -9224,7 +9243,9 @@ A HEADING LINE
             }
         }
 
-        let chapters = split_by_headings(&text, &candidates, &parsed.chapters);
+        let narrative_end = parsed.narrative_ends_at_line.and_then(|n| n.checked_sub(1)).and_then(|i| candidates.get(i)).map(|(off, _)| *off);
+        println!("narrative_ends_at_line: {:?} -> byte {:?}", parsed.narrative_ends_at_line, narrative_end);
+        let chapters = split_by_headings(&text, &candidates, &parsed.chapters, narrative_end);
         let covered: usize = chapters.iter().map(|(_, _, body)| body.chars().count()).sum();
         println!("=== {} chapters, covering {:.1}% of the document", chapters.len(), covered as f64 / text.chars().count() as f64 * 100.0);
         for (title, _, body) in &chapters {
@@ -9539,7 +9560,7 @@ A HEADING LINE
         let titles: Vec<&str> = cands.iter().map(|(_, l)| *l).collect();
         let c1 = titles.iter().position(|l| *l == "Chapter 1: Goblin Arrows").unwrap() + 1;
         let c2 = titles.iter().position(|l| *l == "Chapter 2: Cragmaw Hideout").unwrap() + 1;
-        let chapters = split_by_headings(text, &cands, &[heading("Chapter 1: Goblin Arrows", c1, "Ambush."), heading("Chapter 2: Cragmaw Hideout", c2, "Cave.")]);
+        let chapters = split_by_headings(text, &cands, &[heading("Chapter 1: Goblin Arrows", c1, "Ambush."), heading("Chapter 2: Cragmaw Hideout", c2, "Cave.")], None);
 
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
@@ -9563,7 +9584,7 @@ A HEADING LINE
         // first-match search, and the exact case Acquisitions Incorporated hits.
         let second = titles.iter().enumerate().filter(|(_, l)| **l == "CHAPTER 4").map(|(i, _)| i + 1).nth(1).unwrap();
         let concl = titles.iter().position(|l| *l == "CONCLUSION").unwrap() + 1;
-        let chapters = split_by_headings(text, &cands, &[heading("Chapter 4", second, "Four."), heading("Conclusion", concl, "End.")]);
+        let chapters = split_by_headings(text, &cands, &[heading("Chapter 4", second, "Four."), heading("Conclusion", concl, "End.")], None);
         assert_eq!(chapters.len(), 2);
         assert!(chapters[0].2.contains("still inside chapter four"), "{:?}", chapters[0].2);
         assert!(!chapters[0].2.contains("Opening of chapter four"), "the earlier occurrence must NOT have been used");
@@ -9573,7 +9594,7 @@ A HEADING LINE
     fn split_by_headings_uses_the_clean_title_for_display() {
         let text = "Chapter 1: About\nSome intro text.\nChapter 2: The Cave\nMore text.\n";
         let cands = skeleton(text);
-        let chapters = split_by_headings(text, &cands, &[ChapterHeading { title: "Chapter 1: About the Village".into(), line: 1, summary: "Intro.".into() }]);
+        let chapters = split_by_headings(text, &cands, &[ChapterHeading { title: "Chapter 1: About the Village".into(), line: 1, summary: "Intro.".into() }], None);
         assert_eq!(chapters[0].0, "Chapter 1: About the Village");
     }
 
@@ -9581,7 +9602,7 @@ A HEADING LINE
     fn split_by_headings_falls_back_to_the_skeleton_line_when_title_is_missing() {
         let text = "Chapter 1: Goblin Arrows\nText.\n";
         let cands = skeleton(text);
-        let chapters = split_by_headings(text, &cands, &[ChapterHeading { title: String::new(), line: 1, summary: "Ambush.".into() }]);
+        let chapters = split_by_headings(text, &cands, &[ChapterHeading { title: String::new(), line: 1, summary: "Ambush.".into() }], None);
         assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
     }
 
@@ -9602,20 +9623,51 @@ A HEADING LINE
                 heading("Backwards", 1, "Points behind chapter 1."),
                 heading("Chapter 3", last, "Third."),
             ],
+            None,
         );
         assert_eq!(chapters.len(), 2, "only the two valid, increasing lines survive: {chapters:?}");
         assert_eq!(chapters[0].0, "Chapter 1");
         assert_eq!(chapters[1].0, "Chapter 3");
         // A 0 would underflow a 1-based index — must be dropped, not wrapped.
-        let zeroed = split_by_headings(text, &cands, &[heading("Zero", 0, "Bad.")]);
+        let zeroed = split_by_headings(text, &cands, &[heading("Zero", 0, "Bad.")], None);
         assert_eq!(zeroed.len(), 1);
         assert_eq!(zeroed[0].2, text, "nothing usable means the whole document, not a panic");
+    }
+
+    /// The last chapter used to run to the end of the document, so every
+    /// trailing appendix landed inside it. Measured on Acquisitions
+    /// Incorporated: "Episode 6" absorbed five stat-block appendices and the
+    /// book's own index — 114k chars of tables that then sat in `current.md`
+    /// and were re-sent on every turn. The chapter list had correctly left them
+    /// out; nothing bounded the slice.
+    #[test]
+    fn the_last_chapter_stops_where_the_reference_material_starts() {
+        let text = "EPISODE 6\nThe finale happens here.\nAPPENDIX A: STAT BLOCKS\nGoblin. AC 15.\nINDEX\npage 1\n";
+        let cands = skeleton(text);
+        let titles: Vec<&str> = cands.iter().map(|(_, l)| *l).collect();
+        let ep6 = titles.iter().position(|l| *l == "EPISODE 6").unwrap() + 1;
+        let appendix = titles.iter().position(|l| *l == "APPENDIX A: STAT BLOCKS").unwrap();
+
+        // Unbounded: the appendices come along for the ride.
+        let unbounded = split_by_headings(text, &cands, &[heading("Episode 6", ep6, "Finale.")], None);
+        assert!(unbounded[0].2.contains("Goblin. AC 15."), "this is the bug being fixed: {:?}", unbounded[0].2);
+
+        // Bounded at the appendix's own offset: the finale stops there.
+        let bounded = split_by_headings(text, &cands, &[heading("Episode 6", ep6, "Finale.")], Some(cands[appendix].0));
+        assert!(bounded[0].2.contains("The finale happens here."));
+        assert!(!bounded[0].2.contains("Goblin. AC 15."), "reference material must not be inside a chapter: {:?}", bounded[0].2);
+        assert!(!bounded[0].2.contains("INDEX"));
+
+        // A bound BEFORE the chapter starts would invert the slice — ignored,
+        // not panicked on, since a wrong line number must never crash an import.
+        let absurd = split_by_headings(text, &cands, &[heading("Episode 6", ep6, "Finale.")], Some(0));
+        assert!(absurd[0].2.contains("The finale happens here."), "an impossible bound falls back to end-of-document");
     }
 
     #[test]
     fn split_by_headings_falls_back_to_whole_document_if_nothing_matches() {
         let text = "Completely unstructured adventure text with no headings at all.";
-        let chapters = split_by_headings(text, &[], &[heading("Chapter 1: Nonexistent", 1, "Doesn't appear anywhere.")]);
+        let chapters = split_by_headings(text, &[], &[heading("Chapter 1: Nonexistent", 1, "Doesn't appear anywhere.")], None);
         assert_eq!(chapters.len(), 1);
         assert_eq!(chapters[0].2, text);
     }
@@ -9665,7 +9717,7 @@ A HEADING LINE
         // Same reply shape as the chapterize call, so the same parser and the
         // same splitter handle it — that reuse is the point.
         let parsed = parse_chapterize_reply(r#"{"chapters":[{"title":"Opening","line":1,"summary":"s"},{"title":"The Fallen","line":2,"summary":"s"}]}"#).unwrap();
-        let scenes = split_by_headings(body, &candidate_heading_lines(body), &parsed.chapters);
+        let scenes = split_by_headings(body, &candidate_heading_lines(body), &parsed.chapters, None);
         assert_eq!(scenes.len(), 2);
         assert!(scenes[0].2.contains("prose.") && !scenes[0].2.contains("THE FALLEN"));
         assert!(scenes[1].2.starts_with("THE FALLEN"));
