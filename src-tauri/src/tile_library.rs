@@ -1694,18 +1694,84 @@ fn build_biome_evidence(entries: &[TileLibraryEntry], profile: &PackProfile, mea
 /// top. A sewer on the built-in stone is right; a sewer on a lightbox is not.
 ///
 /// Only ever removes, so a profile that passes is unchanged.
+/// The ground entries a folder owns that a query actually selects. Pure.
+fn own_folder_ground_hits<'a>(entries: &'a [TileLibraryEntry], folder: &str, tokens: &[String]) -> Vec<&'a TileLibraryEntry> {
+    entries
+        .iter()
+        .filter(|e| e.biome == folder && e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, tokens))
+        .collect()
+}
+
+/// Does this folder ship ground a mini can be placed on AT ALL? Jungle carries
+/// 2,281 tiles and ZERO textures; Feywilds has four, every one measuring 41-52
+/// against a floor gate of 70. Both have always BORROWED woodland grass (see
+/// pack_profile's DEFAULT_BIOMES), and a place that cannot possibly answer from
+/// its own shelf must be allowed to. Pure.
+fn folder_has_own_ground(entries: &[TileLibraryEntry], measured: &HashMap<String, MeasuredArt>, folder: &str) -> bool {
+    entries
+        .iter()
+        .filter(|e| e.biome == folder && e.category == "Textures" && !e.rel_path.contains("/Liquids/"))
+        .any(|e| tile_luminance(e, measured).is_none_or(luminance_is_usable_floor))
+}
+
+/// Anything in the catalog this query would select — what `resolve_floor`
+/// really searches, since it filters by CATEGORY and treats the biome as a
+/// scoring weight. Pure.
+fn catalog_wide_ground_hit(entries: &[TileLibraryEntry], tokens: &[String]) -> bool {
+    entries
+        .iter()
+        .any(|e| e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, tokens))
+}
+
+/// Would this floor query still find art? The single question both
+/// `prune_unbacked_grounds` (which deletes answers that stopped holding) and
+/// `carry_forward_settled_answers` (which re-uses answers that still hold)
+/// must agree on. They compose the same three primitives ON PURPOSE: the last
+/// bug here was a check testing a different set than the resolver searched,
+/// and a second independent implementation would rebuild that seam. Pure.
+fn floor_query_still_holds(entries: &[TileLibraryEntry], measured: &HashMap<String, MeasuredArt>, folder: &str, query: &str) -> bool {
+    let tokens = tokenize_query(query);
+    let hits = own_folder_ground_hits(entries, folder, &tokens);
+    if hits.is_empty() {
+        return !folder_has_own_ground(entries, measured, folder) && catalog_wide_ground_hit(entries, &tokens);
+    }
+    let lums: Vec<f64> = hits.iter().filter_map(|e| tile_luminance(e, measured)).collect();
+    lums.is_empty() || lums.iter().copied().any(luminance_is_usable_floor)
+}
+
+/// The `~` counterpart — no luminance gate, and `/Liquids/` is where a pool
+/// SHOULD come from, so it is not excluded. Pure.
+fn liquid_query_still_holds(entries: &[TileLibraryEntry], folder: &str, query: &str) -> bool {
+    let tokens = tokenize_query(query);
+    entries.iter().any(|e| e.biome == folder && e.category == "Textures" && has_identity_match(e, &tokens))
+}
+
 fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<String, MeasuredArt>, mut profile: PackProfile) -> PackProfile {
     let mut dropped: Vec<String> = Vec::new();
+    let folder_has_own_ground = |folder: &str| folder_has_own_ground(entries, measured, folder);
     profile.biomes.retain_mut(|b| {
         let Some(query) = b.floor_query.clone() else { return true };
         let tokens = tokenize_query(&query);
-        // Exactly what resolve_floor will search: this folder's terrain art,
-        // minus the Liquids pools that belong to `~` cells.
+        // NOTE: `resolve_floor` searches every `Textures` entry in the catalog
+        // and treats the biome as a SCORING WEIGHT (`biome_affinity`), not a
+        // filter — so folder-scoping this check tested a different set than the
+        // resolver uses. That is the same seam that made a ground candidate
+        // report 14 files when its word really selected 42. Keep the folder
+        // rule only where the folder can actually answer.
         let hits: Vec<&TileLibraryEntry> = entries
             .iter()
             .filter(|e| e.biome == b.folder && e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, &tokens))
             .collect();
         if hits.is_empty() {
+            if !folder_has_own_ground(&b.folder) {
+                let borrowed = entries
+                    .iter()
+                    .any(|e| e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, &tokens));
+                if borrowed {
+                    dropped.push(format!("{} → {}/{:?}: folder ships no usable ground of its own; BORROWING from the wider catalog, as resolve_floor will", b.scene, b.folder, query));
+                    return true;
+                }
+            }
             dropped.push(format!("{} → {}/{:?}: query selects nothing in its own folder; place dropped", b.scene, b.folder, query));
             return false;
         }
@@ -1717,6 +1783,28 @@ fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<Strin
         }
         true
     });
+    // A place that answered NOTHING because its own shelf is empty falls back
+    // to the built-in table's query for that folder. The profiler is told to
+    // answer null only when a biome "has no ground candidates at all", and the
+    // evidence it sees lists that biome's OWN candidates — so for Jungle
+    // (zero textures) null is the only honest answer available to it, even
+    // though the same prompt invites borrowing from a related biome. The
+    // result was a learned profile strictly WORSE than the hardcoded defaults
+    // it replaced: jungle maps rendered on built-in dungeon flagstone.
+    for b in &mut profile.biomes {
+        if b.floor_query.is_some() || folder_has_own_ground(&b.folder) {
+            continue;
+        }
+        let Some(fallback) = crate::pack_profile::builtin_floor_for_folder(&b.folder) else { continue };
+        if entries
+            .iter()
+            .any(|e| e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, &tokenize_query(fallback)))
+        {
+            dropped.push(format!("{} → {}: no ground of its own and no answer given; adopting the built-in borrow {fallback:?}", b.scene, b.folder));
+            b.floor_query = Some(fallback.to_string());
+        }
+    }
+
     // The same check for `~`, minus the luminance gate: a pool is meant to read
     // as liquid, not as a board you place minis on, and Horror's blood measures
     // about 42. Note resolve_liquid does NOT exclude `/Liquids/` the way
@@ -1755,25 +1843,59 @@ fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<Strin
 /// this means anything restored here is still checked against the current
 /// catalog before it survives), and it never overwrites a fresh answer — only
 /// fills a hole where an answer used to be.
-fn carry_forward_lost_fields(prev: &PackProfile, mut derived: PackProfile) -> PackProfile {
-    let mut restored: Vec<String> = Vec::new();
+fn carry_forward_settled_answers(
+    prev: &PackProfile,
+    mut derived: PackProfile,
+    entries: &[TileLibraryEntry],
+    measured: &HashMap<String, MeasuredArt>,
+) -> PackProfile {
+    let mut notes: Vec<String> = Vec::new();
+    let (mut kept, mut fresh, mut new_places) = (0usize, 0usize, 0usize);
     for b in &mut derived.biomes {
         let Some(old) = prev.biomes.iter().find(|p| p.scene.eq_ignore_ascii_case(&b.scene) && p.folder == b.folder) else {
+            new_places += 1;
             continue;
         };
-        for (field, new, was) in [("floor", &mut b.floor_query, &old.floor_query), ("liquid", &mut b.liquid_query, &old.liquid_query)] {
-            if new.is_none() {
-                if let Some(v) = was {
-                    *new = Some(v.clone());
-                    restored.push(format!("{} {field}_query: dropped by this run, restored {v:?}", b.scene));
+
+        // `natural_walls` describes the PLACE — whether a cave is cut from rock
+        // or a hall is built of masonry — not the art, so re-importing cannot
+        // teach us anything new about it and there is nothing to validate it
+        // against. It is also a bare bool, so the "restore what was lost" rule
+        // never applied to it and it flipped freely: one live run turned
+        // mountain to masonry walls and gave an oasis the bazaar's tiled floor.
+        if b.natural_walls != old.natural_walls {
+            notes.push(format!("{}: natural_walls {} → {} REVERTED (a place does not change what it is made of)", b.scene, old.natural_walls, b.natural_walls));
+        }
+        b.natural_walls = old.natural_walls;
+
+        match &old.floor_query {
+            Some(q) if floor_query_still_holds(entries, measured, &b.folder, q) => {
+                if b.floor_query.as_deref() != Some(q.as_str()) {
+                    notes.push(format!("{} floor_query: keeping settled {q:?} over this run's {:?}", b.scene, b.floor_query));
                 }
+                b.floor_query = Some(q.clone());
+                kept += 1;
             }
+            Some(q) => {
+                notes.push(format!("{} floor_query: settled {q:?} no longer finds art; taking this run's {:?}", b.scene, b.floor_query));
+                fresh += 1;
+            }
+            None => fresh += 1,
+        }
+
+        match &old.liquid_query {
+            Some(q) if liquid_query_still_holds(entries, &b.folder, q) => {
+                if b.liquid_query.as_deref() != Some(q.as_str()) {
+                    notes.push(format!("{} liquid_query: keeping settled {q:?} over this run's {:?}", b.scene, b.liquid_query));
+                }
+                b.liquid_query = Some(q.clone());
+            }
+            Some(q) => notes.push(format!("{} liquid_query: settled {q:?} no longer finds art; taking this run's {:?}", b.scene, b.liquid_query)),
+            None => {}
         }
     }
-    crate::maplog::log(
-        "PACK PROFILE — answers carried forward",
-        &if restored.is_empty() { "this run kept every answer the last one had".to_string() } else { restored.join("\n") },
-    );
+    notes.push(format!("— {kept} settled answer(s) kept, {fresh} re-derived, {new_places} new place(s)"));
+    crate::maplog::log("PACK PROFILE — answers carried forward", &notes.join("\n"));
     derived
 }
 
@@ -1856,7 +1978,7 @@ pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let derived = carry_forward_lost_fields(&saved, derived);
+    let derived = carry_forward_settled_answers(&saved, derived, &entries, &manifest.measured);
     // Same discipline as the layout pass: check the answer against the files
     // before trusting it. Runs LAST so a carried-forward query still has to
     // exist in the catalog this run scanned. See prune_unbacked_grounds.
@@ -2779,46 +2901,82 @@ mod tests {
         assert!(rock.example.contains("Lava_Rocks"), "the examples must reveal the second family: {}", rock.example);
     }
 
-    /// Live: `horror` carried `liquid_query: "blood"` for three runs, then a
-    /// re-profile simply did not mention it, and a charnel house's blood
-    /// channels filled with clean blue water. An answer the last run had and
-    /// this one lost is restored; everything else is left alone.
+    /// A re-profile must not be a re-roll.
+    ///
+    /// This test used to assert the opposite for one case — "a fresh answer
+    /// must never be overwritten by the old one" — back when the only known
+    /// failure was `horror` silently LOSING `liquid_query: "blood"` and a
+    /// charnel house filling with clean blue water. Live evidence on
+    /// 2026-07-21 reversed the call: a single re-profile moved six answers
+    /// nobody asked it to touch, and two were regressions — `mountain` flipped
+    /// to masonry walls, and `oasis` picked up `ceramic`, the BAZAAR's tiled
+    /// market floor, for an open desert spring. Nothing catches that but a
+    /// human reading a diff.
+    ///
+    /// So a settled answer wins by default, and the fresh one is taken only
+    /// where the settled one no longer finds art — which is exactly the case
+    /// where re-profiling has something real to say.
     #[test]
-    fn an_answer_this_run_lost_is_carried_forward_but_a_fresh_one_is_not() {
-        let place = |scene: &str, folder: &str, floor: Option<&str>, liquid: Option<&str>| crate::pack_profile::BiomeProfile {
+    fn a_settled_answer_survives_a_re_profile_unless_it_stopped_working() {
+        let tex = |biome: &str, name: &str, keywords: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("{biome}/Textures/{name}"),
+            biome: biome.into(),
+            category: "Textures".into(),
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        // The catalog still backs flesh/blood/marsh/terrain — but NOT "stone".
+        let entries = vec![
+            tex("Horror", "Flesh_A.jpg", &["flesh", "horror"]),
+            tex("Horror", "Liquids/Blood_A.jpg", &["blood", "horror"]),
+            tex("Swamp", "Marsh_A.jpg", &["marsh", "swamp"]),
+            tex("Swamp", "Wet_A.jpg", &["wet", "swamp"]),
+            tex("Volcanic", "Terrain_A.jpg", &["terrain", "volcanic"]),
+            tex("Volcanic", "Rock_A.jpg", &["rock", "volcanic"]),
+            tex("Crypt", "Bone_A.jpg", &["bone", "crypt"]),
+        ];
+        let measured: HashMap<String, MeasuredArt> = entries
+            .iter()
+            .map(|e| (e.rel_path.clone(), MeasuredArt { kind: ArtKind::Ground, lum: 100 }))
+            .collect();
+        let place = |scene: &str, folder: &str, floor: Option<&str>, walls: bool, liquid: Option<&str>| crate::pack_profile::BiomeProfile {
             scene: scene.into(),
             folder: folder.into(),
             floor_query: floor.map(str::to_string),
-            natural_walls: false,
+            natural_walls: walls,
             liquid_query: liquid.map(str::to_string),
         };
         let prev = PackProfile {
             biomes: vec![
-                place("horror", "Horror", Some("flesh"), Some("blood")),
-                place("swamp", "Swamp", Some("marsh"), None),
-                place("volcano", "Volcanic", Some("terrain"), Some("lava")),
-                place("crypt", "Crypt", Some("stone"), None),
+                place("horror", "Horror", Some("flesh"), false, Some("blood")),
+                place("swamp", "Swamp", Some("marsh"), true, None),
+                place("volcano", "Volcanic", Some("terrain"), true, None),
+                place("crypt", "Crypt", Some("stone"), true, None), // no `stone` art exists
             ],
             ..PackProfile::default()
         };
         let derived = PackProfile {
             biomes: vec![
-                place("horror", "Horror", Some("flesh"), None),   // lost its liquid
-                place("swamp", "Swamp", None, None),              // lost its floor
-                place("volcano", "Volcanic", Some("rock"), Some("lava")), // CHANGED, not lost
-                place("crypt", "Horror", None, None),             // same word, different folder
+                place("horror", "Horror", Some("flesh"), false, None), // lost its liquid
+                place("swamp", "Swamp", Some("wet"), false, None),     // CHANGED, and flipped its walls
+                place("volcano", "Volcanic", Some("rock"), true, None), // CHANGED
+                place("crypt", "Crypt", Some("bone"), true, None),     // changed, and the old answer is dead
+                place("reef", "Aquatic", Some("coral"), true, None),   // a place that did not exist before
             ],
             ..PackProfile::default()
         };
-        let out = carry_forward_lost_fields(&prev, derived);
-        let q = |scene: &str| {
-            let b = out.scene(scene).unwrap();
-            (b.floor_query.clone(), b.liquid_query.clone())
-        };
-        assert_eq!(q("horror"), (Some("flesh".into()), Some("blood".into())), "the dropped liquid must come back");
-        assert_eq!(q("swamp"), (Some("marsh".into()), None), "the dropped floor must come back; a field that was always null stays null");
-        assert_eq!(q("volcano").0, Some("rock".into()), "a fresh answer must never be overwritten by the old one");
-        assert_eq!(q("crypt"), (None, None), "a place re-homed to a different folder is not the same place — carry nothing");
+        let out = carry_forward_settled_answers(&prev, derived, &entries, &measured);
+        let b = |scene: &str| out.scene(scene).unwrap().clone();
+
+        assert_eq!(b("horror").liquid_query.as_deref(), Some("blood"), "a dropped liquid still comes back");
+        assert_eq!(b("swamp").floor_query.as_deref(), Some("marsh"), "a settled floor must not be re-rolled to another working one");
+        assert!(b("swamp").natural_walls, "natural_walls describes the PLACE and must not flip on a re-profile");
+        assert_eq!(b("volcano").floor_query.as_deref(), Some("terrain"), "same — the settled answer wins");
+        // The one case where re-deriving genuinely has something to say.
+        assert_eq!(b("crypt").floor_query.as_deref(), Some("bone"), "a settled answer that no longer finds art gives way to the fresh one");
+        assert_eq!(b("reef").floor_query.as_deref(), Some("coral"), "a place with no history profiles normally");
     }
 
     /// Both live failures from the re-profile that motivated this, and the
@@ -2873,6 +3031,80 @@ mod tests {
         assert_eq!(out.scene("sewer").map(|b| b.folder.as_str()), Some("Settlements"));
         assert!(out.scene("sewer").unwrap().floor_query.is_none(), "art that washes out everything on top of it is not a floor");
         assert_eq!(out.scene("abattoir").unwrap().floor_query.as_deref(), Some("flesh"), "a backed, legible ground must survive untouched");
+    }
+
+    /// Live (2026-07-21): every jungle map rendered on built-in dungeon
+    /// flagstone. Jungle ships 2,281 tiles and ZERO textures; Feywilds ships
+    /// four, all measuring 41-52 against a floor gate of 70. Both have always
+    /// borrowed woodland grass — but the folder-scoped check deleted any
+    /// borrowed answer, and the profiler, shown only its own biome's (empty)
+    /// candidate list, could answer nothing but null. The learned profile came
+    /// out strictly WORSE than the hardcoded defaults it replaced.
+    #[test]
+    fn a_biome_with_no_ground_of_its_own_borrows_instead_of_losing_its_floor() {
+        let tex = |biome: &str, name: &str, keywords: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("{biome}/Textures/{name}"),
+            biome: biome.into(),
+            category: "Textures".into(),
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        let flora = |biome: &str, name: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("{biome}/Flora/{name}"),
+            biome: biome.into(),
+            category: "Flora".into(),
+            keywords: vec!["palm".into()],
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![
+            tex("Woodlands", "Grass_A.jpg", &["grass", "woodlands"]),
+            tex("Swamp", "Wet_A.jpg", &["wet", "swamp"]),
+            // Jungle: tiles, but not one of them is ground.
+            flora("Jungle", "Palm_A.webp"),
+            // Feywilds: ground of its own, every bit of it too dark to stand on.
+            tex("Feywilds", "Terrain_A_05.jpg", &["terrain", "feywilds"]),
+        ];
+        let measured = HashMap::from([
+            ("Woodlands/Textures/Grass_A.jpg".to_string(), MeasuredArt { kind: ArtKind::Ground, lum: 120 }),
+            ("Swamp/Textures/Wet_A.jpg".to_string(), MeasuredArt { kind: ArtKind::Ground, lum: 95 }),
+            ("Feywilds/Textures/Terrain_A_05.jpg".to_string(), MeasuredArt { kind: ArtKind::Ground, lum: 41 }),
+        ]);
+        let place = |scene: &str, folder: &str, q: Option<&str>| crate::pack_profile::BiomeProfile {
+            scene: scene.into(),
+            folder: folder.into(),
+            floor_query: q.map(str::to_string),
+            natural_walls: true,
+            liquid_query: None,
+        };
+        let profile = PackProfile {
+            biomes: vec![
+                place("jungle", "Jungle", None),          // answered nothing; nothing to answer WITH
+                place("feywild", "Feywilds", Some("grass")), // a borrow, explicitly stated
+                place("swamp", "Swamp", Some("wet")),     // stands on its own — control
+                place("crypt", "Swamp", Some("dwarven")), // a folder that CAN answer, given a word it can't
+            ],
+            ..PackProfile::default()
+        };
+        let out = prune_unbacked_grounds(&entries, &measured, profile);
+
+        assert_eq!(
+            out.scene("jungle").and_then(|b| b.floor_query.clone()).as_deref(),
+            Some("grass"),
+            "a folder with no ground at all must adopt the built-in borrow, not render on flagstone"
+        );
+        assert_eq!(
+            out.scene("feywild").and_then(|b| b.floor_query.clone()).as_deref(),
+            Some("grass"),
+            "four unusable textures is still no ground of its own — the borrow must survive"
+        );
+        assert_eq!(out.scene("swamp").and_then(|b| b.floor_query.clone()).as_deref(), Some("wet"));
+        // Unchanged: a folder that ships perfectly good ground and is handed a
+        // word matching none of it is a bad PAIRING, not a borrow.
+        assert!(out.scene("crypt").is_none(), "a mispaired query must still drop its place");
     }
 
     #[test]

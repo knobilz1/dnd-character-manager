@@ -145,7 +145,7 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
   const standable = (s: string): Array<[number, number]> =>
     cellRefsInText(s)
       .map((t) => t.split(',').map(Number) as [number, number])
-      .filter(([c, r]) => c >= 0 && c < cols && r >= 0 && r < grid.length && grid[r][c] !== '#' && grid[r][c] !== ' ' && grid[r][c] !== '%');
+      .filter(([c, r]) => c >= 0 && c < cols && r >= 0 && r < grid.length && grid[r][c] !== '#' && grid[r][c] !== 'B' && grid[r][c] !== ' ' && grid[r][c] !== '%');
 
   const zoneCells = (side: string): Array<[number, number]> => {
     const part = placementPart(side);
@@ -599,7 +599,11 @@ function drawSpriteScaled(ctx: Ctx, url: string, x: number, y: number, w: number
 /** Whether the grid cell at (row, col) is a wall — out-of-bounds counts as
  *  "not a wall" (the map edge reads the same as open space). Pure. */
 function isWallAt(grid: string[], row: number, col: number): boolean {
-  return grid[row]?.[col] === '#';
+  const ch = grid[row]?.[col];
+  // `B` is a BUILT wall — different material, same solidity — so corner joins
+  // and wall runs treat it identically to `#`. A hut's timber wall meeting the
+  // rock it's built against should read as one continuous barrier.
+  return ch === '#' || ch === 'B';
 }
 
 /** True only for a REAL walkable cell — not a wall, and not void/out-of-
@@ -611,7 +615,7 @@ function isWallAt(grid: string[], row: number, col: number): boolean {
  *  this ever hit the UI). Pure. */
 function isOpenFloorAt(grid: string[], row: number, col: number): boolean {
   const ch = grid[row]?.[col];
-  return ch !== undefined && ch !== '#' && ch !== ' ';
+  return ch !== undefined && ch !== '#' && ch !== 'B' && ch !== ' ';
 }
 
 /** The four cardinal neighbors of a `#` cell — `n`/`s`/`e`/`w` true iff that
@@ -812,7 +816,7 @@ function hazardVariantFor(label: string | undefined): keyof HazardSet {
  *  where it defaults to a plain wall face (see NEUTRAL_WALL_NEIGHBORS).
  *  `featureLabel` is only meaningful for `=`/`*` cells (see
  *  furnitureVariantFor/hazardVariantFor) — omit it for the fallback look. */
-function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string, terrain?: MapTerrain) {
+function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string, terrain?: MapTerrain, builtWallAdjacent?: boolean) {
   const style = TILE_STYLE_SPRITES[activeTileStyle];
   switch (code) {
     case '.':
@@ -826,6 +830,16 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       // as a black rectangle that read like a rendering glitch.
       if (terrain?.naturalWalls && terrain.floor && drawShaded(ctx, terrain.floor, x, y, px, VOID_DARKNESS)) return;
       break;
+    case 'B': {
+      // A wall someone BUILT, standing in a scene whose own `#` is landscape.
+      // Never shaded terrain, whatever the biome says — that is the entire
+      // point of the code. Live: a witch's stilt-house drawn with `#` in a
+      // swamp rendered as a patch of bog, walls and doorways and all, because
+      // `naturalWalls` is a per-BIOME flag and a map can hold both kinds.
+      const built = wallSpriteFor(wallNeighbors ?? NEUTRAL_WALL_NEIGHBORS);
+      if (drawSprite(ctx, style.wall[built], x, y, px, style.filter)) return;
+      break;
+    }
     case '#': {
       // Living rock in the wilderness; mortared masonry in a building.
       if (terrain?.naturalWalls && terrain.floor && drawShaded(ctx, terrain.floor, x, y, px, WALL_DARKNESS)) return;
@@ -838,7 +852,9 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       // mouth or a trail gap, and the normal-brightness cell breaking the
       // darkened wall band already reads as the opening. Red plank doors
       // floating on grass (live: every forest/cave map) read as a bug.
-      if (terrain?.naturalWalls) {
+      // A door set into a BUILT wall is the exception: there IS something to
+      // hang it on, so it gets a real door even outdoors.
+      if (terrain?.naturalWalls && !builtWallAdjacent) {
         if (drawGround(ctx, x, y, px, terrain, style)) return;
         break;
       }
@@ -1025,10 +1041,17 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
     for (let c = 0; c < wCols; c++) {
       const mapRow = w.rowStart + r, mapCol = w.colStart + c;
       let code = map.grid[mapRow]?.[mapCol] ?? ' ';
-      if (covered.has(`${mapCol},${mapRow}`) && code !== '#' && code !== ' ') code = '.'; // resolved tile replaces the glyph
-      const neighbors = code === '#' ? wallNeighborsAt(map.grid, mapRow, mapCol) : undefined;
+      if (covered.has(`${mapCol},${mapRow}`) && code !== '#' && code !== 'B' && code !== ' ') code = '.'; // resolved tile replaces the glyph
+      const neighbors = code === '#' || code === 'B' ? wallNeighborsAt(map.grid, mapRow, mapCol) : undefined;
       const featureLabel = code === '=' || code === '*' ? featureLabels.get(`${mapCol},${mapRow}`) : undefined;
-      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel, terrain);
+      // A `+` only earns a real door sprite outdoors when it is set into a
+      // BUILT wall — otherwise it is a cave mouth or a trail gap.
+      const builtAdj =
+        code === '+' &&
+        [[mapCol - 1, mapRow], [mapCol + 1, mapRow], [mapCol, mapRow - 1], [mapCol, mapRow + 1]].some(
+          ([cc, rr]) => map.grid[rr]?.[cc] === 'B',
+        );
+      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel, terrain, builtAdj);
     }
   }
 

@@ -166,6 +166,18 @@ pub const BUILTIN_SCENE: &str = "dungeon";
 ///
 /// `dungeon` is deliberately absent: it IS the built-in look, so a dungeon map
 /// keeps the stone floor with no override and no vision call.
+/// The built-in ground query for an art FOLDER, if the default table has one.
+/// Keyed by folder rather than scene word because a learned profile invents its
+/// own scene words ("feywild" where the table says "fey") but the folder is the
+/// pack's own name and matches exactly. Used to rescue a place whose folder
+/// ships no usable ground of its own — see `prune_unbacked_grounds`. Pure.
+pub fn builtin_floor_for_folder(folder: &str) -> Option<&'static str> {
+    DEFAULT_BIOMES
+        .iter()
+        .find(|(_, f, floor, _, _)| *f == folder && !floor.is_empty())
+        .map(|(_, _, floor, _, _)| *floor)
+}
+
 const DEFAULT_BIOMES: &[(&str, &str, &str, bool, &str)] = &[
     ("cave", "Underdark", "cave", true, ""),
     ("underdark", "Underdark", "drow stone", true, ""),

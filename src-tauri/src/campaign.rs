@@ -221,7 +221,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  % deep chasm/gorge/ravine — a FATAL fall, renders as a dark pit, NOT water; nothing stands here and no one deploys in it  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ water  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  % deep chasm/gorge/ravine — a FATAL fall, renders as a dark pit, NOT water; nothing stands here and no one deploys in it  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -2465,6 +2465,7 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         - Size between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}. The `Grid:` line MUST match the block you actually draw — count every row before you answer.\n\
         - EVERY row must be the exact same number of characters as every other row.\n\
         - Enclose the room with `#` walls; a space is outside the map.\n\
+        - A STRUCTURE standing in an outdoor scene is built with `B`, not `#`. Outdoors, `#` is drawn as the living rock or earth of the landscape itself, so a hut, cabin, watchtower, shrine, palisade or outbuilding drawn with `#` dissolves into the terrain — live: a witch's stilt-house in a swamp rendered as a patch of bog, walls and doorways and all. `B` is timber/plank/masonry someone ERECTED, and a `+` door set into it reads as a real door. Indoors (a tavern, a castle, a mine) `#` is already masonry, so `B` is not needed there.\n\
         - A `+` door needs `#` directly on both sides (left+right, or above+below) — never on open floor.\n\
         - Every `Features:` line must point at a cell that really has that code right now. \"Bar at A2\" means A2 must actually be `=`.\n\
         - A stool, chair, or bench is `=` (furniture) — never `^`. `^` renders as a pile of grey STONE rocks, so use it ONLY for actual stone rubble (caves, ruins, collapsed masonry). Overturned or broken furniture, spilled crates, and other clutter that slows movement is still `=` — draw it as the thing it is and note \"difficult terrain here\" in Tactics; do NOT scatter `^` in a wooden interior, it looks like a rockslide indoors.\n\
@@ -2520,6 +2521,7 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - Size it between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}, and the `Grid:` line's <cols>x<rows> MUST equal the block you actually draw.\n\
         - EVERY row must be exactly <cols> characters wide — count them. Ragged rows are the single most common failure.\n\
         - Enclose the playable area with `#` walls; use a space for anything outside it.\n\
+        - A STRUCTURE standing in an outdoor scene is built with `B`, not `#`. Outdoors, `#` is drawn as the living rock or earth of the landscape itself, so a hut, cabin, watchtower, shrine, palisade or outbuilding drawn with `#` dissolves into the terrain — live: a witch's stilt-house in a swamp rendered as a patch of bog, walls and doorways and all. `B` is timber/plank/masonry someone ERECTED, and a `+` door set into it reads as a real door. Indoors (a tavern, a castle, a mine) `#` is already masonry, so `B` is not needed there.\n\
         - A `+` door must be SET INTO a wall run — a `#` on both sides of it, horizontally or vertically. Never leave a door standing on open floor.\n\
         - Every `Features:` line must point at a cell you actually drew the matching code in. If you write \"Bar at A2\", then A2 must really be a `=`. Never list something you didn't draw.\n\
         - A `Features:` line may name a single cell (\"Hearth at B7\"), a list (\"Pillars at C4, G4\"), or a range (\"Bar counter at B2-K2\", \"Table at D4-E5\"). A range means EVERY cell in the rectangle its two corners span, so each one of them must hold that code — a run with a gap in it is wrong.\n\
@@ -2617,7 +2619,11 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
 // enemy placement against these cell coordinates.
 
 /// Every legal grid character (plus `' '` = void, handled separately).
-const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*', ',', '%', 'H'];
+const MAP_CODES: &[char] = &['.', '#', 'B', '+', '~', 'o', '^', '=', 'T', '_', '*', ',', '%', 'H'];
+/// Every code that BLOCKS movement and joins into a wall run — `#` and `B`
+/// differ only in what they're made of, so a doorway, a corner join and the
+/// "is this cell solid" question all treat them the same.
+const MAP_WALL_CODES: &[char] = &['#', 'B'];
 /// Codes that are an actual object/terrain feature — what a `Features:` line
 /// must point at. Plain floor, void and wall are not "things".
 const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*', ','];
@@ -2876,6 +2882,14 @@ fn feature_lines(suffix: &[String]) -> Vec<String> {
     bullets_under(suffix, "Features:")
 }
 
+/// The `- ...` bullets under `Deployment:` — the `Enemies:`/`Party:` lines.
+/// Their cells are checked for STANDABILITY only (see `validate_map_spec`),
+/// never against the Features object-code rule: a start square is meant to be
+/// plain floor, which is exactly what that rule rejects.
+fn deployment_lines(suffix: &[String]) -> Vec<String> {
+    bullets_under(suffix, "Deployment:")
+}
+
 /// The `- ...` bullets under `Objects:` — see `parse_object_line`.
 fn object_lines(suffix: &[String]) -> Vec<String> {
     bullets_under(suffix, "Objects:")
@@ -2915,7 +2929,10 @@ fn door_in_wall(rows: &[String], col: usize, row: usize) -> bool {
         cell_at(rows, c as usize, r as usize).unwrap_or(' ')
     };
     let (c, r) = (col as isize, row as isize);
-    (at(c - 1, r) == '#' && at(c + 1, r) == '#') || (at(c, r - 1) == '#' && at(c, r + 1) == '#')
+    // A door set into a BUILT wall is just as valid as one set into `#` — a
+    // hut's doorway is the whole reason `B` exists.
+    let wall = |ch: char| MAP_WALL_CODES.contains(&ch);
+    (wall(at(c - 1, r)) && wall(at(c + 1, r))) || (wall(at(c, r - 1)) && wall(at(c, r + 1)))
 }
 
 /// The `<cols>x<rows>` the `Grid:` line CLAIMS (which may be a lie).
@@ -2997,7 +3014,7 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
                 Some(ch) if !MAP_OBJECT_CODES.contains(&ch) => {
                     let what = match ch {
                         '.' => "plain floor",
-                        '#' => "a wall",
+                        '#' | 'B' => "a wall",
                         ' ' => "empty void outside the map",
                         _ => "not an object",
                     };
@@ -3059,6 +3076,34 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
         }
     }
 
+    // Deployment cells must be squares a miniature can be SET DOWN on. This is
+    // deliberately not the Features check — a start cell has no business
+    // pointing at an object code — but nothing checked the one thing that
+    // actually matters, and the failure is silent: the renderer filters
+    // unstandable cells out of the zone, so a wholly-invalid line draws
+    // NOTHING. Live: a swamp map put `Party: G13, H13, I13, J13, K13` on row
+    // 13, which was solid `#`, and the map shipped with no party start marked
+    // at all while the text told the players to stand inside a wall.
+    for line in deployment_lines(&suffix) {
+        let side = if line.to_lowercase().contains("party") { "Party" } else { "Enemies" };
+        let mut bad: Vec<String> = Vec::new();
+        for (tok, c, r) in cell_refs_in(&line) {
+            match cell_at(&rows, c, r) {
+                None => bad.push(format!("{tok} (outside the grid)")),
+                Some(ch) if MAP_WALL_CODES.contains(&ch) => bad.push(format!("{tok} (`{ch}` wall)")),
+                Some(' ') => bad.push(format!("{tok} (void)")),
+                Some('%') => bad.push(format!("{tok} (`%` chasm — a fatal drop)")),
+                _ => {}
+            }
+        }
+        if !bad.is_empty() {
+            issues.push(format!(
+                "Deployment `{side}:` names squares nobody can stand on: {}. Every cell there is where a physical miniature is set down, so it must be open floor — never a wall, the void, or a chasm.",
+                bad.join(", ")
+            ));
+        }
+    }
+
     for line in object_lines(&suffix) {
         let Some((label, c, r, w, h)) = parse_object_line(&line) else {
             issues.push(format!(
@@ -3068,8 +3113,8 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
         };
         match cell_at(&rows, c, r) {
             None => issues.push(format!("Objects says \"{label}\" at a cell outside the {cols}x{rows_n} grid.")),
-            Some('#') => issues.push(format!(
-                "Objects says \"{label}\" at {}{}, but that cell is a `#` wall — objects need real floor.",
+            Some(ch) if MAP_WALL_CODES.contains(&ch) => issues.push(format!(
+                "Objects says \"{label}\" at {}{}, but that cell is a `{ch}` wall — objects need real floor.",
                 column_label(c),
                 r + 1
             )),
@@ -7465,13 +7510,38 @@ mod tests {
     /// through the Features prune untouched.
     #[test]
     fn deployment_section_cells_are_not_validated_or_pruned_as_features() {
-        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\n- Table at G6\nObjects:\n- Small campfire at C7 (1x1)\nDeployment:\n- Enemies: A1-B1 — dug in along the north wall\n- Party: Z9 — arriving from off the eastern edge\nTactics:\n- x";
-        // A1 is a `#` wall and Z9 is off the grid: read as Features/Objects,
-        // both would raise issues. As Deployment, neither is even looked at.
+        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\n- Table at G6\nObjects:\n- Small campfire at C7 (1x1)\nDeployment:\n- Enemies: B2, C2 — dug in along the north wall\n- Party: B9, C9, D9, E9 — arriving from the south\nTactics:\n- x";
+        // Every one of those cells is plain `.` floor — which is exactly what
+        // the Features rule REJECTS ("there is nothing there"). Deployment must
+        // not be read that way, and the section rides the prune untouched.
         assert_eq!(validate_map_spec(spec), Vec::<String>::new());
         let pruned = prune_invalid_features(spec);
-        assert!(pruned.contains("Deployment:\n") && pruned.contains("Enemies: A1-B1") && pruned.contains("Party: Z9"), "{pruned}");
+        assert!(pruned.contains("Deployment:\n") && pruned.contains("Enemies: B2, C2") && pruned.contains("Party: B9"), "{pruned}");
         assert!(is_map_section_header("Deployment:"));
+    }
+
+    /// Live (the hag's stilt-house, 2026-07-21): `Party: G13, H13, I13, J13,
+    /// K13` where row 13 was solid `#`. The renderer drops unstandable cells
+    /// from a zone, so the map shipped with NO party start drawn at all while
+    /// its text told the players to stand inside a wall. Silent erasure is the
+    /// worst failure mode available, so it has to be caught here.
+    #[test]
+    fn deployment_cells_nobody_could_stand_on_are_caught() {
+        let base = "# X\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  % chasm\nMap:\n##########\n#........#\n#........#\n#........#\n#..%%....#\n#........#\n#........#\n#........#\n#........#\n##########\nFeatures:\nDeployment:\nPARTYLINE\nTactics:\n- x";
+
+        let in_wall = base.replace("PARTYLINE", "- Party: B10, C10, D10, E10 — spread along the south wall");
+        let issues = validate_map_spec(&in_wall);
+        assert!(issues.iter().any(|i| i.contains("nobody can stand on") && i.contains("Party")), "{issues:?}");
+
+        let in_chasm = base.replace("PARTYLINE", "- Enemies: Goblin at D5 — perched over the drop");
+        assert!(
+            validate_map_spec(&in_chasm).iter().any(|i| i.contains("chasm")),
+            "a creature cannot be set down in a fatal drop: {:?}",
+            validate_map_spec(&in_chasm)
+        );
+
+        let fine = base.replace("PARTYLINE", "- Party: B2, C2, D2, E2 — just inside the north wall");
+        assert_eq!(validate_map_spec(&fine), Vec::<String>::new(), "open floor must pass");
     }
 
     /// The real spec the generator shipped for "Bar Fight" (test-campaign,
@@ -7682,6 +7752,32 @@ mod tests {
         assert!(door_in_wall(&rows, 1, 1));
         let floating: Vec<String> = vec!["...".into(), ".+.".into(), "...".into()];
         assert!(!door_in_wall(&floating, 1, 1));
+        // A hut's doorway is set into BUILT wall, which is the whole reason
+        // `B` exists — it must be just as valid as one set into `#`.
+        let hut: Vec<String> = vec!["BBB".into(), "B+B".into(), "B.B".into()];
+        assert!(door_in_wall(&hut, 1, 1));
+        // …and a wall that changes material mid-run still frames a door.
+        let mixed: Vec<String> = vec!["#B#".into(), "#+B".into(), "#.#".into()];
+        assert!(door_in_wall(&mixed, 1, 1));
+    }
+
+    /// The live failure this code exists for: a witch's stilt-house in a swamp,
+    /// drawn with `#`, rendered as a patch of bog because `natural_walls` is a
+    /// per-BIOME flag and 14 of the 22 learned places set it. Built walls must
+    /// pass validation exactly like `#` — solid, doors allowed, no objects on
+    /// them — so the model can mix a structure into a wilderness scene.
+    #[test]
+    fn a_built_wall_is_a_wall_everywhere_validation_looks() {
+        let spec = "# Hut\nGrid: 12x10, 5 ft squares.\nLegend: . floor  # wall  B built wall  + door  ~ water\nMap:\n~~~~~~~~~~~~\n~~BBBBB~~~~~\n~~B...B~~~~~\n~~B...B~~~~~\n~~BB+BB~~~~~\n~~~~..~~~~~~\n~~~~..~~~~~~\n~~~~..~~~~~~\n~~~~..~~~~~~\n~~~~~~~~~~~~\nFeatures:\n- Hut door at E5\nTactics:\n- x";
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new(), "a hut built with `B` in open water must validate");
+
+        // An object may not stand inside a built wall any more than a stone one.
+        let on_wall = spec.replace("Features:\n- Hut door at E5", "Objects:\n- barrel at C2 (1x1)\nFeatures:\n- Hut door at E5");
+        assert!(
+            validate_map_spec(&on_wall).iter().any(|i| i.contains("`B` wall")),
+            "objects need real floor: {:?}",
+            validate_map_spec(&on_wall)
+        );
     }
 
     #[test]
