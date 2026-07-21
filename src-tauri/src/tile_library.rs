@@ -1336,8 +1336,20 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     // Upright before rotated at equal score, so a tile that already fits the
     // placement is never passed over for one that needs turning.
     let upright = |e: &TileLibraryEntry| e.w <= fw && e.h <= fh;
+    // Among EQUALLY-scoring candidates, prefer one whose keywords name the
+    // scene. `biome_affinity` cannot separate these: all 445 `Rubble_Stone_*`
+    // tiles live in `!Core_Settlements`, the universal biome, so every one of
+    // them scores affinity 1.0 for every scene — the material is only in the
+    // filename (`volcanic`, `sandstone`, `earthy`, `slate`). "Collapsed
+    // masonry" matches none of those words, so all 445 tied and the variety
+    // picker fanned out across them, strewing tan sandstone over a black
+    // basalt volcano. A tiebreak only ever reorders candidates the ranking
+    // already called equal, so it cannot pull a worse-matching tile forward.
+    let scene_word = scene.to_ascii_lowercase();
+    let names_the_scene = |e: &TileLibraryEntry| !scene_word.is_empty() && e.keywords.iter().any(|k| same_word(k, &scene_word));
     scored.sort_by(|a, b| {
         b.0.total_cmp(&a.0) // higher rarity-weighted rank first
+            .then_with(|| names_the_scene(b.1).cmp(&names_the_scene(a.1)))
             .then_with(|| upright(b.1).cmp(&upright(a.1)))
             .then_with(|| (b.1.w * b.1.h).cmp(&(a.1.w * a.1.h)))
             .then_with(|| a.1.keywords.len().cmp(&b.1.keywords.len()))
@@ -3105,6 +3117,45 @@ mod tests {
         // Unchanged: a folder that ships perfectly good ground and is handed a
         // word matching none of it is a bad PAIRING, not a borrow.
         assert!(out.scene("crypt").is_none(), "a mispaired query must still drop its place");
+    }
+
+    /// Live (2026-07-21, volcano): "Collapsed masonry" strewed TAN SANDSTONE
+    /// across a black basalt caldera. All 445 `Rubble_Stone_*` tiles sit in
+    /// `!Core_Settlements`, the universal biome, so `biome_affinity` scores
+    /// every one of them 1.0 for every scene; the material lives only in the
+    /// filename, and the query matched none of those words. Everything tied,
+    /// and the tiebreak alone decided it.
+    #[test]
+    fn among_equally_scoring_tiles_the_one_that_names_the_scene_wins() {
+        let rubble = |material: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("Settlements/Structures/Rubble_Stone_{material}_A1_1x1.webp"),
+            biome: "!Core_Settlements".into(),
+            category: "Structures".into(),
+            keywords: vec!["rubble".into(), "stone".into(), material.to_ascii_lowercase(), "structures".into()],
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![rubble("Sandstone"), rubble("Slate"), rubble("Volcanic"), rubble("Earthy")];
+        let idf = compute_idf(&entries);
+        let profile = PackProfile {
+            biomes: vec![crate::pack_profile::BiomeProfile {
+                scene: "volcanic".into(),
+                folder: "Volcanic".into(),
+                floor_query: None,
+                natural_walls: true,
+                liquid_query: None,
+            }],
+            universal_biome: Some("!Core_Settlements".into()),
+            object_categories: vec!["Structures".into()],
+            ..PackProfile::default()
+        };
+        let got = shortlist_entries(&entries, &tokenize_query("rubble"), &idf, "volcanic", 1, 1, 8, false, &profile);
+        assert!(
+            got.first().is_some_and(|e| e.rel_path.contains("Volcanic")),
+            "a volcano must get volcanic rubble when every candidate scores the same: {:?}",
+            got.iter().map(|e| e.rel_path.split('/').next_back().unwrap()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

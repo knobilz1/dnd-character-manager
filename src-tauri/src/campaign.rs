@@ -221,7 +221,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ water  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  % deep chasm/gorge/ravine — a FATAL fall, renders as a dark pit, NOT water; nothing stands here and no one deploys in it  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ standing LIQUID — renders as whatever this scene's liquid actually is: water in most places, LAVA in a volcano, blood in a charnel house. Use it for every pool, channel, river or lake, INCLUDING a lethal one — a lava lake is `~`, never `%`  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  % deep chasm/gorge/ravine — a DRY fatal drop onto rock far below, renders as a dark pit; nothing stands here and no one deploys in it. Lethal is not what picks this code — a lava lake is lethal and is still `~`; `%` is specifically empty air with a floor a long way down  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -3319,17 +3319,39 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
     // EVERY field glyph straight from the grid. Non-field glyphs still need
     // their Features line — a `=` could be a bar or a table.
     let mut field_label: HashMap<(usize, usize), String> = HashMap::new();
+    // `^` cells a Features line NAMES as one contiguous thing — those stop
+    // being a field and become a single sized object, below.
+    let mut claimed: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
     for line in feature_lines(&suffix) {
         let label = feature_line_name(&line).to_string();
         let mut solid: Vec<(usize, usize)> = Vec::new();
+        let mut rubble: Vec<(usize, usize)> = Vec::new();
         for (_, c, r) in cell_refs_in(&line) {
             match cell_at(&rows, c, r) {
+                Some('^') => rubble.push((c, r)),
                 Some(ch) if FIELD_GLYPHS.contains(&ch) => {
                     field_label.entry((c, r)).or_insert_with(|| label.clone());
                 }
                 Some(ch) if RESOLVABLE_GLYPHS.contains(&ch) => solid.push((c, r)),
                 _ => {}
             }
+        }
+        // A NAMED run of rubble is one pile the size of the run, not one
+        // pebble per square. Rubble is a mass — which is why the catalog
+        // stocks it from 1x1 all the way to 9x6 — where a tree is a single
+        // countable object, so `T` stays a field however it is labelled.
+        // Live: "Collapsed masonry at B2-D2" and "at F2-K2" drew NINE separate
+        // 1x1 debris smears (each only 52% x 31% of its own canvas) strung
+        // across the top of a volcano, reading as scattered litter rather than
+        // a collapsed wall — with 216 3x2 and 1,119 2x2 rubble pieces unused.
+        for comp in connected_components(&rubble) {
+            if comp.len() < 2 {
+                field_label.entry(comp[0]).or_insert_with(|| label.clone());
+                continue;
+            }
+            let (w, h) = bbox_wh(&comp);
+            claimed.extend(comp.iter().copied());
+            out.push(Placement { label: label.clone(), cells: comp, w, h, field_glyph: None });
         }
         for comp in connected_components(&solid) {
             let (w, h) = bbox_wh(&comp);
@@ -3338,7 +3360,7 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
     }
     for (r, row) in rows.iter().enumerate() {
         for (c, ch) in row.chars().enumerate() {
-            if FIELD_GLYPHS.contains(&ch) {
+            if FIELD_GLYPHS.contains(&ch) && !claimed.contains(&(c, r)) {
                 let label = field_label.get(&(c, r)).cloned().unwrap_or_else(|| field_glyph_noun(ch).to_string());
                 out.push(Placement { label, cells: vec![(c, r)], w: 1, h: 1, field_glyph: Some(ch) });
             }
@@ -10648,21 +10670,40 @@ mod example_map_tests {
     /// physical set-dressing. Pin that the exclusion is actually in both
     /// prompt variants whenever objects_enabled is true — this is a real DM
     /// error (Nabil runs combat with physical miniatures), not just cosmetic.
-    /// A treeline is MANY trees, not one object. Foliage/rubble runs must split
-    /// into per-cell placements so each resolves to its own varied tree — a
-    /// connected 12-cell `T` run resolved to a single wide clothesline once, and
-    /// left the rest to a uniform procedural sprite.
+    /// A treeline is MANY trees; a named rubble run is ONE pile.
+    ///
+    /// Trees split per cell — a connected 12-cell `T` run once resolved to a
+    /// single wide clothesline and left the rest to a uniform procedural
+    /// sprite. Rubble was lumped in with them, and that was wrong: `^` is a
+    /// MASS, which is why the catalog stocks it at 1x1 through 9x6, where a
+    /// tree is one countable object stocked as a big single tree. Live
+    /// (2026-07-21, volcano): "Collapsed masonry at B2-D2" and "at F2-K2" drew
+    /// NINE separate 1x1 debris smears — each only 52% x 31% of its own canvas
+    /// — strung across the caldera rim like litter, while 216 3x2 and 1,119
+    /// 2x2 rubble pieces went unused.
     #[test]
-    fn a_foliage_run_splits_into_one_placement_per_cell() {
-        let spec = "# X\nGrid: 9x6, 5 ft squares.\nLegend: . floor  # wall  T tree  = furniture\nMap:\n#########\n#TTTT...#\n#......=#\n#..^^...#\n#.......#\n#########\nFeatures:\n- Pine treeline at B2-E2\n- Rubble at D4-E4\n- Table at H3\nTactics:\n- x";
+    fn a_treeline_splits_per_cell_but_a_named_rubble_run_is_one_pile() {
+        let spec = "# X\nGrid: 9x6, 5 ft squares.\nLegend: . floor  # wall  T tree  ^ rubble  = furniture\nMap:\n#########\n#TTTT..^#\n#......=#\n#..^^...#\n#.......#\n#########\nFeatures:\n- Pine treeline at B2-E2\n- Collapsed masonry at D4-E4\n- Table at H3\nTactics:\n- x";
         let p = parse_placements(spec);
-        // The 4-cell treeline -> 4 separate 1x1 field placements, each carrying
-        // its glyph, NOT one 4x1 object.
+
+        // Unchanged: the 4-cell treeline is 4 separate 1x1 field placements.
         let trees: Vec<_> = p.iter().filter(|x| x.field_glyph == Some('T')).collect();
         assert_eq!(trees.len(), 4, "each tree cell is its own placement: {:?}", p.iter().map(|x| (&x.label, x.w, x.h)).collect::<Vec<_>>());
         assert!(trees.iter().all(|t| t.w == 1 && t.h == 1));
-        // Rubble is a field glyph too.
-        assert_eq!(p.iter().filter(|x| x.field_glyph == Some('^')).count(), 2);
+
+        // The NAMED 2-cell run is one 2x1 object, so the resolver can ask the
+        // catalog for a pile that size instead of two pebbles.
+        let pile = p.iter().find(|x| x.label == "Collapsed masonry").expect("the named run survives as a placement");
+        assert_eq!((pile.w, pile.h), (2, 1), "a named rubble run takes the size of the run");
+        assert_eq!(pile.field_glyph, None, "it is an object now, not a field");
+        assert_eq!(pile.cells.len(), 2);
+
+        // The stray `^` at H2 that no Features line mentions stays a field —
+        // scattered debris is still scattered debris.
+        let loose: Vec<_> = p.iter().filter(|x| x.field_glyph == Some('^')).collect();
+        assert_eq!(loose.len(), 1, "unnamed rubble keeps the per-cell path: {loose:?}");
+        assert_eq!((loose[0].w, loose[0].h), (1, 1));
+
         // The table is NOT a field — it stays a single connected object.
         let table = p.iter().find(|x| x.label == "Table").unwrap();
         assert_eq!(table.field_glyph, None);
@@ -10860,7 +10901,14 @@ Tactics:
     fn the_streamlined_prompt_is_meaningfully_shorter_and_drops_the_cave_example() {
         let full = battle_map_format_instructions(false, false, &[], &[]);
         let streamlined = battle_map_format_instructions(true, false, &[], &[]);
-        assert!(streamlined.len() < full.len() / 2, "full={} streamlined={}", full.len(), streamlined.len());
+        // Discount the legend. `MAP_LEGEND` is embedded VERBATIM in both
+        // variants, so every entry added to it grows them by the same number of
+        // bytes and drags this ratio toward 0.5 however much shorter the
+        // streamlined BODY is — a structural artifact of the shared text, not a
+        // regression in streamlined-ness. Measure only the part that differs.
+        let legend = MAP_LEGEND.len();
+        let (f, s) = (full.len() - legend, streamlined.len() - legend);
+        assert!(s < f / 2, "body: full={f} streamlined={s} (legend {legend} discounted from both)");
         assert!(!streamlined.contains("Flooded Grotto"), "{streamlined}");
     }
 }
