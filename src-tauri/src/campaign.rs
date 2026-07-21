@@ -611,9 +611,13 @@ fn build_campaign_lore_critique_prompt(draft: &str, inventory: &str) -> String {
 /// ships as-is) — only the pass-2 draft itself is required to succeed and be
 /// non-empty, since that's the one piece with no reasonable fallback.
 fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) -> Result<String, String> {
-    let inventory = split_into_chunks(&intake.lore, EXTRACTION_CHUNK_MAX_CHARS)
+    let prompts = split_into_chunks(&intake.lore, EXTRACTION_CHUNK_MAX_CHARS)
         .iter()
-        .filter_map(|chunk| crate::local_llm::ask_ingest_once(build_inventory_extraction_prompt(chunk), Some("opus"), false).ok())
+        .map(|chunk| build_inventory_extraction_prompt(chunk))
+        .collect();
+    let inventory = extract_chunks_concurrently(prompts, &|_| {})
+        .into_iter()
+        .filter_map(|r| r.ok())
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -714,11 +718,14 @@ fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<Stri
     let path = root.join(id).join("memory").join("campaign_lore.md");
     let existing = read_optional(&path);
 
-    let mut chunk_inventories = Vec::new();
-    for chunk in split_into_chunks(addition, EXTRACTION_CHUNK_MAX_CHARS) {
-        chunk_inventories.push(crate::local_llm::ask_ingest_once(build_inventory_extraction_prompt(&chunk), Some("opus"), false)?);
-    }
-    let inventory = chunk_inventories.join("\n");
+    let prompts = split_into_chunks(addition, EXTRACTION_CHUNK_MAX_CHARS)
+        .iter()
+        .map(|chunk| build_inventory_extraction_prompt(chunk))
+        .collect();
+    let inventory = extract_chunks_concurrently(prompts, &|_| {})
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
 
     let draft = crate::local_llm::ask_ingest_once(build_update_lore_prompt(&existing, &inventory), Some("opus"), false)?;
     let draft = draft.trim().to_string();
@@ -5391,6 +5398,147 @@ fn split_into_chunks(text: &str, max_chars: usize) -> Vec<String> {
     chunks
 }
 
+/// Longest a line can be and still plausibly be a heading rather than wrapped
+/// body prose. Generous on purpose — see candidate_heading_lines for why this
+/// whole filter biases toward recall.
+const MAX_HEADING_LINE_CHARS: usize = 80;
+
+/// Mechanically reduces a raw extracted document to the lines that could
+/// plausibly START a chapter/section, each paired with its BYTE offset into the
+/// original `text` (byte, not char, because the offsets exist to slice `text`
+/// directly — line boundaries are always char boundaries, so this stays
+/// UTF-8-safe).
+///
+/// The point is to let boundary detection see a whole several-hundred-page
+/// module's STRUCTURE in one pass instead of its prose. Chapter boundaries are
+/// a global property — whether a heading is unique document-wide, whether a
+/// short line is a real chapter start or a subsection inside one — so chunking
+/// the raw text and asking each piece locally cannot answer them; a skeleton
+/// small enough to read whole can.
+///
+/// Deliberately biased toward RECALL, not precision: a real heading this drops
+/// is invisible to everything downstream, whereas noise it keeps just costs a
+/// few tokens and gets discarded by whoever reads the list. It is emphatically
+/// NOT trying to decide what's a chapter.
+///
+/// The rules are short + contains a letter + not ending mid-clause + heading-
+/// SHAPED (see looks_like_heading). Notably absent: "follows a blank line",
+/// which reads like the obvious structural signal and measured as worthless —
+/// `pdf_extract` emits a blank line between every line of a two-column book, so
+/// it was true for ~everything and filtered nothing. Case is what actually
+/// separates a heading from a column-wrapped prose line at this width.
+fn candidate_heading_lines(text: &str) -> Vec<(usize, &str)> {
+    let mut out = Vec::new();
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.chars().count() > MAX_HEADING_LINE_CHARS
+            // Pure page numbers, rule lines, and table rows of digits.
+            || !trimmed.chars().any(|c| c.is_alphabetic())
+            // A line ending mid-clause is wrapped prose, never a heading.
+            || trimmed.ends_with(',')
+            || !looks_like_heading(trimmed)
+        {
+            continue;
+        }
+        out.push((line_start + (line.len() - line.trim_start().len()), trimmed));
+    }
+    out
+}
+
+/// Is this line's CASE consistent with a heading rather than body prose? Two
+/// accepted shapes, ORed for recall: mostly-caps (covers ALL CAPS headings
+/// including ones extraction has spaced out or garbled beyond readability), and
+/// Title Case (every substantial word capitalized). A column-wrapped prose line
+/// is sentence case and matches neither.
+fn looks_like_heading(s: &str) -> bool {
+    let letters = s.chars().filter(|c| c.is_alphabetic()).count();
+    if letters == 0 {
+        return false;
+    }
+    let upper = s.chars().filter(|c| c.is_uppercase()).count();
+    if upper * 10 >= letters * 6 {
+        return true;
+    }
+    // Short words ("of", "the", "a") are lowercase even in Title Case, so only
+    // substantial ones get a vote — and at least one has to exist, or a line of
+    // nothing but short words would vacuously qualify.
+    let mut substantial = s
+        .split_whitespace()
+        .filter(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 4)
+        .peekable();
+    substantial.peek().is_some()
+        && substantial.all(|w| w.chars().find(|c| c.is_alphabetic()).is_some_and(|c| c.is_uppercase()))
+}
+
+/// How many extraction calls are in flight at once. Deliberately modest: these
+/// are the biggest prompts the app sends (a full EXTRACTION_CHUNK_MAX_CHARS
+/// chunk each) against a subscription CLI that spawns a real process per call,
+/// so this is about turning a 15-call serial wait into a ~4-call one, not about
+/// saturating anything.
+const EXTRACTION_CONCURRENCY: usize = 4;
+
+/// The shared "map step" runner behind all three chunked-extraction pipelines
+/// (module chapter extraction, campaign-lore establishment, lore updates).
+/// Every prompt is an independent one-shot Opus call — that independence is the
+/// whole premise of splitting extraction from synthesis — so they run
+/// concurrently instead of one after another, the same std::thread::scope idiom
+/// generate_battle_maps_for_plan_at already uses for encounter maps.
+///
+/// Results come back in INPUT order regardless of completion order, so callers
+/// can still zip them against whatever they built the prompts from. `on_done`
+/// fires in REAL completion order with a running count (for progress
+/// reporting), which is why the counter is shared rather than derived from the
+/// join order below.
+///
+/// Errors are returned per-prompt rather than short-circuiting: the three
+/// callers disagree about tolerance (lore establishment degrades gracefully
+/// per-chunk, the other two are load-bearing), so that choice stays theirs.
+///
+/// ponytail: fixed-size batches, not a work-stealing pool — one slow prompt
+/// idles its batch-mates until the batch drains. Fine while every prompt is a
+/// single <= EXTRACTION_CHUNK_MAX_CHARS chunk and they're near-uniform in size;
+/// swap in a channel-fed worker pool if that stops holding.
+fn extract_chunks_concurrently(prompts: Vec<String>, on_done: &(dyn Fn(usize) + Sync)) -> Vec<Result<String, String>> {
+    extract_chunks_with(prompts, &|p| crate::local_llm::ask_ingest_once(p, Some("opus"), false), on_done)
+}
+
+/// The batching/ordering half of `extract_chunks_concurrently`, split out from
+/// the actual LLM call so the input-order guarantee — the one property here
+/// that would corrupt silently rather than fail loudly, by welding one
+/// chapter's facts onto a different chapter — is testable without a live
+/// `claude` or a local server (see the ordering test).
+fn extract_chunks_with(
+    prompts: Vec<String>,
+    call: &(dyn Fn(String) -> Result<String, String> + Sync),
+    on_done: &(dyn Fn(usize) + Sync),
+) -> Vec<Result<String, String>> {
+    let done_count = std::sync::atomic::AtomicUsize::new(0);
+    let done_ref = &done_count;
+    let mut out = Vec::with_capacity(prompts.len());
+    for batch in prompts.chunks(EXTRACTION_CONCURRENCY) {
+        out.extend(std::thread::scope(|s| {
+            batch
+                .iter()
+                .map(|prompt| {
+                    s.spawn(move || {
+                        let result = call(prompt.clone());
+                        on_done(done_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1);
+                        result
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        }));
+    }
+    out
+}
+
 /// Pure, deterministic, zero-spoiler-risk companion to the LLM's own
 /// `concerns` self-audit: split_by_headings only drops content that appears
 /// BEFORE the first matched heading (everything between matched headings is
@@ -5718,15 +5866,6 @@ fn get_module_chapters_at(root: &Path, id: &str, module_id: &str) -> Result<(Vec
 /// wrapping it) touches the network/subprocess — split_by_headings/
 /// split_into_chunks/write_chapters_to_disk above are pure and covered by
 /// real tests instead.
-/// Total chunk count across every chapter — gives the "extracting" progress
-/// phase a real "chunk N of M" total up front (see
-/// chapterize_and_import_module_at). Pure/cheap (split_into_chunks does no
-/// I/O), unit-tested directly since the orchestrating function itself needs
-/// a live `claude` to exercise (see the #[ignore]d end-to-end test).
-fn total_extraction_chunks(chapters: &[(String, String, String)]) -> usize {
-    chapters.iter().map(|(_, _, body)| split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS).len()).sum()
-}
-
 fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_progress: ProgressFn) -> Result<ChapterizeImportResult, String> {
     let dir = root.join(id);
     let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
@@ -5748,23 +5887,37 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
         concerns.push(note);
     }
 
-    // Total chunk count is fully knowable now (chapters are fixed, chunking is
-    // pure/deterministic) — precompute it so "extracting" reports a real
-    // "chunk N of M" instead of an unbounded counter.
-    let total_chunks = total_extraction_chunks(&chapters);
-    let mut chunks_done = 0usize;
-    on_progress("extracting", 0, total_chunks);
-
-    let mut extracts: Vec<(String, String)> = Vec::with_capacity(chapters.len());
-    for (title, _, body) in &chapters {
-        let mut chunk_extracts = Vec::new();
+    // Build every chunk's prompt up front, FLATTENED across all chapters:
+    // chapters are fixed and chunking is pure/deterministic, so this both gives
+    // "extracting" a real "chunk N of M" total and lets the whole map step fan
+    // out at once. Flattening matters — a module of 15 single-chunk chapters
+    // would get no concurrency at all from only parallelizing WITHIN a chapter.
+    // chunk_owners records which chapter each prompt came from, for regrouping.
+    let mut chunk_owners: Vec<usize> = Vec::new();
+    let mut prompts: Vec<String> = Vec::new();
+    for (i, (title, _, body)) in chapters.iter().enumerate() {
         for chunk in split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS) {
-            chunk_extracts.push(crate::local_llm::ask_ingest_once(build_chapter_extraction_prompt(&module_title, title, &chunk), Some("opus"), false)?);
-            chunks_done += 1;
-            on_progress("extracting", chunks_done, total_chunks);
+            chunk_owners.push(i);
+            prompts.push(build_chapter_extraction_prompt(&module_title, title, &chunk));
         }
-        extracts.push((title.clone(), chunk_extracts.join("\n\n")));
     }
+    let total_chunks = prompts.len();
+    on_progress("extracting", 0, total_chunks);
+    let chunk_results = extract_chunks_concurrently(prompts, &|done| on_progress("extracting", done, total_chunks));
+
+    // Regroup by chapter, preserving chapter order and within-chapter chunk
+    // order. Extraction stays load-bearing (any chunk failing fails the whole
+    // import, same as when this ran serially) — a hole in the extracted facts
+    // would just reintroduce the detail loss this pipeline exists to fix.
+    let mut grouped: Vec<Vec<String>> = vec![Vec::new(); chapters.len()];
+    for (owner, result) in chunk_owners.into_iter().zip(chunk_results) {
+        grouped[owner].push(result?);
+    }
+    let extracts: Vec<(String, String)> = chapters
+        .iter()
+        .zip(grouped)
+        .map(|((title, _, _), parts)| (title.clone(), parts.join("\n\n")))
+        .collect();
 
     on_progress("synthesizing", 0, 0);
     let draft_plan = crate::local_llm::ask_ingest_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"), false)?;
@@ -8835,7 +8988,126 @@ mod tests {
     }
 
     #[test]
-    fn total_extraction_chunks_sums_chunk_counts_across_every_chapter() {
+    fn candidate_heading_lines_offsets_slice_the_original_text() {
+        // The whole downstream plan (indices instead of verbatim search
+        // anchors) rests on these offsets being exact — a heading whose offset
+        // is off by even one byte silently shifts a chapter boundary.
+        let text = "THE SUNLESS CITADEL\n\nSome intro prose here.\n\n  Chapter 1: The Ravine\n\nMore prose.\n";
+        let found = candidate_heading_lines(text);
+        for (offset, line) in &found {
+            assert!(text[*offset..].starts_with(line), "offset {offset} must land exactly on {line:?}");
+        }
+        let titles: Vec<&str> = found.iter().map(|(_, l)| *l).collect();
+        assert!(titles.contains(&"THE SUNLESS CITADEL"), "the first line of the document is a candidate: {titles:?}");
+        assert!(titles.contains(&"Chapter 1: The Ravine"), "an indented heading is a candidate, offset past its indent: {titles:?}");
+    }
+
+    #[test]
+    fn candidate_heading_lines_keeps_ocr_garbling_verbatim() {
+        // The exact failure the current verbatim-substring contract keeps
+        // fighting (see build_chapterize_prompt): extraction artifacts must
+        // survive untouched, since the offset is only useful against the real
+        // text. Nothing here normalizes — it only trims outer whitespace.
+        let text = "\nCHAPTER  I  I ACQUISITIO:-<S\n\nbody\n";
+        assert_eq!(candidate_heading_lines(text)[0].1, "CHAPTER  I  I ACQUISITIO:-<S");
+    }
+
+    #[test]
+    fn candidate_heading_lines_drops_prose_but_not_plausible_headings() {
+        let long_prose = "a".repeat(MAX_HEADING_LINE_CHARS + 1);
+        let text = format!("\n{long_prose}\n\n42\n\nThe Goblin Ambush\n\nthe party approaches,\n");
+        let titles: Vec<&str> = candidate_heading_lines(&text).iter().map(|(_, l)| *l).collect();
+        assert_eq!(titles, vec!["The Goblin Ambush"], "long prose, bare page numbers, and mid-clause lines all drop: {titles:?}");
+    }
+
+    #[test]
+    fn candidate_heading_lines_skips_column_wrapped_prose() {
+        // Precision's only real job, and the one the measurement run showed a
+        // blank-line rule can't do: a two-column book's prose lines are short
+        // enough to pass every length test, and pdf_extract blank-line-separates
+        // all of them. Case is what rules them out.
+        let text = "\nHOW IT STARTED\n\nship  began  wh e n Jim  was  the  only surviving candidate\n\nin the  running  for a  hotly contested  position  with the\n\nThe Goblin Ambush\n";
+        let titles: Vec<&str> = candidate_heading_lines(text).iter().map(|(_, l)| *l).collect();
+        assert_eq!(titles, vec!["HOW IT STARTED", "The Goblin Ambush"], "caps and title case survive, sentence-case prose doesn't: {titles:?}");
+    }
+
+    /// Measurement harness, not an assertion — the one thing that can't be
+    /// decided from synthetic fixtures is whether this filter's RECALL holds up
+    /// against what `pdf_extract` actually emits for a real several-hundred-page
+    /// book (dense stat blocks and tables are the hard case: lots of short
+    /// lines). Run it against a real PDF before building anything on top of
+    /// these candidates:
+    ///   cargo test --lib -- --ignored --nocapture measure_candidate_heading_lines
+    /// Override the default with HEADING_SCAN_PDF.
+    #[test]
+    #[ignore]
+    fn measure_candidate_heading_lines() {
+        let path = std::env::var("HEADING_SCAN_PDF")
+            .unwrap_or_else(|_| r"C:\Users\nabil\Desktop\Code\reference-books\Acquisitions Incorporated.pdf".to_string());
+        println!("=== scanning: {path} ===");
+        let text = pdf_extract::extract_text(&path).expect("PDF should extract — is the path right?");
+
+        let candidates = candidate_heading_lines(&text);
+        let raw_chars = text.chars().count();
+        let total_lines = text.lines().count();
+        let candidate_chars: usize = candidates.iter().map(|(_, l)| l.chars().count() + 1).sum();
+        println!(
+            "raw: {raw_chars} chars / {total_lines} lines\n\
+             candidates: {} lines / {candidate_chars} chars\n\
+             reduction: {:.2}% of the document's characters, {:.1}% of its lines\n\
+             one chunkerize call would see ~{}k tokens instead of ~{}k",
+            candidates.len(),
+            candidate_chars as f64 / raw_chars as f64 * 100.0,
+            candidates.len() as f64 / total_lines as f64 * 100.0,
+            candidate_chars / 4000,
+            raw_chars / 4000,
+        );
+        // Every candidate, uncapped: the only question this harness exists to
+        // answer is RECALL, and a book's front matter alone can fill a couple
+        // hundred lines — a cap would hide exactly the chapter headings being
+        // checked for. Pipe it through grep.
+        println!("=== all {} candidates (eyeball RECALL: is every real chapter heading in here?) ===", candidates.len());
+        for (offset, line) in &candidates {
+            println!("{offset:>9}  {line}");
+        }
+    }
+
+    #[test]
+    fn extract_chunks_with_returns_results_in_input_order_across_batches() {
+        // More prompts than EXTRACTION_CONCURRENCY so a batch boundary is
+        // actually crossed, and each call sleeps LONGER the earlier it sits in
+        // its batch — so completion order is the reverse of input order every
+        // time. Input order has to survive that, or a chapter's extracted facts
+        // get filed under a different chapter with nothing to flag it.
+        let n = EXTRACTION_CONCURRENCY * 2 + 1;
+        let prompts: Vec<String> = (0..n).map(|i| i.to_string()).collect();
+        let done_seen = std::sync::Mutex::new(Vec::new());
+        let out = extract_chunks_with(
+            prompts,
+            &|p| {
+                let i: usize = p.parse().unwrap();
+                let slot = i % EXTRACTION_CONCURRENCY;
+                std::thread::sleep(std::time::Duration::from_millis(((EXTRACTION_CONCURRENCY - slot) * 20) as u64));
+                Ok(p)
+            },
+            &|done| done_seen.lock().unwrap().push(done),
+        );
+
+        assert_eq!(
+            out.into_iter().collect::<Result<Vec<_>, String>>().unwrap(),
+            (0..n).map(|i| i.to_string()).collect::<Vec<_>>(),
+            "results must come back in INPUT order even though every batch completes in reverse"
+        );
+        // Sorted, not as-pushed: on_done fires from the worker threads, so the
+        // push interleaving isn't deterministic — what must hold is that it
+        // fired exactly once per prompt with a distinct running count.
+        let mut seen = done_seen.into_inner().unwrap();
+        seen.sort_unstable();
+        assert_eq!(seen, (1..=n).collect::<Vec<_>>(), "on_done fires once per prompt with a distinct running count");
+    }
+
+    #[test]
+    fn split_into_chunks_sums_across_every_chapter() {
         // Chapter 1 fits in one chunk; chapter 2 needs a hard cut into two;
         // chapter 3 is empty (still one "chunk" — split_into_chunks is a
         // no-op on text that already fits, even empty text).
@@ -8849,7 +9121,8 @@ mod tests {
         let small_max = 60;
         let total: usize = chapters.iter().map(|(_, _, body)| split_into_chunks(body, small_max).len()).sum();
         assert_eq!(total, 1 + 3 + 1, "5 total chunks: 1 (short) + 3 (150 chars @ 60/chunk) + 1 (empty)");
-        assert_eq!(total_extraction_chunks(&chapters), 3, "at the REAL EXTRACTION_CHUNK_MAX_CHARS, every chapter here is one chunk");
+        let real_total: usize = chapters.iter().map(|(_, _, body)| split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS).len()).sum();
+        assert_eq!(real_total, 3, "at the REAL EXTRACTION_CHUNK_MAX_CHARS, every chapter here is one chunk");
     }
 
     #[test]

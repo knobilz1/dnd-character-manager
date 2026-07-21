@@ -1291,6 +1291,26 @@ export function DMConsolePage() {
     }
   }
 
+  /** Re-reads campaign_lore.md + the active module's plan.md into
+   *  campaignPlanRef. This ref is the ONLY channel by which either file reaches
+   *  the live DM (neither is a standing CLAUDE.md import — see dmPrompt.ts's
+   *  planCheckIn), so it has to be refreshed at every point those files change
+   *  or the DM keeps being handed a stale blend for the rest of the sitting:
+   *  a module switch would inject the PREVIOUS module's arc plan alongside the
+   *  new module's chapter text, and a freshly-created campaign would go its
+   *  entire first session with an empty ref (which also suppresses check-ins
+   *  outright, since dueForPlanCheck requires non-empty text).
+   *  Takes the id explicitly rather than reading activeCampaignId, so callers
+   *  that already captured an id can't race a campaign switch into writing some
+   *  other campaign's plan into the ref. */
+  async function refreshCampaignPlan(campaignId: string) {
+    const plan = await invoke<string>('read_campaign_plan', { id: campaignId }).catch((e) => {
+      console.warn('Failed to re-read the campaign plan:', e);
+      return null;
+    });
+    if (plan !== null && campaignIdRef.current === campaignId) campaignPlanRef.current = plan;
+  }
+
   React.useEffect(() => {
     turnsSincePlanCheckRef.current = Infinity;
     // Walk-on voices are scoped to the campaign that minted them — a tag like
@@ -1311,9 +1331,11 @@ export function DMConsolePage() {
     invoke('sync_dm_rules', { id: activeCampaignId }).catch((e) =>
       console.warn('Failed to sync DM rules:', e)
     );
-    invoke<string>('read_campaign_plan', { id: activeCampaignId })
-      .then((plan) => { campaignPlanRef.current = plan; })
-      .catch(() => { campaignPlanRef.current = ''; });
+    // Cleared BEFORE the refresh, not just on failure: a read that errors must
+    // not leave the previous campaign's lore/plan sitting in the ref to be
+    // injected into this campaign's turns.
+    campaignPlanRef.current = '';
+    refreshCampaignPlan(activeCampaignId);
     // The campaign's saved positioning style (defaults to theater for any
     // campaign that predates this feature — see campaign.rs's read_battle_mode).
     invoke<string>('read_battle_mode', { id: activeCampaignId })
@@ -1870,7 +1892,13 @@ export function DMConsolePage() {
           if (switched) {
             setActiveModuleId(actions.switchActiveModule);
             // A module switch is at least as big a context shift as a chapter
-            // change — force the next turn to re-check the plan.
+            // change — force the next turn to re-check the plan. The ref must
+            // be re-read too, not just marked due: active_module/plan.md now
+            // mirrors a DIFFERENT module, so without this the forced check-in
+            // hands the DM the OLD module's arc plan labelled as the active
+            // one, contradicting the new module's chapter text it's reading
+            // from @active_module/current.md in the same turn.
+            await refreshCampaignPlan(campaignId);
             turnsSincePlanCheckRef.current = Infinity;
           }
         }
@@ -2139,9 +2167,7 @@ export function DMConsolePage() {
           // otherwise fetched on a campaign SWITCH, so a new sitting in this same
           // campaign would keep injecting the stale pre-reconciliation copy at its
           // next plan check-in — silently defeating the reconciliation entirely.
-          await invoke<string>('read_campaign_plan', { id: campaignId })
-            .then((plan) => { campaignPlanRef.current = plan; })
-            .catch((e) => console.warn('Failed to re-read the reconciled campaign plan:', e));
+          await refreshCampaignPlan(campaignId);
         } catch (digestErr) {
           // Fallback for a DM running on a local LLM with no Claude available
           // (the digest uses Opus, same as every other ingestion call): drop
@@ -2338,6 +2364,15 @@ export function DMConsolePage() {
           setIngestProgress(null);
         }
       }
+      // Both ingestion steps above wrote the very files campaignPlanRef caches,
+      // and they ran AFTER setActiveCampaignId already fired the campaign-switch
+      // effect's own read — which therefore saw an empty campaign and cached ''.
+      // An empty ref doesn't just mean stale content, it suppresses check-ins
+      // entirely (dueForPlanCheck requires non-empty text), so without this the
+      // brand-new campaign plays its whole first session having never once been
+      // shown the lore doc and arc plan that were just generated for it.
+      await refreshCampaignPlan(meta.id);
+      turnsSincePlanCheckRef.current = Infinity;
       setNewCampaign(BLANK_INTAKE);
       setPendingModuleFile(null);
       setPendingLoreFile(null);
@@ -2456,6 +2491,12 @@ export function DMConsolePage() {
       setActiveModuleId(campaignModules.active_id);
       setChapters(result.chapters);
       setCurrentChapterId(result.chapters[0]?.id ?? null);
+      // The new module is now the active one, so active_module/plan.md is a
+      // brand-new arc plan — pick it up and make the next turn check it in,
+      // rather than carrying the previous module's plan for the rest of the
+      // sitting.
+      await refreshCampaignPlan(activeCampaignId);
+      turnsSincePlanCheckRef.current = Infinity;
       const allConcerns = [picked.concern, ...result.concerns].filter((c): c is string => Boolean(c));
       if (allConcerns.length) setWarning(allConcerns.join(' '));
     } catch (e) {
@@ -2487,6 +2528,11 @@ export function DMConsolePage() {
       const result = await invoke<{ chapters: ChapterSummary[]; current_id: string | null }>('get_module_chapters', { id: activeCampaignId, moduleId });
       setChapters(result.chapters);
       setCurrentChapterId(result.current_id);
+      // Same reasoning as the `switchActiveModule` dm-action path — a manual
+      // switch changes which plan.md active_module/ mirrors just as much as
+      // the DM deciding to switch does.
+      await refreshCampaignPlan(activeCampaignId);
+      turnsSincePlanCheckRef.current = Infinity;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -3048,6 +3094,11 @@ export function DMConsolePage() {
       setLoreText(updated);
       setLoreAddition('');
       setPendingLoreUpdateFile(null);
+      // campaign_lore.md just changed — without this the DM keeps being handed
+      // the pre-merge lore at every check-in until the next campaign switch or
+      // session digest, which is the whole point of having attached it.
+      await refreshCampaignPlan(activeCampaignId);
+      turnsSincePlanCheckRef.current = Infinity;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
