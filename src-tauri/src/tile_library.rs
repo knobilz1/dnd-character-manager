@@ -1622,6 +1622,59 @@ fn build_biome_evidence(entries: &[TileLibraryEntry], profile: &PackProfile, mea
     out
 }
 
+/// Checks each learned place's ground against the art it claims to come from,
+/// and drops what the catalog can't back — the same "answer the model, then
+/// verify it against the real files" step `prune_grouping_folders` does for the
+/// layout pass. Two distinct failures, because they are evidence of different
+/// things:
+///
+/// A query that matches NOTHING in its own folder means the row is internally
+/// inconsistent — the model named a material that isn't in the folder it paired
+/// the scene with, so nothing about that pairing is trustworthy and the whole
+/// place goes. An unknown scene word degrades to the universal folder plus the
+/// built-in floor, which is a defined, safe state; a half-wrong place quietly
+/// mis-serves every map classified into it. Live: `crypt → Horror/"dwarven"`,
+/// zero hits — a crypt sent to the horror pack, hunting a dwarven material that
+/// only exists under Mountain, and scoring the settlement art it actually needs
+/// (coffins, altars, candles) at 0.15.
+///
+/// A query that DOES match, but only art outside the legible band, is just a
+/// bad material under a sound pairing — so only the query goes and the place
+/// keeps its folder. Live: `sewer → "grate"`, 50 real hits all measuring ~211
+/// against a ceiling of 205, which would have washed out everything placed on
+/// top. A sewer on the built-in stone is right; a sewer on a lightbox is not.
+///
+/// Only ever removes, so a profile that passes is unchanged.
+fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<String, MeasuredArt>, mut profile: PackProfile) -> PackProfile {
+    let mut dropped: Vec<String> = Vec::new();
+    profile.biomes.retain_mut(|b| {
+        let Some(query) = b.floor_query.clone() else { return true };
+        let tokens = tokenize_query(&query);
+        // Exactly what resolve_floor will search: this folder's terrain art,
+        // minus the Liquids pools that belong to `~` cells.
+        let hits: Vec<&TileLibraryEntry> = entries
+            .iter()
+            .filter(|e| e.biome == b.folder && e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, &tokens))
+            .collect();
+        if hits.is_empty() {
+            dropped.push(format!("{} → {}/{:?}: query selects nothing in its own folder; place dropped", b.scene, b.folder, query));
+            return false;
+        }
+        let lums: Vec<f64> = hits.iter().filter_map(|e| tile_luminance(e, measured)).collect();
+        if !lums.is_empty() && !lums.iter().copied().any(luminance_is_usable_floor) {
+            let mean = lums.iter().sum::<f64>() / lums.len() as f64;
+            dropped.push(format!("{} → {}/{:?}: all {} candidates unusable (mean luminance {:.0}); keeping the built-in floor", b.scene, b.folder, query, lums.len(), mean));
+            b.floor_query = None;
+        }
+        true
+    });
+    crate::maplog::log(
+        "PACK PROFILE — grounds checked against the catalog",
+        &if dropped.is_empty() { "every place's ground is backed by real art".to_string() } else { dropped.join("\n") },
+    );
+    profile
+}
+
 /// Every distinct category name in the catalog, most common first.
 fn all_categories(entries: &[TileLibraryEntry]) -> Vec<String> {
     let mut counts: HashMap<&str, usize> = HashMap::new();
@@ -1688,6 +1741,9 @@ pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
     crate::maplog::log("PACK PROFILE — semantics reply", &reply);
     let derived = crate::pack_profile::parse_semantics_reply(&extract_json_object(&reply), layout)
         .ok_or_else(|| "Couldn't read the profiler's answer — the previous profile is unchanged.".to_string())?;
+    // Same discipline as the layout pass: check the answer against the files
+    // before trusting it. See prune_unbacked_grounds.
+    let derived = prune_unbacked_grounds(&entries, &manifest.measured, derived);
 
     // Persist the derived profile and the re-read manifest together: the
     // entries' biome/category now depend on the layout that produced them, so
@@ -2512,6 +2568,56 @@ mod tests {
             w: 1,
             h: 1,
         }
+    }
+
+    /// Both live failures from the re-profile that motivated this, and the
+    /// control that must survive it. The two get DIFFERENT treatment on
+    /// purpose — see prune_unbacked_grounds.
+    #[test]
+    fn a_ground_the_catalog_cant_back_is_dropped_and_a_good_one_is_not() {
+        let tex = |biome: &str, name: &str, keywords: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("{biome}/Textures/{name}"),
+            biome: biome.into(),
+            category: "Textures".into(),
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![
+            tex("Horror", "Flesh_A.jpg", &["flesh", "horror"]),
+            tex("Settlements", "Grate_A.jpg", &["grate", "settlements"]),
+            tex("Settlements", "Stone_A.jpg", &["stone", "settlements"]),
+        ];
+        // Only the grate is measured, and it is blown out well past the ceiling.
+        let measured = HashMap::from([
+            ("Settlements/Textures/Grate_A.jpg".to_string(), MeasuredArt { kind: ArtKind::Ground, lum: 211 }),
+            ("Settlements/Textures/Stone_A.jpg".to_string(), MeasuredArt { kind: ArtKind::Ground, lum: 95 }),
+            ("Horror/Textures/Flesh_A.jpg".to_string(), MeasuredArt { kind: ArtKind::Ground, lum: 88 }),
+        ]);
+        let place = |scene: &str, folder: &str, q: &str| crate::pack_profile::BiomeProfile {
+            scene: scene.into(),
+            folder: folder.into(),
+            floor_query: Some(q.into()),
+            natural_walls: false,
+            liquid_query: None,
+        };
+        let profile = PackProfile {
+            biomes: vec![
+                place("crypt", "Horror", "dwarven"), // no dwarven art under Horror at all
+                place("sewer", "Settlements", "grate"), // real art, unusable art
+                place("abattoir", "Horror", "flesh"), // the control
+            ],
+            ..PackProfile::default()
+        };
+        let out = prune_unbacked_grounds(&entries, &measured, profile);
+
+        assert!(out.scene("crypt").is_none(), "a query matching nothing in its own folder makes the whole pairing untrustworthy");
+        // The pairing was sound, so the PLACE stays and only the material goes —
+        // a sewer keeps its settlement art and falls back to the built-in floor.
+        assert_eq!(out.scene("sewer").map(|b| b.folder.as_str()), Some("Settlements"));
+        assert!(out.scene("sewer").unwrap().floor_query.is_none(), "art that washes out everything on top of it is not a floor");
+        assert_eq!(out.scene("abattoir").unwrap().floor_query.as_deref(), Some("flesh"), "a backed, legible ground must survive untouched");
     }
 
     #[test]
