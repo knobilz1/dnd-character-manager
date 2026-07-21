@@ -60,11 +60,20 @@ export interface ParsedBattleMap {
    *  from this text directly. */
   objects: string;
   tactics: string;
-  /** Cells named on the `Deployment:` section's `Enemies:`/`Party:` lines,
-   *  0-indexed [col,row] and clamped to the grid — the translucent start-zone
-   *  overlay (drawn only when the caller asks, so a printed map can omit it).
-   *  Empty for a spec generated before the section existed. */
-  deployment: { enemies: Array<[number, number]>; party: Array<[number, number]> };
+  /** The `Deployment:` section, 0-indexed [col,row] and clamped to the grid —
+   *  the translucent start-zone overlay (drawn only when the caller asks, so a
+   *  printed map can omit it). Empty for a spec generated before the section
+   *  existed.
+   *
+   *  The two sides are deliberately different shapes. `enemies` is a PLACEMENT
+   *  LIST: one cell per miniature, each carrying the creature type to set down
+   *  there, so the board can be laid out exactly and the DM knows which
+   *  creature is on which square from round one. `party` stays a plain zone —
+   *  the players choose their own squares inside it. */
+  deployment: {
+    enemies: Array<{ name: string; cells: Array<[number, number]> }>;
+    party: Array<[number, number]>;
+  };
 }
 
 const MAX_DIM = 40; // sanity cap so a malformed spec can't allocate a huge canvas
@@ -118,24 +127,55 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
   // Deployment start-zones: pull the cell refs out of the `Enemies:`/`Party:`
   // bullets' prose and clamp to the grid (a stray non-cell token like a DC or a
   // damage die that happens to look cell-shaped just falls outside and drops).
-  const zoneCells = (side: string): Array<[number, number]> => {
+  //
+  // The line is "<start cells> — <reason>": take only the part BEFORE the
+  // reason separator, so a landmark the side moves TOWARD (named in the reason,
+  // e.g. "entering at F12 — until they reach B10") isn't drawn as a start zone.
+  // Cell ranges use a bare dash ("F8-H8"), so splitting on a SPACED dash never
+  // splits a range.
+  const placementPart = (side: string): string | null => {
     const line = lines.find((l) => new RegExp(`^\\s*-\\s*${side}\\s*:`, 'i').test(l));
-    if (!line) return [];
-    // The line is "<start cells> — <reason>": take only the cells BEFORE the
-    // reason separator, so a landmark the side moves TOWARD (named in the
-    // reason, e.g. "entering at F12 — until they reach B10") isn't drawn as a
-    // start zone. Cell ranges use a bare dash ("F8-H8"), so splitting on a
-    // SPACED dash never splits a range.
-    const cellPart = line.replace(new RegExp(`^\\s*-\\s*${side}\\s*:`, 'i'), '').split(/\s[—–-]\s/)[0];
-    return cellRefsInText(cellPart)
-      .map((s) => s.split(',').map(Number) as [number, number])
-      // In grid AND on a cell a miniature could actually stand — never tint a
-      // wall, a void cell, or a `%` chasm (a fatal drop). A range like
-      // "D9-J12" spanning the cave edge only fills the passable cells inside it.
-      .filter(([c, r]) => c >= 0 && c < cols && r >= 0 && r < grid.length && grid[r][c] !== '#' && grid[r][c] !== ' ' && grid[r][c] !== '%');
+    if (!line) return null;
+    return line.replace(new RegExp(`^\\s*-\\s*${side}\\s*:`, 'i'), '').split(/\s[—–-]\s/)[0];
   };
 
-  return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), objects: section('Objects:'), tactics: section('Tactics:'), deployment: { enemies: zoneCells('Enemies'), party: zoneCells('Party') } };
+  // In grid AND on a cell a miniature could actually stand — never tint a wall,
+  // a void cell, or a `%` chasm (a fatal drop). A range like "D9-J12" spanning
+  // the cave edge only fills the passable cells inside it.
+  const standable = (s: string): Array<[number, number]> =>
+    cellRefsInText(s)
+      .map((t) => t.split(',').map(Number) as [number, number])
+      .filter(([c, r]) => c >= 0 && c < cols && r >= 0 && r < grid.length && grid[r][c] !== '#' && grid[r][c] !== ' ' && grid[r][c] !== '%');
+
+  const zoneCells = (side: string): Array<[number, number]> => {
+    const part = placementPart(side);
+    return part === null ? [] : standable(part);
+  };
+
+  /** `Goblin Boss at K3; Goblin at J2, L2` → one entry per creature type with
+   *  its cells, ONE CELL PER MINIATURE. A spec written before the section
+   *  carried names (or one that ignored the format) has no ` at `, so the whole
+   *  line falls back to a single unnamed group and renders exactly as it used
+   *  to — old saved maps keep working. */
+  const enemyPlacements = (): Array<{ name: string; cells: Array<[number, number]> }> => {
+    const part = placementPart('Enemies');
+    if (part === null) return [];
+    const out: Array<{ name: string; cells: Array<[number, number]> }> = [];
+    for (const chunk of part.split(';')) {
+      const atIdx = chunk.toLowerCase().indexOf(' at ');
+      if (atIdx === -1) continue;
+      const name = chunk.slice(0, atIdx).trim().replace(/^[-•\s]+/, '');
+      const cells = standable(chunk.slice(atIdx + 4));
+      if (name && cells.length) out.push({ name, cells });
+    }
+    if (out.length === 0) {
+      const cells = standable(part);
+      if (cells.length) out.push({ name: 'ENEMIES', cells });
+    }
+    return out;
+  };
+
+  return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), objects: section('Objects:'), tactics: section('Tactics:'), deployment: { enemies: enemyPlacements(), party: zoneCells('Party') } };
 }
 
 // ── Procedural tile drawing ──────────────────────────────────────────────────
@@ -866,48 +906,75 @@ function contiguousGroups(cells: Array<[number, number]>): Array<Array<[number, 
  *  crisp border tracing each region's outer edge, plus a pill label per
  *  cluster. Drawn last so it reads over terrain and art; entirely optional so
  *  the same map prints clean with it off. */
+/** Tints a cell set and traces only its outer edges (a cell side with no
+ *  same-set neighbour), so a run of squares reads as one bordered area. */
+function outlineCells(ctx: CanvasRenderingContext2D, cells: Array<[number, number]>, style: { fill: string; edge: string }, cellPx: number, w: RenderWindow) {
+  const x = (c: number) => (c - w.colStart) * cellPx;
+  const y = (r: number) => (r - w.rowStart) * cellPx;
+  ctx.fillStyle = style.fill;
+  for (const [c, r] of cells) ctx.fillRect(x(c), y(r), cellPx, cellPx);
+  const has = new Set(cells.map(([c, r]) => `${c},${r}`));
+  ctx.strokeStyle = style.edge;
+  ctx.lineWidth = Math.max(2, cellPx * 0.06);
+  ctx.beginPath();
+  for (const [c, r] of cells) {
+    if (!has.has(`${c},${r - 1}`)) { ctx.moveTo(x(c), y(r)); ctx.lineTo(x(c) + cellPx, y(r)); }
+    if (!has.has(`${c},${r + 1}`)) { ctx.moveTo(x(c), y(r) + cellPx); ctx.lineTo(x(c) + cellPx, y(r) + cellPx); }
+    if (!has.has(`${c - 1},${r}`)) { ctx.moveTo(x(c), y(r)); ctx.lineTo(x(c), y(r) + cellPx); }
+    if (!has.has(`${c + 1},${r}`)) { ctx.moveTo(x(c) + cellPx, y(r)); ctx.lineTo(x(c) + cellPx, y(r) + cellPx); }
+  }
+  ctx.stroke();
+}
+
+/** The party's zone gets ONE label over each contiguous cluster — the players
+ *  pick their own squares inside it. Every enemy square gets its OWN label
+ *  naming the creature that stands there, because that square IS one
+ *  miniature: a single "ENEMIES" pill over a twelve-cell block told whoever
+ *  set up the board nothing about how many of what to put down, and left the
+ *  DM with no idea which creature was on which square at initiative. */
 function drawDeploymentZones(ctx: CanvasRenderingContext2D, map: ParsedBattleMap, cellPx: number, w: RenderWindow) {
-  for (const side of ['enemies', 'party'] as const) {
-    const cells = map.deployment[side].filter(([c, r]) => c >= w.colStart && c < w.colEnd && r >= w.rowStart && r < w.rowEnd);
-    if (cells.length === 0) continue;
-    const style = DEPLOYMENT_STYLES[side];
-    const x = (c: number) => (c - w.colStart) * cellPx;
-    const y = (r: number) => (r - w.rowStart) * cellPx;
+  const inWindow = ([c, r]: [number, number]) => c >= w.colStart && c < w.colEnd && r >= w.rowStart && r < w.rowEnd;
+  const mid = (c: number, r: number): [number, number] => [(c - w.colStart + 0.5) * cellPx, (r - w.rowStart + 0.5) * cellPx];
 
-    ctx.fillStyle = style.fill;
-    for (const [c, r] of cells) ctx.fillRect(x(c), y(r), cellPx, cellPx);
-
-    // Outline only the region's outer edges (a cell side with no same-zone
-    // neighbour) so the whole cluster reads as one bordered area.
-    const has = new Set(cells.map(([c, r]) => `${c},${r}`));
-    ctx.strokeStyle = style.edge;
-    ctx.lineWidth = Math.max(2, cellPx * 0.06);
-    ctx.beginPath();
-    for (const [c, r] of cells) {
-      if (!has.has(`${c},${r - 1}`)) { ctx.moveTo(x(c), y(r)); ctx.lineTo(x(c) + cellPx, y(r)); }
-      if (!has.has(`${c},${r + 1}`)) { ctx.moveTo(x(c), y(r) + cellPx); ctx.lineTo(x(c) + cellPx, y(r) + cellPx); }
-      if (!has.has(`${c - 1},${r}`)) { ctx.moveTo(x(c), y(r)); ctx.lineTo(x(c), y(r) + cellPx); }
-      if (!has.has(`${c + 1},${r}`)) { ctx.moveTo(x(c) + cellPx, y(r)); ctx.lineTo(x(c) + cellPx, y(r) + cellPx); }
-    }
-    ctx.stroke();
-
-    for (const group of contiguousGroups(cells)) {
+  const party = map.deployment.party.filter(inWindow);
+  if (party.length) {
+    outlineCells(ctx, party, DEPLOYMENT_STYLES.party, cellPx, w);
+    for (const group of contiguousGroups(party)) {
       const cx = group.reduce((a, [c]) => a + c, 0) / group.length;
       const cy = group.reduce((a, [, r]) => a + r, 0) / group.length;
-      drawZoneLabel(ctx, style.label, (cx - w.colStart + 0.5) * cellPx, (cy - w.rowStart + 0.5) * cellPx, cellPx);
+      drawZoneLabel(ctx, DEPLOYMENT_STYLES.party.label, ...mid(cx, cy), cellPx);
     }
+  }
+
+  for (const placement of map.deployment.enemies) {
+    const cells = placement.cells.filter(inWindow);
+    if (!cells.length) continue;
+    outlineCells(ctx, cells, DEPLOYMENT_STYLES.enemies, cellPx, w);
+    for (const [c, r] of cells) drawZoneLabel(ctx, placement.name, ...mid(c, r), cellPx);
   }
 }
 
 /** A centered pill label (dark plate + white text) so the zone name stays
  *  legible over any terrain underneath. */
 function drawZoneLabel(ctx: CanvasRenderingContext2D, text: string, px: number, py: number, cellPx: number) {
-  ctx.font = `bold ${Math.round(cellPx * 0.3)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const padX = cellPx * 0.16;
+  // This used to be one fixed size, which was fine for the single word
+  // "ENEMIES" centred over a whole block. Now it labels ONE square with a
+  // creature name, and "Goblin Boss" at that size overhangs its neighbours far
+  // enough to cover the next miniature's label. Shrink to fit within about two
+  // cells, with a floor so it never becomes unreadable at print resolution.
+  const maxW = cellPx * 1.9;
+  let size = Math.round(cellPx * 0.3);
+  const floor = Math.max(7, Math.round(cellPx * 0.16));
+  for (;;) {
+    ctx.font = `bold ${size}px sans-serif`;
+    if (size <= floor || ctx.measureText(text).width + padX * 2 <= maxW) break;
+    size -= 1;
+  }
   const tw = ctx.measureText(text).width;
-  const h = Math.round(cellPx * 0.42);
+  const h = Math.round(size * 1.4);
   ctx.fillStyle = 'rgba(15,23,42,0.85)';
   ctx.fillRect(px - tw / 2 - padX, py - h / 2, tw + padX * 2, h);
   ctx.fillStyle = '#ffffff';
