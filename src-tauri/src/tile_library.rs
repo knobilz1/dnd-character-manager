@@ -839,16 +839,40 @@ const HEAD_WEIGHT: u32 = 100;
 /// matched a short keyword ANYWHERE inside a longer query word — "rat" inside
 /// "crate", "bar" inside "barrel", "can" inside "candle" — and put a rat trap
 /// where a crate belonged (found live, "small wooden crate" → Rat_Trap).
-fn token_matches(keyword: &str, token: &str) -> bool {
-    if keyword == token {
+fn same_word(a: &str, b: &str) -> bool {
+    if a == b {
         return true;
     }
-    let (short, long) = if keyword.len() < token.len() { (keyword, token) } else { (token, keyword) };
+    let (short, long) = if a.len() < b.len() { (a, b) } else { (b, a) };
     // Only a genuine plural/adjective ENDING counts, not any ≤2-char tail — a
     // bare length check let "heart"+"h" match "hearth" (a human heart where a
     // hearth belonged). Keywords/queries are lowercase ASCII, so slicing at
     // short.len() is a safe char boundary.
     long.starts_with(short) && matches!(&long[short.len()..], "s" | "es" | "en")
+}
+
+/// Words this catalog uses interchangeably for the same object. A vendor's
+/// filenames are naming, not a thesaurus: Forgotten Adventures files its 40
+/// mind-flayer columns under `.../Structures/Building/Pillars/` but NAMES them
+/// `Ceremorph_Support_Column_*`, so not one of the 4,850 tiles keyworded
+/// `pillar` is Ceremorph and an illithid map's `o` cells fell through to core
+/// stone pillars. `bridges` can't help — "pillar" and "column" share no prefix
+/// or suffix — and no ranking tweak reaches a tile the identity gate already
+/// dropped.
+///
+/// Deliberately one pair. `biome_affinity` already contains the blast radius
+/// (an Astral tile is demoted 0.15x on any non-Astral scene), so this changes
+/// `pillar` ONLY on illithid/astral maps — verified unchanged across the other
+/// 13 scene biomes. It also fixes the reverse, which was broken everywhere:
+/// "marble column" on a tavern map returned a glowing alien column, because
+/// the pack's only `column` tiles are Ceremorph.
+const SYNONYMS: &[(&str, &str)] = &[("pillar", "column")];
+
+fn token_matches(keyword: &str, token: &str) -> bool {
+    same_word(keyword, token)
+        || SYNONYMS
+            .iter()
+            .any(|(a, b)| (same_word(a, token) && same_word(b, keyword)) || (same_word(b, token) && same_word(a, keyword)))
 }
 
 /// Relevance of one catalog entry to a query. The LAST query token is the
@@ -2006,6 +2030,55 @@ mod tests {
         assert_eq!(scene_biome("cave"), "Underdark");
         assert_eq!(scene_biome("forest"), "Woodlands");
         assert_eq!(scene_biome("anything unknown"), "!Core_Settlements");
+    }
+
+    /// The pack names its mind-flayer columns `Ceremorph_Support_Column_*` and
+    /// files them under `Pillars/`, so a `pillar` query used to miss all 40 —
+    /// `bridges` can't connect them (no shared prefix/suffix) and the identity
+    /// gate dropped them before ranking. Both directions, and plurals, since
+    /// an `o` cell's label is usually "Pillars".
+    #[test]
+    fn a_synonym_connects_pillar_and_column_in_both_directions() {
+        assert!(token_matches("column", "pillar"));
+        assert!(token_matches("column", "pillars"));
+        assert!(token_matches("pillar", "columns"));
+        // Unrelated words are still unrelated — this is one pair, not a thesaurus.
+        assert!(!token_matches("column", "table"));
+        assert!(!token_matches("pillar", "brain"));
+        // The plural/adjective rule it wraps is untouched.
+        assert!(token_matches("table", "tables"));
+        assert!(token_matches("wood", "wooden"));
+        assert!(!token_matches("heart", "hearth"));
+    }
+
+    /// The synonym must reach the Ceremorph columns on an illithid map WITHOUT
+    /// disturbing any other scene — the containment comes from biome_affinity
+    /// (an Astral tile is demoted 0.15x elsewhere), not from the synonym.
+    #[test]
+    fn synonym_swaps_pillars_for_ceremorph_columns_only_on_an_astral_scene() {
+        let v = |kw: &[&str], biome: &str, path: &str| TileLibraryEntry {
+            root: "r".into(), rel_path: path.into(), biome: biome.into(),
+            category: "Structures".into(), keywords: kw.iter().map(|s| s.to_string()).collect(), w: 1, h: 1,
+        };
+        // Several core pillars to ONE ceremorph column, because that ratio is
+        // the mechanism: `column` is rare (40 tiles) where `pillar` is generic
+        // (4,850), so IDF lifts the specific word above the generic one. With
+        // one of each they'd be equally rare and tie.
+        let mut entries: Vec<TileLibraryEntry> = ["stone", "marble", "wood", "brick", "slate", "sandstone"]
+            .iter()
+            .map(|m| v(&["pillar", "square", m], "!Core_Settlements", "core_stone"))
+            .collect();
+        entries.push(v(&["ceremorph", "support", "column", "blue"], "Astral", "ceremorph"));
+        let idf = compute_idf(&entries);
+        let top = |scene: &str| {
+            shortlist_entries(&entries, &tokenize_query("Pillars"), &idf, scene, 1, 1, 1, false)
+                .first().map(|e| e.rel_path.clone()).unwrap_or_default()
+        };
+        assert_eq!(top("illithid colony"), "ceremorph");
+        // Every other scene still gets the plain core pillar.
+        for scene in ["tavern", "cave", "forest", "horror", ""] {
+            assert_eq!(top(scene), "core_stone", "scene {scene:?} must be untouched");
+        }
     }
 
     /// Every exact-head match scores identically, so without diversification
