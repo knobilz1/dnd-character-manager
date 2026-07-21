@@ -8990,6 +8990,115 @@ mod tests {
         assert_eq!(titles, vec!["HOW IT STARTED", "The Goblin Ambush"], "caps and title case survive, sentence-case prose doesn't: {titles:?}");
     }
 
+    /// Why `candidate_heading_lines` does NOT collapse repeated lines, kept as
+    /// a runnable record because the idea is an obvious one to re-propose.
+    ///
+    /// The plan was: normalize (strip non-alphanumerics, uppercase), group, keep
+    /// the earliest occurrence — collapsing ~60 OCR-garbled spellings of a
+    /// running page header into one, and mechanically answering "which
+    /// occurrence is the real chapter start". Measured against Acquisitions
+    /// Incorporated, both halves fail:
+    ///
+    /// 1. Repeated text is often SEVERAL REAL SECTIONS, not one heading
+    ///    recurring. `CONCLUSION` appears 6x — one per episode, each followed by
+    ///    its own prose ("the characters attain 2nd level", "3rd level", …). So
+    ///    does `FRANCHISE DOWNTIME`. Keeping only the earliest deletes ten-plus
+    ///    real boundaries — and they are exactly the per-episode structure that
+    ///    makes chapters FINER, which is the whole point of the exercise.
+    /// 2. It doesn't even fix the case it was designed for. All 30 occurrences
+    ///    of `CHAPTER 4 | THE ORRERY OF THE WANDERER` are running page headers,
+    ///    including the earliest — that one is followed by "burned the town
+    ///    down, and given the dangerous quest…", mid-paragraph. "Keep the
+    ///    earliest" anchors chapter 4 to a page header in the middle of itself.
+    ///
+    /// Grouping by normalized prefix instead is worse: `[APPENDIX]` holds
+    /// `APPENDIXAIACQINC`, `APPENDIXBIMONSTERS`, `APPENDIXEITRINKETS` — five
+    /// DIFFERENT appendices merged into one, and `[FRANCHIS]` merges nineteen
+    /// distinct real headings.
+    ///
+    /// What actually separates the two cases is what FOLLOWS the line — a real
+    /// heading is followed by the start of a section, a page header by the
+    /// middle of a sentence. That's a judgment, not a rule, so it belongs to
+    /// the model reading the skeleton, and the skeleton's job stays recall.
+    ///   cargo test --lib -- --ignored --nocapture inspect_heading_repeats
+    #[test]
+    #[ignore]
+    fn inspect_heading_repeats() {
+        let path = std::env::var("HEADING_SCAN_PDF")
+            .unwrap_or_else(|_| r"C:\Users\nabil\Desktop\Code\reference-books\Acquisitions Incorporated.pdf".to_string());
+        let text = pdf_extract::extract_text(&path).expect("PDF should extract — is the path right?");
+        let candidates = candidate_heading_lines(&text);
+        let norm = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_uppercase()).collect::<String>();
+
+        // (a) How much does EXACT normalized grouping actually collapse?
+        let mut exact: HashMap<String, Vec<usize>> = HashMap::new();
+        for (off, line) in &candidates {
+            exact.entry(norm(line)).or_default().push(*off);
+        }
+        let dupes = exact.values().filter(|v| v.len() > 1).count();
+        let collapsible: usize = exact.values().filter(|v| v.len() > 1).map(|v| v.len() - 1).sum();
+        println!("candidates {} -> {} exact-normalized groups ({dupes} with repeats, {collapsible} lines collapsible)", candidates.len(), exact.len());
+
+        // (b) The biggest repeat groups, with their spread — a running page
+        // header repeats MANY times across the whole document; a TOC entry
+        // repeats about twice, close to the front.
+        let mut groups: Vec<(&String, &Vec<usize>)> = exact.iter().filter(|(_, v)| v.len() > 1).collect();
+        groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        println!("=== top exact groups (count, first offset, last offset) ===");
+        for (k, offs) in groups.iter().take(25) {
+            println!("  {:>4}x  {:>8}..{:<8}  {}", offs.len(), offs[0], offs[offs.len() - 1], &k[..k.len().min(60)]);
+        }
+
+        // (c) The near-duplicates exact grouping MISSES: cluster by the first 8
+        // normalized chars, and show any cluster holding more than one distinct
+        // key. If garbling really defeats exact grouping, it shows up here.
+        let mut fuzzy: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+        for (k, offs) in &exact {
+            if k.len() >= 8 {
+                fuzzy.entry(k[..8].to_string()).or_default().push((k.clone(), offs.len()));
+            }
+        }
+        let mut split: Vec<(&String, &Vec<(String, usize)>)> = fuzzy.iter().filter(|(_, v)| v.len() > 1).collect();
+        split.sort_by_key(|(_, v)| std::cmp::Reverse(v.iter().map(|(_, n)| n).sum::<usize>()));
+        // (b2) Is "keep the earliest occurrence" safe? Only if every repeat of a
+        // key is the SAME heading recurring as a page header. If a key repeats
+        // because several chapters each genuinely have a section by that name,
+        // collapsing to the earliest deletes real boundaries. Print what
+        // actually follows each occurrence to tell the two apart.
+        for probe in ["CONCLUSION", "FRANCHISEDOWNTIME", "CHAPTER4ITHEORRERYOFTHEWANDERER"] {
+            let Some(offs) = exact.get(probe) else { continue };
+            println!("=== {probe}: {} occurrences — what FOLLOWS each? ===", offs.len());
+            for off in offs.iter() {
+                let after: String = text[*off..].chars().skip_while(|c| *c != '\n').take(160).collect::<String>().replace(['\n', '\r'], " ");
+                println!("  {off:>9}  ...{}", after.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+        }
+
+        println!("=== prefix clusters holding MULTIPLE distinct normalized keys (what exact grouping misses) ===");
+        for (prefix, keys) in split.iter().take(15) {
+            println!("  [{prefix}] {} distinct spellings, {} lines total", keys.len(), keys.iter().map(|(_, n)| n).sum::<usize>());
+            for (k, n) in keys.iter().take(6) {
+                println!("       {n:>3}x  {}", &k[..k.len().min(56)]);
+            }
+        }
+    }
+
+    /// The always-run guard for the finding above: identical heading TEXT can
+    /// be several different real sections, so nothing downstream may dedupe
+    /// candidates by their text. Measured on a real module, `CONCLUSION` is six
+    /// separate per-episode endings; keeping only the first would delete five
+    /// real boundaries, and finer boundaries are the entire goal.
+    #[test]
+    fn repeated_heading_text_is_kept_because_each_one_is_a_different_section() {
+        let text = "EPISODE 1\n\nprose one.\n\nCONCLUSION\n\nThe characters attain 2nd level.\n\nEPISODE 2\n\nprose two.\n\nCONCLUSION\n\nThe characters attain 3rd level.\n";
+        let found = candidate_heading_lines(text);
+        let offsets: Vec<usize> = found.iter().filter(|(_, l)| *l == "CONCLUSION").map(|(o, _)| *o).collect();
+        assert_eq!(offsets.len(), 2, "both CONCLUSIONs must survive: {found:?}");
+        // Distinct offsets, and each slices its own section out of the source.
+        assert!(text[offsets[0]..].starts_with("CONCLUSION\n\nThe characters attain 2nd"));
+        assert!(text[offsets[1]..].starts_with("CONCLUSION\n\nThe characters attain 3rd"));
+    }
+
     /// Measurement harness, not an assertion — the one thing that can't be
     /// decided from synthetic fixtures is whether this filter's RECALL holds up
     /// against what `pdf_extract` actually emits for a real several-hundred-page
