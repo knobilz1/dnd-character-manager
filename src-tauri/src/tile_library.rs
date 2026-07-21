@@ -24,9 +24,11 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
+
+use crate::pack_profile::{PackLayout, PackProfile, ProfileOverrides};
 
 const IMAGE_EXTS: &[&str] = &["webp", "png", "jpg", "jpeg"];
 /// How many candidate matches `search_tile_catalog` reads off disk and
@@ -110,6 +112,9 @@ pub struct TileLibraryState {
     /// shared; `None` means "not read from disk yet", an empty map means "read,
     /// and there aren't any".
     overrides: Mutex<Option<std::sync::Arc<HashMap<String, ArtKind>>>>,
+    /// The imported pack's profile, with human corrections already folded in.
+    /// Read on every shortlist, so cached like the manifest.
+    profile: Mutex<Option<std::sync::Arc<PackProfile>>>,
 }
 
 // ── Classification overrides: the CSV round trip ─────────────────────────────
@@ -235,6 +240,37 @@ fn overrides_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(manifest_path(app)?.with_file_name("tile_overrides.json"))
 }
 
+fn profile_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(manifest_path(app)?.with_file_name("pack_profile.json"))
+}
+
+fn profile_overrides_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(manifest_path(app)?.with_file_name("pack_profile_overrides.json"))
+}
+
+/// The imported pack's profile: what was derived, with human corrections
+/// folded over it. Falls back to `PackProfile::default()` — Forgotten
+/// Adventures — whenever nothing has been profiled, so an install that predates
+/// profiling behaves exactly as before.
+pub(crate) fn load_profile_cached(app: &AppHandle) -> std::sync::Arc<PackProfile> {
+    let state = app.state::<TileLibraryState>();
+    let mut guard = state.profile.lock().unwrap();
+    if let Some(cached) = guard.as_ref() {
+        return cached.clone();
+    }
+    let read = |p: Result<PathBuf, String>| p.ok().and_then(|p| fs::read_to_string(p).ok());
+    let derived: PackProfile = read(profile_path(app)).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let corrections: ProfileOverrides = read(profile_overrides_path(app)).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let arc = std::sync::Arc::new(derived.with_overrides(&corrections));
+    *guard = Some(arc.clone());
+    arc
+}
+
+/// Drops the cached profile so the next read picks up a freshly written one.
+fn invalidate_profile_cache(app: &AppHandle) {
+    *app.state::<TileLibraryState>().profile.lock().unwrap() = None;
+}
+
 fn manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
@@ -295,82 +331,40 @@ fn keywords_from_stem(stem_without_size: &str) -> Vec<String> {
     stem_without_size.split('_').filter(|t| t.chars().count() > 1 && !is_variant_token(t)).map(|t| t.to_lowercase()).collect()
 }
 
-/// Real Forgotten Adventures object-type folder names, observed across the
-/// actual imported library — both directly under a biome
-/// (`!Core_Settlements/Furniture/...`) and nested under a named settlement
-/// (`Woodlands/Base_Woodlands_Settlement/Furniture/...`). `biome_category_from_rel`
-/// walks every directory segment after the biome, at any depth, for the
-/// first one of these — settlement names and `!Wilderness` get skipped over
-/// rather than matched, since neither says what the thing actually is.
-/// Case-insensitive (vendor packs aren't perfectly consistent).
-const OBJECT_TYPE_FOLDERS: &[&str] = &[
-    "Furniture", "Decor", "Clutter", "Workplace_Equipment", "Lightsources", "Natural_Decor", "Burial_and_Graves", "Flora", "Structures", "Combat",
-    "Vehicles", "Textures", "Elevation",
-];
-
-/// (biome, category) from a path relative to the imported root.
-///
-/// Biome: the segment after the LAST path component starting with
-/// `FA_Assets`, not the first — some pack folder NAMES also start with that
-/// string (e.g. `FA_Assets_Expansion_Webp_v1.12/FA_Assets_Webp/Arctic/...`),
-/// and anchoring on the first occurrence there mis-reads `"FA_Assets_Webp"`
-/// itself as the biome. Confirmed live: ~3,000 real entries were affected.
-///
-/// Category: the first directory segment after the biome that matches
-/// OBJECT_TYPE_FOLDERS, at whatever depth it sits — NOT just "the next
-/// segment". A biome with its own named settlement
-/// (`Woodlands/Base_Woodlands_Settlement/Structures/...`) put the settlement
-/// name where category used to be read from; walking past it instead of
-/// stopping there was also confirmed live (the Import summary's by-category
-/// breakdown was already visibly wrong for every named-settlement biome).
-/// Falls back to the first directory segment when nothing recognized is
-/// found, and to "the first two segments under the root" when there's no
-/// `FA_Assets`-prefixed segment at all, for a non-FA vendor pack.
-fn biome_category_from_rel(rel: &Path) -> (String, String) {
-    let parts: Vec<&str> = rel.components().filter_map(|c| match c { Component::Normal(s) => s.to_str(), _ => None }).collect();
-    if let Some(i) = parts.iter().rposition(|p| p.starts_with("FA_Assets")) {
-        let biome = parts.get(i + 1).copied().unwrap_or("misc").to_string();
-        let end = parts.len().saturating_sub(1); // exclude the filename itself
-        let dirs = parts.get(i + 2..end).unwrap_or(&[]);
-        let category = dirs
-            .iter()
-            .find(|p| OBJECT_TYPE_FOLDERS.iter().any(|f| f.eq_ignore_ascii_case(p)))
-            .or_else(|| dirs.first())
-            .copied()
-            .unwrap_or("misc")
-            .to_string();
-        return (biome, category);
-    }
-    (parts.first().copied().unwrap_or("misc").to_string(), parts.get(1).copied().unwrap_or("misc").to_string())
-}
-
 /// Pure: one entry from a root-relative file path, or `None` if it's not an
 /// image file this catalog indexes. `root` is left empty — `scan_dir` (the
 /// only real caller) fills it in, since a merge Import needs to know which
 /// folder each entry came from (see `TileLibraryEntry::root`) but this
 /// function's own unit tests only care about the path-derived fields.
-fn parse_entry(rel: &Path) -> Option<TileLibraryEntry> {
+///
+/// `layout` is how this pack files things — see pack_profile.rs. It used to be
+/// hardcoded to Forgotten Adventures' scheme, which meant any other vendor's
+/// pack had its biome and category read off whatever its first two path
+/// segments happened to be.
+fn parse_entry(rel: &Path, layout: &PackLayout) -> Option<TileLibraryEntry> {
     let ext = rel.extension()?.to_str()?.to_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
         return None;
     }
     let stem = rel.file_stem()?.to_str()?;
     let (stem_no_size, w, h) = split_footprint(stem);
-    let (biome, category) = biome_category_from_rel(rel);
+    let (biome, category) = crate::pack_profile::biome_category_from_rel(rel, layout);
     let mut keywords = keywords_from_stem(stem_no_size);
-    keywords.push(biome.to_lowercase());
+    if !biome.is_empty() {
+        keywords.push(biome.to_lowercase());
+    }
     keywords.push(category.to_lowercase());
     Some(TileLibraryEntry { root: String::new(), rel_path: rel.to_string_lossy().replace('\\', "/"), biome, category, keywords, w, h })
 }
 
-fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<TileLibraryEntry>) {
+fn scan_dir(root: &Path, dir: &Path, layout: &PackLayout, out: &mut Vec<TileLibraryEntry>) {
     let Ok(read) = fs::read_dir(dir) else { return };
     for entry in read.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            scan_dir(root, &path, out);
+            scan_dir(root, &path, layout, out);
         } else if let Ok(rel) = path.strip_prefix(root) {
-            if let Some(mut e) = parse_entry(rel) {
+            if let Some(mut e) = parse_entry(rel, layout) {
                 e.root = root.to_string_lossy().replace('\\', "/");
                 out.push(e);
             }
@@ -378,10 +372,25 @@ fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<TileLibraryEntry>) {
     }
 }
 
-fn scan_tile_library(root: &Path) -> Vec<TileLibraryEntry> {
+fn scan_tile_library(root: &Path, layout: &PackLayout) -> Vec<TileLibraryEntry> {
     let mut out = Vec::new();
-    scan_dir(root, root, &mut out);
+    scan_dir(root, root, layout, &mut out);
     out
+}
+
+/// Re-derives every entry's biome, category and keywords from its stored
+/// `rel_path` under a new `layout` — what a re-profile applies, so learning a
+/// pack's real scheme costs one pass over the manifest instead of another walk
+/// of tens of thousands of files on a possibly-cold network drive.
+fn reparse_entries(entries: &[TileLibraryEntry], layout: &PackLayout) -> Vec<TileLibraryEntry> {
+    entries
+        .iter()
+        .filter_map(|e| {
+            let mut fresh = parse_entry(Path::new(&e.rel_path), layout)?;
+            fresh.root = e.root.clone();
+            Some(fresh)
+        })
+        .collect()
 }
 
 fn summarize(manifest: &TileLibraryManifest) -> TileLibrarySummary {
@@ -399,7 +408,9 @@ fn summarize(manifest: &TileLibraryManifest) -> TileLibrarySummary {
 /// pieces, terrain not objects) — none of those are what a 1-4 cell
 /// Objects: placement is for, even though they're valid OBJECT_TYPE_FOLDERS
 /// for categorization purposes.
-const OBJECT_VOCAB_CATEGORIES: &[&str] = &["Furniture", "Decor", "Clutter", "Workplace_Equipment", "Lightsources", "Natural_Decor", "Burial_and_Graves", "Flora", "Vehicles"];
+/// Which categories those are is now a property of the imported PACK, not a
+/// constant — see `PackProfile::object_categories` (its default is exactly the
+/// FA list this used to hardcode).
 
 /// Nouns whose 1x1 pool is too thin to shortlist, with the smallest footprint
 /// that actually has one — derived from the catalog, not hand-written.
@@ -419,13 +430,13 @@ const OBJECT_VOCAB_CATEGORIES: &[&str] = &["Furniture", "Decor", "Clutter", "Wor
 /// which is exactly what we want. Words with a healthy 1x1 pool need no
 /// guidance and stay out; rare nouns (< MIN_IDENTITY files) are noise and
 /// stay out.
-fn footprint_guide(entries: &[TileLibraryEntry]) -> Vec<(String, u32, u32)> {
+fn footprint_guide(entries: &[TileLibraryEntry], profile: &PackProfile) -> Vec<(String, u32, u32)> {
     /// A "real" pool = at least a full vision shortlist's worth of art.
     const MIN_POOL: usize = 8;
     const MIN_IDENTITY: usize = 20;
     let mut by: HashMap<&str, Vec<(u32, u32)>> = HashMap::new();
     for e in entries {
-        if !OBJECT_VOCAB_CATEGORIES.iter().any(|c| c.eq_ignore_ascii_case(&e.category)) {
+        if !profile.is_object_category(&e.category) {
             continue;
         }
         let Some(first) = e.keywords.first() else { continue };
@@ -473,7 +484,7 @@ const FOOTPRINT_GUIDE_CAP: usize = 40;
 /// (the resolver bumping a search footprint) rather than print it.
 pub fn structured_footprint_guide_for_app(app: &AppHandle) -> Vec<(String, u32, u32)> {
     match load_manifest_cached(app) {
-        Ok(Some(m)) => footprint_guide(&m.entries),
+        Ok(Some(m)) => footprint_guide(&m.entries, &load_profile_cached(app)),
         _ => Vec::new(),
     }
 }
@@ -520,10 +531,10 @@ fn is_artifact_word(w: &str) -> bool {
 /// existing overlap matcher can always find something for any word the
 /// model actually uses. Frequency-sorted (ties broken alphabetically for
 /// deterministic output) and capped at VOCAB_CAP.
-fn object_vocabulary(entries: &[TileLibraryEntry]) -> Vec<String> {
+fn object_vocabulary(entries: &[TileLibraryEntry], profile: &PackProfile) -> Vec<String> {
     let mut counts: HashMap<&str, u32> = HashMap::new();
     for e in entries {
-        if !OBJECT_VOCAB_CATEGORIES.iter().any(|c| c.eq_ignore_ascii_case(&e.category)) {
+        if !profile.is_object_category(&e.category) {
             continue;
         }
         let biome_lc = e.biome.to_lowercase();
@@ -548,7 +559,7 @@ fn object_vocabulary(entries: &[TileLibraryEntry]) -> Vec<String> {
 /// directly from campaign.rs's prompt builder in the same process, same
 /// pattern as `tile_library_configured`.
 pub fn object_vocabulary_for_app(app: &AppHandle) -> Vec<String> {
-    load_manifest_cached(app).ok().flatten().map(|m| object_vocabulary(&m.entries)).unwrap_or_default()
+    load_manifest_cached(app).ok().flatten().map(|m| object_vocabulary(&m.entries, &load_profile_cached(app))).unwrap_or_default()
 }
 
 fn save_manifest(app: &AppHandle, manifest: &TileLibraryManifest) -> Result<(), String> {
@@ -601,11 +612,10 @@ fn load_manifest_cached(app: &AppHandle) -> Result<Option<std::sync::Arc<TileLib
 ///
 /// `resolve_floor` asks for the `Textures` category by name, so excluding these
 /// from object placements costs the floor path nothing.
-const TERRAIN_ONLY_CATEGORIES: &[&str] = &["Textures", "Texture_Overlays", "Elevation", "Shadow_Paths", "Misc_Paths"];
-
-fn is_terrain_only(category: &str) -> bool {
-    TERRAIN_ONLY_CATEGORIES.iter().any(|c| category.eq_ignore_ascii_case(c))
-}
+/// Which categories those are is a property of the imported PACK — see
+/// `PackProfile::terrain_categories` (its default is exactly the FA list this
+/// used to hardcode). On a pack whose folders are named anything else, an empty
+/// terrain list is what let ground art win object slots.
 
 /// What a tile IS, measured from its pixels rather than from where a vendor
 /// filed it. The category list above only works on a pack whose folder names we
@@ -904,7 +914,7 @@ pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<
     if !root_path.is_dir() {
         return Err(format!("\"{root}\" isn't a folder."));
     }
-    let scanned = scan_tile_library(&root_path);
+    let scanned = scan_tile_library(&root_path, &load_profile_cached(&app).layout);
     if scanned.is_empty() {
         return Err(format!("No image files found under \"{root}\"."));
     }
@@ -1261,15 +1271,15 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
     any.then_some(total)
 }
 
-fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf: &HashMap<String, f64>, scene: &str, fw: u32, fh: u32, k: usize, allow_terrain: bool) -> Vec<&'a TileLibraryEntry> {
-    let want = scene_biome(scene);
+fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf: &HashMap<String, f64>, scene: &str, fw: u32, fh: u32, k: usize, allow_terrain: bool, profile: &PackProfile) -> Vec<&'a TileLibraryEntry> {
+    let want = scene_biome(scene, profile);
     // Keep only tiles that match a word actually NAMING the object. If nothing
     // does, the shortlist is deliberately EMPTY so the caller falls back to the
     // built-in glyph — better to draw the plain sprite than to confidently
     // draw the wrong object (live: "Broken crockery" → a broken window).
     let identified: Vec<&TileLibraryEntry> = entries
         .iter()
-        .filter(|e| e.w <= fw && e.h <= fh && (allow_terrain || !is_terrain_only(&e.category)) && has_identity_match(e, tokens))
+        .filter(|e| e.w <= fw && e.h <= fh && (allow_terrain || !profile.is_terrain_category(&e.category)) && has_identity_match(e, tokens))
         .collect();
     if identified.is_empty() {
         return Vec::new();
@@ -1290,7 +1300,7 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     }
     let mut scored: Vec<(f64, &TileLibraryEntry)> = identified
         .into_iter()
-        .filter_map(|e| shortlist_rank(e, tokens, idf).map(|s| (s * biome_affinity(want, &e.biome) * condition_fit(e, tokens), e)))
+        .filter_map(|e| shortlist_rank(e, tokens, idf).map(|s| (s * biome_affinity(want, &e.biome, profile) * condition_fit(e, tokens), e)))
         .collect();
     scored.sort_by(|a, b| {
         b.0.total_cmp(&a.0) // higher rarity-weighted rank first
@@ -1320,35 +1330,30 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
 }
 
 /// Which catalog biome a scene wants. The scene word comes from
-/// `classify_biome` (tavern, cave, forest, …); catalog biomes are the
-/// top-level pack folders. `!Core_Settlements` is the generic human-built set
-/// and fits almost any civilised scene, so it's always allowed.
-pub(crate) fn scene_biome(scene: &str) -> &'static str {
-    let s = scene.to_lowercase();
-    for (needle, biome) in [
-        ("cave", "Underdark"), ("underdark", "Underdark"), ("forest", "Woodlands"), ("jungle", "Jungle"),
-        ("desert", "Desert"), ("snow", "Arctic"), ("arctic", "Arctic"), ("swamp", "Swamp"), ("marsh", "Swamp"),
-        ("volcan", "Volcanic"), ("mountain", "Mountain"), ("water", "Aquatic"), ("coast", "Aquatic"),
-        ("sea", "Aquatic"), ("horror", "Horror"), ("astral", "Astral"), ("fey", "Feywilds"),
-        // The Astral pack is where the mind flayer colony and Far Realm art
-        // lives; without these two the whole tree scores 0.15 and never shows.
-        ("illithid", "Astral"), ("alien", "Astral"),
-    ] {
-        if s.contains(needle) {
-            return biome;
-        }
-    }
-    "!Core_Settlements"
+/// `classify_biome` (tavern, cave, illithid, …) and the answer is one of the
+/// imported pack's own biome folders, via its profile. Falls back to the pack's
+/// universal set — the generic human-built collection that fits almost any
+/// civilised scene — and to `""` for a pack that has neither, which
+/// `biome_affinity` then treats as "no biome dimension, penalise nothing".
+pub(crate) fn scene_biome<'a>(scene: &str, profile: &'a PackProfile) -> &'a str {
+    profile.folder_for_scene(scene).or(profile.universal_biome.as_deref()).unwrap_or("")
 }
 
 /// How much an entry's own biome disqualifies it for this scene. A tile from
-/// the scene's biome, or from the universal `!Core_Settlements` set, is
-/// unpenalised; anything from an unrelated biome is knocked far down so it
-/// can't crowd the shortlist. This is what keeps Horror flesh pillars and
-/// Arctic "Frosty" floorboards out of a tavern — the ranking itself is
-/// otherwise entirely biome-blind.
-fn biome_affinity(scene_biome: &str, entry_biome: &str) -> f64 {
-    if entry_biome == scene_biome || entry_biome == "!Core_Settlements" {
+/// the scene's biome, or from the pack's universal set, is unpenalised;
+/// anything from an unrelated biome is knocked far down so it can't crowd the
+/// shortlist. This is what keeps Horror flesh pillars and Arctic "Frosty"
+/// floorboards out of a tavern — the ranking itself is otherwise entirely
+/// biome-blind.
+///
+/// The universal set is read from the PROFILE rather than compared against the
+/// literal string `!Core_Settlements`. On any pack without a folder by that
+/// exact name, the old hardcoded test made this return 0.15 for every tile in
+/// the catalog, uniformly — which doesn't reorder anything, so nothing looked
+/// broken, but it silently flattened biome affinity into a no-op.
+fn biome_affinity(scene_biome: &str, entry_biome: &str, profile: &PackProfile) -> f64 {
+    let universal = profile.universal_biome.as_deref();
+    if entry_biome.eq_ignore_ascii_case(scene_biome) || universal.is_some_and(|u| entry_biome.eq_ignore_ascii_case(u)) {
         1.0
     } else {
         0.15
@@ -1435,7 +1440,7 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
     let object_slot = category.is_none();
     let want = if object_slot { k + GROUND_FILTER_MARGIN } else { k };
     let overrides = load_overrides_cached(app);
-    shortlist_entries(entries, &tokens, &idf, scene, fw, fh, want, !object_slot)
+    shortlist_entries(entries, &tokens, &idf, scene, fw, fh, want, !object_slot, &load_profile_cached(app))
         .into_iter()
         .filter_map(|e| {
             // Prefer the audit's stored verdict; only decode when this entry has
@@ -1504,9 +1509,286 @@ pub fn load_tile_art(root: &str, rel_path: &str) -> Option<(String, Option<ArtSi
     Some((to_data_url(&bytes, ext), art_signals(&bytes)))
 }
 
+// ── Profiling an imported pack ───────────────────────────────────────────────
+
+/// How many ground candidates per biome the profiler is shown, and how many
+/// files it samples to measure each one's brightness. Sampling rather than
+/// measuring all of them keeps a re-profile to seconds — a full-catalog decode
+/// was timed at 17.6 minutes.
+const GROUND_CANDIDATES_PER_BIOME: usize = 6;
+const GROUND_SAMPLES_PER_CANDIDATE: usize = 5;
+const SAMPLE_OBJECT_NAMES: usize = 8;
+
+/// Mean luminance for one tile: the audit's stored measurement when there is
+/// one, otherwise decoded now. `None` when the file can't be read.
+fn tile_luminance(e: &TileLibraryEntry, measured: &HashMap<String, MeasuredArt>) -> Option<f64> {
+    if let Some(m) = measured.get(&e.rel_path) {
+        return Some(m.lum as f64);
+    }
+    load_tile_art(&e.root, &e.rel_path).and_then(|(_, s)| s).map(|s| s.luminance)
+}
+
+/// What the profiler is shown about one biome. The ground candidates carry
+/// MEASURED luminance because that is the only way to know a pack's own ground
+/// art is too dark to place minis on — a fact no filename reveals.
+fn build_biome_evidence(entries: &[TileLibraryEntry], profile: &PackProfile, measured: &HashMap<String, MeasuredArt>) -> Vec<crate::pack_profile::BiomeEvidence> {
+    let mut by_biome: HashMap<&str, Vec<&TileLibraryEntry>> = HashMap::new();
+    for e in entries {
+        by_biome.entry(e.biome.as_str()).or_default().push(e);
+    }
+    let mut out: Vec<crate::pack_profile::BiomeEvidence> = by_biome
+        .into_iter()
+        .map(|(folder, tiles)| {
+            let mut cats: HashMap<&str, usize> = HashMap::new();
+            for e in &tiles {
+                *cats.entry(e.category.as_str()).or_insert(0) += 1;
+            }
+            let mut categories: Vec<(String, usize)> = cats.into_iter().map(|(c, n)| (c.to_string(), n)).collect();
+            categories.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+            // Ground candidates: identity word (the filename's leading token,
+            // same notion footprint_guide uses) over this biome's terrain art.
+            // Falls back to every category when the profile doesn't yet know
+            // which are terrain — a first profile of an unknown pack.
+            let terrain: Vec<&&TileLibraryEntry> =
+                tiles.iter().filter(|e| profile.terrain_categories.is_empty() || profile.is_terrain_category(&e.category)).collect();
+            let mut groups: HashMap<&str, Vec<&TileLibraryEntry>> = HashMap::new();
+            for e in &terrain {
+                if let Some(w) = e.keywords.first().filter(|w| !is_artifact_word(w)) {
+                    groups.entry(w.as_str()).or_default().push(e);
+                }
+            }
+            let mut ranked: Vec<(&str, Vec<&TileLibraryEntry>)> = groups.into_iter().collect();
+            ranked.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
+            let ground = ranked
+                .into_iter()
+                .take(GROUND_CANDIDATES_PER_BIOME)
+                .filter_map(|(word, files)| {
+                    let lums: Vec<f64> = files.iter().take(GROUND_SAMPLES_PER_CANDIDATE).filter_map(|e| tile_luminance(e, measured)).collect();
+                    if lums.is_empty() {
+                        return None; // unreadable (cold network drive) — say nothing rather than guess
+                    }
+                    let mean = lums.iter().sum::<f64>() / lums.len() as f64;
+                    Some(crate::pack_profile::GroundCandidate {
+                        word: word.to_string(),
+                        files: files.len(),
+                        lum_min: lums.iter().cloned().fold(f64::MAX, f64::min) as u8,
+                        lum_max: lums.iter().cloned().fold(0.0, f64::max) as u8,
+                        lum_mean: mean as u8,
+                        example: files[0].rel_path.rsplit('/').next().unwrap_or("").to_string(),
+                    })
+                })
+                .collect();
+
+            // Real object filenames, so the pack's own vocabulary is visible —
+            // this is what makes a mismatch like "pillar" vs "Support_Column"
+            // something the profiler can actually see.
+            let sample_objects = tiles
+                .iter()
+                .filter(|e| !profile.is_terrain_category(&e.category))
+                .map(|e| e.rel_path.rsplit('/').next().unwrap_or("").to_string())
+                .step_by((tiles.len() / SAMPLE_OBJECT_NAMES).max(1))
+                .take(SAMPLE_OBJECT_NAMES)
+                .collect();
+
+            crate::pack_profile::BiomeEvidence { folder: folder.to_string(), tiles: tiles.len(), categories, ground, sample_objects }
+        })
+        .collect();
+    out.sort_by(|a, b| b.tiles.cmp(&a.tiles).then_with(|| a.folder.cmp(&b.folder)));
+    out
+}
+
+/// Every distinct category name in the catalog, most common first.
+fn all_categories(entries: &[TileLibraryEntry]) -> Vec<String> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for e in entries {
+        *counts.entry(e.category.as_str()).or_insert(0) += 1;
+    }
+    let mut v: Vec<(&str, usize)> = counts.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    v.into_iter().map(|(c, _)| c.to_string()).collect()
+}
+
+fn ask(prompt: String) -> Result<String, String> {
+    crate::local_llm::ask_ingest_once_low_effort(prompt, Some("sonnet"))
+}
+
+/// Learn how this pack is laid out and what its biomes ARE, in two passes:
+/// first how to read its paths (from the raw directory tree, since reading the
+/// paths correctly is what that pass decides), then what the biomes mean (from
+/// MEASURED evidence — counts, luminance ranges and real filenames).
+///
+/// Re-parses the manifest under the learned layout, which costs one pass over
+/// the entries instead of another walk of tens of thousands of files on a
+/// possibly-cold network drive.
+///
+/// Never destructive: any failure leaves the previous profile in place, and a
+/// pack that has never been profiled falls back to the Forgotten Adventures
+/// default — which is exactly the behaviour that predates this.
+#[tauri::command]
+pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
+    let Some(manifest) = load_manifest_cached(&app)? else {
+        return Err("No tile library imported yet.".into());
+    };
+    let paths: Vec<String> = manifest.entries.iter().map(|e| e.rel_path.clone()).collect();
+    let current = load_profile_cached(&app);
+
+    let digest = crate::pack_profile::directory_digest(&paths);
+    crate::maplog::log("PACK PROFILE — layout evidence", &digest);
+    let layout = match ask(crate::pack_profile::build_layout_prompt(&digest)) {
+        Ok(reply) => {
+            crate::maplog::log("PACK PROFILE — layout reply", &reply);
+            crate::pack_profile::parse_layout_reply(&extract_json_object(&reply)).unwrap_or_else(|| current.layout.clone())
+        }
+        Err(e) => {
+            crate::maplog::log("PACK PROFILE — layout pass failed", &format!("{e}\n(keeping the previous layout)"));
+            current.layout.clone()
+        }
+    };
+
+    // Re-read every path under the learned layout BEFORE gathering evidence:
+    // the biome and category of every entry is what the evidence is grouped by.
+    let entries = reparse_entries(&manifest.entries, &layout);
+    let staged = PackProfile { layout: layout.clone(), ..(*current).clone() };
+    let evidence = build_biome_evidence(&entries, &staged, &manifest.measured);
+    crate::maplog::log(
+        "PACK PROFILE — biome evidence",
+        &evidence.iter().map(|e| format!("{} ({} tiles, {} ground candidates)", e.folder, e.tiles, e.ground.len())).collect::<Vec<_>>().join("\n"),
+    );
+
+    let reply = ask(crate::pack_profile::build_semantics_prompt(&evidence, &all_categories(&entries)))?;
+    crate::maplog::log("PACK PROFILE — semantics reply", &reply);
+    let derived = crate::pack_profile::parse_semantics_reply(&extract_json_object(&reply), layout)
+        .ok_or_else(|| "Couldn't read the profiler's answer — the previous profile is unchanged.".to_string())?;
+
+    // Persist the derived profile and the re-read manifest together: the
+    // entries' biome/category now depend on the layout that produced them, so
+    // storing one without the other leaves the catalog disagreeing with itself.
+    let path = profile_path(&app)?;
+    fs::write(&path, serde_json::to_string_pretty(&derived).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let remanifested = TileLibraryManifest { roots: manifest.roots.clone(), entries, measured: manifest.measured.clone() };
+    save_manifest(&app, &remanifested)?;
+    *app.state::<TileLibraryState>().manifest.lock().unwrap() = Some(std::sync::Arc::new(remanifested));
+    *app.state::<TileLibraryState>().idf.lock().unwrap() = None;
+    invalidate_profile_cache(&app);
+    Ok((*load_profile_cached(&app)).clone())
+}
+
+/// One biome as the Detected Biomes panel shows it: what the profile says,
+/// plus the evidence a human needs to judge whether it's RIGHT — how much art
+/// is actually in there, and a thumbnail of the ground that query resolves to.
+/// A wrong ground query is invisible in text and obvious in a picture.
+#[derive(Serialize, Clone, Debug)]
+pub struct BiomeProfileView {
+    pub scene: String,
+    pub folder: String,
+    pub floor_query: Option<String>,
+    pub natural_walls: bool,
+    pub liquid_query: Option<String>,
+    pub tiles: usize,
+    /// Data URL of the tile this biome's ground query currently lands on.
+    /// `None` when there's no query, or when it resolves to nothing — which is
+    /// itself the finding, and the reason this is worth rendering.
+    pub ground_thumb: Option<String>,
+    /// Other identity words present in this biome's terrain art, offered as
+    /// alternatives so a correction is a pick rather than a guess.
+    pub ground_options: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct PackProfileView {
+    pub layout: crate::pack_profile::PackLayout,
+    pub universal_biome: Option<String>,
+    pub object_categories: Vec<String>,
+    pub terrain_categories: Vec<String>,
+    pub all_categories: Vec<String>,
+    pub biomes: Vec<BiomeProfileView>,
+    /// True once profiling has actually run — otherwise this is the built-in
+    /// Forgotten Adventures default, which is a guess about someone else's pack.
+    pub profiled: bool,
+}
+
+#[tauri::command]
+pub fn get_pack_profile(app: AppHandle) -> Result<Option<PackProfileView>, String> {
+    let Some(manifest) = load_manifest_cached(&app)? else {
+        return Ok(None);
+    };
+    let profile = load_profile_cached(&app);
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for e in &manifest.entries {
+        *counts.entry(e.biome.as_str()).or_insert(0) += 1;
+    }
+    let evidence = build_biome_evidence(&manifest.entries, &profile, &manifest.measured);
+    let biomes = profile
+        .biomes
+        .iter()
+        .map(|b| BiomeProfileView {
+            folder: b.folder.clone(),
+            scene: b.scene.clone(),
+            floor_query: b.floor_query.clone(),
+            natural_walls: b.natural_walls,
+            liquid_query: b.liquid_query.clone(),
+            tiles: counts.get(b.folder.as_str()).copied().unwrap_or(0),
+            ground_thumb: b
+                .floor_query
+                .as_deref()
+                .and_then(|q| shortlist_in_category(&app, q, "Textures", &b.scene, 1, 1, 1).into_iter().next())
+                .map(|c| c.data_url),
+            ground_options: evidence.iter().find(|e| e.folder == b.folder).map(|e| e.ground.iter().map(|g| g.word.clone()).collect()).unwrap_or_default(),
+        })
+        .collect();
+    Ok(Some(PackProfileView {
+        layout: profile.layout.clone(),
+        universal_biome: profile.universal_biome.clone(),
+        object_categories: profile.object_categories.clone(),
+        terrain_categories: profile.terrain_categories.clone(),
+        all_categories: all_categories(&manifest.entries),
+        biomes,
+        profiled: profile_path(&app).map(|p| p.exists()).unwrap_or(false),
+    }))
+}
+
+/// Writes the human's corrections. Kept in their own file so they survive both
+/// a re-profile and a re-import — the same split `tile_overrides.json` uses.
+#[tauri::command]
+pub fn save_pack_profile_overrides(app: AppHandle, overrides: ProfileOverrides) -> Result<(), String> {
+    let path = profile_overrides_path(&app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(&overrides).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    invalidate_profile_cache(&app);
+    Ok(())
+}
+
+/// The corrections as stored, so the panel can show what's been overridden
+/// rather than silently presenting a corrected value as a derived one.
+#[tauri::command]
+pub fn get_pack_profile_overrides(app: AppHandle) -> Result<ProfileOverrides, String> {
+    Ok(profile_overrides_path(&app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default())
+}
+
+/// The JSON object substring of a possibly-chatty reply, so a `{...}` answer
+/// survives surrounding prose.
+fn extract_json_object(s: &str) -> String {
+    match (s.find('{'), s.rfind('}')) {
+        (Some(a), Some(b)) if b > a => s[a..=b].to_string(),
+        _ => s.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The FA defaults — what every one of these cases was written against.
+    fn prof() -> PackProfile {
+        PackProfile::default()
+    }
 
     #[test]
     fn split_footprint_reads_a_real_footprint_suffix() {
@@ -1548,48 +1830,9 @@ mod tests {
     }
 
     #[test]
-    fn biome_category_from_rel_reads_the_fa_assets_layout() {
-        // "!Wilderness" is skipped over, not matched — Flora (found one level
-        // deeper) is the real, useful category, same fix as the settlement-name
-        // case below.
-        let rel = Path::new("FA_Assets_Webp/Woodlands/!Wilderness/Flora/Trees/Tree_Yellow_D8_3x3.webp");
-        assert_eq!(biome_category_from_rel(rel), ("Woodlands".to_string(), "Flora".to_string()));
-    }
-
-    #[test]
-    fn biome_category_from_rel_falls_back_for_a_non_fa_layout() {
-        let rel = Path::new("Dungeon/Furniture/table_01.png");
-        assert_eq!(biome_category_from_rel(rel), ("Dungeon".to_string(), "Furniture".to_string()));
-    }
-
-    /// Real bug, found live: a pack folder NAME (not a nested "FA_Assets"
-    /// content root) can itself start with "FA_Assets" —
-    /// `FA_Assets_Expansion_Webp_v1.12` — so anchoring on the FIRST match
-    /// mis-reads the literal string "FA_Assets_Webp" as the biome and
-    /// swallows the real biome (Arctic) into category. ~3,000 real entries
-    /// were affected before this was fixed to anchor on the LAST match.
-    #[test]
-    fn biome_category_from_rel_anchors_on_the_last_fa_assets_segment_not_the_first() {
-        let rel = Path::new("FA_Assets_Expansion_Webp_v1.12/FA_Assets_Webp/Arctic/!Wilderness/Decor/Cairns/Cairn_Stone_Slate_Snowy_A1_1x1.webp");
-        assert_eq!(biome_category_from_rel(rel), ("Arctic".to_string(), "Decor".to_string()));
-    }
-
-    /// Real bug, found live: a biome with its own named settlement puts the
-    /// SETTLEMENT NAME where category used to be read from, one level too
-    /// shallow — `Base_Woodlands_Settlement` is not a category, `Structures`
-    /// (found one level deeper) is. This also means the Import UI's
-    /// by-category summary was silently wrong for every named-settlement
-    /// biome before this fix.
-    #[test]
-    fn biome_category_from_rel_skips_a_settlement_name_to_find_the_real_category() {
-        let rel = Path::new("Core_Mapmaking_Pack_Webp_v1.01/FA_Assets_Webp/Woodlands/Base_Woodlands_Settlement/Structures/Building/Doors/Shack_Door_Wood_Ashen_A1_1x1.webp");
-        assert_eq!(biome_category_from_rel(rel), ("Woodlands".to_string(), "Structures".to_string()));
-    }
-
-    #[test]
     fn parse_entry_builds_a_full_entry_from_a_real_fa_path() {
         let rel = Path::new("FA_Assets_Webp/!Core_Settlements/Furniture/Tables/Table_Round_Wood_A1_2x2.webp");
-        let entry = parse_entry(rel).unwrap();
+        let entry = parse_entry(rel, &prof().layout).unwrap();
         assert_eq!(entry.w, 2);
         assert_eq!(entry.h, 2);
         assert_eq!(entry.biome, "!Core_Settlements");
@@ -1601,8 +1844,8 @@ mod tests {
 
     #[test]
     fn parse_entry_skips_a_non_image_file() {
-        assert!(parse_entry(Path::new("FA_Assets_Webp/Woodlands/readme.txt")).is_none());
-        assert!(parse_entry(Path::new("Copyright.url")).is_none());
+        assert!(parse_entry(Path::new("FA_Assets_Webp/Woodlands/readme.txt"), &prof().layout).is_none());
+        assert!(parse_entry(Path::new("Copyright.url"), &prof().layout).is_none());
     }
 
     #[test]
@@ -1664,7 +1907,7 @@ mod tests {
         ];
         let tokens = tokenize_query("wooden table");
         let idf = compute_idf(&entries);
-        let got: Vec<&str> = shortlist_entries(&entries, &tokens, &idf, "", 2, 2, 10, false).iter().map(|e| e.rel_path.as_str()).collect();
+        let got: Vec<&str> = shortlist_entries(&entries, &tokens, &idf, "", 2, 2, 10, false, &prof()).iter().map(|e| e.rel_path.as_str()).collect();
         // 3x3 excluded (doesn't fit the footprint). The two real tables rank
         // first by head noun (2x2 before 1x1 — fewer repeats); the chair still
         // appears LAST because it shares the "wood" adjective — that's the
@@ -1752,7 +1995,7 @@ mod tests {
         // a rare noun below MIN_IDENTITY — noise, stays out
         for _ in 0..5 { entries.push(mk("obelisk", 4, 4)); }
 
-        let guide = footprint_guide(&entries);
+        let guide = footprint_guide(&entries, &prof());
         assert_eq!(guide, vec![("tree".to_string(), 2, 2)], "{guide:?}");
 
         // A fringe size must not become the guide minimum. Live: twelve 2x2
@@ -1762,7 +2005,7 @@ mod tests {
         for _ in 0..12 { fringe.push(mk("tree", 2, 2)); }   // branches: 4%
         for _ in 0..150 { fringe.push(mk("tree", 3, 3)); }  // the real bulk
         for _ in 0..128 { fringe.push(mk("tree", 5, 5)); }
-        let g2 = footprint_guide(&fringe);
+        let g2 = footprint_guide(&fringe, &prof());
         assert_eq!(g2, vec![("tree".to_string(), 3, 3)], "fringe 2x2 must be skipped: {g2:?}");
         // gingerbread itself has a fine 1x1 pool (25 >= 8) so it needs no line;
         // statue's 1x1 pool disqualifies it; obelisk is too rare.
@@ -1878,19 +2121,19 @@ mod tests {
         let idf = compute_idf(&entries);
         let q = tokenize_query("bone pile");
 
-        let as_object = shortlist_entries(&entries, &q, &idf, "underdark", 1, 1, 8, false);
+        let as_object = shortlist_entries(&entries, &q, &idf, "underdark", 1, 1, 8, false, &prof());
         assert_eq!(as_object.len(), 1, "ground art must not be an object candidate: {as_object:?}");
         assert_eq!(as_object[0].rel_path, "bone_pile_prop");
 
         // The floor path asks for Textures by name and must still see it.
-        let as_floor = shortlist_entries(&entries, &q, &idf, "underdark", 1, 1, 8, true);
+        let as_floor = shortlist_entries(&entries, &q, &idf, "underdark", 1, 1, 8, true, &prof());
         assert_eq!(as_floor.len(), 2, "the floor resolver still needs ground textures: {as_floor:?}");
 
-        assert!(is_terrain_only("Textures") && is_terrain_only("texture_overlays"));
+        assert!(prof().is_terrain_category("Textures") && prof().is_terrain_category("texture_overlays"));
         // Elevation is entirely cliff/ridge/bank EDGING strips — the art that
         // gave every cave map its illegible stalagmite scribbles.
-        assert!(is_terrain_only("Elevation") && is_terrain_only("Shadow_Paths"));
-        assert!(!is_terrain_only("Clutter") && !is_terrain_only("Structures") && !is_terrain_only("Flora") && !is_terrain_only("Decor"));
+        assert!(prof().is_terrain_category("Elevation") && prof().is_terrain_category("Shadow_Paths"));
+        assert!(!prof().is_terrain_category("Clutter") && !prof().is_terrain_category("Structures") && !prof().is_terrain_category("Flora") && !prof().is_terrain_category("Decor"));
     }
 
     /// Live bug (2026-07-19, every cave map): "Stalagmite" resolved to a
@@ -1908,7 +2151,7 @@ mod tests {
             mk("Decor", &["stalagmite", "rock", "slate"], "real_stalagmite"),
         ];
         let idf = compute_idf(&entries);
-        let got = shortlist_entries(&entries, &tokenize_query("Stalagmite"), &idf, "cave", 1, 1, 8, false);
+        let got = shortlist_entries(&entries, &tokenize_query("Stalagmite"), &idf, "cave", 1, 1, 8, false, &prof());
         assert_eq!(got.len(), 1, "the edging strip must not be a candidate at all: {got:?}");
         assert_eq!(got[0].rel_path, "real_stalagmite");
     }
@@ -1956,10 +2199,10 @@ mod tests {
             category: "Structures".into(), keywords: vec!["window".into(), "wood".into(), "broken".into()], w: 2, h: 1,
         };
         let idf = compute_idf(std::slice::from_ref(&window));
-        let got = shortlist_entries(std::slice::from_ref(&window), &tokenize_query("Broken crockery"), &idf, "", 2, 1, 8, false);
+        let got = shortlist_entries(std::slice::from_ref(&window), &tokenize_query("Broken crockery"), &idf, "", 2, 1, 8, false, &prof());
         assert!(got.is_empty(), "a condition-word-only match is not an identity match: {got:?}");
         // The same tile IS a valid answer when the label really means a window.
-        let got2 = shortlist_entries(std::slice::from_ref(&window), &tokenize_query("Broken window"), &idf, "", 2, 1, 8, false);
+        let got2 = shortlist_entries(std::slice::from_ref(&window), &tokenize_query("Broken window"), &idf, "", 2, 1, 8, false, &prof());
         assert_eq!(got2.len(), 1);
     }
 
@@ -1980,10 +2223,10 @@ mod tests {
         ];
         let idf = compute_idf(&entries);
         let q = tokenize_query("hanging iron chandelier");
-        let got = shortlist_entries(&entries, &q, &idf, "tavern", 1, 1, 8, false);
+        let got = shortlist_entries(&entries, &q, &idf, "tavern", 1, 1, 8, false, &prof());
         assert!(got.is_empty(), "a 1x1 slot must get NOTHING, not a laundry iron: {got:?}");
         // Give it the room the chandelier actually needs and it resolves fine.
-        let got2 = shortlist_entries(&entries, &q, &idf, "tavern", 2, 2, 8, false);
+        let got2 = shortlist_entries(&entries, &q, &idf, "tavern", 2, 2, 8, false, &prof());
         assert_eq!(got2.first().map(|e| e.rel_path.as_str()), Some("chandelier_2x2"), "{got2:?}");
     }
 
@@ -1991,21 +2234,74 @@ mod tests {
     /// the Horror pack, because ranking never looked at biome at all.
     #[test]
     fn biome_affinity_demotes_a_tile_from_an_unrelated_biome() {
-        assert_eq!(biome_affinity("!Core_Settlements", "!Core_Settlements"), 1.0);
-        assert_eq!(biome_affinity("Underdark", "Underdark"), 1.0);
+        assert_eq!(biome_affinity("!Core_Settlements", "!Core_Settlements", &prof()), 1.0);
+        assert_eq!(biome_affinity("Underdark", "Underdark", &prof()), 1.0);
         // The universal settlement set is welcome in any scene.
-        assert_eq!(biome_affinity("Underdark", "!Core_Settlements"), 1.0);
+        assert_eq!(biome_affinity("Underdark", "!Core_Settlements", &prof()), 1.0);
         // Horror flesh has no business in a tavern.
-        assert!(biome_affinity("!Core_Settlements", "Horror") < 0.5);
-        assert!(biome_affinity("!Core_Settlements", "Arctic") < 0.5);
+        assert!(biome_affinity("!Core_Settlements", "Horror", &prof()) < 0.5);
+        assert!(biome_affinity("!Core_Settlements", "Arctic", &prof()) < 0.5);
+    }
+
+    /// The whole reason profiling exists. A pack that doesn't use Forgotten
+    /// Adventures' folder scheme used to fail in three ways at once, all
+    /// silently: nothing matched `TERRAIN_ONLY_CATEGORIES` so ground textures
+    /// were eligible for object slots, nothing was named `!Core_Settlements` so
+    /// `biome_affinity` scored EVERY tile 0.15 uniformly (which reorders
+    /// nothing, so it looked fine while doing nothing), and no scene word
+    /// resolved to any folder it owned. Given its own profile, all three work.
+    #[test]
+    fn a_non_fa_pack_ranks_correctly_once_it_carries_its_own_profile() {
+        use crate::pack_profile::{BiomeProfile, BiomeSource, PackLayout};
+        let mk = |biome: &str, category: &str, kw: &[&str], path: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: path.into(),
+            biome: biome.into(),
+            category: category.into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![
+            mk("Caverns", "ground", &["bone", "dirt"], "Caverns/ground/bone_dirt.png"), // a tiling FLOOR
+            mk("Caverns", "props", &["bone", "pile"], "Caverns/props/bone_pile.png"),   // the real object
+            mk("Township", "props", &["bone", "charm"], "Township/props/bone_charm.png"),
+        ];
+        let profile = PackProfile {
+            layout: PackLayout { biome_source: BiomeSource::FirstSegment, biome_anchors: vec![], category_folders: vec!["props".into(), "ground".into()] },
+            universal_biome: Some("Township".into()),
+            object_categories: vec!["props".into()],
+            terrain_categories: vec!["ground".into()],
+            biomes: vec![BiomeProfile { scene: "cave".into(), folder: "Caverns".into(), floor_query: Some("bone dirt".into()), natural_walls: true, liquid_query: None }],
+        };
+        let idf = compute_idf(&entries);
+
+        // The scene reaches its OWN folder, not the universal fallback.
+        assert_eq!(scene_biome("cave", &profile), "Caverns");
+        // …and affinity is no longer a uniform 0.15: own-biome and universal
+        // are unpenalised, an unrelated biome is not.
+        assert_eq!(biome_affinity("Caverns", "Caverns", &profile), 1.0);
+        assert_eq!(biome_affinity("Caverns", "Township", &profile), 1.0);
+        assert!(biome_affinity("Township", "Caverns", &profile) < 0.5);
+
+        // An OBJECT slot must not be offered the tiling floor.
+        let got: Vec<&str> = shortlist_entries(&entries, &tokenize_query("bone pile"), &idf, "cave", 1, 1, 8, false, &profile).iter().map(|e| e.rel_path.as_str()).collect();
+        assert!(got.contains(&"Caverns/props/bone_pile.png"), "{got:?}");
+        assert!(!got.contains(&"Caverns/ground/bone_dirt.png"), "ground art reached an object slot: {got:?}");
+        // The FLOOR resolver asks for that shelf by name and must still get it.
+        let ground: Vec<&str> = shortlist_entries(&entries, &tokenize_query("bone dirt"), &idf, "cave", 1, 1, 8, true, &profile).iter().map(|e| e.rel_path.as_str()).collect();
+        assert!(ground.contains(&"Caverns/ground/bone_dirt.png"), "{ground:?}");
+        // And the pack's own vocabulary comes only from its object categories.
+        let vocab = object_vocabulary(&entries, &profile);
+        assert!(vocab.contains(&"pile".to_string()) && !vocab.contains(&"dirt".to_string()), "{vocab:?}");
     }
 
     #[test]
     fn scene_biome_maps_scene_words_and_defaults_to_the_settlement_set() {
-        assert_eq!(scene_biome("tavern"), "!Core_Settlements");
-        assert_eq!(scene_biome("cave"), "Underdark");
-        assert_eq!(scene_biome("forest"), "Woodlands");
-        assert_eq!(scene_biome("anything unknown"), "!Core_Settlements");
+        assert_eq!(scene_biome("tavern", &prof()), "!Core_Settlements");
+        assert_eq!(scene_biome("cave", &prof()), "Underdark");
+        assert_eq!(scene_biome("forest", &prof()), "Woodlands");
+        assert_eq!(scene_biome("anything unknown", &prof()), "!Core_Settlements");
     }
 
     /// Every exact-head match scores identically, so without diversification
@@ -2025,7 +2321,7 @@ mod tests {
             v(&["pillar", "wood"], "wood_a"),
         ];
         let idf = compute_idf(&entries);
-        let got: Vec<&str> = shortlist_entries(&entries, &tokenize_query("pillar"), &idf, "", 1, 1, 3, false)
+        let got: Vec<&str> = shortlist_entries(&entries, &tokenize_query("pillar"), &idf, "", 1, 1, 3, false, &prof())
             .iter().map(|e| e.rel_path.as_str()).collect();
         assert_eq!(got.len(), 3);
         // Three DIFFERENT families, not three flesh variants.
@@ -2054,7 +2350,7 @@ mod tests {
         // the compound bridge surfaces the grave tile, and vision confirms.
         let idf = idf_map(&[("grave", 8.0), ("stone", 2.0), ("crate", 6.0), ("wood", 1.5)]);
         let grave = entry("Burial_and_Graves", &["grave", "stone"]);
-        let got = shortlist_entries(std::slice::from_ref(&grave), &tokenize_query("gravestone"), &idf, "", 2, 2, 8, false);
+        let got = shortlist_entries(std::slice::from_ref(&grave), &tokenize_query("gravestone"), &idf, "", 2, 2, 8, false, &prof());
         assert_eq!(got.len(), 1, "a compound label must reach its base-word tile");
         // An exact head match still outranks a bridge one.
         let exact_crate = entry("Decor", &["crate", "wood"]);
@@ -2094,7 +2390,7 @@ mod tests {
     fn shortlist_finds_a_compound_label_whose_last_word_isnt_a_catalog_noun() {
         let bar = TileLibraryEntry { root: "r".into(), rel_path: "bar_5x1".into(), biome: "b".into(), category: "Furniture".into(), keywords: vec!["bar".into(), "wood".into()], w: 5, h: 1 };
         let idf = idf_map(&[("bar", 7.5), ("wood", 1.6)]);
-        let got = shortlist_entries(std::slice::from_ref(&bar), &tokenize_query("Bar counter"), &idf, "", 6, 1, 8, false);
+        let got = shortlist_entries(std::slice::from_ref(&bar), &tokenize_query("Bar counter"), &idf, "", 6, 1, 8, false, &prof());
         assert_eq!(got.len(), 1, "the real bar tile must be shortlisted for 'Bar counter'");
         assert_eq!(got[0].rel_path, "bar_5x1");
     }
@@ -2131,7 +2427,7 @@ mod tests {
             entry("Furniture", &["table", "round", "woodlands", "furniture"]),
             entry("Structures", &["wall", "stone", "woodlands", "structures"]),
         ];
-        let vocab = object_vocabulary(&entries);
+        let vocab = object_vocabulary(&entries, &prof());
         assert!(vocab.contains(&"table".to_string()));
         assert!(vocab.contains(&"round".to_string()));
         assert!(!vocab.contains(&"wall".to_string()), "Structures isn't placeable set-dressing: {vocab:?}");
@@ -2141,7 +2437,7 @@ mod tests {
     #[test]
     fn object_vocabulary_excludes_the_entrys_own_biome_and_category_words() {
         let entries = vec![entry("Furniture", &["table", "woodlands", "furniture"])];
-        let vocab = object_vocabulary(&entries);
+        let vocab = object_vocabulary(&entries, &prof());
         assert_eq!(vocab, vec!["table".to_string()], "biome/category words are structural, not descriptive: {vocab:?}");
     }
 
@@ -2154,7 +2450,7 @@ mod tests {
             entry("Decor", &["candle"]),
             entry("Clutter", &["barrel"]),
         ];
-        assert_eq!(object_vocabulary(&entries), vec!["candle".to_string(), "table".to_string(), "barrel".to_string()]);
+        assert_eq!(object_vocabulary(&entries, &prof()), vec!["candle".to_string(), "table".to_string(), "barrel".to_string()]);
     }
 
     /// "multicolor2" ranked 100th on raw frequency (781 uses) — a filename
@@ -2164,7 +2460,7 @@ mod tests {
         assert!(is_artifact_word("01") && is_artifact_word("multicolor2") && is_artifact_word("green1"));
         assert!(!is_artifact_word("table") && !is_artifact_word("bookshelf"));
         let entries = vec![entry("Furniture", &["table", "multicolor2", "01"])];
-        assert_eq!(object_vocabulary(&entries), vec!["table".to_string()]);
+        assert_eq!(object_vocabulary(&entries, &prof()), vec!["table".to_string()]);
     }
 
     #[test]
@@ -2174,7 +2470,7 @@ mod tests {
             // rule — this is testing the CAP, not the artifact filter.
             .map(|i| TileLibraryEntry { root: "r".into(), rel_path: "x".into(), biome: "Woodlands".into(), category: "Furniture".into(), keywords: vec![format!("word{i}w")], w: 1, h: 1 })
             .collect();
-        assert_eq!(object_vocabulary(&entries).len(), VOCAB_CAP);
+        assert_eq!(object_vocabulary(&entries, &prof()).len(), VOCAB_CAP);
     }
 
     fn entry_at(root: &str, rel_path: &str) -> TileLibraryEntry {
