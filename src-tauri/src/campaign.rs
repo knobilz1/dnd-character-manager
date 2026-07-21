@@ -3575,6 +3575,24 @@ const BIOME_FLOORS: &[(&str, &str)] = &[
     ("tavern", "brick floor"),
     ("underdark", "drow stone"),
     ("jungle", "jungle grass"),
+    // Two ids for the Astral pack because they are separate PLACES a fight can
+    // happen: a built mind flayer colony, and raw Far Realm wilderness (eyes,
+    // tendrils, bioluminescent growth). Both are needed — `classify_biome` can
+    // only answer with an id on this list, so without a word for each, one of
+    // them lands on "dungeon" and loses the whole pack.
+    //
+    // `ceremorph` is owned outright by that pack (98 Textures, nothing else in
+    // the catalog carries the word), so it can't drift into another biome.
+    //
+    // `alien` deliberately does NOT use the pack's own `Alien_*` ground: all 27
+    // were measured at mean luminance 26 (range 11-72) against a floor gate of
+    // 70, so 26 of 27 are darker than `Gravel_05_F` (48), the tile that turned a
+    // whole cave into one unreadable smear. The Far Realm decor is what matters
+    // and it's reachable regardless — `scene_biome` sends both ids to Astral —
+    // so a Far Realm scene stands on the colony plate (49-78), which is still
+    // unmistakably not stone.
+    ("illithid", "ceremorph"),
+    ("alien", "ceremorph"),
 ];
 
 /// Scenes that honestly read with more than one ground material, so the floor
@@ -3620,16 +3638,33 @@ const BIOME_FLOOR_ALTS: &[(&str, &str, u32)] = &[
 /// all GROUND art, and the best "rock" candidate (`Rock_Tiles_A_01`) is tan
 /// crazy-paving — a patio, not a rock face. Reusing the floor darkened needs no
 /// extra query, no extra vision call, and can't disagree with the floor.
-const NATURAL_WALL_BIOMES: &[&str] = &["cave", "underdark", "volcanic", "snow", "swamp", "forest", "jungle", "desert", "coast", "mountain"];
+/// `illithid` is here even though a mind flayer colony really is BUILT: the
+/// renderer has no wall-tile resolution, so the choice is between the built-in
+/// brick sprites and the biome's own floor darkened, and mortared brick in a
+/// ceremorph colony reads far more wrong than a dark organic plate.
+const NATURAL_WALL_BIOMES: &[&str] = &["cave", "underdark", "volcanic", "snow", "swamp", "forest", "jungle", "desert", "coast", "mountain", "illithid", "alien"];
 
 fn has_natural_walls(biome: &str) -> bool {
     NATURAL_WALL_BIOMES.contains(&biome)
 }
 
-/// The catalog search for `~` cells. One query for every biome — water is
-/// water — and only ever run when the grid actually contains a `~`, so a map
-/// without any spends no vision call on it.
+/// The catalog search for `~` cells — water is water almost everywhere, and
+/// it's only ever run when the grid actually contains a `~`, so a map without
+/// any spends no vision call on it.
 const LIQUID_QUERY: &str = "water";
+
+/// The biomes where `~` is NOT water. A ceremorph colony's pools are brine and
+/// spawning fluid, and the pack ships them as `Ceremorph_Magical_Liquid_*` —
+/// which carry no `water` keyword at all, so the default query can't see them
+/// and would fill a brine pool with clear blue pond instead.
+const LIQUID_QUERY_OVERRIDES: &[(&str, &str)] = &[
+    ("illithid", "ceremorph magical liquid"),
+    ("alien", "ceremorph magical liquid"),
+];
+
+fn liquid_query(biome: &str) -> &'static str {
+    LIQUID_QUERY_OVERRIDES.iter().find(|(b, _)| b.eq_ignore_ascii_case(biome)).map_or(LIQUID_QUERY, |(_, q)| *q)
+}
 
 /// The ground query for `biome` given a d20 `roll` — the alternate material if
 /// the roll reaches its threshold, else the biome's default. Pure, so the odds
@@ -3700,6 +3735,14 @@ fn resolve_floor(app: &AppHandle, biome: &str) -> Option<TileRef> {
     let roll = rand::thread_rng().gen_range(1..=20);
     let query = roll_floor_query(biome, roll)?; // "dungeon" isn't in BIOME_FLOORS → None → keep built-in
     let all = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    // A `Textures/Liquids/*` tile is a POOL, not ground — it belongs to `~`
+    // cells, and `resolve_liquid` asks for it there by name. Live: "ceremorph"
+    // head-matched both the colony's floor plates and its brine, because
+    // `ceremorph` is the only keyword the plates carry; the plates are darker
+    // (49-78) than the brine (85-110) so the luminance filter below culled them
+    // first, and the whole chamber rendered as one flat sheet of blue liquid —
+    // floor and water identical, the pool invisible.
+    let all: Vec<_> = all.into_iter().filter(|c| !c.rel_path.contains("/Liquids/")).collect();
     // Drop textures too dark (or too blown out) to be a board you place minis
     // on. Live: a d20 landed "gravel" on Gravel_05_F (luminance 48) and the
     // whole cave — floor, walls, objects — rendered as one dark smear, while
@@ -3725,9 +3768,10 @@ fn resolve_liquid(app: &AppHandle, biome: &str, rows: &[String]) -> Option<TileR
     if !rows.iter().any(|r| r.contains('~')) {
         return None;
     }
-    let cands = crate::tile_library::shortlist_in_category(app, LIQUID_QUERY, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
-    crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={LIQUID_QUERY:?}, {} texture candidate(s)", cands.len()));
-    let idx = pick_texture(biome, "still, natural water seen from directly above", &cands)?;
+    let query = liquid_query(biome);
+    let cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={query:?}, {} texture candidate(s)", cands.len()));
+    let idx = pick_texture(biome, "a still pool seen from directly above", &cands)?;
     let c = cands.get(idx)?;
     Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
 }
@@ -6496,6 +6540,38 @@ mod tests {
                 assert!(PROBED.contains(&(biome, q)), "{biome}: query {q:?} ends in \"floor\" — probe it against the real catalog and add it to PROBED, or it may silently resolve to brick");
             }
         }
+    }
+
+    /// Every biome id must be reachable end to end, not just present in one
+    /// table. A ground query the classifier can't return is dead, and a biome
+    /// `scene_biome` doesn't recognise scores its OWN pack 0.15 and silently
+    /// renders as generic settlement art — which is exactly what the whole
+    /// Astral pack (a complete illithid colony + Far Realm set, ~3,200 tiles)
+    /// did before it had an id here.
+    #[test]
+    fn every_biome_id_reaches_both_its_ground_query_and_its_catalog_pack() {
+        // The civilised scenes whose pack really IS the universal settlement
+        // set — for them the default is the right answer, not a fall-through.
+        const SETTLEMENT_SCENES: &[&str] = &["town", "tavern"];
+        for b in biome_ids() {
+            if b == "dungeon" {
+                continue; // the built-in look: deliberately no query, no pack
+            }
+            assert!(biome_floor_query(b).is_some(), "{b}: in biome_ids() but no ground query");
+            if !SETTLEMENT_SCENES.contains(&b) {
+                assert_ne!(
+                    crate::tile_library::scene_biome(b),
+                    "!Core_Settlements",
+                    "{b}: scene_biome doesn't map it, so its own biome's art is scored 0.15 and never shows"
+                );
+            }
+        }
+        // The two Astral ids resolve to the pack that actually holds the art.
+        assert_eq!(crate::tile_library::scene_biome("illithid"), "Astral");
+        assert_eq!(crate::tile_library::scene_biome("alien"), "Astral");
+        // `~` in a ceremorph colony is brine, not pond water.
+        assert_eq!(liquid_query("illithid"), "ceremorph magical liquid");
+        assert_eq!(liquid_query("cave"), LIQUID_QUERY);
     }
 
     /// The whole point of the rewrite: the flame lands on the sprite's own

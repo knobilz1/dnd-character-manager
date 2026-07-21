@@ -1323,13 +1323,16 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
 /// `classify_biome` (tavern, cave, forest, …); catalog biomes are the
 /// top-level pack folders. `!Core_Settlements` is the generic human-built set
 /// and fits almost any civilised scene, so it's always allowed.
-fn scene_biome(scene: &str) -> &'static str {
+pub(crate) fn scene_biome(scene: &str) -> &'static str {
     let s = scene.to_lowercase();
     for (needle, biome) in [
         ("cave", "Underdark"), ("underdark", "Underdark"), ("forest", "Woodlands"), ("jungle", "Jungle"),
         ("desert", "Desert"), ("snow", "Arctic"), ("arctic", "Arctic"), ("swamp", "Swamp"), ("marsh", "Swamp"),
         ("volcan", "Volcanic"), ("mountain", "Mountain"), ("water", "Aquatic"), ("coast", "Aquatic"),
         ("sea", "Aquatic"), ("horror", "Horror"), ("astral", "Astral"), ("fey", "Feywilds"),
+        // The Astral pack is where the mind flayer colony and Far Realm art
+        // lives; without these two the whole tree scores 0.15 and never shows.
+        ("illithid", "Astral"), ("alien", "Astral"),
     ] {
         if s.contains(needle) {
             return biome;
