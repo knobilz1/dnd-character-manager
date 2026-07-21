@@ -6883,8 +6883,20 @@ mod tests {
         // The civilised places whose pack really IS the universal settlement
         // set — for them the default is the right answer, not a fall-through.
         const SETTLEMENT_SCENES: &[&str] = &["town", "tavern"];
+        // A place is allowed NO ground — `factory`'s pack ships nothing that
+        // reads as a board (its only candidate is 43% owned by other biomes and
+        // measures luminance 52 against a gate of 70), so it keeps the built-in
+        // floor. That's a decision, not an omission, and it still reaches its
+        // 3,226 objects. What must never happen is a place that can't reach its
+        // FOLDER, since then its own art is scored 0.15 and the pack is hidden.
+        const GROUNDLESS_BY_DESIGN: &[&str] = &["factory"];
         for b in &p.biomes {
-            assert!(b.floor_query.is_some(), "{}: a place with no ground query keeps the built-in floor forever", b.scene);
+            assert_eq!(
+                b.floor_query.is_some(),
+                !GROUNDLESS_BY_DESIGN.contains(&b.scene.as_str()),
+                "{}: every place either has a ground query or is listed as deliberately groundless",
+                b.scene
+            );
             assert_eq!(crate::tile_library::scene_biome(&b.scene, &p), b.folder, "{}: scene_biome disagrees with the profile's own folder", b.scene);
             if !SETTLEMENT_SCENES.contains(&b.scene.as_str()) {
                 assert_ne!(b.folder, "!Core_Settlements", "{}: falling back to the universal set means its own art is scored 0.15", b.scene);

@@ -170,11 +170,33 @@ const DEFAULT_BIOMES: &[(&str, &str, &str, bool, &str)] = &[
     ("swamp", "Swamp", "marsh mud", true, ""),
     ("coast", "Aquatic", "beach sand", true, ""),
     ("volcanic", "Volcanic", "volcanic rock", true, ""),
-    ("jungle", "Jungle", "jungle grass", true, ""),
     ("town", "!Core_Settlements", "cobblestone", false, ""),
     ("tavern", "!Core_Settlements", "brick floor", false, ""),
     ("illithid", "Astral", "ceremorph", true, "ceremorph magical liquid"),
     ("alien", "Astral", "ceremorph", true, "ceremorph magical liquid"),
+    // Three packs that had no scene word at all, so `classify_biome` could
+    // never name them and every one of their tiles scored 0.15 forever. Horror
+    // is the third-largest collection in the whole catalog. `scene_biome`
+    // already had needles for horror and fey, and `biome_affinity`'s own test
+    // says "Horror flesh has no business in a tavern" — the ranking had been
+    // taught about them; nothing ever gave the classifier the word to say.
+    ("horror", "Horror", "flesh", true, "blood"),
+    // No ground of its own that reads as a board: `metal` is 43% owned by other
+    // biomes and measures mean luminance 52 against a floor gate of 70. Keeping
+    // the built-in floor still unlocks its 3,226 objects, which is the point.
+    ("factory", "Industrial", "", false, ""),
+    // 1,602 tiles and FOUR textures, none usable — it borrows, like `alien`.
+    ("fey", "Feywilds", "grass", true, ""),
+    // Places that share a folder with a wilderness sibling but are a different
+    // board entirely — the same split as cave/underdark. Each ground word below
+    // is owned 100% by its own biome and measured inside the legibility band.
+    ("bazaar", "Desert", "ceramic", false, ""),
+    ("forge", "Mountain", "dwarven", false, ""),
+    ("greenhouse", "Woodlands", "botanical", false, ""),
+    ("reef", "Aquatic", "coral", true, ""),
+    // Jungle ships 2,281 tiles and they are ALL Flora — zero textures. It has
+    // always borrowed woodland grass; saying so is the only change.
+    ("jungle", "Jungle", "grass", true, ""),
 ];
 
 /// `(biome, category)` for a path relative to the imported root, read through
@@ -440,7 +462,8 @@ pub fn build_layout_prompt(digest: &str) -> String {
          - \"after_anchor\" means the biome is the segment right AFTER a fixed wrapper folder; put that wrapper's name in biome_anchors (matched by prefix, so give the shortest common stem if the pack spells it more than one way). Otherwise biome_anchors is [].\n\
          - \"first_segment\" means the top-level folders ARE the biomes.\n\
          - \"flat\" means there is no biome level; every tile suits any scene.\n\
-         - category_folders lists every folder name that names a KIND OF THING wherever it appears. Include ground/texture folders. Do NOT include a folder that is one collection's proper name (a specific settlement, a numbered set) — those sit where a category would and are the reason a category must be searched for by name rather than taken positionally."
+         - category_folders lists every folder name that names a KIND OF THING wherever it appears — furniture, clutter, ground textures, lighting, vehicles, effects. Include ground/texture folders.\n\
+         - Do NOT list a folder that names a PLACE or a COLLECTION rather than a kind of thing. A pack often groups a biome's contents into a settlement and a wilderness half (\"Base_Desert_Settlement\", \"Drow_Settlement\", \"!Wilderness\", \"Ruins\") and then puts the real categories INSIDE those. Those grouping folders sit exactly where a category would, which is why the category has to be searched for by name instead of taken positionally — listing one collapses every tile beneath it into a single meaningless category and loses the real one. The test: could this folder's name appear under several different biomes AND describe what an individual tile IS? Only then is it a category."
     )
 }
 
@@ -461,7 +484,7 @@ pub fn build_semantics_prompt(evidence: &[BiomeEvidence], categories: &[String])
          - floor_query: words that select this biome's default ground from its candidate list above. It is matched against filenames, so use a word the files actually contain. Prefer a material with a mean luminance in 70-205: below that the board is too dark to read minis on, above it washes out the art placed on top. If this biome's only ground art measures outside that band, either borrow a suitable material from a related biome or answer null to keep the built-in stone floor. Never end the query with the bare word \"floor\" — it collides with generic brick.\n\
          - natural_walls: true when this biome's walls are living rock or organic mass (caves, canyons), false when they are built masonry (towns, taverns).\n\
          - liquid_query: only when this biome's pools are NOT water and its own files would not be found by searching \"water\". Otherwise null.\n\
-         - Include EVERY biome listed above, even ones you are unsure about.",
+         - Include every biome listed above that is a PLACE. Omit any that is a shared library rather than somewhere a fight happens — a folder of spell effects, blast marks, smoke and weather overlays is used ON other maps, and making it a scene would let the classifier send a whole encounter there. Judge that by its categories and filenames, not its name.",
         categories.join(", "),
         blocks
     )
@@ -494,6 +517,52 @@ pub fn parse_layout_reply(json: &str) -> Option<PackLayout> {
         return None;
     }
     Some(PackLayout { biome_source, biome_anchors, category_folders })
+}
+
+/// Drops "category" folders that are really GROUPING folders, by checking the
+/// answer against the paths instead of trusting it.
+///
+/// A grouping folder — `!Wilderness`, `Drow_Settlement`, `Base_Desert_Settlement`
+/// — sits exactly where a category sits and passes every naming heuristic, but
+/// the real category is INSIDE it. Since `biome_category_from_rel` takes the
+/// first category folder it meets walking down, listing one collapses every
+/// tile beneath it into one meaningless category and loses the real one: live,
+/// the profiler returned `!Wilderness`, which would have filed all 6,203
+/// Woodlands wilderness tiles as "!Wilderness" instead of Flora, Decor and
+/// Elevation.
+///
+/// The signal is structural, not lexical, so it needs no vendor knowledge: a
+/// grouping folder nearly always has another category folder beneath it in the
+/// same path, and a real category rarely does. Judged on the actual scan, so a
+/// pack that genuinely nests two real categories is measured, not assumed.
+pub fn prune_grouping_folders(paths: &[String], layout: PackLayout) -> PackLayout {
+    let is_cat = |s: &str| layout.category_folders.iter().any(|c| c.eq_ignore_ascii_case(s));
+    let (mut seen, mut nested): (HashMap<&str, usize>, HashMap<&str, usize>) = (HashMap::new(), HashMap::new());
+    for p in paths {
+        let segs: Vec<&str> = p.split('/').collect();
+        let end = segs.len().saturating_sub(1); // the filename is not a folder
+        for (i, s) in segs[..end].iter().enumerate() {
+            if !is_cat(s) {
+                continue;
+            }
+            *seen.entry(s).or_insert(0) += 1;
+            if segs[i + 1..end].iter().any(|d| is_cat(d)) {
+                *nested.entry(s).or_insert(0) += 1;
+            }
+        }
+    }
+    let kept = layout
+        .category_folders
+        .iter()
+        .filter(|c| {
+            let n = seen.get(c.as_str()).copied().unwrap_or(0);
+            // Unseen folders are harmless and may matter to a pack we only
+            // partly scanned — only drop ones the evidence condemns.
+            n == 0 || nested.get(c.as_str()).copied().unwrap_or(0) * 2 <= n
+        })
+        .cloned()
+        .collect();
+    PackLayout { category_folders: kept, ..layout }
 }
 
 /// The semantics pass's reply, folded onto `layout` (which the layout pass
@@ -670,6 +739,39 @@ mod tests {
         assert!(parse_layout_reply("not json").is_none());
         // A flat pack is a legitimate answer, not a failure.
         assert_eq!(parse_layout_reply(r#"{"biome_source":"flat","biome_anchors":[],"category_folders":["props"]}"#).unwrap().biome_source, BiomeSource::Flat);
+    }
+
+    /// Live: the profiler answered `!Wilderness` among the category folders.
+    /// It sits where a category sits and reads like one, but the real category
+    /// is inside it — taking it would have filed every Woodlands wilderness
+    /// tile as "!Wilderness" instead of Flora/Decor/Elevation. The evidence for
+    /// dropping it is structural, so no vendor knowledge is needed.
+    #[test]
+    fn a_grouping_folder_is_pruned_but_a_real_category_survives() {
+        let paths: Vec<String> = [
+            "P/FA/Woodlands/!Wilderness/Flora/Trees/a.webp",
+            "P/FA/Woodlands/!Wilderness/Decor/Rocks/b.webp",
+            "P/FA/Desert/!Wilderness/Flora/c.webp",
+            "P/FA/Desert/Base_Desert_Settlement/Furniture/Tables/d.webp",
+            "P/FA/Desert/Base_Desert_Settlement/Decor/e.webp",
+            "P/FA/Mountain/Decor/Rocks/f.webp",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let layout = PackLayout {
+            biome_source: BiomeSource::AfterAnchor,
+            biome_anchors: vec!["FA".into()],
+            category_folders: vec!["Flora".into(), "Decor".into(), "Furniture".into(), "!Wilderness".into(), "Base_Desert_Settlement".into()],
+        };
+        let pruned = prune_grouping_folders(&paths, layout).category_folders;
+        assert!(!pruned.iter().any(|c| c == "!Wilderness"), "a grouping folder always wrapping a real category must go: {pruned:?}");
+        assert!(!pruned.iter().any(|c| c == "Base_Desert_Settlement"), "{pruned:?}");
+        // The real categories are untouched, including Decor which appears both
+        // inside a grouping folder and directly under a biome.
+        for real in ["Flora", "Decor", "Furniture"] {
+            assert!(pruned.iter().any(|c| c == real), "{real} must survive: {pruned:?}");
+        }
     }
 
     #[test]

@@ -1662,7 +1662,11 @@ pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
     let layout = match ask(crate::pack_profile::build_layout_prompt(&digest)) {
         Ok(reply) => {
             crate::maplog::log("PACK PROFILE — layout reply", &reply);
-            crate::pack_profile::parse_layout_reply(&extract_json_object(&reply)).unwrap_or_else(|| current.layout.clone())
+            // Checked against the real paths before it's trusted — see
+            // `prune_grouping_folders`, which live output made necessary.
+            crate::pack_profile::parse_layout_reply(&extract_json_object(&reply))
+                .map(|l| crate::pack_profile::prune_grouping_folders(&paths, l))
+                .unwrap_or_else(|| current.layout.clone())
         }
         Err(e) => {
             crate::maplog::log("PACK PROFILE — layout pass failed", &format!("{e}\n(keeping the previous layout)"));
