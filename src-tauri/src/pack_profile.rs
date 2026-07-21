@@ -473,11 +473,27 @@ pub fn build_layout_prompt(digest: &str) -> String {
     )
 }
 
-pub fn build_semantics_prompt(evidence: &[BiomeEvidence], categories: &[String]) -> String {
+pub fn build_semantics_prompt(evidence: &[BiomeEvidence], categories: &[String], previous_scenes: &[String]) -> String {
     let blocks = evidence.iter().map(render_biome_evidence).collect::<Vec<_>>().join("\n");
+    // Scene words are the ONLY identity a place has. A human's corrections are
+    // filed under them (see ProfileOverrides.biomes) and the map classifier is
+    // handed them verbatim, so a word that changes between runs silently drops
+    // whatever was pinned to it. Measured across three re-profiles of one
+    // unchanged catalog: volcano/volcanic, charnel/abattoir, cavern/cave,
+    // foundry/workshop/factory — and a ground correction filed under "volcanic"
+    // was dead on arrival when the next run called the same place "volcano".
+    let carry = if previous_scenes.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nThis pack has been profiled before, under these scene words: {}.\n\
+             Where a place below is the SAME place one of those named, reuse that exact word. A scene word is a place's only identity: the map classifier is handed these words, and any correction a human has made is filed under them, so renaming a place that hasn't changed throws that work away silently. Only introduce a new word for a place that genuinely has no word above.\n",
+            previous_scenes.join(", ")
+        )
+    };
     format!(
         "You are profiling an imported battle-map art pack so a D&D map generator can use it. Everything below was MEASURED from the actual files — trust the numbers over what a name suggests.\n\n\
-         Every category in the pack: {}\n\n{}\n\
+         Every category in the pack: {}\n{carry}\n{}\n\
          Reply with ONLY this JSON:\n\
          {{\"universal_biome\": \"<folder>\" | null,\n\
            \"object_categories\": [\"...\"],\n\
@@ -859,7 +875,7 @@ mod tests {
         // The naming evidence that made "pillar" vs "column" findable.
         assert!(s.contains("Ceremorph_Support_Column_Blue_A1"), "{s}");
         // And the prompt must actually state the legibility band it's judging against.
-        let p = build_semantics_prompt(&[e], &["Structures".into()]);
+        let p = build_semantics_prompt(&[e], &["Structures".into()], &[]);
         assert!(p.contains("70-205") && p.contains("bare word \"floor\""), "the prompt lost its measured guardrails");
     }
 

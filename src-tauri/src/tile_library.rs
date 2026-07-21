@@ -1775,7 +1775,10 @@ pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
         &evidence.iter().map(|e| format!("{} ({} tiles, {} ground candidates)", e.folder, e.tiles, e.ground.len())).collect::<Vec<_>>().join("\n"),
     );
 
-    let reply = ask(crate::pack_profile::build_semantics_prompt(&evidence, &all_categories(&entries)))?;
+    // Carry the previous run's scene words in, so an unchanged place keeps its
+    // name and the corrections filed under it survive — see build_semantics_prompt.
+    let previous: Vec<String> = current.biomes.iter().map(|b| b.scene.clone()).collect();
+    let reply = ask(crate::pack_profile::build_semantics_prompt(&evidence, &all_categories(&entries), &previous))?;
     crate::maplog::log("PACK PROFILE — semantics reply", &reply);
     let derived = crate::pack_profile::parse_semantics_reply(&extract_json_object(&reply), layout)
         .ok_or_else(|| "Couldn't read the profiler's answer — the previous profile is unchanged.".to_string())?;
