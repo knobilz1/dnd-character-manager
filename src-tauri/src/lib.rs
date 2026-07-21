@@ -3,6 +3,7 @@ mod dm;
 mod local_llm;
 mod maplog;
 mod oauth;
+mod pack_profile;
 mod party_listener;
 mod terrain;
 mod tile_library;
@@ -102,6 +103,10 @@ pub fn run() {
       terrain::save_terrain_catalog,
       tile_library::import_tile_library,
       tile_library::get_tile_library_summary,
+      tile_library::profile_tile_library,
+      tile_library::get_pack_profile,
+      tile_library::get_pack_profile_overrides,
+      tile_library::save_pack_profile_overrides,
       tile_library::audit_tile_library,
       tile_library::import_tile_overrides,
       tile_library::search_tile_catalog,

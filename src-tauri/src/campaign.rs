@@ -61,6 +61,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::pack_profile::PackProfile;
+
 const BASE_CLAUDE_MD: &str = r#"# You are the Dungeon Master
 
 You are the Dungeon Master for a Dungeons & Dragons game night. The players are physically at the table talking to you out loud through speech-to-text; you reply and your reply is read aloud with text-to-speech, so keep prose natural to hear, not to read.
@@ -3558,49 +3560,13 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
     }
 }
 
-/// Biome ids the ground resolver understands, each mapped to the catalog
-/// Textures search that finds its floor. Small fixed set — `classify_biome`
-/// picks one. "dungeon" is deliberately absent: it IS the built-in look, so a
-/// dungeon map keeps the current stone floor (no override, no vision call).
-/// CAREFUL: never end one of these queries with the bare word "floor". The
-/// head noun (last token) takes a 1000x exact-match tier, `Brick_Floor_*` is
-/// `!Core_Settlements` (which biome affinity always scores 1.0), and every
-/// biome-specific texture is scored 0.15 for being off-biome — so ANY "… floor"
-/// query resolves to brick. That silently cost tavern ("wooden floor"), cave
-/// ("cave rock floor") and underdark ("drow floor") their ground for months.
-/// Name the material instead and probe the result before trusting it.
-const BIOME_FLOORS: &[(&str, &str)] = &[
-    ("cave", "cave"),
-    ("forest", "grass"),
-    ("mountain", "gravel"),          // rocky scree of a high pass — reads as bare mountain stone
-    ("desert", "desert sand"),
-    ("snow", "snow"),
-    ("swamp", "marsh mud"),
-    ("coast", "beach sand"),
-    ("volcanic", "volcanic rock"),
-    ("town", "cobblestone"),
-    ("tavern", "brick floor"),
-    ("underdark", "drow stone"),
-    ("jungle", "jungle grass"),
-    // Two ids for the Astral pack because they are separate PLACES a fight can
-    // happen: a built mind flayer colony, and raw Far Realm wilderness (eyes,
-    // tendrils, bioluminescent growth). Both are needed — `classify_biome` can
-    // only answer with an id on this list, so without a word for each, one of
-    // them lands on "dungeon" and loses the whole pack.
-    //
-    // `ceremorph` is owned outright by that pack (98 Textures, nothing else in
-    // the catalog carries the word), so it can't drift into another biome.
-    //
-    // `alien` deliberately does NOT use the pack's own `Alien_*` ground: all 27
-    // were measured at mean luminance 26 (range 11-72) against a floor gate of
-    // 70, so 26 of 27 are darker than `Gravel_05_F` (48), the tile that turned a
-    // whole cave into one unreadable smear. The Far Realm decor is what matters
-    // and it's reachable regardless — `scene_biome` sends both ids to Astral —
-    // so a Far Realm scene stands on the colony plate (49-78), which is still
-    // unmistakably not stone.
-    ("illithid", "ceremorph"),
-    ("alien", "ceremorph"),
-];
+// The per-place ground queries that used to live here are now
+// `pack_profile.rs`'s DEFAULT_BIOMES, so an imported pack can carry its own
+// instead of every install being told it owns Forgotten Adventures. The default
+// table is identical to what was here, including its two hard-won warnings: a
+// query whose head noun is the bare word "floor" resolves to generic brick
+// whatever the biome, and `alien` borrows the ceremorph plate because its own
+// ground art measures too dark to place minis on.
 
 /// Scenes that honestly read with more than one ground material, so the floor
 /// is ROLLED each time a map resolves instead of always landing on the same
@@ -3635,59 +3601,41 @@ const BIOME_FLOOR_ALTS: &[(&str, &str, u32)] = &[
     ("town", "gravel", 16),
 ];
 
-/// Biomes whose `#` cells are LIVING ROCK rather than built masonry, so the
-/// renderer should draw them as the biome's own ground darkened instead of the
-/// built-in brick sprites. A tavern or town wall really is mortared stone and
-/// reads correctly today; a limestone cave ringed in brick reads as a dungeon
-/// room, which is exactly what every cave map looked like.
-///
-/// Deliberately NOT resolved as its own texture: the catalog's `Textures` are
-/// all GROUND art, and the best "rock" candidate (`Rock_Tiles_A_01`) is tan
-/// crazy-paving — a patio, not a rock face. Reusing the floor darkened needs no
-/// extra query, no extra vision call, and can't disagree with the floor.
-/// `illithid` is here even though a mind flayer colony really is BUILT: the
-/// renderer has no wall-tile resolution, so the choice is between the built-in
-/// brick sprites and the biome's own floor darkened, and mortared brick in a
-/// ceremorph colony reads far more wrong than a dark organic plate.
-const NATURAL_WALL_BIOMES: &[&str] = &["cave", "underdark", "volcanic", "snow", "swamp", "forest", "jungle", "desert", "coast", "mountain", "illithid", "alien"];
-
-fn has_natural_walls(biome: &str) -> bool {
-    NATURAL_WALL_BIOMES.contains(&biome)
+/// Whether `#` should be drawn as this scene's own ground darkened instead of
+/// the built-in masonry sprites — living rock (a cave, a canyon) rather than
+/// mortared stone. Unknown scenes get built walls, which is what a dungeon is.
+fn has_natural_walls(profile: &PackProfile, scene: &str) -> bool {
+    profile.scene(scene).is_some_and(|b| b.natural_walls)
 }
 
 /// The catalog search for `~` cells — water is water almost everywhere, and
 /// it's only ever run when the grid actually contains a `~`, so a map without
-/// any spends no vision call on it.
+/// any spends no vision call on it. A scene whose pools are NOT water carries
+/// its own query in the profile: a ceremorph colony's are brine, shipped as
+/// `Ceremorph_Magical_Liquid_*` with no `water` keyword at all, so the default
+/// could never see them and filled a spawning pool with clear blue pond.
 const LIQUID_QUERY: &str = "water";
 
-/// The biomes where `~` is NOT water. A ceremorph colony's pools are brine and
-/// spawning fluid, and the pack ships them as `Ceremorph_Magical_Liquid_*` —
-/// which carry no `water` keyword at all, so the default query can't see them
-/// and would fill a brine pool with clear blue pond instead.
-const LIQUID_QUERY_OVERRIDES: &[(&str, &str)] = &[
-    ("illithid", "ceremorph magical liquid"),
-    ("alien", "ceremorph magical liquid"),
-];
-
-fn liquid_query(biome: &str) -> &'static str {
-    LIQUID_QUERY_OVERRIDES.iter().find(|(b, _)| b.eq_ignore_ascii_case(biome)).map_or(LIQUID_QUERY, |(_, q)| *q)
+fn liquid_query<'a>(profile: &'a PackProfile, scene: &str) -> &'a str {
+    profile.scene(scene).and_then(|b| b.liquid_query.as_deref()).unwrap_or(LIQUID_QUERY)
 }
 
 /// The ground query for `biome` given a d20 `roll` — the alternate material if
 /// the roll reaches its threshold, else the biome's default. Pure, so the odds
 /// are testable without the RNG.
-fn roll_floor_query(biome: &str, roll: u32) -> Option<&'static str> {
-    let primary = biome_floor_query(biome)?;
-    match BIOME_FLOOR_ALTS.iter().find(|(b, _, _)| *b == biome) {
+fn roll_floor_query<'a>(profile: &'a PackProfile, scene: &str, roll: u32) -> Option<&'a str> {
+    let primary = biome_floor_query(profile, scene)?;
+    match BIOME_FLOOR_ALTS.iter().find(|(b, _, _)| *b == scene) {
         Some((_, alt, at)) if roll >= *at => Some(alt),
         _ => Some(primary),
     }
 }
 
-/// Every biome the classifier may return — the ground-swap set plus "dungeon"
-/// (the default / built-in floor).
-fn biome_ids() -> Vec<&'static str> {
-    std::iter::once("dungeon").chain(BIOME_FLOORS.iter().map(|(b, _)| *b)).collect()
+/// Every scene word the classifier may return — the imported pack's own places
+/// plus "dungeon" (the default / built-in floor, deliberately never in the
+/// profile since it means "no override, no vision call").
+fn biome_ids(profile: &PackProfile) -> Vec<&str> {
+    std::iter::once("dungeon").chain(profile.scene_words()).collect()
 }
 
 /// Cheap TEXT classification of a finished map's biome from its title +
@@ -3695,8 +3643,8 @@ fn biome_ids() -> Vec<&'static str> {
 /// Keeps biome detection OUT of the fragile map-generation prompt — it runs at
 /// resolution time on the already-written spec. Defaults to "dungeon" on any
 /// miss, which is a no-op (built-in floor).
-fn classify_biome(spec: &str) -> String {
-    let ids = biome_ids();
+fn classify_biome(profile: &PackProfile, spec: &str) -> String {
+    let ids = biome_ids(profile);
     let context: String = spec
         .lines()
         .filter(|l| {
@@ -3737,10 +3685,10 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
 /// Resolve the biome ground texture for a finished spec: classify the biome,
 /// then vision-pick a ground tile from the catalog's Textures. `None` for a
 /// dungeon (keep the built-in stone floor), an unknown biome, or no candidates.
-fn resolve_floor(app: &AppHandle, biome: &str) -> Option<TileRef> {
+fn resolve_floor(app: &AppHandle, profile: &PackProfile, biome: &str) -> Option<TileRef> {
     use rand::Rng;
     let roll = rand::thread_rng().gen_range(1..=20);
-    let query = roll_floor_query(biome, roll)?; // "dungeon" isn't in BIOME_FLOORS → None → keep built-in
+    let query = roll_floor_query(profile, biome, roll)?; // "dungeon" has no profile entry → None → keep built-in
     let all = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
     // A `Textures/Liquids/*` tile is a POOL, not ground — it belongs to `~`
     // cells, and `resolve_liquid` asks for it there by name. Live: "ceremorph"
@@ -3771,11 +3719,11 @@ fn resolve_floor(app: &AppHandle, biome: &str) -> Option<TileRef> {
 /// when the grid contains no `~`, which is most maps. Replaces a flat blue
 /// square drawn in code (`COLORS.water`) that read as a swimming pool next to
 /// the catalog art around it.
-fn resolve_liquid(app: &AppHandle, biome: &str, rows: &[String]) -> Option<TileRef> {
+fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[String]) -> Option<TileRef> {
     if !rows.iter().any(|r| r.contains('~')) {
         return None;
     }
-    let query = liquid_query(biome);
+    let query = liquid_query(profile, biome);
     let cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
     crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={query:?}, {} texture candidate(s)", cands.len()));
     let idx = pick_texture(biome, "a still pool seen from directly above", &cands)?;
@@ -3783,8 +3731,8 @@ fn resolve_liquid(app: &AppHandle, biome: &str, rows: &[String]) -> Option<TileR
     Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
 }
 
-fn biome_floor_query(biome: &str) -> Option<&'static str> {
-    BIOME_FLOORS.iter().find(|(b, _)| b.eq_ignore_ascii_case(biome)).map(|(_, q)| *q)
+fn biome_floor_query<'a>(profile: &'a PackProfile, scene: &str) -> Option<&'a str> {
+    profile.scene(scene).and_then(|b| b.floor_query.as_deref())
 }
 
 /// Resolve one just-generated map's discrete objects to exact catalog tiles
@@ -3807,9 +3755,13 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         return Ok(());
     }
     let spec = read_battle_map_at(root, id, slug)?;
+    // The imported pack's profile decides what scene words even EXIST, what
+    // each one's ground is and whether its walls are living rock — so it's read
+    // once here and threaded through every step below.
+    let profile = crate::tile_library::load_profile_cached(app);
     // Classify the scene ONCE — it drives both the object picks (material fit)
     // and the ground texture.
-    let biome = classify_biome(&spec);
+    let biome = classify_biome(&profile, &spec);
     let placements = parse_placements(&spec);
     let t_short = std::time::Instant::now();
     // Search at the library's real size for guide nouns even when the placement
@@ -3950,10 +3902,10 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         })
         .collect();
     objects.extend(flames);
-    let floor = resolve_floor(app, &biome);
+    let floor = resolve_floor(app, &profile, &biome);
     let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
-    let liquid = resolve_liquid(app, &biome, &grid_rows);
-    let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&biome) };
+    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows);
+    let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&profile, &biome) };
     // Always write (even if nothing resolved) so the mtime gate marks this spec
     // done and we don't re-run the vision/classify calls on every dialog open.
     let path = battle_maps_dir(root, id).join(format!("{slug}.tiles.json"));
@@ -6642,18 +6594,19 @@ mod tests {
     /// the ranking's job, not the die's.
     #[test]
     fn roll_floor_query_swaps_material_on_a_high_roll_only() {
+        let p = PackProfile::default();
         // Brick on the low rolls, wood from 14 up — both reachable, brick favoured.
-        assert_eq!(roll_floor_query("tavern", 1), Some("brick floor"));
-        assert_eq!(roll_floor_query("tavern", 13), Some("brick floor"));
-        assert_eq!(roll_floor_query("tavern", 14), Some("wooden flooring"));
-        assert_eq!(roll_floor_query("tavern", 20), Some("wooden flooring"));
+        assert_eq!(roll_floor_query(&p, "tavern", 1), Some("brick floor"));
+        assert_eq!(roll_floor_query(&p, "tavern", 13), Some("brick floor"));
+        assert_eq!(roll_floor_query(&p, "tavern", 14), Some("wooden flooring"));
+        assert_eq!(roll_floor_query(&p, "tavern", 20), Some("wooden flooring"));
         // Neither branch may be unreachable — that was the bug being fixed.
-        let rolls: Vec<&str> = (1..=20).filter_map(|r| roll_floor_query("tavern", r)).collect();
+        let rolls: Vec<&str> = (1..=20).filter_map(|r| roll_floor_query(&p, "tavern", r)).collect();
         assert!(rolls.contains(&"brick floor") && rolls.contains(&"wooden flooring"), "{rolls:?}");
         // A biome with no alternate ignores the roll entirely.
-        assert_eq!(roll_floor_query("snow", 1), roll_floor_query("snow", 20));
+        assert_eq!(roll_floor_query(&p, "snow", 1), roll_floor_query(&p, "snow", 20));
         // And "dungeon" still opts out of the whole ground swap.
-        assert_eq!(roll_floor_query("dungeon", 20), None);
+        assert_eq!(roll_floor_query(&p, "dungeon", 20), None);
     }
 
     /// Snow and volcanic must NOT gain an alternate on autopilot: the only
@@ -6664,10 +6617,14 @@ mod tests {
         for biome in ["snow", "volcanic"] {
             assert!(!BIOME_FLOOR_ALTS.iter().any(|(b, _, _)| *b == biome), "{biome} must not roll: its alternate would change the tactics");
         }
+        // The alternates are still a fixed FA-flavoured table, so each one must
+        // name a place the DEFAULT profile actually has — on another pack they
+        // simply never match, which is the correct no-op.
+        let p = PackProfile::default();
         for (biome, alt, at) in BIOME_FLOOR_ALTS {
-            assert!(BIOME_FLOORS.iter().any(|(b, _)| b == biome), "alternate for unknown biome {biome:?}");
+            assert!(p.scene(biome).is_some(), "alternate for unknown place {biome:?}");
             assert!((2..=20).contains(at), "{biome}: a threshold outside 2..=20 makes one branch unreachable");
-            assert_ne!(Some(*alt), biome_floor_query(biome), "{biome}: alternate is identical to the primary");
+            assert_ne!(Some(*alt), biome_floor_query(&p, biome), "{biome}: alternate is identical to the primary");
         }
     }
 
@@ -6687,7 +6644,9 @@ mod tests {
             ("tavern", "brick floor"),  // brick IS the intent here
             ("forest", "forest floor"), // → Forest_Floor_Twigs_*; Woodlands affinity carries it
         ];
-        let queries = BIOME_FLOORS.iter().map(|(b, q)| (*b, *q)).chain(BIOME_FLOOR_ALTS.iter().map(|(b, q, _)| (*b, *q)));
+        let p = PackProfile::default();
+        let primaries: Vec<(&str, &str)> = p.biomes.iter().filter_map(|b| b.floor_query.as_deref().map(|q| (b.scene.as_str(), q))).collect();
+        let queries = primaries.into_iter().chain(BIOME_FLOOR_ALTS.iter().map(|(b, q, _)| (*b, *q)));
         for (biome, q) in queries {
             if q.split_whitespace().last() == Some("floor") {
                 assert!(PROBED.contains(&(biome, q)), "{biome}: query {q:?} ends in \"floor\" — probe it against the real catalog and add it to PROBED, or it may silently resolve to brick");
@@ -6695,36 +6654,36 @@ mod tests {
         }
     }
 
-    /// Every biome id must be reachable end to end, not just present in one
-    /// table. A ground query the classifier can't return is dead, and a biome
-    /// `scene_biome` doesn't recognise scores its OWN pack 0.15 and silently
-    /// renders as generic settlement art — which is exactly what the whole
-    /// Astral pack (a complete illithid colony + Far Realm set, ~3,200 tiles)
-    /// did before it had an id here.
+    /// Every place must reach BOTH its ground query and a catalog folder the
+    /// ranking won't demote. This used to guard against a place being present
+    /// in one hand-written table and missing from another — impossible now
+    /// that one row holds all of it — but the second half still bites: a place
+    /// whose folder `scene_biome` can't resolve has its own pack scored 0.15,
+    /// which is what silently hid the entire Astral tree.
     #[test]
-    fn every_biome_id_reaches_both_its_ground_query_and_its_catalog_pack() {
-        // The civilised scenes whose pack really IS the universal settlement
+    fn every_place_reaches_both_its_ground_query_and_its_catalog_pack() {
+        let p = PackProfile::default();
+        // The civilised places whose pack really IS the universal settlement
         // set — for them the default is the right answer, not a fall-through.
         const SETTLEMENT_SCENES: &[&str] = &["town", "tavern"];
-        for b in biome_ids() {
-            if b == "dungeon" {
-                continue; // the built-in look: deliberately no query, no pack
-            }
-            assert!(biome_floor_query(b).is_some(), "{b}: in biome_ids() but no ground query");
-            if !SETTLEMENT_SCENES.contains(&b) {
-                assert_ne!(
-                    crate::tile_library::scene_biome(b),
-                    "!Core_Settlements",
-                    "{b}: scene_biome doesn't map it, so its own biome's art is scored 0.15 and never shows"
-                );
+        for b in &p.biomes {
+            assert!(b.floor_query.is_some(), "{}: a place with no ground query keeps the built-in floor forever", b.scene);
+            assert_eq!(crate::tile_library::scene_biome(&b.scene, &p), b.folder, "{}: scene_biome disagrees with the profile's own folder", b.scene);
+            if !SETTLEMENT_SCENES.contains(&b.scene.as_str()) {
+                assert_ne!(b.folder, "!Core_Settlements", "{}: falling back to the universal set means its own art is scored 0.15", b.scene);
             }
         }
-        // The two Astral ids resolve to the pack that actually holds the art.
-        assert_eq!(crate::tile_library::scene_biome("illithid"), "Astral");
-        assert_eq!(crate::tile_library::scene_biome("alien"), "Astral");
+        // "dungeon" is the built-in look and must stay OUT of the profile, or
+        // it would spend a vision call to re-derive the floor it already has.
+        assert!(p.scene("dungeon").is_none());
+        assert!(biome_ids(&p).contains(&"dungeon"), "the classifier still needs the word");
         // `~` in a ceremorph colony is brine, not pond water.
-        assert_eq!(liquid_query("illithid"), "ceremorph magical liquid");
-        assert_eq!(liquid_query("cave"), LIQUID_QUERY);
+        assert_eq!(liquid_query(&p, "illithid"), "ceremorph magical liquid");
+        assert_eq!(liquid_query(&p, "cave"), LIQUID_QUERY);
+        assert!(has_natural_walls(&p, "cave") && !has_natural_walls(&p, "tavern"));
+        // An unknown scene must degrade to the built-in dungeon look, never panic.
+        assert_eq!(roll_floor_query(&p, "atlantis", 10), None);
+        assert!(!has_natural_walls(&p, "atlantis"));
     }
 
     /// The whole point of the rewrite: the flame lands on the sprite's own
