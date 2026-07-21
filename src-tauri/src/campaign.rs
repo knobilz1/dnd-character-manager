@@ -219,7 +219,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall  + door  ~ water  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  % deep chasm/gorge/ravine — a FATAL fall, renders as a dark pit, NOT water; nothing stands here and no one deploys in it  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -332,15 +332,21 @@ const DM_RULES: &str = r##"# DM rules (auto-generated — do not edit)
 Tavern Sheet rewrites this file every time the campaign loads, so it is always the current, authoritative version of the rules below. If an older copy of any of these sections also appears in CLAUDE.md, THIS file supersedes it.
 
 ## Giving NPCs distinct voices
-There's a pool of distinct synthesized voices available so players can tell speakers apart by ear instead of everyone (narrator and every NPC alike) sounding the same. The parts:
-1. The first time you introduce a named NPC worth giving a voice to (via `rememberEntity`'s `voiceId`), pick one id from this catalog: `male-us-1` through `male-us-9` / `female-us-1` through `female-us-10` (American); `male-gb-1` through `male-gb-4` / `female-gb-1` through `female-gb-4` (English — reads posher/more formal, good for nobles, officials, scholars). The gender prefix is a hard constraint, not a suggestion: a male NPC MUST get a `male-*` id and a female NPC MUST get a `female-*` id — a wrong-gender voice is the single most jarring mistake this system can make at the table, far worse than a bland-but-correct pick. Don't invent an id outside this list — this catalog only has American and British English, nothing more regionally specific (no Scottish/Irish/Welsh/Australian/South African or similar), so don't imply one in your narration just because an NPC's background suggests it. Several ids exist in each bucket specifically so NPCs don't all blend together — entities.md already shows you the full roster of NPCs introduced so far, so when assigning a new one, actually vary which id you pick rather than defaulting to the same one every time. The assignment is permanent once made — don't reassign the same NPC a different voice later.
-   For an NPC whose D&D race or nature strongly suggests a signature voice, reach for one of these race-flavored ids instead of the plain catalog above: `orc-m-1` through `orc-m-5` / `orc-f-1` through `orc-f-5` (orcs and similar monstrous humanoids); `giant-m-1` through `giant-m-5` / `giant-f-1` through `giant-f-5` (ogres, trolls, giants, and other very large creatures); `dwarf-m-1` through `dwarf-m-5` / `dwarf-f-1` through `dwarf-f-5` (thick Scottish accent); `elf-m-1` through `elf-m-5` / `elf-f-1` through `elf-f-5` (refined, light); `gnome-m-1` through `gnome-m-5` / `gnome-f-1` through `gnome-f-5` (quick, high-pitched); `halfling-m-1` through `halfling-m-5` / `halfling-f-1` through `halfling-f-5` (warm, folksy); `sinister-m-1` through `sinister-m-5` / `sinister-f-1` through `sinister-f-5` (cold, calculating — a villain or someone genuinely unsettling); `sage-m-1` through `sage-m-5` / `sage-f-1` through `sage-f-5` (the closest this pool has to a genuinely old-sounding voice, for a venerable elder or sage — still not truly elderly, so don't reach for it just because an NPC is merely "older"). Same hard gender constraint as above. These work automatically regardless of whether this table has the high-quality voice engine enabled — an unsupported table just hears a sensible standard voice instead — so use them freely without checking first; they're an option for a fitting NPC, never a requirement, and the plain catalog above is always correct for anyone who doesn't clearly match one of these.
-2. If (and only if) you picked a **plain** catalog voice in step 1 (not a race-flavored id), you may also optionally include `pitch` alongside it — three tiers, based on the NPC's actual D&D size and build, not just how imposing they read in flavor text: `"small"` for a Small (or Tiny) creature (gnomes, halflings, kobolds, most fey); `"large"` for an actually Large-or-bigger creature (ogres, trolls, hill giants and up, most adult dragons); `"gruff"` for a Medium-size race that still naturally reads as rougher/deeper-voiced than a human (orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins, and similar) — a milder version of `"large"`'s shift, since they aren't mechanically Large. Omit the field entirely for an ordinary Medium NPC with nothing distinctive about their build — most NPCs don't need it. This layers a pitch/pace shift on top of whichever plain voice you picked in step 1, it doesn't replace that choice. **Never combine `pitch` with a race-flavored id** (`orc-*`/`giant-*`/`dwarf-*`/`elf-*`/`gnome-*`/`halfling-*`/`sinister-*`/`sage-*`) — those clips are already recorded at the right pitch and accent for their race, so a `pitch` tag on top would over-shoot and distort a voice that's already tuned. Pick a race-flavored id OR a `pitch` tag on a plain voice, never both for the same NPC.
-3. When that NPC actually speaks, prefix the line in your narration with `[Name]:` immediately before it, e.g. `[Gundren]: "Well met, travelers."` — this tag is mechanically stripped before anyone sees or hears it; it only exists to signal which voice speaks that line. The tag is STICKY: once you tag a line with `[Gundren]:`, every following sentence keeps Gundren's voice until you either tag a different speaker or explicitly switch back to narration with `[Narrator]:`. So for a multi-sentence speech by one NPC you only need the tag once, at the start (repeating it is harmless). Crucially, the moment you stop quoting that NPC and go back to describing the scene, you MUST start that narration with `[Narrator]:` — otherwise your description keeps speaking in the NPC's voice. Example: `[Gundren]: "Well met! I've been expecting you. Come, sit." [Narrator]: The old dwarf pulls out a chair, his eyes darting to the door.` Plain narration at the very start of a reply (before any tag) always uses the narrator voice, so you only need `[Narrator]:` to RETURN to narration after an NPC has spoken within the same reply.
-4. **Before you write any NPC's first line of dialogue, ask yourself: is this NPC listed in entities.md?** If they are NOT, they have no voice yet, and you MUST append their gender to the tag with a pipe: `[Ismark|male]: "Come inside, quickly."` — then just `[Ismark]:` for the rest of the scene. This matters because the `dm-actions` block only reaches the app AFTER your narration has already been spoken aloud, so on the very turn you introduce someone, the tag is the ONLY thing that can tell the app what they should sound like; a bare name like `[Ismark]:` carries no gender, and an NPC with no voice yet falls back to the narrator's own voice, making them sound like the narration around them. The `|male`/`|female` marker is stripped before anyone sees or hears it. Once an NPC has a voice (you sent a `voiceId`, or the app derived one from their description), the marker is ignored — so it is always safe to include, and only ever needed on first mention.
-5. Unnamed one-off speakers work the same way, but their descriptive tag can carry the gender by itself: `[Old Man]:`, `[Young Woman]:`, `[Female Guard]:`. Avoid a bare genderless role like `[Innkeeper]:` or `[Guard]:` — either name the gender in the tag (`[Male Innkeeper]:`) or use the pipe marker (`[Innkeeper|male]:`).
-6. **Re-tag on EVERY switch between speech and narration, in both directions.** It's natural to write a dialogue block as one flowing paragraph: `[Carrow]: "You should not have come." He rises from the pews. "The gate is barred."` Written that way only the FIRST line is attributed — the app hands the narration beat back to the narrator, and Carrow's second line has nothing marking it as his. Write it as: `[Carrow]: "You should not have come." [Narrator]: He rises from the pews. [Carrow]: "The gate is barred."` Every single time the voice should change, say so, even when it's the same NPC resuming two sentences later. The tags cost nothing — they're stripped before anyone sees or hears them — and they're the only thing standing between a scene where each character sounds like themselves and one where everyone sounds like the narrator.
-Don't bother assigning a permanent voice (step 1) to someone who'll only ever say one throwaway line — but DO still tag them, with gender, per steps 4 and 5.
+Players tell speakers apart by ear, so NPCs get distinct synthesized voices.
+
+**1. Assign a voice** the first time you introduce a named NPC worth voicing, via `rememberEntity`'s `voiceId`. Pick from this catalog ONLY — never invent an id:
+- Plain: `male-us-1`…`male-us-9`, `female-us-1`…`female-us-10` (American); `male-gb-1`…`male-gb-4`, `female-gb-1`…`female-gb-4` (English — posher, good for nobles, officials, scholars).
+- Race-flavored, when the NPC's race or nature clearly suggests one — each comes as `-m-1`…`-m-5` and `-f-1`…`-f-5`: `orc-*` (orcs, monstrous humanoids), `giant-*` (ogres, trolls, giants, anything very large), `dwarf-*` (thick Scottish), `elf-*` (refined, light), `gnome-*` (quick, high-pitched), `halfling-*` (warm, folksy), `sinister-*` (cold, calculating — a real villain), `sage-*` (venerable elder, not merely "older"). Safe to use freely: a table without the HD voice engine just hears a sensible standard voice instead.
+- **The gender prefix is a hard constraint** — a male NPC MUST get `male-*`/`*-m-*`, a female MUST get `female-*`/`*-f-*`. A wrong-gender voice is the worst mistake this system can make, far worse than a bland but correct pick.
+- Catalog is American/British English only — don't imply any other accent in narration. Vary your picks (entities.md shows who already has one). Assignment is permanent; never reassign.
+
+**2. Optional `pitch`**, only alongside a PLAIN voice: `"small"` (Small/Tiny — gnomes, halflings, kobolds, most fey), `"large"` (Large or bigger — ogres, trolls, giants, adult dragons), `"gruff"` (Medium but naturally rougher — orcs, half-orcs, goliaths, firbolgs, bugbears, hobgoblins). Omit it for an ordinary Medium NPC. Never combine `pitch` with a race-flavored id — those are already recorded at the right pitch and accent, so stacking a tag on top over-shoots and distorts them.
+
+**3. Tag every spoken line** `[Name]: "…"` — the tag is stripped before anyone sees or hears it; it only routes the voice. Tags are STICKY: once tagged, every following sentence keeps that voice until you tag someone else or return to narration with `[Narrator]:`. **Re-tag on EVERY switch, in both directions** — write `[Carrow]: "You should not have come." [Narrator]: He rises from the pews. [Carrow]: "The gate is barred."`, never all three as one tagged block. Plain narration at the very start of a reply already uses the narrator.
+
+**4. An NPC's FIRST line, when they aren't in entities.md yet, must carry gender**: `[Ismark|male]: "Come inside, quickly."` — then just `[Ismark]:` afterwards. This matters because the `dm-actions` block only reaches the app AFTER your narration is already spoken, so on the introducing turn the tag is the only thing that can say what they sound like; a bare name carries no gender and falls back to the narrator's own voice. The marker is stripped and ignored once they have a voice, so it's always safe to include.
+
+**5. Unnamed one-off speakers** carry gender in the tag itself — `[Old Man]:`, `[Young Woman]:`, `[Female Guard]:`, or `[Innkeeper|male]:`. Never a bare genderless role like `[Guard]:`. Someone with a single throwaway line needs no permanent voice, but still tag them with gender.
 
 ## Out-of-character requests
 Sometimes the table steps outside the fiction entirely — testing the microphone, asking you to demo what a voice sounds like, asking how the app works, or otherwise clearly addressing you (the DM/app) rather than acting through their characters. Answer those naturally, but nothing said or invented to satisfy one is part of the campaign: never emit a dm-actions block for it, and never let a name, place, or event you made up purely to fulfill a demo/test bleed into entities.md/locations.md/flagged_facts.md/MEMORY.md — those files are the permanent record of the actual story, and an invented sound-check character or made-up test location has no business surviving in there forever.
@@ -359,8 +365,14 @@ The narrow case this rule covers: a dead end you created by accident, not one th
 ## Running combat & positioning
 This section fully supersedes any older "Physical hex-grid positioning" text or `position`/`clearPositions` keys still shown elsewhere — ignore those; use the Active Battle Log described here.
 
+### Building the encounter — what shows up, how hard, and where
+When YOU decide what the party runs into (an ambush, a wandering threat, a guardian — anything the fiction throws up rather than a scripted module fight), get three things right before you open the battle log:
+- **Fit the creatures to the place and the fiction.** Reach for real D&D creatures that actually belong where the party is and who they'd plausibly meet there. A roadside ambush is bandits, a highwayman, wolves, maybe a bugbear — not oozes and not a mind flayer. A crypt or tomb is undead — skeletons, zombies, ghouls, a wight, a specter. A swamp is lizardfolk, giant frogs, a giant crocodile, a will-o'-wisp, a bullywug warband. A mountain pass is goblins, orcs, a griffon, harpies, an ogre, stone giants. A sewer is giant rats, otyughs, a gelatinous cube. Match the monster to the biome and the situation the party is actually in; never drop in a creature that has no business in the scene just for novelty (a mountain monster in a swamp, a slime in a bandit ambush) — that breaks the fiction.
+- **Scale it to THIS party, not to the drama.** Match the fight to the party's level and headcount — a real threat they can still beat, not a curbstomp in either direction. Rough anchors for a party around level L: a lone "boss" creature should sit near CR L and never dramatically above it (for a 5th-level party a CR 5–6 solo is already a hard fight; a CR 12 is a bloodbath and a CR 20 is an instant TPK — never do that). A pack of weaker creatures works well when each is roughly CR L/4 or less, a handful of them at a time. Prefer a MIX — one tougher threat plus a few minions plays better than a single glass giant or a swarm of identical mooks. When in doubt, aim a little easy: a close, winnable fight beats an accidental party wipe from a random encounter.
+- **Place them so their tactics read.** Enemies that fight at RANGE — archers, crossbowmen, casters, artillery — start BACK: at distance, on high ground, behind cover, where they can open fire without being reached on turn one. MELEE brutes start closer, or where they can close fast — flanking out of the reeds/trees, holding a chokepoint, charging the front line. Ambushers stay hidden until they strike. Don't line the whole enemy side up on one rank at one range — stagger them by role so the party has to choose which threat to answer first. If a prepared battle map is loaded for this fight, place enemies on its real cells and honor its `Deployment:` section.
+
 ### Battle mode
-Each turn your prompt states one line, `Battle mode: <name>.`, telling you how this table handles positioning. It's one of three, and it changes how you narrate placement — nothing else:
+Each turn your prompt states one line, `Battle mode: <name>.`. This table's mode and exactly how it changes the way you narrate placement:
 - **Theater of the Mind** — there is NO battle map, NO grid, and NO miniatures on the table. Never tell a player to move a mini, never reference a square/hex, a coordinate, or an exact map. Positioning lives entirely in the fiction: describe range in rough terms a listener can picture and act on ("about 30 feet, across the chasm", "right beside you", "the archers are up on the ledge, out of easy reach"), and adjudicate reach/cover/line-of-sight by what makes sense in the scene, not by counting cells. When you note a combatant's position in the battle log, use the `position` field as a short plain-English phrase ("flanking Thorin in the doorway", "prone behind the altar").
 - **Grid** — the table uses miniatures on a plain square grid with no terrain pieces. You may track exact placement in each combatant's `coord` as `{q, r}` (treat them as square offsets; distance is the larger of |Δq| and |Δr| in squares, diagonals counting as one), but never say a raw coordinate aloud — translate to squares from a named anchor ("two squares left of Mira, up against the crates"). There are no elevation or cover features unless you introduce them in the fiction.
 - **Hex terrain** — the table uses physical 3D-printed hex terrain: uniform hex cells with real elevation, cover and difficult-terrain pieces, but no printed coordinates or shared compass. Track placement in `coord` as axial `{q, r}`; hex distance is (|Δq| + |Δq+Δr| + |Δr|) / 2. Never speak a raw coordinate or compass direction — translate to a hex count plus a named anchor plus a natural relative direction ("three hexes past Thorin, toward the cave mouth"). Use the printed terrain's elevation/cover in your rulings.
@@ -374,16 +386,61 @@ Combat state — round, initiative order, whose turn it is, each combatant's rou
 - Use `removeCombatant: ["Goblin2"]` when someone leaves the fight for good (dead and gone, fled off the scene). A downed-but-present PC should stay in the log with `hp: "down"`, not be removed.
 - When the fight is over, send `endBattle: true` together with a one- or two-sentence `battleResult` — who won, any casualties or lasting conditions, and notable loot or consequences. Only that result is saved to the campaign's memory; the blow-by-blow log is wiped. Don't separately `remember` the same outcome — `battleResult` already records it (do still use `rememberEntity`/`rememberLocation` for a new NPC or place that combat introduced).
 
-### Prepared battle maps (Grid mode only)
-The DM (or you, ahead of time) may have prepared printable battle maps for this campaign's Grid-mode encounters. They're listed one per line in battle_maps/index.md above, each with a slug. Each map is a precise top-down grid with a coordinate system — columns labelled A, B, C… left to right and rows numbered 1, 2, 3… top to bottom, the SAME coordinate space as Grid mode's own `{q, r}` square coordinates in the Active Battle Log — so a cell like "C3" or "K1" means one exact square on the printed map.
-- In Grid mode, when a fight happens on a location you have a prepared map for, use that map's real layout: place enemies, set ambushes, and judge cover/choke points by its actual cells, and put those same cell references into the battle log's `coord` and your spoken directions ("the goblins are dug in behind the pillars at C3 and D3"). This is the payoff of preparing the map — everyone at the table is looking at the exact same grid you are.
-- Hex mode doesn't use prepared maps — its physical 3D-printed terrain has no printed coordinates to line up with a map's lettered grid, so battle_maps/index.md will stay empty there. Keep using the terrain catalog and axial hex tracking described above instead.
-- The index only gives you each map's name and size. To see a map's full layout before running a fight on it, use the `recallMap` dm-action with its slug (copied exactly from the index) — the full grid + tactics is loaded into your next turn, just like `recallSession`. It's a read; it never changes anything. Never invent a slug that isn't in the index.
+### Running a fight on a prepared battle map
+This campaign may have printable battle maps prepared for its encounters — listed one per line in battle_maps/index.md above, each with a slug. A map is a precise top-down grid: columns A, B, C… left to right, rows 1, 2, 3… top to bottom — the SAME coordinate space as the battle log's `{q, r}`, so "C3" is one exact square that you and everyone at the table are both looking at.
+- **Pull the map up before the fight.** The index gives only each map's name and size. When a fight is coming at a location you have a map for, use the `recallMap` dm-action with its slug, copied exactly from the index (never invent one) — its full grid, Features, Tactics and Deployment load into your next turn. It's a read; it changes nothing.
+- **Open the fight from the map's `Deployment:` section** — one `Enemies:` line and one `Party:` line naming the cells each side STARTS on. Seed the Active Battle Log straight from them: those cells become each combatant's `coord`. It's a starting suggestion you may bend to the fiction (a stealthy party might come in elsewhere), but it's how the map tells you where round one begins, so you're tracking real positions from the first initiative count.
+- **Run the fight ON the terrain, not beside it.** The map's `Features:` and `Tactics:` ARE the encounter's geography — cover, choke points, difficult terrain, sightlines, elevation, water, chasms. Judge your rulings against them: who actually has cover from whom, whether a lane is blocked, what a shove off a ledge or into a `%` chasm does, what crossing a bridge or wading a stream costs. When anyone moves, move them in SQUARES on that grid and update their `coord`, so the log never drifts from the sheet on the table.
+- **Track in cells, speak in landmarks.** You hold "C3" internally; out loud it is "behind the pillar, two squares left of Mira" or "at the far end of the bar". Name the map's own features — the rockfall, the wagon, the bridge, the cave mouth — so players can act by eye on the printed map without ever hearing a coordinate.
+- **Spend the set piece.** Most maps carry exactly one interactive centrepiece — a chandelier, a cracked stalagmite, lamp-oil casks, a bridge anchor that can be cut. Make it visible, let the party discover it, and let the enemies reach for it too. It's the reason the map is more than a floor plan.
 "##;
 
 /// Appended to a pre-existing CLAUDE.md that predates the dm_rules import.
 /// New campaigns get this line inside BASE_CLAUDE_MD's own import list.
 const DM_RULES_IMPORT_LINE: &str = "\n@memory/dm_rules.md\n";
+
+/// The rules ONE campaign actually gets, filtered from `DM_RULES` by its battle
+/// mode. `DM_RULES` documents all three modes plus the prepared-battle-map
+/// protocol, but a table only ever plays ONE mode — and CLAUDE.md and every
+/// file it imports are reprocessed on EVERY turn (see dm.rs), so shipping the
+/// two inactive modes, and off Grid a map protocol that can never apply, is
+/// pure per-turn waste. Filtering keeps `DM_RULES` the single source of truth
+/// while each campaign carries only what it can use.
+///
+/// Must be re-run whenever the mode changes (`set_battle_mode_at`) as well as
+/// on every load (`sync_dm_rules_at`), so dm_rules.md never disagrees with
+/// battle_mode.txt. Pure.
+fn dm_rules_for_mode(mode: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut skipping_maps = false;
+    for line in DM_RULES.split('\n') {
+        // Prepared maps are Grid-only: they need a lettered grid to line up
+        // with, which Theater (no map at all) and Hex terrain (no printed
+        // coordinates) don't have.
+        if line.starts_with("### Running a fight on a prepared battle map") {
+            if mode != "grid" {
+                skipping_maps = true;
+                continue;
+            }
+        } else if skipping_maps {
+            if line.starts_with("## ") || line.starts_with("### ") {
+                skipping_maps = false;
+            } else {
+                continue;
+            }
+        }
+        let keep = match line.trim_start() {
+            l if l.starts_with("- **Theater of the Mind**") => mode == "theater",
+            l if l.starts_with("- **Grid**") => mode == "grid",
+            l if l.starts_with("- **Hex terrain**") => mode == "hex",
+            _ => true,
+        };
+        if keep {
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
 
 const MODULE_IMPORT_BLOCK: &str = "\n## Imported modules\nThis campaign has one or more imported modules — self-contained adventures/side-quests, each broken into chapters so only the relevant part loads each turn. modules_index.md lists every imported module with a one-line summary and marks which one is active. Only the ACTIVE module's chapters are loaded: active_module/index.md lists that module's chapters and marks which one is current; active_module/current.md has the FULL TEXT of the current chapter only — treat it as your primary source material for this part of the adventure. See the dm-actions `advanceToChapter` key above for moving to the next chapter within the active module, and `switchActiveModule` for moving the party to a different already-imported module entirely. (Each module's own arc plan — plus this campaign's overarching lore, if established — is sent to you periodically in the turn message itself, not as a standing import here — see the \"Campaign-arc plan check-ins\" section above.)\n\n@modules_index.md\n@active_module/index.md\n@active_module/current.md\n";
 
@@ -794,8 +851,9 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     fs::create_dir_all(dir.join("memory").join(BATTLE_MAPS_DIR)).map_err(|e| e.to_string())?;
     write_atomic(&dir.join("memory").join(BATTLE_MAPS_DIR).join("index.md"), DEFAULT_BATTLE_MAPS_INDEX_MD)?;
     // Seeded here too so a brand-new campaign's very first turn already has the
-    // rules — sync_dm_rules_at only runs on load, which is after creation.
-    write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
+    // rules — sync_dm_rules_at only runs on load, which is after creation. A
+    // fresh campaign has no battle_mode.txt yet, so it starts on the default.
+    write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(DEFAULT_BATTLE_MODE))?;
     write_atomic(&dir.join("name.txt"), trimmed)?;
     Ok(CampaignMeta { id, name: trimmed.to_string() })
 }
@@ -1215,14 +1273,71 @@ fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Resul
 /// rules at all with nothing to show for it.
 fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
     let dir = root.join(id);
-    write_atomic(&dir.join("memory").join("dm_rules.md"), DM_RULES)?;
+    write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(&read_battle_mode_at(root, id)))?;
     let claude_path = dir.join("CLAUDE.md");
-    let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    let original = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    let mut claude_md = strip_superseded_positioning(&original);
     if !claude_md.contains("@memory/dm_rules.md") {
         claude_md.push_str(DM_RULES_IMPORT_LINE);
+    }
+    if claude_md != original {
         write_atomic(&claude_path, &claude_md)?;
     }
     Ok(())
+}
+
+const SUPERSEDED_POSITIONING_HEADER: &str = "## Physical hex-grid positioning";
+const SUPERSEDED_KEYS_BULLET: &str = "- `position` / `clearPositions`:";
+const SUPERSEDED_KEYS_SUFFIX: &str = ", position [{name,q,r}], clearPositions (true|false)";
+
+/// Deletes the DEAD hex-positioning system from an old campaign's CLAUDE.md.
+///
+/// `DM_RULES`' combat section opens by saying it "fully supersedes any older
+/// `Physical hex-grid positioning` text or `position`/`clearPositions` keys
+/// still shown elsewhere — ignore those". `BASE_CLAUDE_MD` dropped all of it,
+/// so new campaigns are clean — but CLAUDE.md is written ONCE at creation and
+/// has no regeneration path (every other context file has a `sync_*_at`), so
+/// every campaign made before that change carries it forever.
+///
+/// That costs twice. CLAUDE.md and its imports are reprocessed EVERY turn (see
+/// dm.rs), so it's ~2KB of dead text on every single exchange — and worse, it's
+/// a live contradiction: CLAUDE.md documents `position`/`clearPositions` as
+/// valid dm-actions while the rules say not to use them, so the DM can still
+/// emit keys the app no longer drives combat with.
+///
+/// Surgical and idempotent by construction: removes exactly the one known
+/// section (header through the next `## `), the one stale bullet, and the one
+/// stale key-list suffix. Every other line survives byte-for-byte — including
+/// the DM's own Notes-dialog edits and their `## Campaign setting` block, which
+/// is why this strips known text rather than regenerating the file. Pure.
+fn strip_superseded_positioning(claude_md: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut skipping = false;
+    for line in claude_md.split('\n') {
+        let t = line.trim_start();
+        if t.starts_with(SUPERSEDED_POSITIONING_HEADER) {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            if t.starts_with("## ") {
+                skipping = false;
+            } else {
+                continue;
+            }
+        }
+        if t.starts_with(SUPERSEDED_KEYS_BULLET) {
+            continue;
+        }
+        out.push(line.replace(SUPERSEDED_KEYS_SUFFIX, ""));
+    }
+    // Removing a whole section leaves the blank line above it stacked on the
+    // blank line below it; collapse those so the file doesn't grow gaps.
+    let mut joined = out.join("\n");
+    while joined.contains("\n\n\n") {
+        joined = joined.replace("\n\n\n", "\n\n");
+    }
+    joined
 }
 
 /// Brings a campaign created before the session-index/retrieval system existed
@@ -2276,6 +2391,7 @@ fn objects_rule_line(vocabulary: &[String], footprint_guide: &[String]) -> Strin
     format!(
         "- An `Objects:` line places something with NO legend code of its own, anywhere on real floor you drew: `<description> at <cell> (<W>x<H>)`, where `W`/`H` are whole numbers 1-4 (the object's footprint in cells). This is extra set-dressing variety (a unique chair, a tree, a barrel) on top of the legend codes — it does not replace drawing the room's defining feature with `=`/`*` and a matching Features: line, which still works exactly as before.\n\
         - `Objects:` is PHYSICAL SET-DRESSING ONLY — furniture, decor, terrain, clutter. NEVER a creature, NPC, or monster, downed/unconscious or otherwise. A character's position belongs ONLY in Features/Tactics prose, exactly as it already did before this section existed — the DM plays with physical miniatures and places people themselves.\n\
+        - Every `Objects:` entry must EARN its place: it should be cover, an obstacle, difficult terrain, wall storage, or a detail the Tactics or the fiction actually lean on. Don't scatter a prop with no reason to be there — a lone net, a random barrel, a stray crate dropped mid-floor reads as clutter, not atmosphere. If you can't say what it does or why it's there, leave it out.\n\
         - A built-in HEARTH or FIREPLACE (the kind set into a tavern or hall wall) is NOT the `*` code — `*` only ever draws an open campfire on the floor. For a real fireplace, put an `Objects:` entry \"stone fireplace at <cell> (2x2)\" against a wall — size it AT LEAST 2x2 so it reads as a proper hearth (a 1x1 fireplace only matches tiny grates). Reserve `*` for an actual campfire, brazier, or fire pit out on the floor.\n\
         - A TABLE longer than 2 cells must be 2 cells DEEP — write `3x2` or `4x2`, never `3x1` or `4x1`. A long table only one cell deep matches almost nothing real in the catalog: it lands on a table RUNNER (a decorative cloth) and renders as a strip of fabric lying on the floor. Small tables at `1x1` and `2x1` are fine as they are.\n\
         - A hanging CHANDELIER is a 2x2 object — every chandelier in the catalog is a 2x2 piece, so a 1x1 one finds nothing and simply won't appear. Write \"iron chandelier at <cell> (2x2)\" over OPEN FLOOR (it hangs above the room, not against a wall). A single wall sconce, candelabra, or lantern is the 1x1 option instead.\n\
@@ -2283,6 +2399,29 @@ fn objects_rule_line(vocabulary: &[String], footprint_guide: &[String]) -> Strin
         {vocab_line}{guide_line}"
     )
 }
+
+/// The `Deployment:` section — where each side STARTS the fight, so the DM
+/// knows where to set the physical enemy miniatures down and where the party
+/// begins. Text guidance ONLY; it draws no one (Nabil places minis himself —
+/// see `objects_rule_line`). It's its own section, not a Tactics sentence, so
+/// it can be shown on the map card and read back by the DM bot to seed the
+/// battle log — where "suggested enemy cells" buried in Tactics prose could be
+/// found by neither. `is_map_section_header` knows it, so the renderer's
+/// Features/Objects parsers skip its cells entirely.
+const DEPLOYMENT_FORMAT_LINE: &str = "Deployment:\n\
+    - Enemies: <EVERY cell/zone the hostile side starts on, comma-separated, e.g. \"M7-O8, K5\"> — <why there, in prose, naming NO further cells>\n\
+    - Party: <every cell the party starts on or enters from, e.g. \"B4-D9\"> — <why there, in prose, naming NO further cells>\n";
+
+/// Chasm + bridge terrain rule — mountains/canyons/ravines were rendering their
+/// gorge as `~` water (a blue river, not a lethal drop) and their bridge as a
+/// bare floor strip, because the legend had no drop/span primitive. `%`/`H` (in
+/// MAP_LEGEND + MAP_CODES) fix that; this teaches the model to reach for them
+/// AND to hand the DM the bridge's tactical payload (bottleneck, fall hazard,
+/// cut-the-anchor). Included in every map prompt; the model applies it only
+/// where a drop actually fits, exactly like the bar/cave rules.
+const CHASM_BRIDGE_RULE_LINE: &str = "- For a mountain pass, canyon, ravine, gorge, cliff edge, or any scene with a deep drop, draw the fall with the `%` chasm code — a LETHAL drop, never water, so never use `~` for a gorge — and cross it with an `H` bridge: a run of `H` laid over the chasm, anchored to solid floor at both ends, with `%` in the cells to either side so it reads as a span over the void. A bridge is a superb set piece: it forces a narrow BOTTLENECK, it is a fall hazard (a creature shoved off the edge drops into the `%`), and its anchor or ropes can be attacked and cut to drop the whole span. Put that in Tactics — the bridge's width and choke, that the `%` chasm is a fatal fall for anyone pushed in, and (where it fits) an anchor/rope with an AC and HP that severs the bridge when destroyed.\n";
+
+const DEPLOYMENT_RULE_LINE: &str = "- End with a `Deployment:` section: exactly one `Enemies:` line and one `Party:` line. On each, FIRST list every cell that side actually STARTS on — all of them, comma-separated, BEFORE the `—` — then after the `—` give a short prose reason that names NO further cells. A cell a side only moves TOWARD later (a piece of cover to reach, an exit to flee to) is NOT a start cell: keep it out of this line and mention it in Tactics instead. This is placement guidance for the physical miniatures — every listed cell is somewhere a real miniature is set down at the start, so it must be a spot a creature can actually stand (open floor, not inside a wall) and fit the map: put the enemies where their cover, camp, or objective actually is, and the party at a believable approach or entrance, never mixed in among the enemies. It draws NO ONE — a creature never goes in the grid, Features, or Objects.\n";
 
 /// The streamlined prompt for a local model: one worked example instead of
 /// two, and only the mechanically-load-bearing rules (the ones
@@ -2306,7 +2445,8 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         - <what's in a cell, e.g. \"Altar at J8\">\n\
         {objects_format}\
         Tactics:\n\
-        - <cover, choke points, suggested enemy cells>\n\n\
+        - <cover, choke points, sightlines>\n\
+        {DEPLOYMENT_FORMAT_LINE}\n\
         Rules — count carefully, a mistake gets the map rejected:\n\
         - Size between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}. The `Grid:` line MUST match the block you actually draw — count every row before you answer.\n\
         - EVERY row must be the exact same number of characters as every other row.\n\
@@ -2316,7 +2456,9 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         - A stool, chair, or bench is `=` (furniture) — never `^`. `^` renders as a pile of grey STONE rocks, so use it ONLY for actual stone rubble (caves, ruins, collapsed masonry). Overturned or broken furniture, spilled crates, and other clutter that slows movement is still `=` — draw it as the thing it is and note \"difficult terrain here\" in Tactics; do NOT scatter `^` in a wooden interior, it looks like a rockslide indoors.\n\
         {objects_rule}\
         - Draw the encounter's main feature for real, not just in words: a bar needs an actual run of `=`, a shrine needs an actual altar cell.\n\
-        - Don't overcrowd — this is a combat map, so keep at least half the floor open for movement and leave clear lanes; a few pieces of furniture beat a room packed wall-to-wall.\n\n\
+        - Don't overcrowd — this is a combat map, so keep at least half the floor open for movement and leave clear lanes; a few pieces of furniture beat a room packed wall-to-wall.\n\
+        {CHASM_BRIDGE_RULE_LINE}\
+        {DEPLOYMENT_RULE_LINE}\n\
         One example:\n\n\
         {MAP_SPEC_DELIMITER}\n\
         # The Bent Nail\n\
@@ -2330,6 +2472,9 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         - Stool at K5\n\
         Tactics:\n\
         - The bar at C3-H3 gives half cover.\n\
+        Deployment:\n\
+        - Enemies: behind the bar at C2-H2 — they hold the room's far end with the counter as cover.\n\
+        - Party: F12 — the main door; in the open until they reach cover.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         Draw a DIFFERENT room for THIS encounter — do not just copy that grid. Only draw a bar or tables if the encounter actually has them; a cave or tower would have none of that.\n\n\
         Output nothing outside the sections shown.",
@@ -2352,7 +2497,8 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - <notable things and the cell they're in, e.g. \"Altar at J8\">\n\
         {objects_format}\
         Tactics:\n\
-        - <choke points, cover, and sightlines, plus concrete suggested enemy start cells and ambush spots, referencing cells like C3 or K1>\n\n\
+        - <choke points, cover, and sightlines, referencing cells like C3 or K1>\n\
+        {DEPLOYMENT_FORMAT_LINE}\n\
         Rules for the Map block — these are checked mechanically and a violation gets the map rejected:\n\
         - Size it between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}, and the `Grid:` line's <cols>x<rows> MUST equal the block you actually draw.\n\
         - EVERY row must be exactly <cols> characters wide — count them. Ragged rows are the single most common failure.\n\
@@ -2373,7 +2519,9 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - Give the room at LEAST TWO ways in, placed so the lanes from them are genuinely different — not two doors that feed the same approach. At most ONE deliberate choke point; if every route is a bottleneck the fight stops being a choice. Remember distance is measured in MOVES (about 5-6 squares each), so a piece of blocking terrain in the middle of a lane buys more distance than making the room bigger.\n\
         - Give the map ONE set piece — a single thing that is unexpected and worth interacting with (a collapsing floor, a chandelier, a well, a fire that spreads, a lever). Exactly one: two or more competing gimmicks overload the scene. It must be visible and fair — never a hidden instant-kill, never a feature that removes a character from the fight with no counterplay.\n\
         - Do NOT overcrowd. This is a COMBAT map — most of the floor must stay OPEN so miniatures can move and there are real lines of sight. Furniture and clutter ARE the cover and obstacles, so a handful of well-placed pieces beats a room packed wall-to-wall. Keep at least half the interior cells as empty floor, and leave clear lanes to move and flank through.\n\
-        - But match the FILL to the setting — that half-empty rule is a ceiling, not a target. A wooded or overgrown scene (forest, jungle, grove, copse, swamp, thicket, an overgrown ruin) must read as DENSE: cluster trees and undergrowth (`T`) across much of the map — a treeline hugging the edges, stands and thickets reaching in — around the clear lanes and the central clearing where the fight happens. A dozen-plus `T` on a normal map, not a scattered handful; a forest that's mostly bare floor is as wrong as a tavern packed wall-to-wall. An OPEN setting (cavern, arena, plain, dungeon hall, a courtyard) is the opposite — keep the floor open with a few well-placed features and do not manufacture clutter to fill it.\n\n\
+        - But match the FILL to the setting — that half-empty rule is a ceiling, not a target. A wooded or overgrown scene (forest, jungle, grove, copse, swamp, thicket, an overgrown ruin) must read as DENSE: cluster trees and undergrowth (`T`) across much of the map — a treeline hugging the edges, stands and thickets reaching in — around the clear lanes and the central clearing where the fight happens. A dozen-plus `T` on a normal map, not a scattered handful; a forest that's mostly bare floor is as wrong as a tavern packed wall-to-wall. An OPEN setting (cavern, arena, plain, dungeon hall, a courtyard) is the opposite — keep the floor open with a few well-placed features and do not manufacture clutter to fill it.\n\
+        {CHASM_BRIDGE_RULE_LINE}\
+        {DEPLOYMENT_RULE_LINE}\n\
         Here is a COMPLETE, correct example. Copy its habits — the irregular spacing, the mix of object sizes, the bar with room behind it, the occupied centre — not its specific contents:\n\n\
         {MAP_SPEC_DELIMITER}\n\
         # The Bent Nail\n\
@@ -2396,6 +2544,9 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - The bar at C3-H3 gives half cover; the gap at row 2 behind it is a dead end once someone blocks B2.\n\
         - The crockery at G8-H8 is difficult terrain and splits the room's centre.\n\
         - Anyone coming in the main entrance at F12 is in the open until they reach the table at E6-F7.\n\
+        Deployment:\n\
+        - Enemies: behind the bar at C2-H2, with a lookout covering the side door at P6 — they hold the room's far end.\n\
+        - Party: F12 — they come in off the street at the main entrance, in the open until they reach cover.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         Note what that example does NOT do: it does not put matching furniture at both walls, it does not repeat one block eight times, and it does not leave the centre empty. It illustrates HABITS, not a room to reuse: drawing that same grid again, or a lightly-edited version of it, is a rejected answer — the encounter you were asked for is a different place.\n\n\
         A second example, so you don't walk away thinking every map needs a bar. This is a cave — it has NO `=` furniture anywhere, because a cave has none. Draw what the fiction actually contains, not what the previous example happened to have:\n\n\
@@ -2419,6 +2570,9 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - The pool at D4-F4/E3-F3 blocks a straight line through the middle; the rockfall at F5-G5 and C6-D6 forces anyone going around it into difficult terrain.\n\
         - Anyone entering at the cave mouth (A6) is in rockfall before they reach open floor.\n\
         - The stalagmite at H7 gives three-quarter cover to whoever holds the stairs down at I9.\n\
+        Deployment:\n\
+        - Enemies: dug in at the back holding the stairs down at I9 and the stalagmite at H7 — three-quarter cover with the exit at their backs.\n\
+        - Party: entering at the cave mouth A6 — in rockfall before they reach open floor.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         A wizard's tower, an octopus-ship hold, a goblin warren — none of them are a tavern. Only draw `=` furniture, a bar, tables, stools, when the encounter actually has them. Fit the room to what was asked for, not to whichever example above looks closest.\n\n\
         Output nothing outside the sections shown.",
@@ -2445,7 +2599,7 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
 // enemy placement against these cell coordinates.
 
 /// Every legal grid character (plus `' '` = void, handled separately).
-const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*', ','];
+const MAP_CODES: &[char] = &['.', '#', '+', '~', 'o', '^', '=', 'T', '_', '*', ',', '%', 'H'];
 /// Codes that are an actual object/terrain feature — what a `Features:` line
 /// must point at. Plain floor, void and wall are not "things".
 const MAP_OBJECT_CODES: &[char] = &['+', '~', 'o', '^', '=', 'T', '_', '*', ','];
@@ -2533,7 +2687,7 @@ const MAP_SLURP_CAP: usize = 40;
 
 fn is_map_section_header(t: &str) -> bool {
     t.starts_with("Features:") || t.starts_with("Objects:") || t.starts_with("Tactics:") || t.starts_with("Legend:")
-        || t.starts_with("Grid:") || t.starts_with("# ")
+        || t.starts_with("Deployment:") || t.starts_with("Grid:") || t.starts_with("# ")
 }
 
 /// Splits a spec into (everything up to and including `Map:`, the grid rows,
@@ -3411,6 +3565,7 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
 const BIOME_FLOORS: &[(&str, &str)] = &[
     ("cave", "cave"),
     ("forest", "grass"),
+    ("mountain", "gravel"),          // rocky scree of a high pass — reads as bare mountain stone
     ("desert", "desert sand"),
     ("snow", "snow"),
     ("swamp", "marsh mud"),
@@ -3465,7 +3620,7 @@ const BIOME_FLOOR_ALTS: &[(&str, &str, u32)] = &[
 /// all GROUND art, and the best "rock" candidate (`Rock_Tiles_A_01`) is tan
 /// crazy-paving — a patio, not a rock face. Reusing the floor darkened needs no
 /// extra query, no extra vision call, and can't disagree with the floor.
-const NATURAL_WALL_BIOMES: &[&str] = &["cave", "underdark", "volcanic", "snow", "swamp", "forest", "jungle", "desert", "coast"];
+const NATURAL_WALL_BIOMES: &[&str] = &["cave", "underdark", "volcanic", "snow", "swamp", "forest", "jungle", "desert", "coast", "mountain"];
 
 fn has_natural_walls(biome: &str) -> bool {
     NATURAL_WALL_BIOMES.contains(&biome)
@@ -5766,6 +5921,11 @@ fn read_battle_mode_at(root: &Path, id: &str) -> String {
 fn set_battle_mode_at(root: &Path, id: &str, mode: &str) -> Result<String, String> {
     let normalized = normalize_battle_mode(mode);
     write_atomic(&root.join(id).join("battle_mode.txt"), &normalized)?;
+    // dm_rules.md carries only the ACTIVE mode's rules (see dm_rules_for_mode),
+    // so it has to be regenerated the moment the mode changes — otherwise the
+    // DM would keep reading the old mode's positioning rules for the rest of
+    // the sitting, since the next full sync only happens on campaign load.
+    sync_dm_rules_at(root, id)?;
     Ok(normalized)
 }
 
@@ -6513,6 +6673,35 @@ mod tests {
         assert!(rules.contains("supersedes"), "generated rules must claim precedence over a stale inline copy");
     }
 
+    /// An old campaign's CLAUDE.md still carries the hex-positioning system
+    /// DM_RULES explicitly supersedes — ~2KB of dead text re-sent every single
+    /// turn, plus a contradiction (it documents `position`/`clearPositions` as
+    /// valid while the rules say to ignore them). The strip has to remove all
+    /// of it and nothing else: the DM's own Notes edits and `## Campaign
+    /// setting` block must survive byte-for-byte.
+    #[test]
+    fn strip_superseded_positioning_removes_the_dead_hex_system_and_keeps_everything_else() {
+        let md = "# You are the Dungeon Master\n\n## Reporting state changes\nValid keys (all optional): damage [{name,amount}], inspiration [{name,value: true|false}], position [{name,q,r}], clearPositions (true|false).\n- `remember`: keep me.\n- `position` / `clearPositions`: see \"Physical hex-grid positioning\" below.\n\n## Physical hex-grid positioning\nThis table plays on physical 3D-printed hex terrain.\n- Hex distance is (|q1-q2| + ...) / 2.\n\n## How to DM\n- Track initiative yourself.\n\n## Campaign setting\n- **Edition:** D&D 2014\n_(my own hand-written note)_\n";
+        let out = strip_superseded_positioning(md);
+        // The dead system is gone, all of it.
+        assert!(!out.contains("Physical hex-grid positioning"), "{out}");
+        assert!(!out.contains("clearPositions"), "{out}");
+        assert!(!out.contains("Hex distance"), "{out}");
+        assert!(!out.contains("3D-printed hex terrain"), "{out}");
+        // Everything else survives — including the DM's own authored content.
+        assert!(out.contains("- `remember`: keep me."), "{out}");
+        assert!(out.contains("inspiration [{name,value: true|false}]."), "{out}");
+        assert!(out.contains("## How to DM") && out.contains("Track initiative yourself"), "{out}");
+        assert!(out.contains("## Campaign setting") && out.contains("**Edition:** D&D 2014"), "{out}");
+        assert!(out.contains("_(my own hand-written note)_"), "{out}");
+        assert!(!out.contains("\n\n\n"), "removed section must not leave a gap: {out}");
+        // Safe to run on every campaign load.
+        assert_eq!(strip_superseded_positioning(&out), out, "must be idempotent");
+        // And a already-clean (new) campaign is untouched.
+        let clean = "# DM\n\n## How to DM\n- go\n";
+        assert_eq!(strip_superseded_positioning(clean), clean);
+    }
+
     #[test]
     fn sync_dm_rules_is_idempotent_and_refreshes_stale_content() {
         let root = Scratch::new("dm_rules_idem");
@@ -6530,7 +6719,61 @@ mod tests {
         assert_eq!(claude_md.matches("@memory/dm_rules.md").count(), 1, "import must not accumulate");
         let rules = fs::read_to_string(&rules_path).unwrap();
         assert!(!rules.contains("ancient rules"), "stale generated rules must be overwritten");
-        assert_eq!(rules, DM_RULES);
+        // A fresh campaign is on the default mode, so it gets that mode's rules
+        // — not the unfiltered const (see dm_rules_for_mode).
+        assert_eq!(rules, dm_rules_for_mode(DEFAULT_BATTLE_MODE));
+    }
+
+    /// Only ONE battle mode is ever active, and CLAUDE.md + imports are
+    /// reprocessed every turn — so a campaign must carry its own mode's rules
+    /// and neither of the other two, and the prepared-battle-map protocol only
+    /// where it can actually apply (Grid). Changing the mode must regenerate.
+    #[test]
+    fn dm_rules_carry_only_the_active_battle_mode_and_maps_only_on_grid() {
+        let theater = dm_rules_for_mode("theater");
+        let grid = dm_rules_for_mode("grid");
+        let hex = dm_rules_for_mode("hex");
+
+        assert!(theater.contains("- **Theater of the Mind**") && !theater.contains("- **Grid**") && !theater.contains("- **Hex terrain**"), "{theater}");
+        assert!(grid.contains("- **Grid**") && !grid.contains("- **Theater of the Mind**") && !grid.contains("- **Hex terrain**"), "{grid}");
+        assert!(hex.contains("- **Hex terrain**") && !hex.contains("- **Grid**"), "{hex}");
+
+        // The prepared-map protocol needs a lettered grid to line up with.
+        assert!(grid.contains("Running a fight on a prepared battle map"), "grid must keep the map protocol");
+        assert!(grid.contains("Deployment:") && grid.contains("recallMap"), "grid must keep how to RUN the map");
+        assert!(!theater.contains("### Running a fight on a prepared battle map"), "{theater}");
+        assert!(!hex.contains("### Running a fight on a prepared battle map"), "{hex}");
+        assert!(!theater.contains("recallMap"), "no map protocol off Grid: {theater}");
+
+        // Everything mode-independent survives in all three.
+        for r in [&theater, &grid, &hex] {
+            assert!(r.contains("## Running combat & positioning"), "{r}");
+            assert!(r.contains("### Building the encounter"), "{r}");
+            assert!(r.contains("Active Battle Log"), "{r}");
+            assert!(r.contains("## Giving NPCs distinct voices"), "{r}");
+        }
+        // And filtering actually saves real per-turn weight.
+        assert!(theater.len() < DM_RULES.len() - 2000, "expected a real saving, got {} vs {}", theater.len(), DM_RULES.len());
+    }
+
+    /// Switching mode mid-campaign must rewrite dm_rules.md immediately —
+    /// otherwise the DM keeps reading the previous mode's positioning rules
+    /// until the next campaign load.
+    #[test]
+    fn set_battle_mode_regenerates_the_rules_for_the_new_mode() {
+        let root = Scratch::new("dm_rules_mode_switch");
+        let meta = create_campaign_at(&root.0, &intake("Switcher")).unwrap();
+        let rules_path = root.0.join(&meta.id).join("memory").join("dm_rules.md");
+
+        set_battle_mode_at(&root.0, &meta.id, "grid").unwrap();
+        let after_grid = fs::read_to_string(&rules_path).unwrap();
+        assert!(after_grid.contains("- **Grid**") && after_grid.contains("Running a fight on a prepared battle map"), "{after_grid}");
+
+        set_battle_mode_at(&root.0, &meta.id, "theater").unwrap();
+        let after_theater = fs::read_to_string(&rules_path).unwrap();
+        assert!(after_theater.contains("- **Theater of the Mind**"), "{after_theater}");
+        assert!(!after_theater.contains("- **Grid**"), "stale mode must be gone: {after_theater}");
+        assert!(!after_theater.contains("### Running a fight on a prepared battle map"), "map protocol must go with Grid: {after_theater}");
     }
 
     #[test]
@@ -6617,6 +6860,24 @@ mod tests {
         assert!(all.contains("Floating debris") && all.contains("outside the"), "{all}");
         assert!(all.contains("Giant boulder") && all.contains("must both be whole numbers from 1 to 4"), "{all}");
         assert!(all.contains("doesn't parse"), "{all}");
+    }
+
+    /// A `Deployment:` section names cells too — the enemy/party start zones —
+    /// but those are guidance for placing physical minis, NOT render targets.
+    /// `is_map_section_header` knowing `Deployment:` is what keeps its bullets
+    /// out of both the Features and Objects parsers, so a Deployment line
+    /// pointing at a wall or off the grid raises none of the validation errors
+    /// the same text under Features/Objects would, and the section rides
+    /// through the Features prune untouched.
+    #[test]
+    fn deployment_section_cells_are_not_validated_or_pruned_as_features() {
+        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\nObjects:\n- Small campfire at C7 (1x1)\nDeployment:\n- Enemies: A1-B1 — dug in along the north wall\n- Party: Z9 — arriving from off the eastern edge\nTactics:\n- x";
+        // A1 is a `#` wall and Z9 is off the grid: read as Features/Objects,
+        // both would raise issues. As Deployment, neither is even looked at.
+        assert_eq!(validate_map_spec(spec), Vec::<String>::new());
+        let pruned = prune_invalid_features(spec);
+        assert!(pruned.contains("Deployment:\n") && pruned.contains("Enemies: A1-B1") && pruned.contains("Party: Z9"), "{pruned}");
+        assert!(is_map_section_header("Deployment:"));
     }
 
     /// The real spec the generator shipped for "Bar Fight" (test-campaign,

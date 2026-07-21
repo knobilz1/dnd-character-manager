@@ -60,6 +60,11 @@ export interface ParsedBattleMap {
    *  from this text directly. */
   objects: string;
   tactics: string;
+  /** Cells named on the `Deployment:` section's `Enemies:`/`Party:` lines,
+   *  0-indexed [col,row] and clamped to the grid — the translucent start-zone
+   *  overlay (drawn only when the caller asks, so a printed map can omit it).
+   *  Empty for a spec generated before the section existed. */
+  deployment: { enemies: Array<[number, number]>; party: Array<[number, number]> };
 }
 
 const MAX_DIM = 40; // sanity cap so a malformed spec can't allocate a huge canvas
@@ -89,7 +94,7 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
       if (rowLines.length === 0) continue;
       break;
     }
-    if (/^(Features:|Objects:|Tactics:|Legend:|Grid:)/.test(trimmed) || trimmed.startsWith('# ')) break;
+    if (/^(Features:|Objects:|Tactics:|Deployment:|Legend:|Grid:)/.test(trimmed) || trimmed.startsWith('# ')) break;
     rowLines.push(raw.replace(/\s+$/, ''));
     if (rowLines.length >= MAX_DIM) break;
   }
@@ -104,13 +109,33 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
     const out: string[] = [];
     for (let i = start + 1; i < lines.length; i++) {
       const t = lines[i].trim();
-      if (/^(Features:|Objects:|Tactics:|Legend:|Grid:|Map:)$/.test(t) || t.startsWith('# ')) break;
+      if (/^(Features:|Objects:|Tactics:|Deployment:|Legend:|Grid:|Map:)$/.test(t) || t.startsWith('# ')) break;
       out.push(lines[i]);
     }
     return out.join('\n').trim();
   };
 
-  return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), objects: section('Objects:'), tactics: section('Tactics:') };
+  // Deployment start-zones: pull the cell refs out of the `Enemies:`/`Party:`
+  // bullets' prose and clamp to the grid (a stray non-cell token like a DC or a
+  // damage die that happens to look cell-shaped just falls outside and drops).
+  const zoneCells = (side: string): Array<[number, number]> => {
+    const line = lines.find((l) => new RegExp(`^\\s*-\\s*${side}\\s*:`, 'i').test(l));
+    if (!line) return [];
+    // The line is "<start cells> — <reason>": take only the cells BEFORE the
+    // reason separator, so a landmark the side moves TOWARD (named in the
+    // reason, e.g. "entering at F12 — until they reach B10") isn't drawn as a
+    // start zone. Cell ranges use a bare dash ("F8-H8"), so splitting on a
+    // SPACED dash never splits a range.
+    const cellPart = line.replace(new RegExp(`^\\s*-\\s*${side}\\s*:`, 'i'), '').split(/\s[—–-]\s/)[0];
+    return cellRefsInText(cellPart)
+      .map((s) => s.split(',').map(Number) as [number, number])
+      // In grid AND on a cell a miniature could actually stand — never tint a
+      // wall, a void cell, or a `%` chasm (a fatal drop). A range like
+      // "D9-J12" spanning the cave edge only fills the passable cells inside it.
+      .filter(([c, r]) => c >= 0 && c < cols && r >= 0 && r < grid.length && grid[r][c] !== '#' && grid[r][c] !== ' ' && grid[r][c] !== '%');
+  };
+
+  return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), objects: section('Objects:'), tactics: section('Tactics:'), deployment: { enemies: zoneCells('Enemies'), party: zoneCells('Party') } };
 }
 
 // ── Procedural tile drawing ──────────────────────────────────────────────────
@@ -126,6 +151,8 @@ const COLORS = {
   green: '#4b7a3a', greenHi: '#639a4d',
   rubble: '#8a7f6a', hazard: '#d4692a', hazardHi: '#f0a04b',
   sand: '#dcc48a', sandHi: '#c9ac6c',
+  chasm: '#0c0a08', chasmRim: '#332c24',
+  bridgePlank: '#6e4a28', bridgeRope: '#a07d4a',
   grid: 'rgba(40,36,30,0.35)', ink: '#2a2620',
 };
 
@@ -246,6 +273,37 @@ function drawTileProcedural(ctx: Ctx, code: string, x: number, y: number, px: nu
         ctx.arc(x + px * dx, y + px * dy, px * 0.05, 0, Math.PI * 2);
         ctx.fill();
       }
+      return;
+    }
+    case '%': {
+      // A deep chasm/gorge — a lethal drop, drawn as a dark pit with a faintly
+      // lit rocky rim so it reads as depth, clearly NOT `~` water. No floor
+      // underneath: nothing stands here.
+      fillCell(ctx, x, y, px, COLORS.chasm);
+      const g = ctx.createRadialGradient(x + px * 0.5, y + px * 0.55, px * 0.06, x + px * 0.5, y + px * 0.5, px * 0.78);
+      g.addColorStop(0, '#040302');
+      g.addColorStop(0.7, COLORS.chasm);
+      g.addColorStop(1, COLORS.chasmRim);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, px, px);
+      return;
+    }
+    case 'H': {
+      // A plank/rope bridge deck laid over a chasm — dark void showing through
+      // the plank gaps, timber slats across the span, a rope rail down each
+      // long edge. Reads as a walkable crossing over the drop.
+      fillCell(ctx, x, y, px, COLORS.chasm);
+      ctx.fillStyle = COLORS.bridgePlank;
+      const planks = 4;
+      for (let i = 0; i < planks; i++) {
+        ctx.fillRect(x + (px * i) / planks + px * 0.03, y + px * 0.06, px / planks - px * 0.06, px * 0.88);
+      }
+      ctx.strokeStyle = COLORS.bridgeRope;
+      ctx.lineWidth = Math.max(1.5, px * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(x, y + px * 0.09); ctx.lineTo(x + px, y + px * 0.09);
+      ctx.moveTo(x, y + px * 0.91); ctx.lineTo(x + px, y + px * 0.91);
+      ctx.stroke();
       return;
     }
     case '_': {
@@ -776,7 +834,87 @@ export interface RenderWindow { colStart: number; colEnd: number; rowStart: numb
 /** Renders ONLY the grid content — tiles + thin cell-boundary lines, no
  *  coordinate ruler — sized exactly `wCols*cellPx` by `wRows*cellPx`. The
  *  ruler is composited separately (see `composeRulerFrame`). */
-function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain): HTMLCanvasElement {
+const DEPLOYMENT_STYLES = {
+  enemies: { fill: 'rgba(220,38,38,0.30)', edge: 'rgba(220,38,38,0.95)', label: 'ENEMIES' },
+  party: { fill: 'rgba(56,189,248,0.30)', edge: 'rgba(56,189,248,0.98)', label: 'PARTY' },
+} as const;
+
+/** Groups a cell set into 4-connected clusters, so a side split across two
+ *  ledges gets a label over each cluster instead of one floating between them. */
+function contiguousGroups(cells: Array<[number, number]>): Array<Array<[number, number]>> {
+  const key = ([c, r]: [number, number]) => `${c},${r}`;
+  const remaining = new Map(cells.map((cell) => [key(cell), cell] as const));
+  const groups: Array<Array<[number, number]>> = [];
+  for (const start of cells) {
+    if (!remaining.has(key(start))) continue;
+    const group: Array<[number, number]> = [];
+    const stack = [start];
+    remaining.delete(key(start));
+    while (stack.length) {
+      const [c, r] = stack.pop()!;
+      group.push([c, r]);
+      for (const n of [[c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]] as Array<[number, number]>) {
+        if (remaining.has(key(n))) { remaining.delete(key(n)); stack.push(n); }
+      }
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
+/** Translucent Enemies/Party start-zones over the grid: a tinted fill with a
+ *  crisp border tracing each region's outer edge, plus a pill label per
+ *  cluster. Drawn last so it reads over terrain and art; entirely optional so
+ *  the same map prints clean with it off. */
+function drawDeploymentZones(ctx: CanvasRenderingContext2D, map: ParsedBattleMap, cellPx: number, w: RenderWindow) {
+  for (const side of ['enemies', 'party'] as const) {
+    const cells = map.deployment[side].filter(([c, r]) => c >= w.colStart && c < w.colEnd && r >= w.rowStart && r < w.rowEnd);
+    if (cells.length === 0) continue;
+    const style = DEPLOYMENT_STYLES[side];
+    const x = (c: number) => (c - w.colStart) * cellPx;
+    const y = (r: number) => (r - w.rowStart) * cellPx;
+
+    ctx.fillStyle = style.fill;
+    for (const [c, r] of cells) ctx.fillRect(x(c), y(r), cellPx, cellPx);
+
+    // Outline only the region's outer edges (a cell side with no same-zone
+    // neighbour) so the whole cluster reads as one bordered area.
+    const has = new Set(cells.map(([c, r]) => `${c},${r}`));
+    ctx.strokeStyle = style.edge;
+    ctx.lineWidth = Math.max(2, cellPx * 0.06);
+    ctx.beginPath();
+    for (const [c, r] of cells) {
+      if (!has.has(`${c},${r - 1}`)) { ctx.moveTo(x(c), y(r)); ctx.lineTo(x(c) + cellPx, y(r)); }
+      if (!has.has(`${c},${r + 1}`)) { ctx.moveTo(x(c), y(r) + cellPx); ctx.lineTo(x(c) + cellPx, y(r) + cellPx); }
+      if (!has.has(`${c - 1},${r}`)) { ctx.moveTo(x(c), y(r)); ctx.lineTo(x(c), y(r) + cellPx); }
+      if (!has.has(`${c + 1},${r}`)) { ctx.moveTo(x(c) + cellPx, y(r)); ctx.lineTo(x(c) + cellPx, y(r) + cellPx); }
+    }
+    ctx.stroke();
+
+    for (const group of contiguousGroups(cells)) {
+      const cx = group.reduce((a, [c]) => a + c, 0) / group.length;
+      const cy = group.reduce((a, [, r]) => a + r, 0) / group.length;
+      drawZoneLabel(ctx, style.label, (cx - w.colStart + 0.5) * cellPx, (cy - w.rowStart + 0.5) * cellPx, cellPx);
+    }
+  }
+}
+
+/** A centered pill label (dark plate + white text) so the zone name stays
+ *  legible over any terrain underneath. */
+function drawZoneLabel(ctx: CanvasRenderingContext2D, text: string, px: number, py: number, cellPx: number) {
+  ctx.font = `bold ${Math.round(cellPx * 0.3)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const padX = cellPx * 0.16;
+  const tw = ctx.measureText(text).width;
+  const h = Math.round(cellPx * 0.42);
+  ctx.fillStyle = 'rgba(15,23,42,0.85)';
+  ctx.fillRect(px - tw / 2 - padX, py - h / 2, tw + padX * 2, h);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, px, py);
+}
+
+function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
   const wRows = w.rowEnd - w.rowStart;
@@ -860,6 +998,8 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
       ctx.strokeRect(c * cellPx, r * cellPx, cellPx, cellPx);
     }
   }
+
+  if (showDeployment) drawDeploymentZones(ctx, map, cellPx, w);
   return canvas;
 }
 
@@ -897,8 +1037,8 @@ function composeRulerFrame(
 /** Renders a (sub-)grid to a fresh canvas, with a coordinate ruler (A.. / 1..)
  *  down the left and across the top so cells are referenceable on the print.
  *  `win` defaults to the whole map. `cellPx` sets resolution. */
-export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain): HTMLCanvasElement {
-  return composeRulerFrame(map, cellPx, win, renderBattleMapContent(map, cellPx, win, tiles, terrain));
+export function renderBattleMapToCanvas(map: ParsedBattleMap, cellPx = 64, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): HTMLCanvasElement {
+  return composeRulerFrame(map, cellPx, win, renderBattleMapContent(map, cellPx, win, tiles, terrain, showDeployment));
 }
 
 /** Spreadsheet-style column label: 0→A, 25→Z, 26→AA. */
@@ -915,10 +1055,10 @@ export function columnLabel(index: number): string {
 /** Renders the whole map to a PNG data URL (dialog preview + PNG export).
  *  `tiles` are the resolved catalog tiles (preload their art first with
  *  preloadResolvedTileArt); omit for the plain built-in-sprite render. */
-export function battleMapToPngDataUrl(spec: string, cellPx = 64, tiles: MapTileArt[] = [], terrain?: MapTerrain): string | null {
+export function battleMapToPngDataUrl(spec: string, cellPx = 64, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): string | null {
   const map = parseBattleMap(spec);
   if (!map) return null;
-  return renderBattleMapToCanvas(map, cellPx, undefined, tiles, terrain).toDataURL('image/png');
+  return renderBattleMapToCanvas(map, cellPx, undefined, tiles, terrain, showDeployment).toDataURL('image/png');
 }
 
 // ── PDF export (true 1-inch-per-square, tiled across pages) ───────────────────
@@ -939,7 +1079,7 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 /** Builds a print-scaled PDF: every grid square is exactly 1 inch, and a map
  *  bigger than one page is tiled across multiple Letter sheets (with the
  *  coordinate ruler repeated on each) to tape together. */
-export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = [], terrain?: MapTerrain): Promise<Uint8Array | null> {
+export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
 
@@ -953,7 +1093,7 @@ export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = []
         colStart: rx, colEnd: Math.min(map.cols, rx + usableSquaresX),
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
-      const source = renderBattleMapContent(map, RENDER_PX, win, tiles, terrain);
+      const source = renderBattleMapContent(map, RENDER_PX, win, tiles, terrain, showDeployment);
       const canvas = composeRulerFrame(map, RENDER_PX, win, source);
       const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));

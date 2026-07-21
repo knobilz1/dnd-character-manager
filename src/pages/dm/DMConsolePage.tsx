@@ -333,6 +333,16 @@ interface SessionPlanResult {
   failed_maps: string[];
 }
 
+/** Pulls the `Deployment:` section's Enemies/Party lines out of a map spec so
+ *  the card can show where each side starts up front, instead of leaving it
+ *  buried in the raw-spec textarea. Fields are undefined for maps generated
+ *  before the section existed. Pure. */
+function parseDeployment(spec: string): { enemies?: string; party?: string } {
+  const grab = (label: string) =>
+    spec.match(new RegExp(`^\\s*-\\s*${label}\\s*:\\s*(.+)$`, 'im'))?.[1].trim();
+  return { enemies: grab('Enemies'), party: grab('Party') };
+}
+
 /** A battle map card as rendered in the merged Plan Next Session dialog —
  *  BattleMapMeta plus the full spec text and its rendered preview PNG. */
 interface MapCard {
@@ -826,6 +836,17 @@ export function DMConsolePage() {
   const [mapProgress, setMapProgress] = React.useState<{ phase: string; elapsed_s: number } | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
+  // Draw the translucent Enemies/Party start-zones over the map previews. On by
+  // default for planning; the DM turns it OFF to print/export a clean map. The
+  // flag flows into both the preview render and the PNG/PDF export.
+  const [showZones, setShowZones] = React.useState(true);
+  // Re-render every loaded card's preview when the toggle flips (no-op on mount
+  // while the lists are still empty). Art is already cached from the first load.
+  React.useEffect(() => {
+    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain, showZones) });
+    setPlanMapCards((cards) => cards.map(rerender));
+    setAdHocMapCards((cards) => cards.map(rerender));
+  }, [showZones]);
   const [failedMaps, setFailedMaps] = React.useState<string[]>([]);
   const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
   const [tileLibraryRootCount, setTileLibraryRootCount] = React.useState(0);
@@ -2734,7 +2755,7 @@ export function DMConsolePage() {
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
     const { tiles, terrain } = await fetchMapTiles(meta.slug);
-    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, png: battleMapToPngDataUrl(spec, 64, tiles, terrain) };
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, png: battleMapToPngDataUrl(spec, 64, tiles, terrain, showZones) };
   }
 
   /** Loads the currently-imported tile library's summary (if any) — called
@@ -2784,7 +2805,7 @@ export function DMConsolePage() {
    *  (see setActiveTileStyle), so switching styles doesn't touch any map's
    *  saved spec, just what art the already-loaded cards redraw with. */
   function refreshMapCardPreviews() {
-    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain) });
+    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain, showZones) });
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }
@@ -2817,7 +2838,7 @@ export function DMConsolePage() {
     setPlanBusy('Exporting PNG…');
     try {
       await preloadResolvedTileArt(card.tiles, card.terrain);
-      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.tiles, card.terrain);
+      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.tiles, card.terrain, showZones);
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -2838,7 +2859,7 @@ export function DMConsolePage() {
     setPlanBusy('Exporting print-scaled PDF…');
     try {
       await preloadResolvedTileArt(card.tiles, card.terrain);
-      const bytes = await battleMapToPdfBytes(card.spec, card.tiles, card.terrain);
+      const bytes = await battleMapToPdfBytes(card.spec, card.tiles, card.terrain, showZones);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -2857,7 +2878,7 @@ export function DMConsolePage() {
     // Hand edits keep the card's already-resolved tiles (a live edit doesn't
     // re-run the vision resolver — that happens on regenerate); the preview
     // just redraws the edited grid under the existing tile art.
-    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec, 64, c.tiles, c.terrain) : c.png } : c));
+    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec, 64, c.tiles, c.terrain, showZones) : c.png } : c));
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
   }
@@ -3666,6 +3687,13 @@ export function DMConsolePage() {
                   </p>
                 )}
 
+                {[...planMapCards, ...adHocMapCards].length > 0 && (
+                  <label className="flex items-center gap-2 mb-2 text-xs text-slate-300 cursor-pointer select-none">
+                    <input type="checkbox" checked={showZones} onChange={(e) => setShowZones(e.target.checked)} className="accent-red-600" />
+                    Show start-zone overlay (<span className="text-red-400">Enemies</span> / <span className="text-sky-400">Party</span>) — turn off to print a clean map
+                  </label>
+                )}
+
                 <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
                   {[...planMapCards, ...adHocMapCards].length === 0 && !planBusy && (
                     <p className="text-xs text-slate-500">No combat encounters in this plan called for a map yet.</p>
@@ -3694,6 +3722,18 @@ export function DMConsolePage() {
                       ) : (
                         <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
                       )}
+
+                      {(() => {
+                        const dep = parseDeployment(card.spec);
+                        if (!dep.enemies && !dep.party) return null;
+                        return (
+                          <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs space-y-1">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500">Starting positions — place the minis here</div>
+                            {dep.enemies && <div><span className="font-medium text-red-400">Enemies:</span> <span className="text-slate-300">{dep.enemies}</span></div>}
+                            {dep.party && <div><span className="font-medium text-sky-400">Party:</span> <span className="text-slate-300">{dep.party}</span></div>}
+                          </div>
+                        );
+                      })()}
 
                       <details className="mt-2">
                         <summary className="text-xs text-slate-400 cursor-pointer">View / edit the raw spec</summary>
