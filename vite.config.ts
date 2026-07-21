@@ -35,9 +35,14 @@ export default defineConfig({
   plugins: [tailwindcss(), react(), excludeModelsPlugin()],
   server: {
     watch: {
-      // Rust writes/locks files in target/ while linking; Vite's watcher
-      // picking them up crashes with EBUSY on Windows mid-build.
-      ignored: ['**/src-tauri/target/**'],
+      // Nothing under src-tauri/ feeds the frontend bundle, so watching any of
+      // it can only cause harm. target/ is the crash: Rust writes and locks
+      // files there while linking and the watcher hits EBUSY on Windows
+      // mid-build. The rest is the quieter bug — editing a .rs file made Vite
+      // full-reload the running app's webview, which discards whatever the
+      // page was holding. Live: one edit to pack_profile.rs wiped four
+      // in-flight map generations at once, mid-run.
+      ignored: ['**/src-tauri/**'],
     },
   },
 });

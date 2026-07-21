@@ -3635,7 +3635,7 @@ fn roll_floor_query<'a>(profile: &'a PackProfile, scene: &str, roll: u32) -> Opt
 /// plus "dungeon" (the default / built-in floor, deliberately never in the
 /// profile since it means "no override, no vision call").
 fn biome_ids(profile: &PackProfile) -> Vec<&str> {
-    std::iter::once("dungeon").chain(profile.scene_words()).collect()
+    std::iter::once(crate::pack_profile::BUILTIN_SCENE).chain(profile.scene_words()).collect()
 }
 
 /// Cheap TEXT classification of a finished map's biome from its title +

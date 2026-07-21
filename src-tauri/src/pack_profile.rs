@@ -147,6 +147,12 @@ const DEFAULT_OBJECT_CATEGORIES: &[&str] =
 
 const DEFAULT_TERRAIN_CATEGORIES: &[&str] = &["Textures", "Texture_Overlays", "Elevation", "Shadow_Paths", "Misc_Paths"];
 
+/// The scene meaning "no override": the renderer's own stone floor and built
+/// masonry walls, resolved without a single catalog lookup. It must reach the
+/// classifier (see `biome_ids`) but must never appear in a profile — see the
+/// guard in `parse_semantics_reply`.
+pub const BUILTIN_SCENE: &str = "dungeon";
+
 /// `(scene, folder, floor query, natural walls, liquid query)` — one row per
 /// PLACE. Reproduces exactly the hand-authored Forgotten Adventures tables this
 /// replaced, so an existing install sees no change.
@@ -481,7 +487,7 @@ pub fn build_semantics_prompt(evidence: &[BiomeEvidence], categories: &[String])
          - object_categories: categories holding discrete, placeable set-dressing a map can put in a single square or two.\n\
          - terrain_categories: categories that are tileable SURFACE or edging art — ground textures, overlays, cliff and path strips. Anything listed here is barred from object slots. Get this wrong and a search for \"bone pile\" returns a tiling bone-dirt FLOOR.\n\
          - One entry per PLACE a fight could happen, not one per folder. \"scene\" is the single word a DM would use for it (\"cave\", \"tavern\", \"desert\"); \"folder\" is which folder above its art comes from. Give SEVERAL entries sharing one folder when that folder holds genuinely different places — a natural cavern and a carved drow city are one folder but different ground, and a place with no word of its own falls back to plain stone and loses the pack entirely. Every \"scene\" must be unique; a repeat is dropped.\n\
-         - floor_query: words that select this biome's default ground from its candidate list above. It is matched against filenames, so use a word the files actually contain. Prefer a material with a mean luminance in 70-205: below that the board is too dark to read minis on, above it washes out the art placed on top. If this biome's only ground art measures outside that band, either borrow a suitable material from a related biome or answer null to keep the built-in stone floor. Never end the query with the bare word \"floor\" — it collides with generic brick.\n\
+         - floor_query: words that select this biome's default ground from its candidate list above. It is matched against filenames, so use a word the files actually contain. Prefer a material with a mean luminance in 70-205: below that the board is dark to read minis on, above it washes out the art placed on top. If NOTHING is in that band, still answer: the darkest of this biome's own materials, or one borrowed from a related biome, beats the built-in dungeon flagstone — which is bright grey masonry, the wrong material for every outdoor and organic place there is. Answer null ONLY when the biome has no ground candidates at all. This is the surface the WHOLE map stands on, so pick walkable ground, never a hazard or a liquid: lava, acid and water belong to the specific cells a map calls out, and a map's text is written before this is chosen, so a hazard here contradicts prose that never mentioned one. Never end the query with the bare word \"floor\" — it collides with generic brick.\n\
          - natural_walls: true when this biome's walls are living rock or organic mass (caves, canyons), false when they are built masonry (towns, taverns).\n\
          - liquid_query: only when this biome's pools are NOT water and its own files would not be found by searching \"water\". Otherwise null.\n\
          - Include every biome listed above that is a PLACE. Omit any that is a shared library rather than somewhere a fight happens — a folder of spell effects, blast marks, smoke and weather overlays is used ON other maps, and making it a scene would let the classifier send a whole encounter there. Judge that by its categories and filenames, not its name.",
@@ -587,6 +593,17 @@ pub fn parse_semantics_reply(json: &str, layout: PackLayout) -> Option<PackProfi
             // would send that scene's art hunt to the wrong folder in silence.
             let scene = b.get("scene")?.as_str()?.to_lowercase();
             if scene.is_empty() || seen_words.contains(&scene) {
+                return None;
+            }
+            // "dungeon" is the built-in look, and it reaches the classifier from
+            // `biome_ids` on its own. A profile that also CLAIMS it turns the
+            // one scene that needs no art into one that resolves art like any
+            // other — a vision call per map to re-derive the floor it already
+            // had. Live: the profiler answered `dungeon → !Core_Settlements`
+            // with floor "stone", and every dungeon map has paid for it since.
+            // `PackProfile::default()` has always omitted it and a test asserts
+            // that; nothing enforced the same on a LEARNED profile until here.
+            if scene == BUILTIN_SCENE {
                 return None;
             }
             seen_words.push(scene.clone());
@@ -804,6 +821,23 @@ mod tests {
         let p = parse_semantics_reply(json, fa()).unwrap();
         assert_eq!(p.folder_for_scene("cave"), Some("A"));
         assert_eq!(p.scene_words(), vec!["cave", "tunnel"], "the duplicate must be dropped, not left shadowed");
+    }
+
+    /// "dungeon" means "no override, no vision call". A profile that claims it
+    /// turns the one scene needing no art into one that resolves art like any
+    /// other. `PackProfile::default()` has always omitted it and a test in
+    /// campaign.rs asserts that — but nothing enforced it on a LEARNED profile,
+    /// and the live one duly came back with `dungeon → !Core_Settlements`
+    /// (floor "stone"), costing a vision call per dungeon map.
+    #[test]
+    fn a_learned_profile_may_not_claim_the_builtin_scene() {
+        let json = r#"{"universal_biome":"Common","object_categories":[],"terrain_categories":[],
+          "biomes":[{"scene":"dungeon","folder":"Common","floor_query":"stone","natural_walls":false},
+                    {"scene":"Dungeon","folder":"Other","floor_query":"flagstone","natural_walls":false},
+                    {"scene":"crypt","folder":"Common","floor_query":"stone","natural_walls":false}]}"#;
+        let p = parse_semantics_reply(json, fa()).unwrap();
+        assert!(p.scene(BUILTIN_SCENE).is_none(), "the built-in look must never resolve catalog art");
+        assert_eq!(p.scene_words(), vec!["crypt"], "only the real place survives");
     }
 
     /// The evidence block is the whole reason profiling works — if it stops
