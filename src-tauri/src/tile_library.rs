@@ -1732,6 +1732,22 @@ pub struct PackProfileView {
     pub profiled: bool,
 }
 
+/// Longest edge of a panel thumbnail, in pixels.
+const THUMB_PX: u32 = 96;
+
+/// A small PNG data URL for one catalog tile. The panel renders these at 48
+/// CSS pixels, and handing it the untouched file is wildly out of proportion:
+/// measured live, the Underdark ground tile alone is an 8.5 MB base64 string,
+/// with fourteen biomes in one response. Decoding and downscaling here turns
+/// tens of megabytes of IPC into a few kilobytes.
+fn thumbnail_data_url(root: &str, rel_path: &str) -> Option<String> {
+    let bytes = fs::read(Path::new(root).join(rel_path)).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?.thumbnail(THUMB_PX, THUMB_PX);
+    let mut png: Vec<u8> = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(format!("data:image/png;base64,{}", STANDARD.encode(&png)))
+}
+
 #[tauri::command]
 pub fn get_pack_profile(app: AppHandle) -> Result<Option<PackProfileView>, String> {
     let Some(manifest) = load_manifest_cached(&app)? else {
@@ -1757,7 +1773,7 @@ pub fn get_pack_profile(app: AppHandle) -> Result<Option<PackProfileView>, Strin
                 .floor_query
                 .as_deref()
                 .and_then(|q| shortlist_in_category(&app, q, "Textures", &b.scene, 1, 1, 1).into_iter().next())
-                .map(|c| c.data_url),
+                .and_then(|c| thumbnail_data_url(&c.root, &c.rel_path)),
             ground_options: evidence.iter().find(|e| e.folder == b.folder).map(|e| e.ground.iter().map(|g| g.word.clone()).collect()).unwrap_or_default(),
         })
         .collect();
