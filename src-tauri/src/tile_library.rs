@@ -1301,9 +1301,16 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     // does, the shortlist is deliberately EMPTY so the caller falls back to the
     // built-in glyph — better to draw the plain sprite than to confidently
     // draw the wrong object (live: "Broken crockery" → a broken window).
+    //
+    // `fits` accepts the TRANSPOSED footprint too: a top-down battle-map tile
+    // rotates perfectly well, and refusing the rotation is how a 2x1 "Weapon
+    // rack" ended up a WINE rack — all 247 weapon racks in the catalog are
+    // 1x2, so every one was excluded and a 2x1 wine rack was the only "rack"
+    // left standing. The renderer draws the swap (see ResolvedTile::rotated).
+    let fits = |e: &TileLibraryEntry| (e.w <= fw && e.h <= fh) || (e.h <= fw && e.w <= fh);
     let identified: Vec<&TileLibraryEntry> = entries
         .iter()
-        .filter(|e| e.w <= fw && e.h <= fh && (allow_terrain || !profile.is_terrain_category(&e.category)) && has_identity_match(e, tokens))
+        .filter(|e| fits(e) && (allow_terrain || !profile.is_terrain_category(&e.category)) && has_identity_match(e, tokens))
         .collect();
     if identified.is_empty() {
         return Vec::new();
@@ -1326,8 +1333,12 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
         .into_iter()
         .filter_map(|e| shortlist_rank(e, tokens, idf).map(|s| (s * biome_affinity(want, &e.biome, profile) * condition_fit(e, tokens), e)))
         .collect();
+    // Upright before rotated at equal score, so a tile that already fits the
+    // placement is never passed over for one that needs turning.
+    let upright = |e: &TileLibraryEntry| e.w <= fw && e.h <= fh;
     scored.sort_by(|a, b| {
         b.0.total_cmp(&a.0) // higher rarity-weighted rank first
+            .then_with(|| upright(b.1).cmp(&upright(a.1)))
             .then_with(|| (b.1.w * b.1.h).cmp(&(a.1.w * a.1.h)))
             .then_with(|| a.1.keywords.len().cmp(&b.1.keywords.len()))
             .then_with(|| a.1.rel_path.len().cmp(&b.1.rel_path.len()))
@@ -1706,11 +1717,64 @@ fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<Strin
         }
         true
     });
+    // The same check for `~`, minus the luminance gate: a pool is meant to read
+    // as liquid, not as a board you place minis on, and Horror's blood measures
+    // about 42. Note resolve_liquid does NOT exclude `/Liquids/` the way
+    // resolve_floor does — that folder is exactly where a pool SHOULD come
+    // from — so this must not exclude it either, or it would condemn the art it
+    // is checking.
+    for b in &mut profile.biomes {
+        let Some(query) = b.liquid_query.clone() else { continue };
+        let tokens = tokenize_query(&query);
+        let any = entries.iter().any(|e| e.biome == b.folder && e.category == "Textures" && has_identity_match(e, &tokens));
+        if !any {
+            dropped.push(format!("{} → {}/{:?}: liquid query selects nothing in its own folder; falling back to water", b.scene, b.folder, query));
+            b.liquid_query = None;
+        }
+    }
     crate::maplog::log(
         "PACK PROFILE — grounds checked against the catalog",
         &if dropped.is_empty() { "every place's ground is backed by real art".to_string() } else { dropped.join("\n") },
     );
     profile
+}
+
+/// Restores per-place answers the newest profiling run LOST — a `floor_query`
+/// or `liquid_query` that was `Some` last time and came back `None` for a place
+/// that is otherwise unchanged (same scene word, same folder).
+///
+/// Re-profiling re-derives every field from scratch, and the model does not
+/// answer identically twice. Live: `horror` carried `liquid_query: "blood"` for
+/// three runs and then simply did not mention it, so a charnel house's blood
+/// channels filled with `Water_Calm_A_02` — clean blue water, in a room whose
+/// own Features call them blood channels. Nothing surfaced the loss; the only
+/// reason it was caught is that somebody looked at the picture.
+///
+/// Deliberately field-level and one-directional. It never resurrects a whole
+/// place (`prune_unbacked_grounds` drops those on purpose, and running AFTER
+/// this means anything restored here is still checked against the current
+/// catalog before it survives), and it never overwrites a fresh answer — only
+/// fills a hole where an answer used to be.
+fn carry_forward_lost_fields(prev: &PackProfile, mut derived: PackProfile) -> PackProfile {
+    let mut restored: Vec<String> = Vec::new();
+    for b in &mut derived.biomes {
+        let Some(old) = prev.biomes.iter().find(|p| p.scene.eq_ignore_ascii_case(&b.scene) && p.folder == b.folder) else {
+            continue;
+        };
+        for (field, new, was) in [("floor", &mut b.floor_query, &old.floor_query), ("liquid", &mut b.liquid_query, &old.liquid_query)] {
+            if new.is_none() {
+                if let Some(v) = was {
+                    *new = Some(v.clone());
+                    restored.push(format!("{} {field}_query: dropped by this run, restored {v:?}", b.scene));
+                }
+            }
+        }
+    }
+    crate::maplog::log(
+        "PACK PROFILE — answers carried forward",
+        &if restored.is_empty() { "this run kept every answer the last one had".to_string() } else { restored.join("\n") },
+    );
+    derived
 }
 
 /// Every distinct category name in the catalog, most common first.
@@ -1782,8 +1846,20 @@ pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
     crate::maplog::log("PACK PROFILE — semantics reply", &reply);
     let derived = crate::pack_profile::parse_semantics_reply(&extract_json_object(&reply), layout)
         .ok_or_else(|| "Couldn't read the profiler's answer — the previous profile is unchanged.".to_string())?;
+    // Fill back anything this run lost that the last one knew — read from the
+    // SAVED profile, never `load_profile_cached`, which returns the profile with
+    // corrections already applied (see with_overrides). Folding an override in
+    // here would bake it into the learned layer, so clearing it in the panel
+    // would no longer reveal what the profiler itself answered.
+    let saved: PackProfile = profile_path(&app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let derived = carry_forward_lost_fields(&saved, derived);
     // Same discipline as the layout pass: check the answer against the files
-    // before trusting it. See prune_unbacked_grounds.
+    // before trusting it. Runs LAST so a carried-forward query still has to
+    // exist in the catalog this run scanned. See prune_unbacked_grounds.
     let derived = prune_unbacked_grounds(&entries, &manifest.measured, derived);
 
     // Persist the derived profile and the re-read manifest together: the
@@ -2519,6 +2595,63 @@ mod tests {
         assert_eq!(got.iter().filter(|p| p.starts_with("flesh")).count(), 1, "only one variant per family up front: {got:?}");
     }
 
+    /// The live failure: a 2x1 "Weapon rack" resolved to
+    /// `Wine_Rack_Wood_Light_A_2x1`. All 247 weapon racks are 1x2, so the size
+    /// filter dropped every one and a 2x1 wine rack was the only surviving
+    /// "rack". Admitting the transposed fit is the whole fix: the right tile
+    /// comes back AND outranks the wrong one, because it matches "weapon" as
+    /// well as the head noun.
+    ///
+    /// Note what is deliberately NOT done here — the wine rack is not filtered
+    /// out. An earlier attempt refused any candidate whose filename qualified
+    /// the head noun with an unasked-for word ("wine" rack), and the existing
+    /// suite immediately caught it eating `Ceremorph_Support_Column` for
+    /// "Pillars" and `Flesh_Pale_Pillar` for "pillar" — both genuinely the
+    /// right tile. Nothing structural separates a qualifier that changes what
+    /// an object IS from one that merely describes it, so ranking plus the
+    /// vision picker does that job, exactly as it does everywhere else.
+    #[test]
+    fn a_tile_that_only_fits_transposed_is_offered_and_outranks_the_wrong_one() {
+        let sized = |kw: &[&str], w: u32, h: u32, path: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: path.into(),
+            biome: "b".into(),
+            category: "Combat".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w,
+            h,
+        };
+        let entries = vec![
+            sized(&["weapon", "rack", "metal"], 1, 2, "weapon_rack_1x2"),
+            sized(&["wine", "rack", "wood"], 2, 1, "wine_rack_2x1"),
+        ];
+        let idf = compute_idf(&entries);
+        let got: Vec<&str> =
+            shortlist_entries(&entries, &tokenize_query("Weapon rack"), &idf, "", 2, 1, 8, false, &prof()).iter().map(|e| e.rel_path.as_str()).collect();
+        assert_eq!(got.first(), Some(&"weapon_rack_1x2"), "the rotated weapon rack must come back, and FIRST: {got:?}");
+        // Before this, the 1x2 rack could not be offered at all and the wine
+        // rack was the entire shortlist.
+        assert!(got.len() > 1, "the wine rack stays as recall for the vision picker to reject");
+    }
+
+    /// At equal score an upright tile must beat one that needs turning.
+    #[test]
+    fn an_upright_tile_outranks_an_equally_good_rotated_one() {
+        let sized = |w: u32, h: u32, path: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: path.into(),
+            biome: "b".into(),
+            category: "Furniture".into(),
+            keywords: vec!["bench".into()],
+            w,
+            h,
+        };
+        let entries = vec![sized(1, 3, "bench_1x3_rotated"), sized(3, 1, "bench_3x1_upright")];
+        let idf = compute_idf(&entries);
+        let got: Vec<&str> = shortlist_entries(&entries, &tokenize_query("bench"), &idf, "", 3, 1, 8, false, &prof()).iter().map(|e| e.rel_path.as_str()).collect();
+        assert_eq!(got.first(), Some(&"bench_3x1_upright"), "got {got:?}");
+    }
+
     #[test]
     fn bridges_compound_words_to_a_base_keyword_but_never_short_words() {
         assert!(bridges("grave", "gravestone")); // prefix
@@ -2646,6 +2779,48 @@ mod tests {
         assert!(rock.example.contains("Lava_Rocks"), "the examples must reveal the second family: {}", rock.example);
     }
 
+    /// Live: `horror` carried `liquid_query: "blood"` for three runs, then a
+    /// re-profile simply did not mention it, and a charnel house's blood
+    /// channels filled with clean blue water. An answer the last run had and
+    /// this one lost is restored; everything else is left alone.
+    #[test]
+    fn an_answer_this_run_lost_is_carried_forward_but_a_fresh_one_is_not() {
+        let place = |scene: &str, folder: &str, floor: Option<&str>, liquid: Option<&str>| crate::pack_profile::BiomeProfile {
+            scene: scene.into(),
+            folder: folder.into(),
+            floor_query: floor.map(str::to_string),
+            natural_walls: false,
+            liquid_query: liquid.map(str::to_string),
+        };
+        let prev = PackProfile {
+            biomes: vec![
+                place("horror", "Horror", Some("flesh"), Some("blood")),
+                place("swamp", "Swamp", Some("marsh"), None),
+                place("volcano", "Volcanic", Some("terrain"), Some("lava")),
+                place("crypt", "Crypt", Some("stone"), None),
+            ],
+            ..PackProfile::default()
+        };
+        let derived = PackProfile {
+            biomes: vec![
+                place("horror", "Horror", Some("flesh"), None),   // lost its liquid
+                place("swamp", "Swamp", None, None),              // lost its floor
+                place("volcano", "Volcanic", Some("rock"), Some("lava")), // CHANGED, not lost
+                place("crypt", "Horror", None, None),             // same word, different folder
+            ],
+            ..PackProfile::default()
+        };
+        let out = carry_forward_lost_fields(&prev, derived);
+        let q = |scene: &str| {
+            let b = out.scene(scene).unwrap();
+            (b.floor_query.clone(), b.liquid_query.clone())
+        };
+        assert_eq!(q("horror"), (Some("flesh".into()), Some("blood".into())), "the dropped liquid must come back");
+        assert_eq!(q("swamp"), (Some("marsh".into()), None), "the dropped floor must come back; a field that was always null stays null");
+        assert_eq!(q("volcano").0, Some("rock".into()), "a fresh answer must never be overwritten by the old one");
+        assert_eq!(q("crypt"), (None, None), "a place re-homed to a different folder is not the same place — carry nothing");
+    }
+
     /// Both live failures from the re-profile that motivated this, and the
     /// control that must survive it. The two get DIFFERENT treatment on
     /// purpose — see prune_unbacked_grounds.
@@ -2664,6 +2839,10 @@ mod tests {
             tex("Horror", "Flesh_A.jpg", &["flesh", "horror"]),
             tex("Settlements", "Grate_A.jpg", &["grate", "settlements"]),
             tex("Settlements", "Stone_A.jpg", &["stone", "settlements"]),
+            // Blood lives under Liquids and measures ~42. Both facts matter:
+            // resolve_liquid does NOT exclude that folder, and a pool is not
+            // meant to be a legible board, so no luminance gate applies to it.
+            tex("Horror", "Liquids/Blood_A_01.jpg", &["blood", "horror"]),
         ];
         // Only the grate is measured, and it is blown out well past the ceiling.
         let measured = HashMap::from([

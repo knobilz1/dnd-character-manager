@@ -3382,6 +3382,27 @@ struct ResolvedTile {
     /// flame overlay, sized smaller than the hearth and pushed into the firebox.
     #[serde(default)]
     sub: Option<[f32; 4]>,
+    /// Draw this tile turned a quarter turn, because the art only fits the
+    /// placement transposed — a 1x2 weapon rack laid into a 2x1 slot. `tw`/`th`
+    /// are already stored SWAPPED when this is set, so every size calculation
+    /// downstream stays in placement orientation and only the blit rotates.
+    /// `#[serde(default)]` keeps every `.tiles.json` written before this
+    /// existed loading unchanged.
+    #[serde(default)]
+    rotated: bool,
+}
+
+/// How a chosen tile sits in its placement: its size in PLACEMENT orientation,
+/// and whether that needed a quarter turn. Art that fits upright is never
+/// turned; art that fits neither way (a 3x3 pine anchored on a 1x1 `T`) is
+/// left alone for the renderer's existing centred-overhang path.
+fn orient(tile_w: u32, tile_h: u32, fw: u32, fh: u32) -> (u32, u32, bool) {
+    let upright = tile_w <= fw && tile_h <= fh;
+    if !upright && tile_h <= fw && tile_w <= fh {
+        (tile_h, tile_w, true)
+    } else {
+        (tile_w, tile_h, false)
+    }
 }
 
 /// A catalog tile's identity (which folder + relative path) — enough to reload
@@ -3837,7 +3858,8 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         // stably across re-renders but neighbours differ.
         let (c, r) = p.cells[0];
         let pick = &cands[(c.wrapping_mul(7) ^ r.wrapping_mul(13)) % pool];
-        field_objects.push(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw: pick.w, th: pick.h, root: pick.root.clone(), rel_path: pick.rel_path.clone(), sub: None });
+        let (tw, th, rotated) = orient(pick.w, pick.h, p.w, p.h);
+        field_objects.push(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: pick.root.clone(), rel_path: pick.rel_path.clone(), sub: None, rotated });
     }
 
     let slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
@@ -3865,7 +3887,10 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         // that used to get noticed, so say it outright in the trace.
         let mut dropped: Vec<&str> = Vec::new();
         objects.extend(slots.iter().zip(picks).filter_map(|((p, cands), pick)| match pick.and_then(|i| cands.get(i)) {
-            Some(c) => Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw: c.w, th: c.h, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None }),
+            Some(c) => {
+                let (tw, th, rotated) = orient(c.w, c.h, p.w, p.h);
+                Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None, rotated })
+            }
             None => {
                 dropped.push(p.label.as_str());
                 None
@@ -3909,7 +3934,9 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
                 return None;
             }
             let (root, rel_path, tw, th) = crate::tile_library::pick_flame_overlay(app, o.w, o.h)?;
-            Some(ResolvedTile { cells: o.cells.clone(), w: o.w, h: o.h, tw, th, root, rel_path, sub: Some(firebox_rect(&o.cells, is_hearth)) })
+            // A flame is drawn once inside its firebox rect (`sub`), never
+            // tiled and never turned — its own art is already upright.
+            Some(ResolvedTile { cells: o.cells.clone(), w: o.w, h: o.h, tw, th, root, rel_path, sub: Some(firebox_rect(&o.cells, is_hearth)), rotated: false })
         })
         .collect();
     objects.extend(flames);
@@ -3946,6 +3973,8 @@ pub struct MapTileArt {
     data_url: String,
     /// See `ResolvedTile::sub` — sub-cell placement for a flame overlay.
     sub: Option<[f32; 4]>,
+    /// See `ResolvedTile::rotated` — blit this tile a quarter turn.
+    rotated: bool,
 }
 
 /// The resolved art for a map: the picked object tiles plus the biome ground
@@ -3971,7 +4000,7 @@ pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTile
         .objects
         .into_iter()
         .filter_map(|t| {
-            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub })
+            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated })
         })
         .collect();
     let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
@@ -7288,6 +7317,25 @@ mod tests {
         assert!(all.contains("Floating debris") && all.contains("outside the"), "{all}");
         assert!(all.contains("Giant boulder") && all.contains("must both be whole numbers from 1 to 4"), "{all}");
         assert!(all.contains("doesn't parse"), "{all}");
+    }
+
+    /// Art on a top-down map turns, so a tile that fits its placement only
+    /// transposed is used rotated rather than refused — the shortlist offers it
+    /// (see tile_library's rack tests) and this decides how it sits. `tw`/`th`
+    /// come back in PLACEMENT orientation so every size calculation downstream
+    /// stays untouched and only the blit rotates.
+    #[test]
+    fn a_tile_is_turned_only_when_it_fits_no_other_way() {
+        // 1x2 weapon rack into a 2x1 slot: swapped, and flagged.
+        assert_eq!(orient(1, 2, 2, 1), (2, 1, true));
+        // Already fits — never turned, even though its transpose would too.
+        assert_eq!(orient(1, 1, 1, 1), (1, 1, false));
+        assert_eq!(orient(2, 1, 2, 1), (2, 1, false));
+        // Fits neither way: a 3x3 pine anchored on a 1x1 `T`. Left alone so the
+        // renderer's existing centred-overhang path still draws it as a tree.
+        assert_eq!(orient(3, 3, 1, 1), (3, 3, false));
+        // Square art can never need turning.
+        assert_eq!(orient(2, 2, 3, 2), (2, 2, false));
     }
 
     /// A `Deployment:` section names cells too — the enemy/party start zones —

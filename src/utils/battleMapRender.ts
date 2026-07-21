@@ -575,11 +575,24 @@ function drawShaded(ctx: Ctx, url: string, x: number, y: number, px: number, dar
 }
 
 /** Same as drawSprite but for a non-square footprint — the Objects: layer's
- *  catalog art spans `w`x`h` cells rather than always exactly one. */
-function drawSpriteScaled(ctx: Ctx, url: string, x: number, y: number, w: number, h: number): boolean {
+ *  catalog art spans `w`x`h` cells rather than always exactly one.
+ *
+ *  `rotated` draws the art a quarter turn inside the same rect, for a tile that
+ *  only fits its placement transposed (a 1x2 weapon rack laid into a 2x1 slot —
+ *  see ResolvedTile::rotated). `w`/`h` are already in placement orientation, so
+ *  the draw swaps them back about the rect's centre. */
+function drawSpriteScaled(ctx: Ctx, url: string, x: number, y: number, w: number, h: number, rotated = false): boolean {
   const img = spriteCache.get(url);
   if (!img) return false;
-  ctx.drawImage(img, x, y, w, h);
+  if (!rotated) {
+    ctx.drawImage(img, x, y, w, h);
+    return true;
+  }
+  ctx.save();
+  ctx.translate(x + w / 2, y + h / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(img, -h / 2, -w / 2, h, w);
+  ctx.restore();
   return true;
 }
 
@@ -746,6 +759,10 @@ export interface MapTileArt {
    *  grid coords). When set, the tile is drawn ONCE inside that rect instead of
    *  tiled across the footprint — a hearth's flame in its firebox. */
   sub?: [number, number, number, number] | null;
+  /** Blit this tile a quarter turn: its art only fits the placement transposed
+   *  (a 1x2 weapon rack laid into a 2x1 slot). `tw`/`th` already arrive swapped
+   *  into placement orientation, so only the blit turns. */
+  rotated?: boolean;
 }
 
 /** Preloads the resolved tiles' art into the shared sprite cache so the
@@ -1051,7 +1068,7 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
         // rather than overflowing into the next cells.
         const drawW = Math.min(stepX, t.w - dx) * cellPx;
         const drawH = Math.min(stepY, t.h - dy) * cellPx;
-        drawSpriteScaled(ctx, t.data_url, px, py, drawW, drawH);
+        drawSpriteScaled(ctx, t.data_url, px, py, drawW, drawH, t.rotated);
       }
     }
   }
