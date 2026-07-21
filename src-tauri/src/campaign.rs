@@ -3726,7 +3726,14 @@ fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[S
     let query = liquid_query(profile, biome);
     let cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
     crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={query:?}, {} texture candidate(s)", cands.len()));
-    let idx = pick_texture(biome, "a still pool seen from directly above", &cands)?;
+    // Name the liquid, don't just say "a pool". The shortlist is built from
+    // `query`, so every candidate already matches it — which means a pack that
+    // ships one texture per FLUID COLOUR hands the picker a set differing in
+    // nothing but hue, with no stated reason to prefer any of them. Live: a
+    // charnel house asked for "blood", got FA's Blood_A_01..06 (red, navy,
+    // brown, black, white, orange — monster-blood variants of one texture),
+    // and filled its gore channels with NAVY BLUE.
+    let idx = pick_texture(biome, &format!("a still pool of {query} seen from directly above"), &cands)?;
     let c = cands.get(idx)?;
     Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
 }
