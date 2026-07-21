@@ -2367,7 +2367,7 @@ mod tests {
         entries.push(v(&["ceremorph", "support", "column", "blue"], "Astral", "ceremorph"));
         let idf = compute_idf(&entries);
         let top = |scene: &str| {
-            shortlist_entries(&entries, &tokenize_query("Pillars"), &idf, scene, 1, 1, 1, false)
+            shortlist_entries(&entries, &tokenize_query("Pillars"), &idf, scene, 1, 1, 1, false, &prof())
                 .first().map(|e| e.rel_path.clone()).unwrap_or_default()
         };
         assert_eq!(top("illithid colony"), "ceremorph");
