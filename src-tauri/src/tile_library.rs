@@ -745,8 +745,21 @@ pub fn art_signals(bytes: &[u8]) -> Option<ArtSignals> {
     Some(ArtSignals { opaque: opaque as f64 / (w as f64 * h as f64), edges, luminance: lum_sum / opaque as f64 })
 }
 
+/// Function words that can never name an object, but are long enough to
+/// survive the ≥3-char filter and DO appear as keywords in the catalog —
+/// FA filenames keep the conjunction in `Staff_of_Thunder_And_Lightning`,
+/// `Bow_And_Quiver`, `Dust_of_Sneezing_And_Choking`. Live: "rubble and broken
+/// masonry" resolved to the Staff of Thunder and Lightning, because "and" was
+/// a scoring token and only 31 tiles in 183k carry it, making it rare enough
+/// for rarity weighting to treat as highly specific.
+const STOP_WORDS: &[&str] = &["and", "the", "with", "from"];
+
 fn tokenize_query(q: &str) -> Vec<String> {
-    let mut tokens: Vec<String> = normalize_query(q).split(|c: char| !c.is_alphanumeric()).filter(|t| t.len() >= 3).map(|t| t.to_string()).collect();
+    let mut tokens: Vec<String> = normalize_query(q)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 3 && !STOP_WORDS.contains(t))
+        .map(|t| t.to_string())
+        .collect();
     // A trailing COLLECTIVE noun is not the object's identity: "bone pile" is
     // about bones, "mushroom cluster" about mushrooms. Since the HEAD is the
     // last token, move the real noun there and keep the collective as a
@@ -858,7 +871,14 @@ fn same_word(a: &str, b: &str) -> bool {
     // bare length check let "heart"+"h" match "hearth" (a human heart where a
     // hearth belonged). Keywords/queries are lowercase ASCII, so slicing at
     // short.len() is a safe char boundary.
-    long.starts_with(short) && matches!(&long[short.len()..], "s" | "es" | "en")
+    //
+    // "-es" is refused on a word that ALREADY ends in "s": English forms those
+    // plurals that way ("glass"/"glasses"), but so does every false friend, and
+    // the false friends are what a tile catalog is full of — "broken glass"
+    // resolved to `Glasses_Metal_Rusty_A_Broken`, a pair of rusty SPECTACLES,
+    // while all 116 `Glass_Pile_*` tiles sat unreachable.
+    let ending = &long[short.len()..];
+    long.starts_with(short) && matches!(ending, "s" | "es" | "en") && !(ending == "es" && short.ends_with('s'))
 }
 
 /// Words this catalog uses interchangeably for the same object. A vendor's
@@ -1264,9 +1284,22 @@ fn compute_idf(entries: &[TileLibraryEntry]) -> HashMap<String, f64> {
 /// generic one — "gravestone" prefers the `grave` tile over a plain `stone`
 /// one), scaled up for the head noun and down for a compound bridge. `None` if
 /// nothing matches. An unknown keyword defaults to IDF 1.0.
-fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<String, f64>) -> Option<f64> {
+///
+/// Also returns COVERAGE: how many of the label's naming words (condition
+/// words excluded, same as `has_identity_match`) this entry matches at all.
+/// Coverage sorts above the score because the score is multiplied by
+/// `biome_affinity`, and a 0.15 cross-biome penalty is big enough to bury a
+/// tile that answers the whole label under one that answers a single word of
+/// it. Live: "bone pile" resolved to `Dice_D4_Bone` — a bone die — because the
+/// catalog files its 105 `Beast_Bone_*_Pile` tiles under Horror, and the die,
+/// matching only "bone" but sitting in the universal set, scored ~1030 against
+/// the pile's ~165. Affinity keeps its real job (separating a tavern pillar
+/// from `Flesh_Pale_Pillar`, where both cover exactly one word) as the
+/// tiebreak WITHIN a coverage level.
+fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<String, f64>) -> Option<(u32, f64)> {
     let mut total = 0.0;
     let mut any = false;
+    let mut coverage = 0;
     for (i, t) in tokens.iter().enumerate() {
         // Best (rarest) keyword matching this token, and whether it was exact.
         let mut best: Option<(f64, bool)> = None;
@@ -1282,6 +1315,14 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
         }
         if let Some((w, strict)) = best {
             any = true;
+            // Only a STRICT match counts toward coverage. A bridge is a
+            // suffix/prefix coincidence as often as a real synonym, and
+            // letting it buy coverage handed "driftwood pile" to
+            // `Debris_Pile_Wood` (whose "wood" bridges "driftwood") over the
+            // actual `Driftwood_Log`, and "dark mushroom" to an Underdark one.
+            if strict && !is_condition_word(t) {
+                coverage += 1;
+            }
             let is_head = i == tokens.len() - 1;
             let head = if is_head { HEAD_MULT } else { 1.0 };
             total += w * head * if strict { 1.0 } else { BRIDGE_DISCOUNT };
@@ -1292,7 +1333,7 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
             }
         }
     }
-    any.then_some(total)
+    any.then_some((coverage, total))
 }
 
 fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf: &HashMap<String, f64>, scene: &str, fw: u32, fh: u32, k: usize, allow_terrain: bool, profile: &PackProfile) -> Vec<&'a TileLibraryEntry> {
@@ -1329,9 +1370,11 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     if entries.iter().any(|e| head_matches(&e)) && !identified.iter().any(head_matches) {
         return Vec::new();
     }
-    let mut scored: Vec<(f64, &TileLibraryEntry)> = identified
+    let mut scored: Vec<((u32, f64), &TileLibraryEntry)> = identified
         .into_iter()
-        .filter_map(|e| shortlist_rank(e, tokens, idf).map(|s| (s * biome_affinity(want, &e.biome, profile) * condition_fit(e, tokens), e)))
+        .filter_map(|e| {
+            shortlist_rank(e, tokens, idf).map(|(cov, s)| ((cov, s * biome_affinity(want, &e.biome, profile) * condition_fit(e, tokens)), e))
+        })
         .collect();
     // Upright before rotated at equal score, so a tile that already fits the
     // placement is never passed over for one that needs turning.
@@ -1348,7 +1391,8 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     let scene_word = scene.to_ascii_lowercase();
     let names_the_scene = |e: &TileLibraryEntry| !scene_word.is_empty() && e.keywords.iter().any(|k| same_word(k, &scene_word));
     scored.sort_by(|a, b| {
-        b.0.total_cmp(&a.0) // higher rarity-weighted rank first
+        b.0 .0.cmp(&a.0 .0) // more of the label's naming words answered first
+            .then_with(|| b.0 .1.total_cmp(&a.0 .1)) // then higher rarity-weighted rank
             .then_with(|| names_the_scene(b.1).cmp(&names_the_scene(a.1)))
             .then_with(|| upright(b.1).cmp(&upright(a.1)))
             .then_with(|| (b.1.w * b.1.h).cmp(&(a.1.w * a.1.h)))
@@ -2801,6 +2845,105 @@ mod tests {
         pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
     }
 
+    /// A tile that answers MORE of the label wins, even from a foreign biome.
+    /// Live: "bone pile" resolved to `Dice_D4_Bone` — a bone die — because the
+    /// catalog files its `Beast_Bone_*_Pile` art under Horror and the 0.15
+    /// cross-biome multiplier crushed a score that was otherwise 4% higher.
+    #[test]
+    fn coverage_outranks_biome_affinity() {
+        let sized = |biome: &str, kw: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: kw.join("_"),
+            biome: biome.into(),
+            category: "Decor".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        let profile = PackProfile { universal_biome: Some("!Core_Settlements".into()), ..PackProfile::default() };
+        let entries = vec![
+            sized("Horror", &["beast", "bone", "white", "pile"]), // answers "bone" AND "pile"
+            sized("!Core_Settlements", &["dice", "bone"]),        // answers "bone" only, but is local
+        ];
+        let idf = compute_idf(&entries);
+        let got = shortlist_entries(&entries, &tokenize_query("bone pile"), &idf, "tavern", 1, 1, 8, false, &profile);
+        assert_eq!(got.first().map(|e| e.rel_path.as_str()), Some("beast_bone_white_pile"), "got: {got:?}");
+
+        // …but affinity keeps its real job: where both tiles answer the SAME
+        // amount of the label, the local one still wins. This is the
+        // `Flesh_Pale_Pillar`-in-a-tavern case, which must not regress.
+        let pillars = vec![sized("Horror", &["flesh", "pale", "pillar"]), sized("!Core_Settlements", &["stone", "pillar"])];
+        let idf = compute_idf(&pillars);
+        let got = shortlist_entries(&pillars, &tokenize_query("pillar"), &idf, "tavern", 1, 1, 8, false, &profile);
+        assert_eq!(got.first().map(|e| e.rel_path.as_str()), Some("stone_pillar"), "got: {got:?}");
+    }
+
+    /// Conjunctions are not object names, but they ARE catalog keywords —
+    /// `Staff_of_Thunder_And_Lightning`, `Bow_And_Quiver`. Only 31 tiles in
+    /// 183k carry "and", which made rarity weighting treat it as highly
+    /// specific: "rubble and broken masonry" resolved to the Staff of Thunder
+    /// and Lightning.
+    #[test]
+    fn tokenize_query_drops_conjunctions_and_prepositions() {
+        assert_eq!(tokenize_query("rubble and broken masonry"), vec!["rubble", "broken", "masonry"]);
+        assert_eq!(tokenize_query("ruins with rubble"), vec!["ruins", "rubble"]);
+        // Words that merely CONTAIN a stop word are untouched.
+        assert_eq!(tokenize_query("sandbar and thewall"), vec!["sandbar", "thewall"]);
+    }
+
+    /// "-es" after a word already ending in "s" is a false-friend factory:
+    /// "broken glass" reached `Glasses_Metal_Rusty_A_Broken` (spectacles)
+    /// while all 116 `Glass_Pile_*` tiles sat unreachable.
+    #[test]
+    fn same_word_refuses_an_es_plural_on_a_word_already_ending_in_s() {
+        assert!(!same_word("glass", "glasses"));
+        assert!(!same_word("brass", "brasses"));
+        // Every other plural/adjective form still matches.
+        assert!(same_word("table", "tables"));
+        assert!(same_word("box", "boxes"));
+        assert!(same_word("torch", "torches"));
+        assert!(same_word("wood", "wooden"));
+    }
+
+    /// Snapshot the whole ranking against the REAL imported catalog, so a
+    /// scoring change can be diffed instead of argued about.
+    ///
+    /// `#[ignore]`d: it needs this machine's `manifest.json` (183k tiles) and
+    /// a corpus file, neither of which exists in CI. Run it before and after
+    /// a change to `shortlist_rank` / `shortlist_entries` and diff the two
+    /// outputs — every one of the ranking bugs fixed so far (the wine rack,
+    /// the laundry iron, the flesh pillar, the sandstone volcano) was a case
+    /// where the fix for one label silently moved a hundred others.
+    ///
+    ///   TILE_CORPUS=…/label-corpus.txt TILE_SNAPSHOT=…/before.txt \
+    ///     cargo test --lib rank_snapshot -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn rank_snapshot_over_the_real_catalog() {
+        let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.nabil.dndsheet/tile_library");
+        let man: TileLibraryManifest = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        let profile: PackProfile = serde_json::from_str(&std::fs::read_to_string(dir.join("pack_profile.json")).unwrap()).unwrap();
+        let idf = compute_idf(&man.entries);
+        let corpus = std::fs::read_to_string(std::env::var("TILE_CORPUS").unwrap()).unwrap();
+
+        let mut out = String::new();
+        for line in corpus.lines().filter(|l| !l.trim().is_empty()) {
+            let (size, label) = line.split_once('\t').unwrap();
+            let (w, h) = size.split_once('x').unwrap();
+            let (w, h) = (w.parse().unwrap(), h.parse().unwrap());
+            let tokens = tokenize_query(label);
+            // Two scenes: one on the universal folder and one on a real biome
+            // folder, because `biome_affinity` only has teeth on the second.
+            for scene in ["tavern", "cavern"] {
+                let top = shortlist_entries(&man.entries, &tokens, &idf, scene, w, h, 3, false, &profile);
+                let names: Vec<&str> = top.iter().map(|e| e.rel_path.rsplit('/').next().unwrap_or("")).collect();
+                out.push_str(&format!("{label} [{w}x{h}] @{scene} -> {}\n", if names.is_empty() { "(none)".into() } else { names.join(" | ") }));
+            }
+        }
+        std::fs::write(std::env::var("TILE_SNAPSHOT").unwrap(), &out).unwrap();
+        println!("{} lines written", out.lines().count());
+    }
+
     #[test]
     fn shortlist_bridges_a_compound_label_the_model_wrote_to_the_catalog_base() {
         // "gravestone" isn't a plural of "grave", so strict scoring missed it;
@@ -2825,7 +2968,7 @@ mod tests {
         let q = tokenize_query("gravestone");
         let g = shortlist_rank(&grave, &q, &idf).unwrap();
         let r = shortlist_rank(&rock, &q, &idf).unwrap();
-        assert!(g > r, "grave ({g}) must outrank generic stone ({r}) for 'gravestone'");
+        assert!(g > r, "grave ({g:?}) must outrank generic stone ({r:?}) for 'gravestone'");
     }
 
     /// Live bug: "tableau" (a rare metal plaque, idf ~8.9) prefix-bridges

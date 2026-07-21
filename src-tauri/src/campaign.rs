@@ -3803,25 +3803,61 @@ fn biome_ids(profile: &PackProfile) -> Vec<&str> {
     std::iter::once(crate::pack_profile::BUILTIN_SCENE).chain(profile.scene_words()).collect()
 }
 
+/// The lines of a finished spec that describe the PLACE: its title, its
+/// `Features` and its `Objects`. Everything else is dropped on purpose.
+///
+/// `Tactics` is dropped because it is entirely about WHO is fighting, and it
+/// is the longest section by far — live-measured on the saved corpus, the old
+/// "any line starting with `-`" filter made Tactics 62% of the classifier's
+/// context (1492 of 2392 chars for `bone-chamber-of-the-underdark`), so a
+/// natural cave that happened to be ambushed by drow classified as `drow` and
+/// rendered with dressed masonry walls and a drow-tiled floor.
+///
+/// The grid is dropped because every wall row starts with `#`, which the old
+/// filter also swept in — the doc comment claimed the grid was excluded while
+/// the code fed it in whole. Map codes carry no biome signal the captions
+/// don't carry better.
+fn place_context(spec: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut in_place = false;
+    for (i, line) in spec.lines().enumerate() {
+        let t = line.trim();
+        if i == 0 && t.starts_with('#') {
+            out.push(t.trim_start_matches('#').trim());
+        } else if t.starts_with("Features") || t.starts_with("Objects") {
+            in_place = true;
+        } else if t.ends_with(':') {
+            in_place = false;
+        } else if in_place && t.starts_with('-') {
+            out.push(t);
+        }
+    }
+    out.join("\n")
+}
+
+/// Each scene word with the pack folder it draws from, e.g.
+/// `nautiloid (Astral)`. A bare word list left the classifier reading
+/// `nautiloid` as "nautical" — a sea cove classified as an illithid ship.
+/// The folder is the pack's own grouping, so this needs no hand-written
+/// glosses and works for any imported pack.
+fn glossed_biome_ids(profile: &PackProfile) -> String {
+    std::iter::once(crate::pack_profile::BUILTIN_SCENE.to_string())
+        .chain(profile.biomes.iter().map(|b| format!("{} ({})", b.scene, b.folder.trim_start_matches('!').replace('_', " "))))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Cheap TEXT classification of a finished map's biome from its title +
-/// Features + Tactics (never the grid or images), constrained to `biome_ids`.
-/// Keeps biome detection OUT of the fragile map-generation prompt — it runs at
-/// resolution time on the already-written spec. Defaults to "dungeon" on any
-/// miss, which is a no-op (built-in floor).
+/// Features + Objects (never the grid, never Tactics, never images),
+/// constrained to `biome_ids`. Keeps biome detection OUT of the fragile
+/// map-generation prompt — it runs at resolution time on the already-written
+/// spec. Defaults to "dungeon" on any miss, which is a no-op (built-in floor).
 fn classify_biome(profile: &PackProfile, spec: &str) -> String {
     let ids = biome_ids(profile);
-    let context: String = spec
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            t.starts_with('#') || t.starts_with('-') || t.starts_with("Features") || t.starts_with("Tactics")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     let prompt = format!(
-        "A tabletop battle map is described below. Which single setting best fits where it takes place? Reply with EXACTLY one word from this list and nothing else: {}.\n\n{}",
-        ids.join(", "),
-        context
+        "A tabletop battle map is described below. Which single setting best fits the PHYSICAL PLACE it depicts — its ground, its walls, its structures? Answer for the location itself, never for whoever happens to be fighting there: a cave full of drow is still a cave, a tavern full of goblins is still a tavern.\nReply with EXACTLY one word from this list and nothing else (the bracketed group is what each word means, don't reply with it): {}.\n\n{}",
+        glossed_biome_ids(profile),
+        place_context(spec)
     );
     let reply = crate::local_llm::ask_ingest_once_low_effort(prompt, Some("sonnet")).unwrap_or_default();
     let lc = reply.to_lowercase();
@@ -6992,6 +7028,71 @@ mod tests {
         assert!(all_features_only_issues(&fixed), "remaining issues should be features-only: {fixed:?}");
     }
 
+    /// The biome classifier must be told about the PLACE, not its occupants.
+    /// Live bug: `bone-chamber-of-the-underdark` — stalagmites, tunnels and
+    /// glowing mushrooms, ambushed by drow — classified as `drow` and rendered
+    /// with dressed masonry and a drow-tiled floor, because Tactics ("Drow
+    /// start cells…") was 62% of the context the old filter built.
+    #[test]
+    fn place_context_keeps_the_place_and_drops_the_occupants() {
+        let spec = "\
+# Bone Chamber of the Underdark
+Grid: 14x12, 5 ft squares.
+Map:
+######+#######
+#..o..TT.....#
+######+#######
+Features:
+- Stalagmite at D3
+- Glowing mushroom cluster at G3-H3
+Objects:
+- bleached bone skull pile at I4 (2x2)
+Tactics:
+- **Drow start cells:** scouts prefer the dim far walls, one at L3.
+- **Bone pile I4-J5** is the objective; Drow Darkness poisons the ambush.";
+        let ctx = place_context(spec);
+        assert_eq!(
+            ctx,
+            "Bone Chamber of the Underdark\n\
+             - Stalagmite at D3\n\
+             - Glowing mushroom cluster at G3-H3\n\
+             - bleached bone skull pile at I4 (2x2)"
+        );
+        // The two things the old filter leaked, named explicitly so a future
+        // refactor can't quietly re-admit them.
+        assert!(!ctx.contains("Drow"), "Tactics names the occupants: {ctx}");
+        assert!(!ctx.contains('#'), "wall rows start with '#' and must not reach the classifier: {ctx}");
+    }
+
+    /// A bare word list left the classifier reading `nautiloid` as "nautical"
+    /// — a sea cove classified as an illithid ship. The pack's own folder is
+    /// the gloss, so no per-pack table has to be written or maintained.
+    #[test]
+    fn glossed_biome_ids_names_each_scene_s_folder() {
+        let p = PackProfile {
+            biomes: vec![
+                crate::pack_profile::BiomeProfile {
+                    scene: "nautiloid".into(),
+                    folder: "Astral".into(),
+                    floor_query: None,
+                    natural_walls: false,
+                    liquid_query: None,
+                },
+                crate::pack_profile::BiomeProfile {
+                    scene: "tavern".into(),
+                    folder: "!Core_Settlements".into(),
+                    floor_query: None,
+                    natural_walls: false,
+                    liquid_query: None,
+                },
+            ],
+            ..PackProfile::default()
+        };
+        // Leading '!' is a sort marker in the pack's folder names and '_' is a
+        // separator — neither is meant to be read as English.
+        assert_eq!(glossed_biome_ids(&p), "dungeon, nautiloid (Astral), tavern (Core Settlements)");
+    }
+
     /// The floor material is rolled, so a tavern isn't the same board every
     /// session — but only the MATERIAL. Which brick or which plank is still
     /// the ranking's job, not the die's.
@@ -7432,7 +7533,6 @@ mod tests {
         assert!(all.contains("draw it with the `=` legend code, not `^`"), "{all}");
     }
 
-    #[test]
     /// Both halves of the live armoury map, which drew the mannequin twice and
     /// the crates twice — one of those was right. Nothing about the ART
     /// separates them; the label is the only thing that knows.
