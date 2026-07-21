@@ -763,6 +763,10 @@ export interface MapTileArt {
    *  (a 1x2 weapon rack laid into a 2x1 slot). `tw`/`th` already arrive swapped
    *  into placement orientation, so only the blit turns. */
   rotated?: boolean;
+  /** The label asked for ONE thing ("iron armor mannequin"), not several
+   *  ("stacked crates"), so art smaller than the footprint is drawn once and
+   *  scaled rather than repeated across it. */
+  single?: boolean;
 }
 
 /** Preloads the resolved tiles' art into the shared sprite cache so the
@@ -1056,6 +1060,29 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
       const cy = (originRow - w.rowStart + t.h / 2) * cellPx;
       const dw = t.tw * cellPx, dh = t.th * cellPx;
       drawSpriteScaled(ctx, t.data_url, cx - dw / 2, cy - dh / 2, dw, dh);
+      continue;
+    }
+    // Art smaller than its footprint, for something the label said there is
+    // ONE of — draw it once, scaled, instead of repeating it. Live: "iron
+    // armor mannequin at E3 (1x2)" got a 1x1 mannequin and rendered TWO, while
+    // "stacked crates at O4 (1x2)" in the same map correctly wanted two. The
+    // art can't tell those apart; only the label can, and `single` carries its
+    // plurality (see campaign.rs's label_is_singular).
+    //
+    // The both-axis test stays as a fallback for `.tiles.json` written before
+    // `single` existed — those deserialize it as false, and without this a
+    // saved map's lone candelabra would go back to being four.
+    //
+    // The `> 0` guards match the `Math.max(1, …)` the tiling loop below already
+    // applies — a zero dimension would divide to Infinity here, where there it
+    // merely floors to 1. A malformed tile falls through and tiles as before.
+    const smaller = t.tw < t.w || t.th < t.h;
+    if (t.tw > 0 && t.th > 0 && ((t.single && smaller) || (t.tw < t.w && t.th < t.h))) {
+      const k = Math.min(t.w / t.tw, t.h / t.th) * cellPx;
+      const dw = t.tw * k, dh = t.th * k;
+      const cx = (originCol - w.colStart + t.w / 2) * cellPx;
+      const cy = (originRow - w.rowStart + t.h / 2) * cellPx;
+      drawSpriteScaled(ctx, t.data_url, cx - dw / 2, cy - dh / 2, dw, dh, t.rotated);
       continue;
     }
     const stepX = Math.max(1, t.tw), stepY = Math.max(1, t.th);

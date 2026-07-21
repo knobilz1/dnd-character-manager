@@ -37,6 +37,26 @@ pub fn log(section: &str, body: &str) {
     }
 }
 
+/// History file for per-generation timing, deliberately SEPARATE from the trace
+/// and NEVER truncated. `banner()` wipes the trace every run, so the trace can
+/// only ever answer "how long did the last map take" — which is why "generation
+/// is getting slower" could only be felt, never measured. (The `[map-timing]`
+/// stderr line has the same problem: nothing captures the app's stderr.) One
+/// durable line per run makes the distribution readable after the fact.
+pub fn timing_path() -> PathBuf {
+    std::env::temp_dir().join("tavern_map_timing.log")
+}
+
+/// Append one timing record. Leads with epoch seconds because `stamp()` is
+/// wall-clock time only (no date, no chrono dependency) and a history spanning
+/// days needs something sortable and unambiguous.
+pub fn append_timing(line: &str) {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(timing_path()) {
+        let _ = writeln!(f, "{secs}\t{}\t{line}", stamp());
+    }
+}
+
 /// Start-of-run marker that also TRUNCATES the file, so each generation reads
 /// as its own clean trace instead of piling onto the last one.
 pub fn banner(what: &str) {

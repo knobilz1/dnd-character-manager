@@ -2401,10 +2401,12 @@ fn objects_rule_line(vocabulary: &[String], footprint_guide: &[String]) -> Strin
         "- An `Objects:` line places something with NO legend code of its own, anywhere on real floor you drew: `<description> at <cell> (<W>x<H>)`, where `W`/`H` are whole numbers 1-4 (the object's footprint in cells). This is extra set-dressing variety (a unique chair, a tree, a barrel) on top of the legend codes — it does not replace drawing the room's defining feature with `=`/`*` and a matching Features: line, which still works exactly as before.\n\
         - `Objects:` is PHYSICAL SET-DRESSING ONLY — furniture, decor, terrain, clutter. NEVER a creature, NPC, or monster, downed/unconscious or otherwise. A character's position belongs ONLY in Features/Tactics prose, exactly as it already did before this section existed — the DM plays with physical miniatures and places people themselves.\n\
         - Every `Objects:` entry must EARN its place: it should be cover, an obstacle, difficult terrain, wall storage, or a detail the Tactics or the fiction actually lean on. Don't scatter a prop with no reason to be there — a lone net, a random barrel, a stray crate dropped mid-floor reads as clutter, not atmosphere. If you can't say what it does or why it's there, leave it out.\n\
+        - Anything that MOUNTS TO or HANGS ON a wall needs a wall behind it: put it on a floor cell orthogonally adjacent to a `#`, never out in the open. Live: a torn fabric banner was placed mid-floor and rendered as cloth hanging off nothing. This is about what the object IS, not a list of words — if you'd have to drive a nail into something to hang it, it goes against a wall. A piece suspended from the CEILING is not wall-mounted and belongs over open floor. Where the spot you want has no wall, leave the object out rather than floating it.\n\
         - A built-in HEARTH or FIREPLACE (the kind set into a tavern or hall wall) is NOT the `*` code — `*` only ever draws an open campfire on the floor. For a real fireplace, put an `Objects:` entry \"stone fireplace at <cell> (2x2)\" against a wall — size it AT LEAST 2x2 so it reads as a proper hearth (a 1x1 fireplace only matches tiny grates). Reserve `*` for an actual campfire, brazier, or fire pit out on the floor.\n\
         - A TABLE longer than 2 cells must be 2 cells DEEP — write `3x2` or `4x2`, never `3x1` or `4x1`. A long table only one cell deep matches almost nothing real in the catalog: it lands on a table RUNNER (a decorative cloth) and renders as a strip of fabric lying on the floor. Small tables at `1x1` and `2x1` are fine as they are.\n\
         - A hanging CHANDELIER is a 2x2 object — every chandelier in the catalog is a 2x2 piece, so a 1x1 one finds nothing and simply won't appear. Write \"iron chandelier at <cell> (2x2)\" over OPEN FLOOR (it hangs above the room, not against a wall). A single wall sconce, candelabra, or lantern is the 1x1 option instead.\n\
         - DRESS THE WALLS. A lived-in room stores things along its edges, and a bare-walled room reads as empty. Add 1-3 `Objects:` entries of WALL STORAGE stocked to fit the scene, each sitting in the floor cells directly against a wall (typically 2x1 or 3x1): behind a bar, shelves of bottles and a keg or two; a study, bookshelves; an armoury, weapon racks; a pantry or warehouse, crates and a cupboard. Name the contents (\"shelf of bottles\", \"bookshelf\", \"stacked crates\") so the right stocked piece is found, not a bare plank.\n\
+        - TACTICS MAY ONLY LEAN ON WHAT YOU ACTUALLY DREW. Every prop you cite as cover, an obstacle, or a set piece must already exist — a legend code with a matching Features line, or an Objects entry. Live: a crypt's Tactics promised \"the crate at K4\" while the map had bare floor there and no Objects section at all, so the DM offered the party cover that was not on the board. Write the Features/Objects line FIRST, then write the Tactics sentence about it; if you find yourself describing something you never placed, either place it or cut the sentence.\n\
         {vocab_line}{guide_line}"
     )
 }
@@ -2482,11 +2484,14 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         - Bar counter at C3-H3\n\
         - Table at E6-F7\n\
         - Stool at K5\n\
+        - Stool at L7\n\
+        - Stool at C9\n\
+        - Table at I9-J10\n\
         Tactics:\n\
         - The bar at C3-H3 gives half cover.\n\
         Deployment:\n\
-        - Enemies: behind the bar at C2-H2 — they hold the room's far end with the counter as cover.\n\
-        - Party: F12 — the main door; in the open until they reach cover.\n\
+        - Enemies: Bandit Captain at E2; Bandit at C2, D2, G2, H2 — they hold the room's far end with the counter as cover.\n\
+        - Party: E11, F11, G11, H11 — spread just inside the main door, in the open until they reach cover.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         Draw a DIFFERENT room for THIS encounter — do not just copy that grid. Only draw a bar or tables if the encounter actually has them; a cave or tower would have none of that.\n\n\
         Output nothing outside the sections shown.",
@@ -2558,8 +2563,8 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - The crockery at G8-H8 is difficult terrain and splits the room's centre.\n\
         - Anyone coming in the main entrance at F12 is in the open until they reach the table at E6-F7.\n\
         Deployment:\n\
-        - Enemies: behind the bar at C2-H2, with a lookout covering the side door at P6 — they hold the room's far end.\n\
-        - Party: F12 — they come in off the street at the main entrance, in the open until they reach cover.\n\
+        - Enemies: Bandit Captain at E2; Bandit at C2, D2, G2, H2; Lookout at O6 — they hold the room's far end, one watching the side door.\n\
+        - Party: E11, F11, G11, H11 — they come in off the street at the main entrance, in the open until they reach cover.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         Note what that example does NOT do: it does not put matching furniture at both walls, it does not repeat one block eight times, and it does not leave the centre empty. It illustrates HABITS, not a room to reuse: drawing that same grid again, or a lightly-edited version of it, is a rejected answer — the encounter you were asked for is a different place.\n\n\
         A second example, so you don't walk away thinking every map needs a bar. This is a cave — it has NO `=` furniture anywhere, because a cave has none. Draw what the fiction actually contains, not what the previous example happened to have:\n\n\
@@ -2584,8 +2589,8 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - Anyone entering at the cave mouth (A6) is in rockfall before they reach open floor.\n\
         - The stalagmite at H7 gives three-quarter cover to whoever holds the stairs down at I9.\n\
         Deployment:\n\
-        - Enemies: dug in at the back holding the stairs down at I9 and the stalagmite at H7 — three-quarter cover with the exit at their backs.\n\
-        - Party: entering at the cave mouth A6 — in rockfall before they reach open floor.\n\
+        - Enemies: Goblin Boss at I9; Goblin at G7, H8, I8 — dug in at the back, three-quarter cover from the stalagmite with the exit at their backs.\n\
+        - Party: B5, B6, B7, C7 — spread just inside the cave mouth, with the rockfall ahead of them.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         A wizard's tower, an octopus-ship hold, a goblin warren — none of them are a tavern. Only draw `=` furniture, a bar, tables, stools, when the encounter actually has them. Fit the room to what was asked for, not to whichever example above looks closest.\n\n\
         Output nothing outside the sections shown.",
@@ -3011,6 +3016,49 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
         }
     }
 
+    // Every `=`/`o` cell must be claimed by SOMETHING. The Features check above
+    // runs line -> cell; this is the other direction, cell -> line, and only it
+    // catches furniture drawn and then never named. Live: the noble crypt drew
+    // `=` at K11 beside its sarcophagi with no Features line, and it rendered
+    // as an anonymous brown box (the resolver has no label to search on).
+    //
+    // Restricted to furniture and pillars ON PURPOSE. Trees, sand, rubble,
+    // water, chasm and bridge are drawn as FIELDS — a forest map had 92 `T`
+    // cells and a beach 79 `,` — and demanding a Features line per tree would
+    // fail almost every outdoor map. Measured across 36 saved maps: `=`/`o`
+    // only fires on 5, every one of them a genuine unnamed prop.
+    {
+        let mut named: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        for line in feature_lines(&suffix) {
+            for (_, c, r) in cell_refs_in(&line) {
+                named.insert((c, r));
+            }
+        }
+        for line in object_lines(&suffix) {
+            if let Some((_, c, r, w, h)) = parse_object_line(&line) {
+                for dr in 0..h as usize {
+                    for dc in 0..w as usize {
+                        named.insert((c + dc, r + dr));
+                    }
+                }
+            }
+        }
+        let mut orphans: Vec<String> = Vec::new();
+        for (r, row) in rows.iter().enumerate() {
+            for (c, ch) in row.chars().enumerate() {
+                if (ch == '=' || ch == 'o') && !named.contains(&(c, r)) {
+                    orphans.push(format!("{}{}", column_label(c), r + 1));
+                }
+            }
+        }
+        if !orphans.is_empty() {
+            issues.push(format!(
+                "Unnamed furniture: {} — these cells are drawn as `=`/`o` but no Features or Objects line names them. Every piece of furniture you draw must be named, or it renders as an anonymous box instead of the real thing — add a Features line for each, or take the code back out.",
+                orphans.join(", ")
+            ));
+        }
+    }
+
     for line in object_lines(&suffix) {
         let Some((label, c, r, w, h)) = parse_object_line(&line) else {
             issues.push(format!(
@@ -3318,6 +3366,9 @@ fn log_map_phase_timing(entry: &str, vocab: std::time::Duration, spec: std::time
     );
     eprintln!("[map-timing] {line}");
     crate::maplog::log("PHASE TIMING", &line);
+    // …and to the one file that survives the next generation, so the question
+    // "is this getting slower?" has an answer that isn't a memory of last time.
+    crate::maplog::append_timing(&line);
 }
 
 /// Where a flame overlay sits within a fire vessel's footprint, as
@@ -3390,6 +3441,28 @@ struct ResolvedTile {
     /// existed loading unchanged.
     #[serde(default)]
     rotated: bool,
+    /// The label asked for ONE thing, so a tile smaller than the footprint is
+    /// drawn once and scaled up instead of repeated. Live: "iron armor
+    /// mannequin at E3 (1x2)" resolved to a 1x1 mannequin and rendered TWO of
+    /// them, while "stacked crates at O4 (1x2)" in the same map correctly
+    /// wanted two. Nothing about the ART separates those cases — only the
+    /// label does, and English already marks it.
+    #[serde(default)]
+    single: bool,
+}
+
+/// Is this label asking for one thing or several? The head noun is the word
+/// before "of" ("wooden barrel of crossbow bolts" is a barrel, not bolts),
+/// otherwise the last word. Trailing "ss"/"us" are not plural markers, so
+/// glass and fungus stay singular.
+fn label_is_singular(label: &str) -> bool {
+    let lower = label.to_lowercase();
+    let head = lower.split_whitespace().take_while(|w| *w != "of").last().unwrap_or("");
+    let head = head.trim_matches(|c: char| !c.is_alphanumeric());
+    if head.is_empty() {
+        return true;
+    }
+    !(head.ends_with('s') && !head.ends_with("ss") && !head.ends_with("us"))
 }
 
 /// How a chosen tile sits in its placement: its size in PLACEMENT orientation,
@@ -3859,7 +3932,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         let (c, r) = p.cells[0];
         let pick = &cands[(c.wrapping_mul(7) ^ r.wrapping_mul(13)) % pool];
         let (tw, th, rotated) = orient(pick.w, pick.h, p.w, p.h);
-        field_objects.push(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: pick.root.clone(), rel_path: pick.rel_path.clone(), sub: None, rotated });
+        field_objects.push(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: pick.root.clone(), rel_path: pick.rel_path.clone(), sub: None, rotated, single: false });
     }
 
     let slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
@@ -3889,7 +3962,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         objects.extend(slots.iter().zip(picks).filter_map(|((p, cands), pick)| match pick.and_then(|i| cands.get(i)) {
             Some(c) => {
                 let (tw, th, rotated) = orient(c.w, c.h, p.w, p.h);
-                Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None, rotated })
+                Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None, rotated, single: label_is_singular(&p.label) })
             }
             None => {
                 dropped.push(p.label.as_str());
@@ -3936,7 +4009,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             let (root, rel_path, tw, th) = crate::tile_library::pick_flame_overlay(app, o.w, o.h)?;
             // A flame is drawn once inside its firebox rect (`sub`), never
             // tiled and never turned — its own art is already upright.
-            Some(ResolvedTile { cells: o.cells.clone(), w: o.w, h: o.h, tw, th, root, rel_path, sub: Some(firebox_rect(&o.cells, is_hearth)), rotated: false })
+            Some(ResolvedTile { cells: o.cells.clone(), w: o.w, h: o.h, tw, th, root, rel_path, sub: Some(firebox_rect(&o.cells, is_hearth)), rotated: false, single: false })
         })
         .collect();
     objects.extend(flames);
@@ -3975,6 +4048,8 @@ pub struct MapTileArt {
     sub: Option<[f32; 4]>,
     /// See `ResolvedTile::rotated` — blit this tile a quarter turn.
     rotated: bool,
+    /// See `ResolvedTile::single` — draw once scaled up, never repeated.
+    single: bool,
 }
 
 /// The resolved art for a map: the picked object tiles plus the biome ground
@@ -4000,7 +4075,7 @@ pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTile
         .objects
         .into_iter()
         .filter_map(|t| {
-            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated })
+            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated, single: t.single })
         })
         .collect();
     let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
@@ -4387,8 +4462,12 @@ fn fold_best_real_map_attempt(
 /// the shipped-spec regression tests below. Pure.
 fn issue_is_features_only(issue: &str) -> bool {
     // `Objects says` issues are the same shape — one caption line to rewrite,
-    // no redraw — so they ride the same cheap retry.
-    issue.starts_with("Features says \"") || issue.starts_with("Objects says \"")
+    // no redraw — so they ride the same cheap retry. So is unnamed furniture:
+    // the room is drawn correctly, it just isn't fully described, and the fix
+    // is to ADD a caption. Worth the narrow retry rather than shipping it,
+    // because an unnamed `=` never reaches the tile resolver at all (it
+    // searches on the Features label) and renders as a generic box.
+    issue.starts_with("Features says \"") || issue.starts_with("Objects says \"") || issue.starts_with("Unnamed furniture:")
 }
 
 /// True when EVERY remaining issue is a Features mismatch and the grid
@@ -7287,6 +7366,45 @@ mod tests {
     }
 
     #[test]
+    /// Both halves of the live armoury map, which drew the mannequin twice and
+    /// the crates twice — one of those was right. Nothing about the ART
+    /// separates them; the label is the only thing that knows.
+    #[test]
+    fn a_label_says_whether_there_is_one_of_something_or_several() {
+        for one in ["iron armor mannequin", "hanging brass chandelier", "wooden keg", "stone fireplace", "bleached bone skull pile"] {
+            assert!(label_is_singular(one), "{one:?} asks for one thing");
+        }
+        for many in ["stacked crates", "heaped bones and skulls", "weapon racks", "shelves of bottles"] {
+            assert!(!label_is_singular(many), "{many:?} asks for several");
+        }
+        // The head noun is what the phrase is ABOUT, not its last word.
+        assert!(label_is_singular("wooden barrel of crossbow bolts"), "a barrel of bolts is one barrel");
+        assert!(label_is_singular("shelf of bottles"), "a shelf of bottles is one shelf");
+        // A trailing "s" that was never a plural marker.
+        assert!(label_is_singular("pane of glass") && label_is_singular("glowing fungus"));
+    }
+
+    /// Live (the noble crypt): `=` drawn at K11 with no Features line, which
+    /// renders as an anonymous box because the resolver has no label to search.
+    /// The existing checks only run Features -> cell and cannot see this.
+    #[test]
+    fn furniture_drawn_but_never_named_is_flagged_and_terrain_fields_are_not() {
+        let spec = "# X\nGrid: 6x5, 5 ft squares.\nLegend: . floor  # wall  = furniture  o pillar  T tree\nMap:\n######\n#.==.#\n#....#\n#.o..#\n######\nFeatures:\n- Table at C2-D2\nTactics:\n- x";
+        let issues = validate_map_spec(spec);
+        assert!(issues.iter().any(|i| i.contains("C4")), "the unnamed pillar must be caught: {issues:?}");
+        assert!(!issues.iter().any(|i| i.contains("C2") || i.contains("D2")), "the named table must not be: {issues:?}");
+
+        // A forest is a FIELD of trees — 92 of them on one real map — and must
+        // never require a Features line each.
+        let forest = "# X\nGrid: 6x5, 5 ft squares.\nLegend: . floor  # wall  = furniture  T tree\nMap:\n######\n#TTTT#\n#TTTT#\n#....#\n######\nFeatures:\n- Clearing\nTactics:\n- x";
+        assert!(
+            !validate_map_spec(forest).iter().any(|i| i.contains("no Features or Objects line names them")),
+            "trees are terrain, not props: {:?}",
+            validate_map_spec(forest)
+        );
+    }
+
+    #[test]
     fn parse_object_line_reads_label_cell_and_footprint() {
         assert_eq!(
             parse_object_line("Round wooden dining table at D4 (2x2)"),
@@ -7347,7 +7465,7 @@ mod tests {
     /// through the Features prune untouched.
     #[test]
     fn deployment_section_cells_are_not_validated_or_pruned_as_features() {
-        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\nObjects:\n- Small campfire at C7 (1x1)\nDeployment:\n- Enemies: A1-B1 — dug in along the north wall\n- Party: Z9 — arriving from off the eastern edge\nTactics:\n- x";
+        let spec = "# Clean\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  + door  o pillar  = furniture\nMap:\n####+#####\n#........#\n#..o.....#\n#........#\n+........#\n#.....=..#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Pillar at D3\n- Table at G6\nObjects:\n- Small campfire at C7 (1x1)\nDeployment:\n- Enemies: A1-B1 — dug in along the north wall\n- Party: Z9 — arriving from off the eastern edge\nTactics:\n- x";
         // A1 is a `#` wall and Z9 is off the grid: read as Features/Objects,
         // both would raise issues. As Deployment, neither is even looked at.
         assert_eq!(validate_map_spec(spec), Vec::<String>::new());
