@@ -3824,12 +3824,16 @@ fn place_context(spec: &str) -> String {
         let t = line.trim();
         if i == 0 && t.starts_with('#') {
             out.push(t.trim_start_matches('#').trim());
+        } else if t.starts_with('-') {
+            // Checked BEFORE the section-header arm: a caption is free text and
+            // may end in a colon, which would otherwise close the section.
+            if in_place {
+                out.push(t);
+            }
         } else if t.starts_with("Features") || t.starts_with("Objects") {
             in_place = true;
         } else if t.ends_with(':') {
             in_place = false;
-        } else if in_place && t.starts_with('-') {
-            out.push(t);
         }
     }
     out.join("\n")

@@ -816,6 +816,11 @@ fn is_quantifier(w: &str) -> bool {
 const CONDITION_WORDS: &[&str] = &[
     "fallen", "broken", "cracked", "burnt", "ruined", "spilled", "overturned", "sooty", "destroyed", "toppled",
     "damaged", "dead", "hot", "empty", "piano", "baby", "toy", "doll", "miniature",
+    // Seasonal novelty art. It sits in the pack's universal set, so unlike a
+    // Horror or Arctic tile it takes NO biome penalty on any scene, and a
+    // catalog with 1,417 tiles keyworded "tree" will happily hand a forest a
+    // decorated Christmas one — reported live, twice.
+    "christmas", "gingerbread", "candy",
 ];
 
 /// How hard an entry is demoted per unrequested condition word it carries.
@@ -1950,6 +1955,29 @@ fn carry_forward_settled_answers(
             None => {}
         }
     }
+
+    // A category that was settled as TERRAIN stays terrain, as long as the
+    // catalog still has tiles filed under it. This is the one profile field
+    // where a re-profile losing an answer is a safety problem rather than a
+    // cosmetic one: in the live pack, `!Wilderness` is a grouping folder and
+    // 9,950 of its 13,190 tiles are Gore — 252 humanoid corpses, plus wound
+    // overlays, blood pools and intestines. Being terrain-classified is the
+    // only thing keeping every one of them out of object slots. Nothing
+    // guarantees that classification: it comes back from the model each run,
+    // and if it ever came back without `!Wilderness` the map would start
+    // drawing bodies with no error anywhere.
+    //
+    // One-way on purpose. A category the model NEWLY calls terrain is still
+    // accepted (that's a fresh answer, not a lost one); only dropping a
+    // settled one is refused, and only while the category still exists.
+    let live: HashSet<&str> = entries.iter().map(|e| e.category.as_str()).collect();
+    for c in &prev.terrain_categories {
+        if live.contains(c.as_str()) && !derived.terrain_categories.iter().any(|d| d.eq_ignore_ascii_case(c)) {
+            notes.push(format!("terrain_categories: restoring settled {c:?}, which this run dropped while the catalog still has tiles under it"));
+            derived.terrain_categories.push(c.clone());
+        }
+    }
+
     notes.push(format!("— {kept} settled answer(s) kept, {fresh} re-derived, {new_places} new place(s)"));
     crate::maplog::log("PACK PROFILE — answers carried forward", &notes.join("\n"));
     derived
@@ -2932,9 +2960,9 @@ mod tests {
             let (w, h) = size.split_once('x').unwrap();
             let (w, h) = (w.parse().unwrap(), h.parse().unwrap());
             let tokens = tokenize_query(label);
-            // Two scenes: one on the universal folder and one on a real biome
-            // folder, because `biome_affinity` only has teeth on the second.
-            for scene in ["tavern", "cavern"] {
+            // Scenes: one on the universal folder and two on real biome
+            // folders, because `biome_affinity` only has teeth on those.
+            for scene in std::env::var("TILE_SCENES").unwrap_or_else(|_| "tavern,cavern".into()).split(',') {
                 let top = shortlist_entries(&man.entries, &tokens, &idf, scene, w, h, 3, false, &profile);
                 let names: Vec<&str> = top.iter().map(|e| e.rel_path.rsplit('/').next().unwrap_or("")).collect();
                 out.push_str(&format!("{label} [{w}x{h}] @{scene} -> {}\n", if names.is_empty() { "(none)".into() } else { names.join(" | ") }));
@@ -3132,6 +3160,38 @@ mod tests {
         // The one case where re-deriving genuinely has something to say.
         assert_eq!(b("crypt").floor_query.as_deref(), Some("bone"), "a settled answer that no longer finds art gives way to the fresh one");
         assert_eq!(b("reef").floor_query.as_deref(), Some("coral"), "a place with no history profiles normally");
+    }
+
+    /// The one profile field where losing an answer is a SAFETY problem, not a
+    /// cosmetic one. In the live pack `!Wilderness` is a grouping folder whose
+    /// 13,190 tiles are 75% Gore — 252 humanoid corpses, plus wound overlays,
+    /// blood pools and intestines — and its terrain classification is the only
+    /// thing keeping every one of them out of object slots. That
+    /// classification comes back from the model on each re-profile.
+    #[test]
+    fn a_category_settled_as_terrain_is_not_dropped_by_a_re_profile() {
+        let e = |category: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("Woodlands/{category}/x.webp"),
+            biome: "Woodlands".into(),
+            category: category.into(),
+            keywords: vec!["x".into()],
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![e("!Wilderness"), e("Textures"), e("Decor")];
+        let prev = PackProfile {
+            terrain_categories: vec!["!Wilderness".into(), "Textures".into(), "Retired_Overlays".into()],
+            ..PackProfile::default()
+        };
+        let derived = PackProfile { terrain_categories: vec!["Textures".into(), "Shadow_Paths".into()], ..PackProfile::default() };
+        let out = carry_forward_settled_answers(&prev, derived, &entries, &HashMap::new());
+
+        assert!(out.is_terrain_category("!Wilderness"), "a settled terrain category the catalog still stocks must come back: {:?}", out.terrain_categories);
+        // One-way: a NEW terrain answer is still accepted, and a settled one
+        // whose tiles are all gone is not resurrected.
+        assert!(out.is_terrain_category("Shadow_Paths"), "this run's own answer must survive");
+        assert!(!out.is_terrain_category("Retired_Overlays"), "a category with no tiles left must not zombie back");
     }
 
     /// Both live failures from the re-profile that motivated this, and the
