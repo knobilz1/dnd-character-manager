@@ -5105,13 +5105,13 @@ pub fn save_battle_map(app: AppHandle, id: String, slug: String, content: String
 /// genuinely needs a single whole-document read (chapter boundaries can't be
 /// found any other way); campaign lore/other-modules context is irrelevant
 /// to finding them, so those params are gone too.
-fn build_chapterize_prompt(text: &str, candidates: &[(usize, &str)]) -> String {
+fn build_chapterize_prompt(candidates: &[(usize, &str)]) -> String {
     let index = heading_line_index(candidates);
     format!(
-        "You will be given the full text of a Dungeons & Dragons adventure module or scenario document, extracted from a PDF. Do two things with it, in one reply.\n\n\
+        "Below is the STRUCTURE of a Dungeons & Dragons adventure module, extracted from a PDF: every line in it that looked like it might be a heading, in document order, numbered. The prose itself is not included — you are reading the module's skeleton. Do two things with it, in one reply.\n\n\
         1. Give the whole module a short, human-readable title (a few words, e.g. \"The Sunless Citadel\" or \"Goblin Ambush at the Old Mill\") — from the document's own title if it has one, otherwise one you invent that fits.\n\n\
         2. Identify its logical NARRATIVE chapters or major sections — the story beats the party actually plays through in order. Leave out pure-reference material that isn't a story beat (monster/NPC stat-block appendices, item/treasure tables, handout-only pages, maps with no accompanying scene) — those aren't \"chapters\" the party progresses through, so including them just makes chapter sizes wildly uneven and risks one becoming the \"current\" chapter by mistake. For each chapter, give:\n\
-        - \"title\": a short, clean, human-readable name (e.g. \"Chapter 3: The Ambush at Old Mill\") — this is shown directly to players, so it must read as a complete phrase. Never truncate it mid-word or mid-sentence for any reason.\n\
+        - \"title\": a short, clean, human-readable name (e.g. \"Chapter 3: The Ambush at Old Mill\"), read off the line index — provisional only, since each chapter gets renamed later by the call that reads its actual text. It must still be a complete phrase, never truncated mid-word.\n\
         - \"line\": the number of the line in the LINE INDEX below where this chapter STARTS. Just the number.\n\
         List chapters in the order they appear, so the line numbers you give must increase.\n\n\
         About the line index: it is a mechanical shortlist of every line in the document that looked like it might be a heading, so most of its entries are NOT chapter starts — subsection titles, table headers, stat-block labels and running page headers all end up in it. Two things to watch for. A running page header repeats many times, once per page of the chapter it belongs to, often garbled differently each time; the chapter really starts at the first of them that is actually followed by the start of that chapter's text, NOT simply the first one that appears. And the same heading text can legitimately occur several times as genuinely different sections (six episodes may each end with a \"Conclusion\"); those are separate real boundaries, not duplicates. The surrounding document text is below the index — use it to tell these apart.\n\n\
@@ -5119,8 +5119,7 @@ fn build_chapterize_prompt(text: &str, candidates: &[(usize, &str)]) -> String {
         Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
         {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"line\": <line number>, \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
         If the document has no clear internal chapter structure, still return a single chapters entry pointing at line 1, whose title is a short readable name for the whole document and whose summary describes the whole document.\n\n\
-        LINE INDEX (candidate headings, numbered — pick from these):\n{index}\n\n\
-        Document:\n{text}"
+        LINE INDEX (candidate headings, numbered — pick from these):\n{index}"
     )
 }
 
@@ -5141,9 +5140,27 @@ fn heading_line_index(candidates: &[(usize, &str)]) -> String {
 /// again) is the actual fix for a genuinely long module: no single call ever
 /// has to hold the whole document's worth of detail in mind while ALSO doing
 /// the highest-judgment writing task.
-fn build_chapter_extraction_prompt(module_title: &str, chapter_title: &str, chapter_text: &str) -> String {
+///
+/// `name_it` is set for the FIRST chunk of each chapter, which begins at the
+/// chapter's own opening — so this call is looking straight at the real heading
+/// and the paragraph under it. That makes it the best-informed place in the
+/// whole pipeline to name the chapter, and it costs no extra call. The
+/// alternative, and what this replaced, was the chapterize call naming all of
+/// them from a single skim of the entire book — the same "one call doing the
+/// highest-judgment work while reading the most text" shape that plan-writing
+/// was already moved out of, for the same reason.
+fn build_chapter_extraction_prompt(module_title: &str, chapter_title: &str, chapter_text: &str, name_it: bool) -> String {
+    let naming = if name_it {
+        "Begin your reply with EXACTLY these two lines, before the bullets:\n\
+         TITLE: <the chapter's real name, as this text itself gives it — clean and readable, a complete phrase, never truncated mid-word. If the text names no chapter here, write a short accurate one.>\n\
+         SUMMARY: <one clean sentence saying what actually happens in this chapter>\n\n\
+         Both of those lines are read by people, so repair PDF extraction damage in them — the text below is full of it. \"EPISOD E 2: FUN I N PHAN DALIN\" is \"Episode 2: Fun in Phandalin\"; a name broken across a space like \"Om in Dran\" is \"Omin Dran\". Never carry that damage into a title or summary. (The bullets below are for a machine and need no such tidying.)\n\n"
+    } else {
+        ""
+    };
     format!(
-        "You are reading one chapter/section of the Dungeons & Dragons module \"{module_title}\", titled \"{chapter_title}\", so an AI Dungeon Master can be told the facts it must not forget when running this later. Extract — do not summarize the narrative or write prose.\n\n\
+        "You are reading one chapter/section of the Dungeons & Dragons module \"{module_title}\", provisionally titled \"{chapter_title}\", so an AI Dungeon Master can be told the facts it must not forget when running this later. Extract — do not summarize the narrative or write prose.\n\n\
+        {naming}\
         List every one of the following that appears in the text below, as short markdown bullets grouped under these headings (omit a heading entirely if nothing in this chapter fits it):\n\
         ## NPCs\n\
         Every named NPC: name, role, and anything a DM must play consistently (motivation, secret, personality quirk, what they know or want).\n\
@@ -5156,9 +5173,42 @@ fn build_chapter_extraction_prompt(module_title: &str, chapter_title: &str, chap
         ## Other critical specifics\n\
         Numbers, conditions, traps, secrets, or rules the text calls out explicitly that a DM improvising later would need to get right (DCs, damage, gold amounts, timers, unique locations).\n\n\
         Err on the side of including too much rather than too little — a detail left out here is gone for good; one that turns out unimportant later costs nothing. Do not editorialize or add anything not actually in the text.\n\n\
-        Reply with ONLY the markdown bullets described above, no other commentary, no code fences.\n\n\
+        Reply with ONLY the two lines above (if asked for) followed by the markdown bullets described above, no other commentary, no code fences.\n\n\
         Chapter text:\n{chapter_text}"
     )
+}
+
+/// Splits a naming extraction's reply into `(title, summary, the facts)`.
+///
+/// Deliberately forgiving: a missing or malformed line yields `None` and the
+/// caller keeps the provisional title rather than the chapter losing its name.
+/// The lines are stripped from the body either way, so a stray `TITLE:` can't
+/// leak into the extracted facts the plan is synthesized from.
+fn parse_chapter_naming(reply: &str) -> (Option<String>, Option<String>, String) {
+    let (mut title, mut summary) = (None, None);
+    let mut rest: Vec<&str> = Vec::new();
+    for line in reply.lines() {
+        let t = line.trim();
+        // Only consumed while still in the header — a `TITLE:` appearing later
+        // in the bullets is real content, not a second answer.
+        let header_still_open = title.is_none() || summary.is_none();
+        match t.strip_prefix("TITLE:").filter(|_| header_still_open && rest.iter().all(|l: &&str| l.trim().is_empty())) {
+            Some(v) if !v.trim().is_empty() => {
+                title = Some(v.trim().to_string());
+                continue;
+            }
+            _ => {}
+        }
+        match t.strip_prefix("SUMMARY:").filter(|_| header_still_open && rest.iter().all(|l: &&str| l.trim().is_empty())) {
+            Some(v) if !v.trim().is_empty() => {
+                summary = Some(v.trim().to_string());
+                continue;
+            }
+            _ => {}
+        }
+        rest.push(line);
+    }
+    (title, summary, rest.join("\n").trim().to_string())
 }
 
 /// Synthesis ("reduce") pass — writes the exact same two-section DM plan
@@ -5854,7 +5904,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     // reply's line numbers are resolved back through the SAME list. Rebuilding
     // it for the split would risk the two disagreeing about what line 7 is.
     let candidates = candidate_heading_lines(raw_text);
-    let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(raw_text, &candidates), Some("opus"), true)?;
+    let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(&candidates), Some("opus"), true)?;
     let parsed = parse_chapterize_reply(&reply)?;
     let chapters = split_by_headings(raw_text, &candidates, &parsed.chapters);
     let module_title = if parsed.module_title.trim().is_empty() {
@@ -5878,9 +5928,11 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     let mut chunk_owners: Vec<usize> = Vec::new();
     let mut prompts: Vec<String> = Vec::new();
     for (i, (title, _, body)) in chapters.iter().enumerate() {
-        for chunk in split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS) {
+        for (n, chunk) in split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS).into_iter().enumerate() {
             chunk_owners.push(i);
-            prompts.push(build_chapter_extraction_prompt(&module_title, title, &chunk));
+            // Only the first chunk of a chapter is asked to name it — it's the
+            // one that starts at the chapter's own heading.
+            prompts.push(build_chapter_extraction_prompt(&module_title, title, &chunk, n == 0));
         }
     }
     let total_chunks = prompts.len();
@@ -5892,9 +5944,25 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     // import, same as when this ran serially) — a hole in the extracted facts
     // would just reintroduce the detail loss this pipeline exists to fix.
     let mut grouped: Vec<Vec<String>> = vec![Vec::new(); chapters.len()];
+    // The real name each chapter gave itself, from its first chunk.
+    let mut named: Vec<(Option<String>, Option<String>)> = vec![(None, None); chapters.len()];
     for (owner, result) in chunk_owners.into_iter().zip(chunk_results) {
-        grouped[owner].push(result?);
+        let body = result?;
+        if grouped[owner].is_empty() {
+            let (title, summary, facts) = parse_chapter_naming(&body);
+            named[owner] = (title, summary);
+            grouped[owner].push(facts);
+        } else {
+            grouped[owner].push(body);
+        }
     }
+    // A chapter is now titled by the call that READ it, falling back to the
+    // provisional name from the skeleton if that call didn't answer.
+    let chapters: Vec<(String, String, String)> = chapters
+        .into_iter()
+        .zip(&named)
+        .map(|((title, summary, body), (t, s))| (t.clone().unwrap_or(title), s.clone().unwrap_or(summary), body))
+        .collect();
     let extracts: Vec<(String, String)> = chapters
         .iter()
         .zip(grouped)
@@ -8899,20 +8967,24 @@ mod tests {
 
     #[test]
     fn build_chapterize_prompt_includes_module_title_instruction() {
-        let prompt = build_chapterize_prompt("Document text.", &candidate_heading_lines("Document text."));
+        let prompt = build_chapterize_prompt(&candidate_heading_lines("Document text.
+A HEADING LINE
+"));
         assert!(prompt.contains("module_title"));
     }
 
     #[test]
     fn build_chapterize_prompt_instructs_a_spoiler_free_concerns_self_audit() {
-        let prompt = build_chapterize_prompt("Document text.", &candidate_heading_lines("Document text."));
+        let prompt = build_chapterize_prompt(&candidate_heading_lines("Document text.
+A HEADING LINE
+"));
         assert!(prompt.contains("\"concerns\""));
         assert!(prompt.to_lowercase().contains("never reveal plot content"));
     }
 
     #[test]
     fn build_chapter_extraction_prompt_asks_for_facts_not_narrative() {
-        let prompt = build_chapter_extraction_prompt("Lost Mine of Phandelver", "Chapter 1: Goblin Arrows", "Sildar Hallwinter is ambushed.");
+        let prompt = build_chapter_extraction_prompt("Lost Mine of Phandelver", "Chapter 1: Goblin Arrows", "Sildar Hallwinter is ambushed.", false);
         assert!(prompt.contains("Lost Mine of Phandelver"));
         assert!(prompt.contains("Chapter 1: Goblin Arrows"));
         assert!(prompt.contains("Sildar Hallwinter is ambushed."));
@@ -9032,21 +9104,9 @@ mod tests {
             .unwrap_or_else(|_| r"C:\Users\nabil\Desktop\Code\reference-books\Acquisitions Incorporated.pdf".to_string());
         let text = pdf_extract::extract_text(&path).expect("PDF should extract — is the path right?");
         let candidates = candidate_heading_lines(&text);
-        let prompt = build_chapterize_prompt(&text, &candidates);
+        let prompt = build_chapterize_prompt(&candidates);
         println!("=== {path}\ndoc {} chars | {} candidates | prompt {} chars (~{}k tok)", text.len(), candidates.len(), prompt.len(), prompt.len() / 4000);
 
-        // SKELETON_ONLY=1 cuts the raw document off the end, leaving just the
-        // numbered index — the phase-2 question. Now that the anchor is a line
-        // number, the model no longer needs the raw text to produce one; the
-        // open question is whether TITLES and SUMMARIES survive without it.
-        let prompt = if std::env::var("SKELETON_ONLY").is_ok() {
-            let cut = prompt.rfind("Document:\n").expect("prompt ends with the document");
-            let trimmed = format!("{}(The raw document is not included — work from the LINE INDEX above.)", &prompt[..cut]);
-            println!("SKELETON_ONLY: prompt {} chars (~{}k tok)", trimmed.len(), trimmed.len() / 4000);
-            trimmed
-        } else {
-            prompt
-        };
         let reply = crate::local_llm::ask_ingest_once(prompt, Some("opus"), true).expect("chapterize call");
         let parsed = parse_chapterize_reply(&reply).expect("reply should parse");
         println!("module_title: {:?}\nconcerns: {:?}", parsed.module_title, parsed.concerns);
@@ -9077,6 +9137,24 @@ mod tests {
         // resolved and the split lost nothing.
         assert!(!chapters.is_empty());
         assert!(covered as f64 / text.chars().count() as f64 > 0.5, "the split dropped more than half the document");
+
+        // The naming pass: each chapter's FIRST chunk is asked what it's really
+        // called, since it opens on the chapter's own heading. This is the half
+        // that the skeleton-only chapterize call structurally cannot do — it has
+        // never seen the prose — so it's the half worth watching.
+        println!("=== renaming each chapter from the call that reads it ===");
+        let naming: Vec<String> = chapters
+            .iter()
+            .map(|(title, _, body)| {
+                let first = split_into_chunks(body, EXTRACTION_CHUNK_MAX_CHARS).into_iter().next().unwrap_or_default();
+                build_chapter_extraction_prompt(&parsed.module_title, title, &first, true)
+            })
+            .collect();
+        for (i, result) in extract_chunks_concurrently(naming, &|_| {}).into_iter().enumerate() {
+            let body = result.expect("naming extraction");
+            let (t, s, facts) = parse_chapter_naming(&body);
+            println!("  provisional: {}\n  real name  : {}\n  summary    : {}\n  facts      : {} chars", chapters[i].0, t.unwrap_or_else(|| "(none)".into()), s.unwrap_or_else(|| "(none)".into()), facts.len());
+        }
     }
 
     /// Why `candidate_heading_lines` does NOT collapse repeated lines, kept as
@@ -9424,7 +9502,7 @@ mod tests {
     fn the_chapterize_prompt_numbers_the_skeleton_and_asks_for_a_line_number() {
         let text = "THE SUNLESS CITADEL\n\nprose.\n\nChapter 1: The Ravine\n\nmore prose.\n";
         let cands = candidate_heading_lines(text);
-        let prompt = build_chapterize_prompt(text, &cands);
+        let prompt = build_chapterize_prompt(&cands);
         assert!(prompt.contains("1. THE SUNLESS CITADEL"), "the index must be numbered from 1:\n{prompt}");
         assert!(prompt.contains("2. Chapter 1: The Ravine"), "{prompt}");
         assert!(prompt.contains("\"line\""));
@@ -9437,9 +9515,45 @@ mod tests {
         // And the contracts that have nothing to do with anchoring must survive
         // the rewrite: a player-facing title that reads as a whole phrase, and
         // leaving stat-block/table appendices out of the narrative chapters.
-        assert!(prompt.to_lowercase().contains("never truncate it mid-word"), "{prompt}");
+        assert!(prompt.to_lowercase().contains("truncat"), "the whole-phrase title contract must survive: {prompt}");
         assert!(prompt.to_lowercase().contains("pure-reference material"), "{prompt}");
         assert!(prompt.contains("module_title") && prompt.contains("\"concerns\""));
+        // The prose is NOT sent any more — the skeleton is the whole input.
+        assert!(!prompt.contains("more prose."), "the raw document must not be in the chapterize prompt: {prompt}");
+    }
+
+    /// A chapter is named by the call that actually READ it. The first chunk of
+    /// each chapter starts at its own heading, so that call sees the real name —
+    /// and can repair the extraction damage in it, which is something the
+    /// skeleton-reading chapterize call has no way to do.
+    #[test]
+    fn the_first_chunk_of_a_chapter_is_asked_to_name_it_and_later_chunks_are_not() {
+        let first = build_chapter_extraction_prompt("AcqInc", "Episode 2", "text", true);
+        assert!(first.contains("TITLE:") && first.contains("SUMMARY:"), "{first}");
+        assert!(first.contains("EPISOD E 2: FUN I N PHAN DALIN"), "it must be shown what damaged text looks like");
+        let later = build_chapter_extraction_prompt("AcqInc", "Episode 2", "text", false);
+        assert!(!later.contains("TITLE:"), "only the chunk holding the chapter opening names it: {later}");
+        // Both still do the actual job.
+        assert!(first.contains("## NPCs") && later.contains("## NPCs"));
+    }
+
+    #[test]
+    fn parse_chapter_naming_splits_the_header_off_and_survives_it_being_absent() {
+        let (t, s, facts) = parse_chapter_naming("TITLE: Episode 2: Fun in Phandalin\nSUMMARY: The party is sent to Phandalin.\n\n## NPCs\n- Omin Dran");
+        assert_eq!(t.as_deref(), Some("Episode 2: Fun in Phandalin"));
+        assert_eq!(s.as_deref(), Some("The party is sent to Phandalin."));
+        assert_eq!(facts, "## NPCs\n- Omin Dran", "the header must not leak into the facts the plan is built from");
+
+        // No header at all — the caller keeps the provisional title, and the
+        // facts survive completely.
+        let (t2, s2, facts2) = parse_chapter_naming("## NPCs\n- Omin Dran");
+        assert!(t2.is_none() && s2.is_none());
+        assert_eq!(facts2, "## NPCs\n- Omin Dran");
+
+        // A `TITLE:` deeper in the bullets is real content, not a second answer.
+        let (t3, _, facts3) = parse_chapter_naming("TITLE: Real Name\n\n## Other\n- TITLE: on a handout the party finds");
+        assert_eq!(t3.as_deref(), Some("Real Name"));
+        assert!(facts3.contains("TITLE: on a handout"), "{facts3}");
     }
 
     fn sample_chapters() -> Vec<(String, String, String)> {
