@@ -5130,6 +5130,101 @@ fn heading_line_index(candidates: &[(usize, &str)]) -> String {
     candidates.iter().enumerate().map(|(i, (_, line))| format!("{}. {}", i + 1, line)).collect::<Vec<_>>().join("\n")
 }
 
+/// A chapter longer than this gets re-split into scenes. The number is a
+/// per-TURN cost, not an import-time one: `current.md` holds the full body of
+/// the current chapter and is a standing `@import` in CLAUDE.md, so every
+/// character of it is re-read and re-sent on every single turn for as long as
+/// the party is in that chapter. Measured, episode 6 of Acquisitions
+/// Incorporated came out at 208,004 chars — roughly 52k tokens per turn, dwarfing
+/// the ~8.7k of standing rules.
+///
+/// 60k chars is ~15k tokens: still the biggest thing in the turn, but the same
+/// order as everything else rather than ten times it. Deliberately not smaller —
+/// every extra boundary is another `advanceToChapter` the DM has to get right,
+/// and a party stalled in the wrong chapter is worse than a fat one.
+const MAX_CHAPTER_CHARS: usize = 60_000;
+
+/// Asks for the scene boundaries inside ONE oversized chapter. Same line-number
+/// contract and same reply shape as the chapterize call, so this reuses
+/// `parse_chapterize_reply` and `split_by_headings` unchanged — the candidates
+/// are just recomputed against the chapter's own body, making every offset
+/// relative to it.
+fn build_scene_split_prompt(module_title: &str, chapter_title: &str, candidates: &[(usize, &str)]) -> String {
+    let index = heading_line_index(candidates);
+    format!(
+        "Below is the STRUCTURE of one chapter — \"{chapter_title}\" from the Dungeons & Dragons module \"{module_title}\" — as a numbered index of every line in it that looked like a heading. This chapter is too long to hold in a Dungeon Master's working memory all at once, so it needs breaking into the SCENES the party plays through in order.\n\n\
+        Return each scene: a short readable title, the line number where it starts, and one sentence on what happens. The first scene should start at or near line 1 so the chapter's opening isn't lost. List them in order, so the line numbers increase.\n\n\
+        Judgement matters more than quantity here. Aim for scenes that are a coherent unit of play — an encounter, a location, a negotiation — not every subsection heading. Too few and the Dungeon Master carries dead weight; too many and it has to keep deciding it has moved on, and a party stuck on the wrong scene is worse than a slightly long one. If this chapter genuinely doesn't subdivide, return a single scene at line 1.\n\n\
+        Note the index is mechanical, so most of its lines are NOT scene starts — stat-block labels, table headers and running page headers all end up in it, and the same heading text can recur as several genuinely different sections.\n\n\
+        Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
+        {{\"chapters\": [{{\"title\": \"<short readable scene title>\", \"line\": <line number>, \"summary\": \"<one sentence>\"}}]}}\n\n\
+        LINE INDEX (pick from these):\n{index}"
+    )
+}
+
+/// How many times the scene split may run. One pass is measurably not enough:
+/// episode 6 of Acquisitions Incorporated (208,004 chars) came back as 11
+/// scenes of which ONE was still 120,894 — the model listed the early scenes in
+/// detail and let the tail run together. Re-splitting only what is still
+/// oversized fixes that, and stopping as soon as a pass subdivides nothing
+/// means a genuinely indivisible chapter costs one wasted call, not three.
+const MAX_SPLIT_PASSES: usize = 3;
+
+/// Breaks every chapter down to something that can sit in `current.md` on every
+/// turn, re-splitting whatever is still too big after each pass.
+fn subdivide_oversized_chapters(module_title: &str, mut chapters: Vec<(String, String, String)>) -> Vec<(String, String, String)> {
+    for _ in 0..MAX_SPLIT_PASSES {
+        let before = chapters.len();
+        chapters = subdivide_once(module_title, chapters);
+        if chapters.len() == before {
+            break; // nothing subdivided — asking again would get the same answer
+        }
+    }
+    chapters
+}
+
+/// One pass: one concurrent call per chapter still over `MAX_CHAPTER_CHARS`.
+/// Never load-bearing — a call that fails, or whose answer doesn't actually
+/// subdivide anything, leaves that chapter whole. A fat chapter is a cost, a
+/// lost one is a bug.
+fn subdivide_once(module_title: &str, chapters: Vec<(String, String, String)>) -> Vec<(String, String, String)> {
+    let oversized: Vec<usize> = chapters.iter().enumerate().filter(|(_, (_, _, body))| body.chars().count() > MAX_CHAPTER_CHARS).map(|(i, _)| i).collect();
+    if oversized.is_empty() {
+        return chapters;
+    }
+    let prompts: Vec<String> = oversized
+        .iter()
+        .map(|&i| {
+            let (title, _, body) = &chapters[i];
+            build_scene_split_prompt(module_title, title, &candidate_heading_lines(body))
+        })
+        .collect();
+    let replies = extract_chunks_concurrently(prompts, &|_| {});
+
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    let mut replies = oversized.iter().copied().zip(replies).collect::<std::collections::HashMap<_, _>>();
+    for (i, chapter) in chapters.into_iter().enumerate() {
+        let Some(Ok(reply)) = replies.remove(&i) else {
+            out.push(chapter);
+            continue;
+        };
+        let (title, summary, body) = chapter;
+        let scenes = parse_chapterize_reply(&reply)
+            .ok()
+            .map(|parsed| split_by_headings(&body, &candidate_heading_lines(&body), &parsed.chapters))
+            .unwrap_or_default();
+        // One scene covering the whole thing is the documented "doesn't
+        // subdivide" answer, and is indistinguishable from not having asked.
+        if scenes.len() < 2 {
+            out.push((title, summary, body));
+            continue;
+        }
+        crate::maplog::log("SCENE SPLIT", &format!("{title}: {} chars -> {} scenes", body.chars().count(), scenes.len()));
+        out.extend(scenes);
+    }
+    out
+}
+
 /// Extraction ("map") pass — see build_plan_synthesis_prompt for the
 /// corresponding "reduce" step, and chapterize_and_import_module_at for how
 /// the two fit together. Reads ONE chapter (or, for an oversized chapter,
@@ -5912,6 +6007,11 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     } else {
         parsed.module_title.trim().to_string()
     };
+
+    // Break up anything too big to sit in `current.md` on every turn. Done
+    // before extraction so each scene is extracted and named in its own right.
+    on_progress("chapterizing", 0, 0);
+    let chapters = subdivide_oversized_chapters(&module_title, chapters);
 
     let mut concerns = parsed.concerns.clone();
     let covered_chars: usize = chapters.iter().map(|(_, _, body)| body.chars().count()).sum();
@@ -9138,6 +9238,28 @@ A HEADING LINE
         assert!(!chapters.is_empty());
         assert!(covered as f64 / text.chars().count() as f64 > 0.5, "the split dropped more than half the document");
 
+        // The granularity pass. current.md holds the FULL body of whichever
+        // chapter is current and is a standing @import, so these numbers are
+        // per-TURN costs paid for as long as the party sits in that chapter.
+        let before: Vec<usize> = chapters.iter().map(|(_, _, b)| b.chars().count()).collect();
+        let chapters = subdivide_oversized_chapters(&parsed.module_title, chapters);
+        let after: Vec<usize> = chapters.iter().map(|(_, _, b)| b.chars().count()).collect();
+        let tok = |c: usize| c / 4;
+        println!(
+            "=== scene split: {} chapters -> {}\n    worst chapter {} chars (~{}k tok/turn) -> {} chars (~{}k tok/turn)",
+            before.len(),
+            after.len(),
+            before.iter().max().unwrap(),
+            tok(*before.iter().max().unwrap()) / 1000,
+            after.iter().max().unwrap(),
+            tok(*after.iter().max().unwrap()) / 1000
+        );
+        for (title, _, body) in &chapters {
+            println!("  {:>8} chars (~{:>2}k tok/turn)  {title}", body.chars().count(), tok(body.chars().count()) / 1000);
+        }
+        let recovered: usize = after.iter().sum();
+        assert_eq!(recovered, before.iter().sum::<usize>(), "splitting must not lose or duplicate a single character");
+
         // The naming pass: each chapter's FIRST chunk is asked what it's really
         // called, since it opens on the chapter's own heading. This is the half
         // that the skeleton-only chapterize call structurally cannot do — it has
@@ -9520,6 +9642,35 @@ A HEADING LINE
         assert!(prompt.contains("module_title") && prompt.contains("\"concerns\""));
         // The prose is NOT sent any more — the skeleton is the whole input.
         assert!(!prompt.contains("more prose."), "the raw document must not be in the chapterize prompt: {prompt}");
+    }
+
+    /// Splitting a fat chapter is an optimisation, never load-bearing: the cost
+    /// of not splitting is a slow turn, the cost of dropping one is a lost
+    /// chapter. So anything under the limit is left completely alone, and no
+    /// call is even made for it.
+    #[test]
+    fn only_oversized_chapters_are_considered_for_scene_splitting() {
+        let small = vec![("A".to_string(), "s".to_string(), "x".repeat(100)), ("B".to_string(), "s".to_string(), "y".repeat(200))];
+        // No oversized chapter means no model call at all — this returns
+        // without touching the network, which is why it's testable here.
+        assert_eq!(subdivide_oversized_chapters("M", small.clone()), small);
+    }
+
+    #[test]
+    fn the_scene_split_prompt_reuses_the_line_number_contract() {
+        let body = "EPISODE 6\n\nprose.\n\nTHE FALLEN\n\nmore prose.\n";
+        let prompt = build_scene_split_prompt("AcqInc", "Episode 6", &candidate_heading_lines(body));
+        assert!(prompt.contains("1. EPISODE 6") && prompt.contains("2. THE FALLEN"), "{prompt}");
+        assert!(prompt.contains("\"line\""));
+        // Same reply shape as the chapterize call, so the same parser and the
+        // same splitter handle it — that reuse is the point.
+        let parsed = parse_chapterize_reply(r#"{"chapters":[{"title":"Opening","line":1,"summary":"s"},{"title":"The Fallen","line":2,"summary":"s"}]}"#).unwrap();
+        let scenes = split_by_headings(body, &candidate_heading_lines(body), &parsed.chapters);
+        assert_eq!(scenes.len(), 2);
+        assert!(scenes[0].2.contains("prose.") && !scenes[0].2.contains("THE FALLEN"));
+        assert!(scenes[1].2.starts_with("THE FALLEN"));
+        // And it must warn about the stall risk, not just ask for more splits.
+        assert!(prompt.to_lowercase().contains("stuck on the wrong scene"), "{prompt}");
     }
 
     /// A chapter is named by the call that actually READ it. The first chunk of

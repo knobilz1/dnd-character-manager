@@ -345,6 +345,39 @@ function parseDeployment(spec: string): { enemies?: string; party?: string } {
 
 /** A battle map card as rendered in the merged Plan Next Session dialog —
  *  BattleMapMeta plus the full spec text and its rendered preview PNG. */
+/** One PLACE the map resolver knows about, as pack_profile.rs derived it, plus
+ *  the evidence a human needs to judge whether it's right — how much art is
+ *  actually in that biome, and a thumbnail of what its ground query resolves
+ *  to. A wrong ground query is invisible in text and obvious in a picture. */
+interface BiomeProfileView {
+  scene: string;
+  folder: string;
+  floor_query: string | null;
+  natural_walls: boolean;
+  liquid_query: string | null;
+  tiles: number;
+  ground_thumb: string | null;
+  ground_options: string[];
+}
+
+interface PackProfileView {
+  universal_biome: string | null;
+  object_categories: string[];
+  terrain_categories: string[];
+  all_categories: string[];
+  biomes: BiomeProfileView[];
+  /** False means nothing has been profiled and these are the built-in
+   *  Forgotten Adventures defaults — i.e. a guess about someone else's pack. */
+  profiled: boolean;
+}
+
+/** Only the fields a correction actually names are sent, so fixing one biome's
+ *  ground doesn't freeze the rest against a later re-profile. `null` for a
+ *  query means "this biome genuinely has no ground art, keep the built-in
+ *  floor" — distinct from omitting the field, which means "not corrected". */
+type BiomeEdit = { folder?: string; floor_query?: string | null; natural_walls?: boolean; liquid_query?: string | null };
+type ProfileOverrides = { biomes: Record<string, BiomeEdit | undefined> };
+
 interface MapCard {
   slug: string;
   name: string;
@@ -848,6 +881,10 @@ export function DMConsolePage() {
     setAdHocMapCards((cards) => cards.map(rerender));
   }, [showZones]);
   const [failedMaps, setFailedMaps] = React.useState<string[]>([]);
+  const [packProfile, setPackProfile] = React.useState<PackProfileView | null>(null);
+  const [profileEdits, setProfileEdits] = React.useState<ProfileOverrides>({ biomes: {} });
+  const [profileBusy, setProfileBusy] = React.useState(false);
+  const [profileOpen, setProfileOpen] = React.useState(false);
   const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
   const [tileLibraryRootCount, setTileLibraryRootCount] = React.useState(0);
   const [tileLibraryBusy, setTileLibraryBusy] = React.useState(false);
@@ -2817,9 +2854,55 @@ export function DMConsolePage() {
     }
   }
 
+  /** What the resolver believes about the imported pack — see pack_profile.rs.
+   *  Worth showing rather than trusting silently: a wrong ground query or a
+   *  mis-detected universal biome doesn't fail, it just quietly makes every
+   *  map render as generic stone, three sessions later. */
+  async function refreshPackProfile() {
+    try {
+      setPackProfile(await invoke<PackProfileView | null>('get_pack_profile'));
+      setProfileEdits(await invoke<ProfileOverrides>('get_pack_profile_overrides'));
+    } catch {
+      setPackProfile(null);
+    }
+  }
+
   React.useEffect(() => {
-    if (planOpen) void refreshTileLibrarySummary();
+    if (planOpen) {
+      void refreshTileLibrarySummary();
+      void refreshPackProfile();
+    }
   }, [planOpen]);
+
+  /** Re-derives the profile from the pack itself (two model passes over its
+   *  folder structure and MEASURED texture evidence). Human corrections live in
+   *  a separate file and survive this. */
+  async function reprofilePack() {
+    if (!(await ensureClaudeConnected())) return;
+    setProfileBusy(true);
+    try {
+      await invoke('profile_tile_library');
+      await refreshPackProfile();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  /** Records one correction and re-reads the profile so the row shows the
+   *  corrected value (and its new ground thumbnail) immediately. Keyed by scene
+   *  word, matching ProfileOverrides. */
+  async function editBiome(scene: string, patch: BiomeEdit) {
+    const next: ProfileOverrides = { ...profileEdits, biomes: { ...profileEdits.biomes, [scene]: { ...profileEdits.biomes?.[scene], ...patch } } };
+    setProfileEdits(next);
+    try {
+      await invoke('save_pack_profile_overrides', { overrides: next });
+      await refreshPackProfile();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   /** "Import…"/"Add another folder…"/"Replace…" for the optional local tile
    *  library (see tile_library.rs) — a folder picker, then a one-shot
@@ -3726,6 +3809,95 @@ export function DMConsolePage() {
                   <p className="text-xs text-slate-500 mb-2">
                     "Add another folder…" keeps everything already imported; "Replace…" wipes it and starts over with only the new folder. Re-picking the same folder either way just refreshes it, never duplicates.
                   </p>
+                )}
+
+                {/* Detected biomes. Every failure this panel exists to catch is
+                    SILENT — a pack whose folders aren't recognised still reports
+                    "imported ✓" and then resolves nothing, so the only symptom is
+                    maps that look like the library was never there. */}
+                {tileLibraryTotal != null && packProfile && (
+                  <div className="border border-slate-800 rounded-lg mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setProfileOpen((o) => !o)}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+                    >
+                      <span className="text-sm text-slate-200">
+                        Detected biomes{' '}
+                        <span className="text-slate-500">
+                          ({packProfile.biomes.length} place{packProfile.biomes.length === 1 ? '' : 's'})
+                        </span>
+                        {!packProfile.profiled && <span className="ml-2 text-amber-400 text-xs">not profiled — using built-in defaults</span>}
+                      </span>
+                      <span className="text-slate-500 text-xs">{profileOpen ? '▾' : '▸'}</span>
+                    </button>
+
+                    {profileOpen && (
+                      <div className="px-3 pb-3">
+                        <p className="text-xs text-slate-500 mb-2">
+                          How the map resolver reads this pack. {packProfile.profiled
+                            ? 'Derived from the pack itself.'
+                            : 'These are the built-in Forgotten Adventures defaults — if you imported a different pack, profile it so its own folders are understood.'}{' '}
+                          Universal set:{' '}
+                          <span className="text-slate-300">{packProfile.universal_biome ?? 'none'}</span> — art from there is never penalised for being off-biome.
+                        </p>
+                        <Button size="sm" variant="outline" onClick={() => void reprofilePack()} disabled={profileBusy} className="mb-3">
+                          {profileBusy ? 'Reading the pack…' : packProfile.profiled ? 'Re-profile this pack' : 'Profile this pack'}
+                        </Button>
+
+                        <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+                          {packProfile.biomes.map((b) => (
+                            <div key={b.scene} className="flex items-start gap-3 border border-slate-800 rounded p-2">
+                              {/* The ground this biome's query actually lands on.
+                                  An empty slot is itself the finding. */}
+                              {b.ground_thumb ? (
+                                <img src={b.ground_thumb} alt="" className="w-12 h-12 rounded object-cover border border-slate-700 shrink-0" />
+                              ) : (
+                                <div className="w-12 h-12 rounded border border-dashed border-slate-700 shrink-0 flex items-center justify-center text-[10px] text-slate-600 text-center leading-tight">
+                                  built-in floor
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm text-slate-100">
+                                  {b.scene} <span className="text-xs text-slate-500">→ {b.folder || '(no biome)'} · {b.tiles.toLocaleString()} tiles</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                  <label className="text-xs text-slate-400">
+                                    ground{' '}
+                                    <select
+                                      value={b.floor_query ?? ''}
+                                      onChange={(e) => void editBiome(b.scene, { floor_query: e.target.value || null })}
+                                      className="bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-xs text-slate-200"
+                                    >
+                                      <option value="">(built-in floor)</option>
+                                      {/* Whatever the profile already chose stays
+                                          selectable even if it isn't one of this
+                                          biome's own measured candidates — `alien`
+                                          deliberately borrows another biome's. */}
+                                      {[...new Set([...(b.floor_query ? [b.floor_query] : []), ...b.ground_options])].map((w) => (
+                                        <option key={w} value={w}>{w}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="text-xs text-slate-400 flex items-center gap-1 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={b.natural_walls}
+                                      onChange={(e) => void editBiome(b.scene, { natural_walls: e.target.checked })}
+                                      className="accent-emerald-600"
+                                    />
+                                    natural walls
+                                  </label>
+                                  {b.liquid_query && <span className="text-xs text-slate-500">~ {b.liquid_query}</span>}
+                                  {profileEdits.biomes?.[b.scene] && <span className="text-xs text-emerald-400">edited</span>}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {planBusy && (
                   <p className="text-xs text-amber-400 mb-2">
