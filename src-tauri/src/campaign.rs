@@ -5105,20 +5105,30 @@ pub fn save_battle_map(app: AppHandle, id: String, slug: String, content: String
 /// genuinely needs a single whole-document read (chapter boundaries can't be
 /// found any other way); campaign lore/other-modules context is irrelevant
 /// to finding them, so those params are gone too.
-fn build_chapterize_prompt(text: &str) -> String {
+fn build_chapterize_prompt(text: &str, candidates: &[(usize, &str)]) -> String {
+    let index = heading_line_index(candidates);
     format!(
         "You will be given the full text of a Dungeons & Dragons adventure module or scenario document, extracted from a PDF. Do two things with it, in one reply.\n\n\
         1. Give the whole module a short, human-readable title (a few words, e.g. \"The Sunless Citadel\" or \"Goblin Ambush at the Old Mill\") — from the document's own title if it has one, otherwise one you invent that fits.\n\n\
-        2. Identify its logical NARRATIVE chapters or major sections — the story beats the party actually plays through in order. Leave out pure-reference material that isn't a story beat (monster/NPC stat-block appendices, item/treasure tables, handout-only pages, maps with no accompanying scene) — those aren't \"chapters\" the party progresses through, so including them just makes chapter sizes wildly uneven and risks one becoming the \"current\" chapter by mistake. For each chapter, give TWO different strings:\n\
+        2. Identify its logical NARRATIVE chapters or major sections — the story beats the party actually plays through in order. Leave out pure-reference material that isn't a story beat (monster/NPC stat-block appendices, item/treasure tables, handout-only pages, maps with no accompanying scene) — those aren't \"chapters\" the party progresses through, so including them just makes chapter sizes wildly uneven and risks one becoming the \"current\" chapter by mistake. For each chapter, give:\n\
         - \"title\": a short, clean, human-readable name (e.g. \"Chapter 3: The Ambush at Old Mill\") — this is shown directly to players, so it must read as a complete phrase. Never truncate it mid-word or mid-sentence for any reason.\n\
-        - \"heading\": copied EXACTLY character-for-character from a contiguous span of the document text below — including any extraction artifacts like doubled letters, stray spaces between every word, broken ligatures, or OCR garbling (e.g. if the document shows \"CHAPTER  I  I ACQUISITIO:-<S\", copy exactly that, do not clean it up to \"CHAPTER 1: ACQUISITIONS\"). Nobody ever sees this string — it exists purely to find this exact position in the raw text programmatically, so ANY normalization, cleanup, or paraphrasing will make it fail to match. Prefer it to be UNIQUE within the whole document: a short/generic heading word (\"About\", \"Background\", \"Introduction\") likely repeats elsewhere (as a subsection heading, a running header, etc.) and matching the wrong occurrence silently corrupts the split — if the bare heading text looks generic, extend the copied substring with the next few words until it's distinctive, still verbatim.\n\
-        List chapters in the order they appear.\n\n\
+        - \"line\": the number of the line in the LINE INDEX below where this chapter STARTS. Just the number.\n\
+        List chapters in the order they appear, so the line numbers you give must increase.\n\n\
+        About the line index: it is a mechanical shortlist of every line in the document that looked like it might be a heading, so most of its entries are NOT chapter starts — subsection titles, table headers, stat-block labels and running page headers all end up in it. Two things to watch for. A running page header repeats many times, once per page of the chapter it belongs to, often garbled differently each time; the chapter really starts at the first of them that is actually followed by the start of that chapter's text, NOT simply the first one that appears. And the same heading text can legitimately occur several times as genuinely different sections (six episodes may each end with a \"Conclusion\"); those are separate real boundaries, not duplicates. The surrounding document text is below the index — use it to tell these apart.\n\n\
         3. Self-audit your own breakdown above and list any STRUCTURAL concerns as short strings — e.g. a heading you weren't fully confident matched a unique exact point in the source text, or narrative chapters that still came out very uneven in size. The person reading this may be a PLAYER in the game, not the DM, so these strings must never reveal plot content, twists, names of secrets, or anything that would spoil the adventure — describe only the structural problem itself. If you have no concerns, return an empty array.\n\n\
         Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
-        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"heading\": \"<exact verbatim substring, artifacts included, chosen to be unique>\", \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
-        If the document has no clear internal chapter structure, still return a single chapters entry whose heading is an exact short substring from the very start of the document, whose title is a short readable name for the whole document, and whose summary describes the whole document.\n\n\
+        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"line\": <line number>, \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
+        If the document has no clear internal chapter structure, still return a single chapters entry pointing at line 1, whose title is a short readable name for the whole document and whose summary describes the whole document.\n\n\
+        LINE INDEX (candidate headings, numbered — pick from these):\n{index}\n\n\
         Document:\n{text}"
     )
+}
+
+/// The numbered skeleton shown to the chapterize call, and the offsets those
+/// numbers mean. 1-based in the prompt: the model is choosing from a printed
+/// list, and off-by-one on a 0-based one is a needless place to lose a chapter.
+fn heading_line_index(candidates: &[(usize, &str)]) -> String {
+    candidates.iter().enumerate().map(|(i, (_, line))| format!("{}. {}", i + 1, line)).collect::<Vec<_>>().join("\n")
 }
 
 /// Extraction ("map") pass — see build_plan_synthesis_prompt for the
@@ -5215,31 +5225,41 @@ fn build_plan_critique_prompt(draft_plan: &str, campaign_lore: &str, other_modul
     )
 }
 
-/// `title` and `heading` are deliberately separate fields serving two
-/// different, conflicting needs: `title` is a clean, human-readable name
-/// shown to players (in the Module dialog, index.md), which must read as a
-/// complete phrase. `heading` is a raw, verbatim, exact-match search anchor
-/// for `split_by_headings` — it may legitimately be garbled (OCR artifacts)
-/// or clipped short for match-safety, neither of which should ever leak into
-/// what a human reads. Before this split, `heading` did double duty as both,
-/// so a heading Claude shortened to stay an unambiguous exact match (e.g. cut
-/// off mid-phrase) showed up as a broken-looking chapter title. `#[serde(default)]`
-/// on `title` (falling back to `heading` for display, see split_by_headings'
-/// display_title) tolerates an older/incomplete reply that omits it.
+/// `title` is a clean, human-readable name shown to players (Module dialog,
+/// index.md), which must read as a complete phrase. `line` is where the chapter
+/// STARTS: a 1-based index into the numbered skeleton the prompt listed (see
+/// `candidate_heading_lines`), which `split_by_headings` turns back into a byte
+/// offset.
+///
+/// `line` replaced a verbatim substring copied out of the document. That
+/// contract could not be satisfied on real material: it required a string
+/// unique document-wide, and for chapter 4 of Acquisitions Incorporated no such
+/// string exists — every occurrence of its heading is a running page header. So
+/// the moving-cursor `find` would anchor the chapter to a header printed in the
+/// middle of some earlier page, silently and with no way to detect it. It also
+/// demanded the model reproduce OCR garbling byte-for-byte, which is why a
+/// third of the prompt used to be spent begging it not to tidy `CHAPTER  I  I
+/// ACQUISITIO:-<S` into something readable. An index is checkable, and being
+/// wrong about one is a number out of range rather than silent corruption.
+///
+/// `#[serde(default)]` on `title` tolerates a reply that omits it —
+/// `display_title` then falls back to the skeleton line's own text.
 #[derive(Deserialize, Clone, Debug)]
 struct ChapterHeading {
     #[serde(default)]
     title: String,
-    heading: String,
+    line: usize,
     summary: String,
 }
 
-/// The human-facing name for a chapter — `title` if Claude provided one,
-/// falling back to the raw `heading` search-anchor for replies from before
-/// that field existed (or ones that omitted it despite the prompt asking).
-fn display_title(h: &ChapterHeading) -> String {
+/// The human-facing name for a chapter — `title` if Claude provided one, else
+/// the raw text of the skeleton line it pointed at.
+fn display_title(h: &ChapterHeading, candidates: &[(usize, &str)]) -> String {
     let t = h.title.trim();
-    if t.is_empty() { h.heading.clone() } else { t.to_string() }
+    if !t.is_empty() {
+        return t.to_string();
+    }
+    candidates.get(h.line.wrapping_sub(1)).map(|(_, l)| (*l).to_string()).unwrap_or_else(|| "Untitled Chapter".to_string())
 }
 
 /// The combined result of one chapterize call: a module title, chapter
@@ -5275,28 +5295,34 @@ fn parse_chapterize_reply(reply: &str) -> Result<ChapterizeReply, String> {
         .map_err(|e| format!("Couldn't parse chapter/plan reply from Claude: {e}. Raw: {reply}"))
 }
 
-/// Mechanically splits `text` at each heading's position, in order. Headings
-/// Claude paraphrased slightly (so they don't literally appear) are skipped
-/// leniently rather than failing the whole import. If nothing at all matches,
-/// falls back to treating the entire document as one chapter.
-fn split_by_headings(text: &str, headings: &[ChapterHeading]) -> Vec<(String, String, String)> {
+/// Mechanically splits `text` at each chapter's start, in order. Each heading
+/// names a 1-based line in `candidates` (the same numbered skeleton the prompt
+/// listed), which is just an array lookup — no searching, so there is nothing
+/// left to mis-match. If nothing usable survives, falls back to treating the
+/// whole document as one chapter.
+///
+/// Two ways an index is rejected, both of which the old string search could
+/// only fail at silently:
+/// - out of range, i.e. the model invented a line number;
+/// - not strictly after the previous chapter's start. Chapters are asked for in
+///   document order, so an index that goes backwards is a mistake, and taking
+///   it would produce an inverted or empty slice.
+fn split_by_headings(text: &str, candidates: &[(usize, &str)], headings: &[ChapterHeading]) -> Vec<(String, String, String)> {
     let mut positions: Vec<(usize, &ChapterHeading)> = vec![];
-    let mut search_from = 0usize;
     for h in headings {
-        if h.heading.trim().is_empty() {
+        let Some((offset, _)) = h.line.checked_sub(1).and_then(|i| candidates.get(i)) else {
+            continue;
+        };
+        if positions.last().is_some_and(|(prev, _)| *offset <= *prev) {
             continue;
         }
-        if let Some(idx) = text.get(search_from..).and_then(|s| s.find(h.heading.as_str())) {
-            let abs = search_from + idx;
-            positions.push((abs, h));
-            search_from = abs + h.heading.len();
-        }
+        positions.push((*offset, h));
     }
 
     if positions.is_empty() {
         let (title, summary) = headings
             .first()
-            .map(|h| (display_title(h), h.summary.clone()))
+            .map(|h| (display_title(h, candidates), h.summary.clone()))
             .unwrap_or_else(|| ("Full Document".to_string(), String::new()));
         return vec![(title, summary, text.to_string())];
     }
@@ -5306,7 +5332,7 @@ fn split_by_headings(text: &str, headings: &[ChapterHeading]) -> Vec<(String, St
         .enumerate()
         .map(|(i, (pos, h))| {
             let end = positions.get(i + 1).map(|(p, _)| *p).unwrap_or(text.len());
-            (display_title(h), h.summary.clone(), text[*pos..end].to_string())
+            (display_title(h, candidates), h.summary.clone(), text[*pos..end].to_string())
         })
         .collect()
 }
@@ -5824,9 +5850,13 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     let other_modules_summary = read_optional(&dir.join("modules_index.md"));
 
     on_progress("chapterizing", 0, 0);
-    let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(raw_text), Some("opus"), true)?;
+    // One skeleton, built once and used twice: the prompt numbers it, and the
+    // reply's line numbers are resolved back through the SAME list. Rebuilding
+    // it for the split would risk the two disagreeing about what line 7 is.
+    let candidates = candidate_heading_lines(raw_text);
+    let reply = crate::local_llm::ask_ingest_once(build_chapterize_prompt(raw_text, &candidates), Some("opus"), true)?;
     let parsed = parse_chapterize_reply(&reply)?;
-    let chapters = split_by_headings(raw_text, &parsed.chapters);
+    let chapters = split_by_headings(raw_text, &candidates, &parsed.chapters);
     let module_title = if parsed.module_title.trim().is_empty() {
         chapters[0].0.clone()
     } else {
@@ -6565,8 +6595,8 @@ mod tests {
         }
     }
 
-    fn heading(h: &str, s: &str) -> ChapterHeading {
-        ChapterHeading { title: h.into(), heading: h.into(), summary: s.into() }
+    fn heading(h: &str, n: usize, s: &str) -> ChapterHeading {
+        ChapterHeading { title: h.into(), line: n, summary: s.into() }
     }
 
     /// The repair is deterministic and always ran on the way out, so a width
@@ -8869,13 +8899,13 @@ mod tests {
 
     #[test]
     fn build_chapterize_prompt_includes_module_title_instruction() {
-        let prompt = build_chapterize_prompt("Document text.");
+        let prompt = build_chapterize_prompt("Document text.", &candidate_heading_lines("Document text."));
         assert!(prompt.contains("module_title"));
     }
 
     #[test]
     fn build_chapterize_prompt_instructs_a_spoiler_free_concerns_self_audit() {
-        let prompt = build_chapterize_prompt("Document text.");
+        let prompt = build_chapterize_prompt("Document text.", &candidate_heading_lines("Document text."));
         assert!(prompt.contains("\"concerns\""));
         assert!(prompt.to_lowercase().contains("never reveal plot content"));
     }
@@ -8988,6 +9018,65 @@ mod tests {
         let text = "\nHOW IT STARTED\n\nship  began  wh e n Jim  was  the  only surviving candidate\n\nin the  running  for a  hotly contested  position  with the\n\nThe Goblin Ambush\n";
         let titles: Vec<&str> = candidate_heading_lines(text).iter().map(|(_, l)| *l).collect();
         assert_eq!(titles, vec!["HOW IT STARTED", "The Goblin Ambush"], "caps and title case survive, sentence-case prose doesn't: {titles:?}");
+    }
+
+    /// End-to-end on a real book: run the actual chapterize call and check the
+    /// line numbers it returns actually land on chapter starts. The unit tests
+    /// prove the mechanism; only this proves the model can USE it against
+    /// several hundred pages of OCR-garbled two-column text.
+    ///   cargo test --lib -- --ignored --nocapture chapterize_a_real_module
+    #[test]
+    #[ignore]
+    fn chapterize_a_real_module() {
+        let path = std::env::var("HEADING_SCAN_PDF")
+            .unwrap_or_else(|_| r"C:\Users\nabil\Desktop\Code\reference-books\Acquisitions Incorporated.pdf".to_string());
+        let text = pdf_extract::extract_text(&path).expect("PDF should extract — is the path right?");
+        let candidates = candidate_heading_lines(&text);
+        let prompt = build_chapterize_prompt(&text, &candidates);
+        println!("=== {path}\ndoc {} chars | {} candidates | prompt {} chars (~{}k tok)", text.len(), candidates.len(), prompt.len(), prompt.len() / 4000);
+
+        // SKELETON_ONLY=1 cuts the raw document off the end, leaving just the
+        // numbered index — the phase-2 question. Now that the anchor is a line
+        // number, the model no longer needs the raw text to produce one; the
+        // open question is whether TITLES and SUMMARIES survive without it.
+        let prompt = if std::env::var("SKELETON_ONLY").is_ok() {
+            let cut = prompt.rfind("Document:\n").expect("prompt ends with the document");
+            let trimmed = format!("{}(The raw document is not included — work from the LINE INDEX above.)", &prompt[..cut]);
+            println!("SKELETON_ONLY: prompt {} chars (~{}k tok)", trimmed.len(), trimmed.len() / 4000);
+            trimmed
+        } else {
+            prompt
+        };
+        let reply = crate::local_llm::ask_ingest_once(prompt, Some("opus"), true).expect("chapterize call");
+        let parsed = parse_chapterize_reply(&reply).expect("reply should parse");
+        println!("module_title: {:?}\nconcerns: {:?}", parsed.module_title, parsed.concerns);
+
+        // The point of the whole change: does each line number land on a real
+        // chapter start? Print what the document actually says there.
+        for c in &parsed.chapters {
+            match c.line.checked_sub(1).and_then(|i| candidates.get(i)) {
+                Some((off, line)) => {
+                    let after: String = text[*off..].chars().take(110).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+                    println!("  line {:>4} -> {:<40} | {}", c.line, c.title, after);
+                    assert!(text[*off..].starts_with(line), "line {} offset must land on its own text", c.line);
+                }
+                None => println!("  line {:>4} -> {:<40} | OUT OF RANGE (dropped)", c.line, c.title),
+            }
+        }
+
+        let chapters = split_by_headings(&text, &candidates, &parsed.chapters);
+        let covered: usize = chapters.iter().map(|(_, _, body)| body.chars().count()).sum();
+        println!("=== {} chapters, covering {:.1}% of the document", chapters.len(), covered as f64 / text.chars().count() as f64 * 100.0);
+        for (title, _, body) in &chapters {
+            println!("  {:>8} chars  {title}", body.chars().count());
+        }
+        // NOT "more than one chapter" — a rules supplement legitimately has no
+        // narrative beats, and the prompt's documented fallback is a single
+        // whole-document entry (measured: Tides of Blood returns exactly that,
+        // and says so in `concerns`). What must hold is that every line number
+        // resolved and the split lost nothing.
+        assert!(!chapters.is_empty());
+        assert!(covered as f64 / text.chars().count() as f64 > 0.5, "the split dropped more than half the document");
     }
 
     /// Why `candidate_heading_lines` does NOT collapse repeated lines, kept as
@@ -9195,11 +9284,11 @@ mod tests {
 
     #[test]
     fn parse_chapterize_reply_defaults_concerns_to_empty_when_absent() {
-        let no_concerns = r#"{"chapters":[{"heading":"Chapter 1","summary":"Intro."}]}"#;
+        let no_concerns = r#"{"chapters":[{"title":"Chapter 1","line":1,"summary":"Intro."}]}"#;
         let parsed = parse_chapterize_reply(no_concerns).unwrap();
         assert!(parsed.concerns.is_empty());
 
-        let with_concerns = r#"{"chapters":[{"heading":"Chapter 1","summary":"Intro."}],"concerns":["Chapter 2 came out much shorter than the others."]}"#;
+        let with_concerns = r#"{"chapters":[{"title":"Chapter 1","line":1,"summary":"Intro."}],"concerns":["Chapter 2 came out much shorter than the others."]}"#;
         let parsed2 = parse_chapterize_reply(with_concerns).unwrap();
         assert_eq!(parsed2.concerns, vec!["Chapter 2 came out much shorter than the others."]);
     }
@@ -9226,22 +9315,31 @@ mod tests {
 
     #[test]
     fn parse_chapterize_reply_handles_plain_and_fenced_json() {
-        let plain = "{\"chapters\":[{\"heading\":\"Chapter 1: Goblin Arrows\",\"summary\":\"An ambush on the road.\"}]}";
+        let plain = "{\"chapters\":[{\"title\":\"Chapter 1: Goblin Arrows\",\"line\":4,\"summary\":\"An ambush on the road.\"}]}";
         let parsed = parse_chapterize_reply(plain).unwrap();
-        assert_eq!(parsed.chapters[0].heading, "Chapter 1: Goblin Arrows");
+        assert_eq!(parsed.chapters[0].line, 4);
 
-        let fenced = "```json\n{\"chapters\":[{\"heading\":\"Chapter 1\",\"summary\":\"Intro.\"}]}\n```";
+        let fenced = "```json\n{\"chapters\":[{\"title\":\"Chapter 1\",\"line\":1,\"summary\":\"Intro.\"}]}\n```";
         let parsed2 = parse_chapterize_reply(fenced).unwrap();
-        assert_eq!(parsed2.chapters[0].heading, "Chapter 1");
+        assert_eq!(parsed2.chapters[0].line, 1);
 
         assert!(parse_chapterize_reply("not json at all").is_err());
     }
 
+    /// The skeleton for a fixture, so a test's line numbers are the ones the
+    /// prompt would really have printed.
+    fn skeleton(text: &str) -> Vec<(usize, &str)> {
+        candidate_heading_lines(text)
+    }
+
     #[test]
-    fn split_by_headings_splits_in_order_on_verbatim_matches() {
+    fn split_by_headings_slices_at_the_lines_the_reply_named() {
         let text = "Intro fluff.\nChapter 1: Goblin Arrows\nGoblins attack the wagon.\nChapter 2: Cragmaw Hideout\nA cave full of goblins.\n";
-        let headings = vec![heading("Chapter 1: Goblin Arrows", "Ambush."), heading("Chapter 2: Cragmaw Hideout", "Cave.")];
-        let chapters = split_by_headings(text, &headings);
+        let cands = skeleton(text);
+        let titles: Vec<&str> = cands.iter().map(|(_, l)| *l).collect();
+        let c1 = titles.iter().position(|l| *l == "Chapter 1: Goblin Arrows").unwrap() + 1;
+        let c2 = titles.iter().position(|l| *l == "Chapter 2: Cragmaw Hideout").unwrap() + 1;
+        let chapters = split_by_headings(text, &cands, &[heading("Chapter 1: Goblin Arrows", c1, "Ambush."), heading("Chapter 2: Cragmaw Hideout", c2, "Cave.")]);
 
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
@@ -9251,61 +9349,97 @@ mod tests {
         assert!(chapters[1].2.contains("A cave full of goblins."));
     }
 
+    /// The reason the anchor stopped being a verbatim substring. A running page
+    /// header repeats through the chapter it belongs to, so the OLD contract
+    /// (find the first occurrence of a unique string) anchored the chapter to a
+    /// header printed mid-chapter and silently swallowed the preceding text.
+    /// A line number names the one occurrence that is actually the start.
     #[test]
-    fn split_by_headings_uses_clean_title_for_display_not_the_garbled_match_anchor() {
-        // Simulates the real complaint: the exact-match "heading" is clipped/
-        // garbled for match-safety, but "title" (a separate, clean field) is
-        // what should actually show up as the chapter name.
-        let text = "Chapter 1: About\nSome intro text.\nChapter 2: The Cave\nMore text.\n";
-        let headings = vec![
-            ChapterHeading { title: "Chapter 1: About the Village".into(), heading: "Chapter 1: About".into(), summary: "Intro.".into() },
-            heading("Chapter 2: The Cave", "Cave."),
-        ];
-        let chapters = split_by_headings(text, &headings);
-        assert_eq!(chapters[0].0, "Chapter 1: About the Village", "display title should use the clean title, not the clipped match anchor");
-    }
-
-    #[test]
-    fn split_by_headings_falls_back_to_heading_when_title_is_missing() {
-        // Older/incomplete replies before `title` existed (or one that just
-        // omitted it) shouldn't lose their chapter name entirely.
-        let headings = vec![ChapterHeading { title: String::new(), heading: "Chapter 1: Goblin Arrows".into(), summary: "Ambush.".into() }];
-        let chapters = split_by_headings("Chapter 1: Goblin Arrows\nText.", &headings);
-        assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
-    }
-
-    #[test]
-    fn build_chapterize_prompt_instructs_separate_title_and_unique_heading() {
-        let prompt = build_chapterize_prompt("Document text.");
-        assert!(prompt.contains("\"title\""));
-        assert!(prompt.to_lowercase().contains("never truncate it mid-word"));
-        assert!(prompt.to_lowercase().contains("unique"));
-        assert!(prompt.to_lowercase().contains("pure-reference material"));
-    }
-
-    #[test]
-    fn split_by_headings_skips_unmatched_headings_leniently() {
-        let text = "Chapter 1: Goblin Arrows\nSome content.\nChapter 3: The Cave\nMore content.\n";
-        // "Chapter 2" doesn't literally appear (e.g. Claude slightly misquoted it) —
-        // should just be skipped, not fail the whole split.
-        let headings = vec![
-            heading("Chapter 1: Goblin Arrows", "First."),
-            heading("Chapter 2: Missing", "Never actually appears."),
-            heading("Chapter 3: The Cave", "Third."),
-        ];
-        let chapters = split_by_headings(text, &headings);
+    fn split_by_headings_can_target_a_later_occurrence_of_a_repeated_heading() {
+        let text = "CHAPTER 4\nOpening of chapter four.\nCHAPTER 4\nstill inside chapter four, page header.\nCONCLUSION\nThey attain 5th level.\n";
+        let cands = skeleton(text);
+        let titles: Vec<&str> = cands.iter().map(|(_, l)| *l).collect();
+        // Deliberately the SECOND "CHAPTER 4" — unreachable under the old
+        // first-match search, and the exact case Acquisitions Incorporated hits.
+        let second = titles.iter().enumerate().filter(|(_, l)| **l == "CHAPTER 4").map(|(i, _)| i + 1).nth(1).unwrap();
+        let concl = titles.iter().position(|l| *l == "CONCLUSION").unwrap() + 1;
+        let chapters = split_by_headings(text, &cands, &[heading("Chapter 4", second, "Four."), heading("Conclusion", concl, "End.")]);
         assert_eq!(chapters.len(), 2);
+        assert!(chapters[0].2.contains("still inside chapter four"), "{:?}", chapters[0].2);
+        assert!(!chapters[0].2.contains("Opening of chapter four"), "the earlier occurrence must NOT have been used");
+    }
+
+    #[test]
+    fn split_by_headings_uses_the_clean_title_for_display() {
+        let text = "Chapter 1: About\nSome intro text.\nChapter 2: The Cave\nMore text.\n";
+        let cands = skeleton(text);
+        let chapters = split_by_headings(text, &cands, &[ChapterHeading { title: "Chapter 1: About the Village".into(), line: 1, summary: "Intro.".into() }]);
+        assert_eq!(chapters[0].0, "Chapter 1: About the Village");
+    }
+
+    #[test]
+    fn split_by_headings_falls_back_to_the_skeleton_line_when_title_is_missing() {
+        let text = "Chapter 1: Goblin Arrows\nText.\n";
+        let cands = skeleton(text);
+        let chapters = split_by_headings(text, &cands, &[ChapterHeading { title: String::new(), line: 1, summary: "Ambush.".into() }]);
         assert_eq!(chapters[0].0, "Chapter 1: Goblin Arrows");
-        assert_eq!(chapters[1].0, "Chapter 3: The Cave");
+    }
+
+    /// An index the model invented, or one that goes backwards, is dropped
+    /// rather than taken. Both were unrepresentable before — a bad verbatim
+    /// anchor just silently found the wrong place, or nothing.
+    #[test]
+    fn split_by_headings_rejects_out_of_range_and_out_of_order_lines() {
+        let text = "Chapter 1: Goblin Arrows\nSome content.\nChapter 3: The Cave\nMore content.\n";
+        let cands = skeleton(text);
+        let last = cands.len();
+        let chapters = split_by_headings(
+            text,
+            &cands,
+            &[
+                heading("Chapter 1", 1, "First."),
+                heading("Invented", last + 99, "Line number doesn't exist."),
+                heading("Backwards", 1, "Points behind chapter 1."),
+                heading("Chapter 3", last, "Third."),
+            ],
+        );
+        assert_eq!(chapters.len(), 2, "only the two valid, increasing lines survive: {chapters:?}");
+        assert_eq!(chapters[0].0, "Chapter 1");
+        assert_eq!(chapters[1].0, "Chapter 3");
+        // A 0 would underflow a 1-based index — must be dropped, not wrapped.
+        let zeroed = split_by_headings(text, &cands, &[heading("Zero", 0, "Bad.")]);
+        assert_eq!(zeroed.len(), 1);
+        assert_eq!(zeroed[0].2, text, "nothing usable means the whole document, not a panic");
     }
 
     #[test]
     fn split_by_headings_falls_back_to_whole_document_if_nothing_matches() {
         let text = "Completely unstructured adventure text with no headings at all.";
-        let headings = vec![heading("Chapter 1: Nonexistent", "Doesn't appear anywhere.")];
-        let chapters = split_by_headings(text, &headings);
+        let chapters = split_by_headings(text, &[], &[heading("Chapter 1: Nonexistent", 1, "Doesn't appear anywhere.")]);
         assert_eq!(chapters.len(), 1);
         assert_eq!(chapters[0].2, text);
+    }
+
+    #[test]
+    fn the_chapterize_prompt_numbers_the_skeleton_and_asks_for_a_line_number() {
+        let text = "THE SUNLESS CITADEL\n\nprose.\n\nChapter 1: The Ravine\n\nmore prose.\n";
+        let cands = candidate_heading_lines(text);
+        let prompt = build_chapterize_prompt(text, &cands);
+        assert!(prompt.contains("1. THE SUNLESS CITADEL"), "the index must be numbered from 1:\n{prompt}");
+        assert!(prompt.contains("2. Chapter 1: The Ravine"), "{prompt}");
+        assert!(prompt.contains("\"line\""));
+        // The verbatim-substring contract, and the paragraph pleading with the
+        // model to preserve OCR garbling, are both gone.
+        assert!(!prompt.contains("\"heading\""), "the old verbatim anchor must be gone");
+        assert!(!prompt.to_lowercase().contains("character-for-character"), "the garbling plea should have gone with it");
+        // It must still warn about the two ways a repeated line misleads.
+        assert!(prompt.to_lowercase().contains("running page header"), "{prompt}");
+        // And the contracts that have nothing to do with anchoring must survive
+        // the rewrite: a player-facing title that reads as a whole phrase, and
+        // leaving stat-block/table appendices out of the narrative chapters.
+        assert!(prompt.to_lowercase().contains("never truncate it mid-word"), "{prompt}");
+        assert!(prompt.to_lowercase().contains("pure-reference material"), "{prompt}");
+        assert!(prompt.contains("module_title") && prompt.contains("\"concerns\""));
     }
 
     fn sample_chapters() -> Vec<(String, String, String)> {
