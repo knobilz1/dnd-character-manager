@@ -4020,9 +4020,20 @@ fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[S
     // answer, and it is only wrong NEXT TO that particular floor.
     let floor_rgb = floor.and_then(|f| crate::tile_library::mean_rgb(&f.root, &f.rel_path));
     if let Some(fr) = floor_rgb {
+        // `c.rgb` is None for every AUDITED tile, because `shortlist_impl`
+        // deliberately skips decoding when the audit already has a verdict —
+        // and textures are exactly what gets audited. Relying on it alone made
+        // this whole guard a silent no-op that still reported success, which is
+        // how the first cut of it shipped and did nothing. Decode on demand for
+        // the handful that survive to here; it is at most 8 files, once per map,
+        // and only for maps that actually contain `~`.
         let clear: Vec<_> = cands
             .iter()
-            .filter(|c| c.rgb.is_none_or(|cr| crate::tile_library::colour_distance(cr, fr) >= crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN))
+            .filter(|c| {
+                c.rgb
+                    .or_else(|| crate::tile_library::mean_rgb(&c.root, &c.rel_path))
+                    .is_none_or(|cr| crate::tile_library::colour_distance(cr, fr) >= crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN)
+            })
             .cloned()
             .collect();
         // Never empty the shortlist: a pack whose only liquid is floor-coloured
