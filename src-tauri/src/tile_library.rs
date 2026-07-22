@@ -836,10 +836,30 @@ pub(crate) fn strip_parentheticals(s: &str) -> String {
 
 /// Words that count a thing rather than being the thing — "a stack of crates"
 /// is crates, not a stack. Checked on the phrase left of "of".
+///
+/// This is a list of ENGLISH words, which is why it is allowed to be a list at
+/// all: a collective noun is a property of the caption the DM writes, not of
+/// the imported pack, so it stays correct on any catalog. Measuring instead —
+/// "which family does this word live in?" — was tried and is strictly worse
+/// here, because it answers from what the pack happens to stock: FA files
+/// jewellery under `Ring_*`, so "ring" measured as a real object on THIS pack
+/// and would measure as nothing on the next one.
+///
+/// Only add words that are never themselves a map object. `patch` is
+/// deliberately absent (FA stocks `Plant_Patch_*`, and "thick bramble patch"
+/// correctly resolves to one), as are `stand`, `bed`, `carpet`, `screen` and
+/// `crown` — each is a real prop a DM might caption.
 fn is_quantifier(w: &str) -> bool {
     const QUANTIFIERS: &[&str] = &[
         "stack", "stacks", "pile", "piles", "heap", "heaps", "row", "rows", "set", "sets", "pair", "pairs", "bunch",
-        "group", "cluster", "collection", "handful", "scattering", "assortment", "line", "bundle", "load", "mound",
+        "group", "groups", "cluster", "clusters", "collection", "handful", "scattering", "assortment", "line",
+        "lines", "bundle", "bundles", "load", "mound", "mounds",
+        // Formation words for natural cover. Live (2026-07-21, `w1-feywild`):
+        // "Giant mushroom ring" kept "ring" as the head, so the x8 head weight
+        // went to the appended canonical "tree" and the ring drew as 45 autumn
+        // deciduous trees while 2,164 mushroom tiles sat unmatched.
+        "ring", "rings", "grove", "groves", "thicket", "thickets", "copse", "copses", "clump", "clumps", "tangle",
+        "tangles",
     ];
     QUANTIFIERS.contains(&w.rsplit(' ').next().unwrap_or(w))
 }
@@ -857,7 +877,11 @@ const CONDITION_WORDS: &[&str] = &[
     // Horror or Arctic tile it takes NO biome penalty on any scene, and a
     // catalog with 1,417 tiles keyworded "tree" will happily hand a forest a
     // decorated Christmas one — reported live, twice.
-    "christmas", "gingerbread", "candy",
+    // `gift` is the same art without the giveaway word in the filename:
+    // `Gift_Sack_Cloth_Red_A1_2x1` is a Santa sack, and being 2x1 it beats
+    // every honest 1x1 sack on footprint. Live, a mine's "Sack of stone ore"
+    // drew it.
+    "christmas", "gingerbread", "candy", "gift",
 ];
 
 /// How hard an entry is demoted per unrequested condition word it carries.
@@ -932,13 +956,48 @@ fn same_word(a: &str, b: &str) -> bool {
 /// or suffix — and no ranking tweak reaches a tile the identity gate already
 /// dropped.
 ///
-/// Deliberately one pair. `biome_affinity` already contains the blast radius
-/// (an Astral tile is demoted 0.15x on any non-Astral scene), so this changes
-/// `pillar` ONLY on illithid/astral maps — verified unchanged across the other
-/// 13 scene biomes. It also fixes the reverse, which was broken everywhere:
-/// "marble column" on a tavern map returned a glowing alien column, because
-/// the pack's only `column` tiles are Ceremorph.
-const SYNONYMS: &[(&str, &str)] = &[("pillar", "column")];
+/// Deliberately kept to the pairs a measurement forced. `biome_affinity`
+/// already contains the blast radius (an Astral tile is demoted 0.15x on any
+/// non-Astral scene), so `pillar` changes ONLY on illithid/astral maps —
+/// verified unchanged across the other 13 scene biomes. It also fixes the
+/// reverse, which was broken everywhere: "marble column" on a tavern map
+/// returned a glowing alien column, because the pack's only `column` tiles are
+/// Ceremorph.
+///
+/// `hearth`/`fireplace` is the same mismatch with the blame reversed — here the
+/// PROMPT is what speaks off-catalog. Measured 2026-07-21: `hearth` matches 0
+/// of 183k tiles, `fireplace` matches 349, and the map-generation prompt's own
+/// worked example names the feature "Hearth at B7". So every hall and tavern
+/// asked for a word the catalog cannot answer, and `bridges` then diverted it
+/// by SUFFIX — "earth" inside "hearth" — to `Stone_of_Controlling_Earth_-
+/// Elementals`, a spell component, as the tavern's fireplace. Fixing it here
+/// rather than in the prompt is deliberate: which noun a given art pack happens
+/// to file its fireplaces under is not something the map author should have to
+/// know, and a differently-named pack would just reopen the hole.
+///
+/// `iron`/`metal` is the materials case, and the pack's own `iron` keyword is
+/// the trap. Measured 2026-07-21: exactly 50 tiles carry `iron`, and they are
+/// `Iron_Wood` (36), `Iron_Maiden` (8), `Iron_Stand` (4), `Iron_Flask` —
+/// ironwood, laundry irons and a torture device. NOTHING in this pack is
+/// keyworded `iron` for being made of iron; that is spelled `metal`. So the
+/// commonest material adjective in D&D prose bought a label nothing but
+/// novelties, and it cost an industrial map its supports: "Iron support
+/// pillar" drew 6 `Ceremorph_Support_Column` (illithid), because those 40
+/// Astral tiles answer BOTH "support" and (via pillar/column) "pillar" for
+/// coverage 2, while the right `Pillar_Metal_Gray_1x1` answered only "pillar"
+/// for coverage 1 — and coverage sorts above the affinity-scaled score, so the
+/// 0.15x off-biome penalty never got a vote. Making `iron` reach `metal` puts
+/// the correct pillar on level coverage, where affinity can decide.
+///
+/// `stall`/`awning` is `hearth` again, on the market square. Measured
+/// 2026-07-21: `stall`, `market`, `vendor` and `merchant` match **0** tiles
+/// each, while `awning` matches 572 (all `Structures`, stocked 2x1/2x2/2x3) —
+/// because from directly overhead a market stall IS its awning, and that is
+/// what the pack draws. With nothing to answer the label, a town market's four
+/// stalls resolved to `Fountain_Spill_Metal_Gold/Bronze_Tall`, so the square
+/// filled with metal fountains and 572 awnings went unreached.
+const SYNONYMS: &[(&str, &str)] =
+    &[("pillar", "column"), ("hearth", "fireplace"), ("iron", "metal"), ("stall", "awning")];
 
 fn token_matches(keyword: &str, token: &str) -> bool {
     same_word(keyword, token)
@@ -1419,7 +1478,16 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
         })
         .collect();
     // Upright before rotated at equal score, so a tile that already fits the
-    // placement is never passed over for one that needs turning.
+    // placement is never passed over for one that needs turning. This sits
+    // BELOW the footprint tiebreak on purpose: rotation is free for top-down
+    // art (that is the whole premise of admitting a transposed fit), so the
+    // preference is cosmetic, while filling more of the run is functional.
+    // Ordered the other way round it cost a live tavern its bar — an 11-cell
+    // vertical "Bar counter" tied `Bar_Wood_Red_A1_5x1` with
+    // `Lock_Bar_Wood_Red_A_1x3` (a door-barring plank) on every scoring term,
+    // because the query head "counter" matches nothing in the catalog and both
+    // cover exactly the word "bar" — and the upright 1x3 won, drawing four
+    // spaced planks down the wall where the bar should be.
     let upright = |e: &TileLibraryEntry| e.w <= fw && e.h <= fh;
     // Among EQUALLY-scoring candidates, prefer one whose keywords name the
     // scene. `biome_affinity` cannot separate these: all 445 `Rubble_Stone_*`
@@ -1433,11 +1501,21 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     let scene_word = scene.to_ascii_lowercase();
     let names_the_scene = |e: &TileLibraryEntry| !scene_word.is_empty() && e.keywords.iter().any(|k| same_word(k, &scene_word));
     scored.sort_by(|a, b| {
-        b.0 .0.cmp(&a.0 .0) // more of the label's naming words answered first
+        // Naming the object beats describing it. Coverage counts matched words
+        // without caring WHICH, so a tile that misses the head noun entirely
+        // could out-cover one that nails it: "Dwarven iron forge" picked
+        // `Dwarven_Worktop_Metal_Gray` (dwarven + metal = 2) over
+        // `Forge_Stone_Slate` (forge = 1), losing the actual forge. This does
+        // not weaken the coverage-first rule that fixed "bone pile" — there the
+        // higher-coverage tile ALSO head-matched (`Beast_Bone_Pile` answers
+        // "pile"), and the die it beat did not — so both cases now resolve on
+        // the same principle instead of one paying for the other.
+        head_matches(&b.1).cmp(&head_matches(&a.1))
+            .then_with(|| b.0 .0.cmp(&a.0 .0)) // then more of the label's naming words answered
             .then_with(|| b.0 .1.total_cmp(&a.0 .1)) // then higher rarity-weighted rank
             .then_with(|| names_the_scene(b.1).cmp(&names_the_scene(a.1)))
-            .then_with(|| upright(b.1).cmp(&upright(a.1)))
             .then_with(|| (b.1.w * b.1.h).cmp(&(a.1.w * a.1.h)))
+            .then_with(|| upright(b.1).cmp(&upright(a.1)))
             .then_with(|| a.1.keywords.len().cmp(&b.1.keywords.len()))
             .then_with(|| a.1.rel_path.len().cmp(&b.1.rel_path.len()))
     });
@@ -2039,6 +2117,19 @@ fn carry_forward_settled_answers(
     // and if it ever came back without `!Wilderness` the map would start
     // drawing bodies with no error anywhere.
     //
+    // THE COST IS KNOWN AND ACCEPTED — measured 2026-07-21, written down here
+    // so it isn't rediscovered and "fixed". Horror's 11,324 `!Wilderness`
+    // tiles include 1,588 legitimate `Flesh_*` props, among them all 180
+    // `Flesh_Black_Pillar_*` / `Flesh_Black_Brain_Pillar_*` at exactly 1x1.
+    // They are unreachable from an object slot, which is why a flesh-temple
+    // map asking for a "Bone growth pillar" resolves a cross-biome
+    // `Pillar_Metal_Rusty` instead (`w1-horror`). Do NOT unblock the category
+    // to recover them: the same move admits 5,879 `Body_*` and 2,600
+    // `Dwarven_*` corpse tiles, and the Objects layer must never place a
+    // figure — Nabil uses physical minis. A wrong-material pillar is
+    // cosmetic; a corpse rendered into the grid is not. Any future attempt
+    // needs a per-tile creature test, not a category-level flip.
+    //
     // One-way on purpose. A category the model NEWLY calls terrain is still
     // accepted (that's a fresh answer, not a lost one); only dropping a
     // settled one is refused, and only while the category still exists.
@@ -2118,6 +2209,26 @@ pub fn category_for_noun(app: &AppHandle, noun: &str) -> Option<String> {
     modal_category(&manifest.entries, &profile, noun).map(str::to_string)
 }
 
+/// The label token that says WHAT the object is, or `None` when the label
+/// names nothing the catalog stocks in the glyph noun's family (case 3 —
+/// append the canonical noun).
+///
+/// Scans from the END backwards instead of testing only the last token.
+/// English puts the identity word BEFORE a collective head — "giant mushroom
+/// ring", "fern cluster", "birch grove", "reed bed" — so reading `tokens
+/// .last()` saw "ring", found it wasn't `Flora`, and fell through to the
+/// "<label> tree" append. That handed the x8 head weight to `tree` and drew a
+/// feywild giant mushroom ring as 45 autumn deciduous trees (2026-07-21,
+/// `w1-feywild`). Backwards is still right-to-left-specific: the LAST word
+/// that is genuinely stocked in the family wins, so "Ancient standing
+/// mushroom" still answers "mushroom" on the first step and nothing that
+/// already worked moves.
+///
+/// The head is `tokenize_query`'s last token, NOT the label's last word —
+/// the tokenizer has already moved a trailing collective noun out of head
+/// position (see `is_quantifier`), so "giant mushroom ring" arrives here as
+/// `[giant, ring, mushroom]` and this reads "mushroom". Fixing a missed
+/// collective belongs in that list, not here.
 pub fn label_names_its_own_object(app: &AppHandle, label: &str, noun: &str) -> bool {
     let Ok(Some(manifest)) = load_manifest_cached(app) else { return false };
     let profile = load_profile_cached(app);
@@ -3047,6 +3158,53 @@ mod tests {
         assert_eq!(got.first(), Some(&"bench_3x1_upright"), "got {got:?}");
     }
 
+    /// …but only when they really are equally good. Live: an 11-cell vertical
+    /// "Bar counter" drew four spaced door-barring planks. The query head
+    /// ("counter") is not catalog vocabulary, so the real `Bar_*_5x1` and
+    /// `Lock_Bar_*_1x3` tie on every scoring term — both cover exactly the one
+    /// word "bar" — and the upright 1x3 won the tiebreak purely for not needing
+    /// turning. Filling 5 of the 11 cells beats saving a free rotation.
+    #[test]
+    fn a_bigger_transposed_tile_beats_a_smaller_upright_one() {
+        let sized = |kw: &[&str], w: u32, h: u32, path: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: path.into(),
+            biome: "b".into(),
+            category: "Furniture".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w,
+            h,
+        };
+        let entries = vec![sized(&["lock", "bar", "wood"], 1, 3, "lock_bar_1x3"), sized(&["bar", "wood"], 5, 1, "bar_5x1")];
+        let idf = compute_idf(&entries);
+        let got: Vec<&str> =
+            shortlist_entries(&entries, &tokenize_query("Bar counter"), &idf, "", 1, 11, 8, false, &prof()).iter().map(|e| e.rel_path.as_str()).collect();
+        assert_eq!(got.first(), Some(&"bar_5x1"), "the tile that fills more of the run must win: {got:?}");
+    }
+
+    /// The prompt says "Hearth", the pack says `Fireplace_*`, and without the
+    /// synonym the SUFFIX bridge "earth" inside "hearth" answered instead.
+    #[test]
+    fn hearth_reaches_a_fireplace_without_dragging_in_earth() {
+        let e = |kw: &[&str], path: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: path.into(),
+            biome: "b".into(),
+            category: "Structures".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![e(&["stone", "earth", "elementals"], "earth_stone"), e(&["fireplace", "stone"], "fireplace")];
+        let idf = compute_idf(&entries);
+        let look = |q: &str| {
+            shortlist_entries(&entries, &tokenize_query(q), &idf, "", 1, 1, 8, false, &prof()).first().map(|e| e.rel_path.clone()).unwrap_or_default()
+        };
+        assert_eq!(look("Hearth"), "fireplace");
+        // …and the synonym must not drag a fireplace into a genuine earth label.
+        assert_eq!(look("Earth stone"), "earth_stone");
+    }
+
     #[test]
     fn bridges_compound_words_to_a_base_keyword_but_never_short_words() {
         assert!(bridges("grave", "gravestone")); // prefix
@@ -3266,6 +3424,24 @@ mod tests {
     /// 183k carry "and", which made rarity weighting treat it as highly
     /// specific: "rubble and broken masonry" resolved to the Staff of Thunder
     /// and Lightning.
+    /// A formation word is not what the cover is made OF. Live (2026-07-21,
+    /// `w1-feywild`): "Giant mushroom ring" kept "ring" as the head, so
+    /// `label_names_its_own_object` read "ring" (`Clutter` — FA files
+    /// jewellery there), answered false, and the cell searched "Giant mushroom
+    /// ring tree". The appended canonical noun took the x8 head weight and the
+    /// ring drew as 45 autumn deciduous trees.
+    #[test]
+    fn tokenize_query_moves_a_trailing_formation_word_out_of_the_head() {
+        assert_eq!(tokenize_query("giant mushroom ring"), vec!["giant", "ring", "mushroom"]);
+        assert_eq!(tokenize_query("birch grove"), vec!["grove", "birch"]);
+        assert_eq!(tokenize_query("dense fern thicket"), vec!["dense", "thicket", "fern"]);
+        assert_eq!(tokenize_query("clump of ferns"), vec!["clump", "ferns"]);
+        // Real props that merely LOOK collective keep their head, because the
+        // catalog stocks them: FA has `Plant_Patch_*` and `Weapon_Stand_*`.
+        assert_eq!(tokenize_query("thick bramble patch"), vec!["thick", "bramble", "patch"]);
+        assert_eq!(tokenize_query("pine stand"), vec!["pine", "stand"]);
+    }
+
     #[test]
     fn tokenize_query_drops_conjunctions_and_prepositions() {
         assert_eq!(tokenize_query("rubble and broken masonry"), vec!["rubble", "broken", "masonry"]);
@@ -3292,6 +3468,13 @@ mod tests {
     /// REAL catalog. `#[ignore]`d for the same reason as `rank_snapshot`.
     ///   TILE_CORPUS=…/field-labels.txt cargo test --lib field_decision -- --ignored --nocapture
     /// Corpus rows are `<glyph>\t<label>`.
+    ///
+    /// READ THE OUTPUT WITH THIS CAVEAT: it calls `shortlist_entries`, so it
+    /// skips `shortlist_impl`'s measured `ArtKind::Overlay` drop. Drop-shadow
+    /// layers therefore still appear here and are NOT a live regression —
+    /// "jungle canopy" ranks `Palm_Tree_Trunk_Shadow` first in this harness and
+    /// never reaches a real map. Confirm any shadow/overlay finding against an
+    /// actual render before acting on it.
     #[test]
     #[ignore]
     fn field_decision_over_the_real_catalog() {
@@ -3304,12 +3487,14 @@ mod tests {
             let (glyph, label) = line.split_once('\t').unwrap();
             let noun = if glyph == "^" { "rubble" } else { "tree" };
             let (fw, fh) = if glyph == "^" { (2, 2) } else { (3, 3) };
-            let head = tokenize_query(label).last().cloned().unwrap_or_default();
             let cat = modal_category(&man.entries, &profile, noun);
-            let use_label = matches!(
-                (modal_category(&man.entries, &profile, &head), cat),
-                (Some(a), Some(b)) if a == b
-            );
+            // Mirrors `label_identity_token`: the LAST token actually stocked
+            // in the noun's family, not blindly `tokens.last()` — a collective
+            // head ("ring", "cluster") is stocked nowhere near it.
+            // `tokenize_query` has already moved a trailing collective out of
+            // head position, so this reads the identity word, not "ring".
+            let head_cat = tokenize_query(label).last().and_then(|h| modal_category(&man.entries, &profile, h));
+            let as_label = (head_cat.is_some() && head_cat == cat).then(|| label.to_string());
             // Exactly what campaign.rs does: category-restricted, the label
             // first when it names its own object, canonical noun as fallback.
             let pool: Vec<TileLibraryEntry> = match cat {
@@ -3323,18 +3508,18 @@ mod tests {
                     .collect::<Vec<_>>()
             };
             let with_noun = format!("{label} {noun}");
-            let (src, got) = match use_label {
-                true => match look(label) {
-                    v if !v.is_empty() => ("label", v),
-                    _ => ("noun<-empty", look(&with_noun)),
+            let (src, got) = match &as_label {
+                Some(q) => match look(q) {
+                    v if !v.is_empty() => (format!("q:{q}"), v),
+                    _ => ("noun<-empty".to_string(), look(&with_noun)),
                 },
-                false => ("noun", look(&with_noun)),
+                None => ("noun".to_string(), look(&with_noun)),
             };
             println!(
-                "{:<36} [{:<11}] {:<11} -> {}",
+                "{:<28} head={:<11} [{:<26}] -> {}",
                 label,
+                head_cat.unwrap_or("(none)"),
                 src,
-                cat.unwrap_or("(any)"),
                 if got.is_empty() { "*** NOTHING ***".to_string() } else { got.join(" | ") }
             );
         }

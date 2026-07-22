@@ -221,7 +221,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ standing LIQUID — renders as whatever this scene's liquid actually is: water in most places, LAVA in a volcano, blood in a charnel house. Use it for every pool, channel, river or lake, INCLUDING a lethal one — a lava lake is `~`, never `%`  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T vegetation — renders as whatever THIS scene actually grows: trees in a forest, palms in a jungle, giant mushrooms in the Underdark, snow-firs in the arctic. Use it for any standing plant cover, including fungus in a cave  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , loose SAND — renders as yellow beach sand in EVERY scene, so use it only for real sand: a desert dune, a shoreline beach, a sandy arena floor. A snowy shore, a muddy bank or a gravel margin is plain floor `.`, which already renders as this scene's own ground  % deep chasm/gorge/ravine — a DRY fatal drop onto rock far below, renders as a dark pit; nothing stands here and no one deploys in it. Lethal is not what picks this code — a lava lake is lethal and is still `~`; `%` is specifically empty air with a floor a long way down  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ standing LIQUID — renders as whatever this scene's liquid actually is: water in most places, LAVA in a volcano, blood in a charnel house. Use it for every pool, channel, river or lake, INCLUDING a lethal one — a lava lake is `~`, never `%`  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T vegetation — renders as whatever THIS scene actually grows: trees in a forest, palms in a jungle, giant mushrooms in the Underdark, snow-firs in the arctic. Use it for any standing plant cover, including fungus in a cave  _ STAIRWELL — a flight of steps joining this level to ANOTHER one, and it renders as a descending staircase. It is not a generic step code: a dais, a raised platform, a low kerb or a single step up is plain floor `.` (say it is raised in a Features caption instead), because drawing it as `_` puts a hole in the floor where a throne platform should be  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , loose SAND — renders as yellow beach sand in EVERY scene, so use it only for real sand: a desert dune, a shoreline beach, a sandy arena floor. A snowy shore, a muddy bank or a gravel margin is plain floor `.`, which already renders as this scene's own ground  % deep chasm/gorge/ravine — a DRY fatal drop onto rock far below, renders as a dark pit; nothing stands here and no one deploys in it. Lethal is not what picks this code — a lava lake is lethal and is still `~`; `%` is specifically empty air with a floor a long way down  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -2406,6 +2406,7 @@ fn objects_rule_line(vocabulary: &[String], footprint_guide: &[String]) -> Strin
         - A TABLE longer than 2 cells must be 2 cells DEEP — write `3x2` or `4x2`, never `3x1` or `4x1`. A long table only one cell deep matches almost nothing real in the catalog: it lands on a table RUNNER (a decorative cloth) and renders as a strip of fabric lying on the floor. Small tables at `1x1` and `2x1` are fine as they are.\n\
         - A hanging CHANDELIER is a 2x2 object — every chandelier in the catalog is a 2x2 piece, so a 1x1 one finds nothing and simply won't appear. Write \"iron chandelier at <cell> (2x2)\" over OPEN FLOOR (it hangs above the room, not against a wall). A single wall sconce, candelabra, or lantern is the 1x1 option instead.\n\
         - DRESS THE WALLS. A lived-in room stores things along its edges, and a bare-walled room reads as empty. Add 1-3 `Objects:` entries of WALL STORAGE stocked to fit the scene, each sitting in the floor cells directly against a wall (typically 2x1 or 3x1): behind a bar, shelves of bottles and a keg or two; a study, bookshelves; an armoury, weapon racks; a pantry or warehouse, crates and a cupboard. Name the contents (\"shelf of bottles\", \"bookshelf\", \"stacked crates\") so the right stocked piece is found, not a bare plank.\n\
+        - SEAT THE TABLES. A table people eat, drink or work at is drawn with its seating, or the room reads as furniture in storage. For every dining, banquet, tavern or council table, add `Objects:` entries for chairs, stools or benches in the floor cells DIRECTLY ALONGSIDE it — down both long sides of a banquet table, around a round table, on the public side of a bar. Give each its own cell (1x1 for a chair or stool, 2x1 for a bench) and place it touching the table's footprint, never floating loose in the middle of the room. A long hall table wants a bench or several chairs a side; a card table wants two to four. Tables that are NOT for sitting — an altar, a workbench, a shop counter, a slab — take no seating.\n\
         - TACTICS MAY ONLY LEAN ON WHAT YOU ACTUALLY DREW. Every prop you cite as cover, an obstacle, or a set piece must already exist — a legend code with a matching Features line, or an Objects entry. Live: a crypt's Tactics promised \"the crate at K4\" while the map had bare floor there and no Objects section at all, so the DM offered the party cover that was not on the board. Write the Features/Objects line FIRST, then write the Tactics sentence about it; if you find yourself describing something you never placed, either place it or cut the sentence.\n\
         {vocab_line}{guide_line}"
     )
@@ -2665,6 +2666,12 @@ const FIELD_GLYPHS: &[char] = &['T', '^'];
 /// object (it IS the noun), so case 2 swallows it and searches the bare word.
 /// That is exactly the bug this ordering exists to prevent, and it survived a
 /// passing unit test of case 2 — the test exercised the query, not the path.
+///
+/// Nothing here reorders the label. Head position carries the x8 weight and
+/// the exact-head tier, but `tokenize_query` is what puts the right word
+/// there — it moves a trailing collective noun ("giant mushroom ring") out of
+/// head position for BOTH this decision and the ranker's own scoring pass.
+/// Doing it a second time here would be duplicate, weaker machinery.
 fn field_query(label: &str, noun: &str, folder: &str, names_own: bool) -> String {
     if label == noun {
         format!("{noun} {folder}")
@@ -3739,7 +3746,17 @@ fn pick_tiles_via_vision(slots: &[(&Placement, Vec<crate::tile_library::TileCand
 }
 
 /// One vision call for one chunk of slots — picks aligned to the chunk's own
-/// 1-based numbering. Failure → all-`None` for this chunk (built-in fallback).
+/// 1-based numbering.
+///
+/// A DECLINE and a FAILURE are different answers and must not share a
+/// fallback. `choice: 0` is vision's considered judgment that none of the
+/// candidates fit, and is honoured (`None` → built-in glyph). A transport
+/// error is no judgment at all, so the chunk keeps shortlist rank #1 rather
+/// than throwing away eight already-scored, category-restricted,
+/// biome-affinity-ranked candidates. Live (2026-07-21): a session-limit error
+/// dropped all 6 objects from a tavern and all 4 from a sewer, and both maps
+/// rendered as bare glyphs — with a perfectly good keg, crate and barrel
+/// sitting at rank #1 the whole time.
 fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> Vec<Option<usize>> {
     match crate::dm::run_claude_vision(&build_vision_message(chunk, biome), Some(VISION_PICK_MODEL)) {
         Ok(reply) => {
@@ -3747,8 +3764,11 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
             parse_vision_picks(&reply, chunk.len())
         }
         Err(e) => {
-            crate::maplog::log("VISION TILE PICK FAILED", &format!("{e}\n(this chunk falls back to built-in sprites)"));
-            vec![None; chunk.len()]
+            crate::maplog::log(
+                "VISION TILE PICK FAILED",
+                &format!("{e}\n(no judgment was made, so this chunk keeps shortlist rank #1 rather than falling back to built-in sprites)"),
+            );
+            chunk.iter().map(|(_, cands)| (!cands.is_empty()).then_some(0)).collect()
         }
     }
 }
@@ -3881,9 +3901,19 @@ fn glossed_biome_ids(profile: &PackProfile) -> String {
 
 /// Cheap TEXT classification of a finished map's biome from its title +
 /// Features + Objects (never the grid, never Tactics, never images),
-/// constrained to `biome_ids`. Keeps biome detection OUT of the fragile
+/// constrained to `biome_ids`.  Keeps biome detection OUT of the fragile
 /// map-generation prompt — it runs at resolution time on the already-written
-/// spec. Defaults to "dungeon" on any miss, which is a no-op (built-in floor).
+/// spec.
+///
+/// Falls back to `BUILTIN_SCENE` on a miss, but LOUDLY, and only after a
+/// retry. That fallback is the single most destructive answer this function
+/// can give — it means "resolve no catalog art at all", so the map comes out
+/// as the renderer's own grey masonry and all 183k tiles go unused. It used
+/// to be reached by `.unwrap_or_default()` swallowing the transport error
+/// whole: on 2026-07-21 a session-limit error silently classified both a
+/// dockside tavern and a sewer junction as `dungeon`, discarding the correct
+/// `tavern`/`sewer` rows that were sitting in the profile, and nothing
+/// anywhere said so. A blip must never be indistinguishable from an answer.
 fn classify_biome(profile: &PackProfile, spec: &str) -> String {
     let ids = biome_ids(profile);
     let prompt = format!(
@@ -3891,9 +3921,29 @@ fn classify_biome(profile: &PackProfile, spec: &str) -> String {
         glossed_biome_ids(profile),
         place_context(spec)
     );
-    let reply = crate::local_llm::ask_ingest_once_low_effort(prompt, Some("sonnet")).unwrap_or_default();
-    let lc = reply.to_lowercase();
-    ids.iter().find(|id| lc.contains(**id)).map(|s| s.to_string()).unwrap_or_else(|| "dungeon".to_string())
+    let mut why = String::new();
+    for attempt in 1..=2 {
+        match crate::local_llm::ask_ingest_once_low_effort(prompt.clone(), Some("sonnet")) {
+            Ok(reply) => {
+                let lc = reply.to_lowercase();
+                if let Some(id) = ids.iter().find(|id| lc.contains(**id)) {
+                    return id.to_string();
+                }
+                why = format!("attempt {attempt}: reply named no scene in the list — {reply:?}");
+            }
+            Err(e) => why = format!("attempt {attempt}: {e}"),
+        }
+        crate::maplog::log("BIOME CLASSIFY MISS", &why);
+    }
+    crate::maplog::log(
+        "BIOME CLASSIFY FAILED",
+        &format!(
+            "{why}\nfalling back to {:?} — the BUILT-IN look, so this map resolves NO catalog art \
+             (no floor texture, no liquid, no object tiles). This is a fallback, NOT a classification.",
+            crate::pack_profile::BUILTIN_SCENE
+        ),
+    );
+    crate::pack_profile::BUILTIN_SCENE.to_string()
 }
 
 /// Vision-pick the best-looking ground texture for `biome` from its candidate
@@ -4116,7 +4166,34 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             &format!("{slug}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
                 slots.iter().enumerate().map(|(i, (p, c))| format!("  [slot {}] \"{}\" {}x{} — {} candidates", i + 1, p.label, p.w, p.h, c.len())).collect::<Vec<_>>().join("\n")),
         );
-        let picks = pick_tiles_via_vision(&slots, &biome);
+        let mut picks = pick_tiles_via_vision(&slots, &biome);
+        // Four "Pillar" cells in one hall are four of the SAME pillar. Each
+        // slot is shortlisted and vision-picked on its own, so identical labels
+        // came back as independent answers — live, a castle great hall got a
+        // wood pillar, a metal one and two slate ones in the same room, which
+        // reads as scavenged rather than built. An identical label at an
+        // identical footprint gets identical art: the shortlist is a pure
+        // function of (label, size, biome), so the same index names the same
+        // tile in every one of those slots.
+        //
+        // Uniformity is the right default here because these are a room's
+        // BUILT furnishings. Variety where variety is right — trees, rubble,
+        // undergrowth — comes from the field path above, which spreads its own
+        // per-cell pool and never reaches this loop.
+        //
+        // Taking the first slot that vision actually answered (rather than the
+        // first slot outright) also rescues a twin it happened to decline.
+        let mut agreed: HashMap<(&str, u32, u32), usize> = HashMap::new();
+        for ((p, _), pick) in slots.iter().zip(&picks) {
+            if let Some(i) = pick {
+                agreed.entry((p.label.as_str(), p.w, p.h)).or_insert(*i);
+            }
+        }
+        for ((p, _), pick) in slots.iter().zip(picks.iter_mut()) {
+            if let Some(&i) = agreed.get(&(p.label.as_str(), p.w, p.h)) {
+                *pick = Some(i);
+            }
+        }
         // Track the ones that come back empty. A placement can drop out here
         // because vision declined every candidate (it answers `choice: 0`) or
         // returned an out-of-range number — both land as `None` and the object
@@ -4136,7 +4213,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         if !dropped.is_empty() {
             crate::maplog::log(
                 "PLACEMENTS LEFT UNRESOLVED",
-                &format!("{} of {} got no tile — vision declined every candidate. They fall back to the built-in glyph:\n  {}", dropped.len(), slots.len(), dropped.join("\n  ")),
+                &format!("{} of {} got no tile — vision declined every candidate, or answered out of range. (A FAILED vision call no longer lands here; it keeps rank #1.) They fall back to the built-in glyph:\n  {}", dropped.len(), slots.len(), dropped.join("\n  ")),
             );
         }
     }

@@ -1114,7 +1114,23 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
     // applies — a zero dimension would divide to Infinity here, where there it
     // merely floors to 1. A malformed tile falls through and tiles as before.
     const smaller = t.tw < t.w || t.th < t.h;
-    if (t.tw > 0 && t.th > 0 && ((t.single && smaller) || (t.tw < t.w && t.th < t.h))) {
+    // A `single` fixture that is itself SEVERAL CELLS LONG on the axis it has
+    // to fill, with the other axis matching exactly, is a module of a
+    // continuous run — a 5x1 bar counter in a 10x1 footprint — not a lone item
+    // adrift in an oversized slot. Repeat it; the tiling loop below already
+    // clamps a partial last repeat. Live (2026-07-21): "Bar counter at C3-L3"
+    // spans ten cells and the widest bar art in the whole 183k-tile library is
+    // 5x1, so the centred path drew ONE and left five cells of bare floor
+    // through the middle of the tavern.
+    //
+    // The `>= 2` is what protects the cases this branch was built for: a 1x1
+    // mannequin in a 1x2 slot and a 1x1 candelabra in a 2x2 both fail it and
+    // stay centred. When BOTH axes are smaller neither test can hold (each
+    // requires one axis to match exactly), so the pre-`single` fallback for old
+    // sidecars is untouched.
+    const runX = t.th === t.h && t.tw >= 2 && t.tw < t.w;
+    const runY = t.tw === t.w && t.th >= 2 && t.th < t.h;
+    if (t.tw > 0 && t.th > 0 && !(runX || runY) && ((t.single && smaller) || (t.tw < t.w && t.th < t.h))) {
       const k = Math.min(t.w / t.tw, t.h / t.th) * cellPx;
       const dw = t.tw * k, dh = t.th * k;
       const cx = (originCol - w.colStart + t.w / 2) * cellPx;
