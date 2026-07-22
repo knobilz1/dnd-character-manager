@@ -1629,7 +1629,10 @@ pub fn drain_unanswered_words() -> Vec<(String, usize, bool)> {
 /// The same check run over a batch of labels against a manifest on disk, for
 /// auditing a whole corpus of already-written maps at once instead of learning
 /// one map at a time. Uses the real tokenizer and the real vocabulary test, so
-/// it cannot drift from what generation actually does.
+/// it cannot drift from what generation actually does. Test-only: generation
+/// reports per map through `drain_unanswered_words`, and this is the corpus
+/// harness's entry point.
+#[cfg(test)]
 pub fn audit_vocabulary_at(manifest_path: &Path, labels: &[String]) -> Vec<(String, usize, bool)> {
     let Ok(text) = fs::read_to_string(manifest_path) else { return Vec::new() };
     let Ok(manifest) = serde_json::from_str::<TileLibraryManifest>(&text) else { return Vec::new() };
@@ -2250,6 +2253,18 @@ fn floor_query_still_holds(entries: &[TileLibraryEntry], measured: &HashMap<Stri
     lums.is_empty() || lums.iter().copied().any(luminance_is_usable_floor)
 }
 
+/// Whether a ground query says nothing beyond the name of the shelf it will be
+/// searched on. Compared against the FOLDER rather than against a hit count,
+/// because "this word selects everything here" is also true of a two-file
+/// folder whose files are both `Rock_*` — and there the query is perfect. Only
+/// the folder's own label is guaranteed to be uninformative, and it is
+/// uninformative by construction: `parse_entry` puts it on every entry. Pure.
+fn query_only_names_its_folder(query: &str, folder: &str) -> bool {
+    let shelf = tokenize_query(folder);
+    let tokens = tokenize_query(query);
+    !tokens.is_empty() && tokens.iter().all(|t| shelf.iter().any(|s| same_word(s, t)))
+}
+
 /// The `~` counterpart — no luminance gate, and `/Liquids/` is where a pool
 /// SHOULD come from, so it is not excluded. Pure.
 fn liquid_query_still_holds(entries: &[TileLibraryEntry], folder: &str, query: &str) -> bool {
@@ -2261,7 +2276,39 @@ fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<Strin
     let mut dropped: Vec<String> = Vec::new();
     let folder_has_own_ground = |folder: &str| folder_has_own_ground(entries, measured, folder);
     profile.biomes.retain_mut(|b| {
-        let Some(query) = b.floor_query.clone() else { return true };
+        let Some(mut query) = b.floor_query.clone() else { return true };
+        // A query that only says the folder's own name is not a query at all.
+        // `parse_entry` injects the biome folder as a keyword on EVERY entry, so
+        // such a query matches the whole shelf — identically — and the ranking
+        // has nothing left to sort on. The tiebreak then decides, and it prefers
+        // the fewest keywords, i.e. the least descriptive filename in the
+        // folder. Live: the profiler answered `cavern → Underdark/"underdark"`,
+        // which selects all 159 Underdark textures, so every cavern floor came
+        // out `Webbed_A_01` — spider webs as living rock. The hand-written
+        // default for that folder was "cave"; the profiler regressed an
+        // informative query into the shelf's label.
+        //
+        // The folder demonstrably cannot answer its own label, so this earns the
+        // borrow that a folder with no ground of its own gets — otherwise the
+        // built-in replacement finds nothing locally and the place is dropped,
+        // taking the scene word with it and leaving the classifier unable to
+        // name a cavern at all.
+        let mut may_borrow = !folder_has_own_ground(&b.folder);
+        if query_only_names_its_folder(&query, &b.folder) {
+            match crate::pack_profile::builtin_floor_for_folder(&b.folder) {
+                Some(fallback) => {
+                    dropped.push(format!("{} → {}/{:?}: names its own folder, so it selects the whole shelf and ranks it flat; taking the built-in {fallback:?}", b.scene, b.folder, query));
+                    query = fallback.to_string();
+                    b.floor_query = Some(query.clone());
+                    may_borrow = true;
+                }
+                None => {
+                    dropped.push(format!("{} → {}/{:?}: names its own folder and there is no built-in for it; keeping the built-in floor", b.scene, b.folder, query));
+                    b.floor_query = None;
+                    return true;
+                }
+            }
+        }
         let tokens = tokenize_query(&query);
         // NOTE: `resolve_floor` searches every `Textures` entry in the catalog
         // and treats the biome as a SCORING WEIGHT (`biome_affinity`), not a
@@ -2274,7 +2321,7 @@ fn prune_unbacked_grounds(entries: &[TileLibraryEntry], measured: &HashMap<Strin
             .filter(|e| e.biome == b.folder && e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, &tokens))
             .collect();
         if hits.is_empty() {
-            if !folder_has_own_ground(&b.folder) {
+            if may_borrow {
                 let borrowed = entries
                     .iter()
                     .any(|e| e.category == "Textures" && !e.rel_path.contains("/Liquids/") && has_identity_match(e, &tokens));
@@ -4237,6 +4284,92 @@ mod tests {
         assert_eq!(out.scene("sewer").map(|b| b.folder.as_str()), Some("Settlements"));
         assert!(out.scene("sewer").unwrap().floor_query.is_none(), "art that washes out everything on top of it is not a floor");
         assert_eq!(out.scene("abattoir").unwrap().floor_query.as_deref(), Some("flesh"), "a backed, legible ground must survive untouched");
+    }
+
+    /// Live (2026-07-22): `cavern → Underdark/"underdark"`. The folder name is
+    /// a keyword on every entry, so that selects all 159 Underdark textures at
+    /// an identical score and the tiebreak — fewest keywords, i.e. the least
+    /// descriptive filename — decides. Every cavern floor came out `Webbed_A_01`.
+    #[test]
+    fn a_ground_query_that_only_names_its_own_shelf_is_replaced() {
+        let tex = |biome: &str, name: &str, keywords: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("{biome}/Textures/{name}"),
+            biome: biome.into(),
+            category: "Textures".into(),
+            // `parse_entry` appends the folder to every entry's keywords; the
+            // whole bug lives in that injection, so the fixture must have it.
+            keywords: keywords.iter().map(|s| s.to_string()).chain(std::iter::once(biome.to_lowercase())).collect(),
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![
+            tex("Underdark", "Webbed_A_01.jpg", &["webbed"]),
+            tex("Underdark", "Drow_Stone_Patterned_Tiles_01.jpg", &["drow", "stone", "patterned", "tiles"]),
+            tex("Mountain", "Cave_Floor_A.jpg", &["cave", "floor"]), // where "cave" is borrowed from
+            // The control: "rock" selects 100% of Volcanic and is still a real
+            // query, because it is not the shelf's own label. A hit-count rule
+            // would wrongly condemn it.
+            tex("Volcanic", "Rock_A.jpg", &["rock"]),
+            tex("Volcanic", "Rock_B.jpg", &["rock"]),
+        ];
+        let measured: HashMap<String, MeasuredArt> =
+            entries.iter().map(|e| (e.rel_path.clone(), MeasuredArt { kind: ArtKind::Ground, lum: 100 })).collect();
+        let place = |scene: &str, folder: &str, q: &str| crate::pack_profile::BiomeProfile {
+            scene: scene.into(),
+            folder: folder.into(),
+            floor_query: Some(q.into()),
+            natural_walls: true,
+            liquid_query: None,
+        };
+        let out = prune_unbacked_grounds(
+            &entries,
+            &measured,
+            PackProfile { biomes: vec![place("cavern", "Underdark", "underdark"), place("volcanic", "Volcanic", "rock")], ..PackProfile::default() },
+        );
+
+        // The place must SURVIVE. Dropping it would take the scene word with it,
+        // and a classifier that cannot answer "cavern" is worse than spider webs.
+        assert_eq!(out.scene("cavern").map(|b| b.folder.as_str()), Some("Underdark"));
+        assert_eq!(out.scene("cavern").unwrap().floor_query.as_deref(), Some("cave"), "the built-in for this folder replaces the non-answer");
+        assert_eq!(out.scene("volcanic").unwrap().floor_query.as_deref(), Some("rock"), "selecting a whole SMALL folder is not the same fault");
+    }
+
+    /// What `prune_unbacked_grounds` would do to the REAL saved profile, without
+    /// touching it. A re-profile is the only thing that applies these rules, and
+    /// it costs model calls and can lose learned answers — so this is how to see
+    /// the outcome first.
+    ///
+    ///   cargo test --lib prune_over_the_real_profile -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn prune_over_the_real_profile() {
+        let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.nabil.dndsheet/tile_library");
+        let man: TileLibraryManifest = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        let before: PackProfile = serde_json::from_str(&std::fs::read_to_string(dir.join("pack_profile.json")).unwrap()).unwrap();
+        let after = prune_unbacked_grounds(&man.entries, &man.measured, before.clone());
+        for b in &before.biomes {
+            let now = after.scene(&b.scene);
+            let (was, is) = (b.floor_query.as_deref(), now.and_then(|n| n.floor_query.as_deref()));
+            let verdict = match now {
+                None => "PLACE DROPPED".to_string(),
+                Some(_) if was == is => continue,
+                Some(_) => format!("{was:?} -> {is:?}"),
+            };
+            println!("{:12} {:20} {verdict}", b.scene, b.folder);
+        }
+        println!("{} places in, {} out", before.biomes.len(), after.biomes.len());
+    }
+
+    #[test]
+    fn only_the_shelfs_own_label_counts_as_naming_it() {
+        assert!(query_only_names_its_folder("underdark", "Underdark"));
+        assert!(query_only_names_its_folder("Underdark", "underdark"), "case is not the point");
+        // Every token has to be the label, not just the head.
+        assert!(!query_only_names_its_folder("underdark rock", "Underdark"));
+        assert!(!query_only_names_its_folder("drow", "Underdark"));
+        assert!(!query_only_names_its_folder("stone", "!Core_Settlements"));
+        assert!(!query_only_names_its_folder("", "Underdark"), "no query is a different case, handled before this");
     }
 
     /// Live (2026-07-21): every jungle map rendered on built-in dungeon
