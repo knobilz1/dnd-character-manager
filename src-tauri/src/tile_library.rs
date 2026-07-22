@@ -151,6 +151,7 @@ fn kind_str(k: ArtKind) -> &'static str {
         ArtKind::Ground => "ground",
         ArtKind::Prop => "prop",
         ArtKind::Undecided => "undecided",
+        ArtKind::Overlay => "overlay",
     }
 }
 
@@ -158,6 +159,7 @@ fn parse_kind(s: &str) -> Option<ArtKind> {
     match s.trim().to_lowercase().as_str() {
         "ground" => Some(ArtKind::Ground),
         "prop" => Some(ArtKind::Prop),
+        "overlay" => Some(ArtKind::Overlay),
         _ => None,
     }
 }
@@ -642,6 +644,13 @@ pub enum ArtKind {
     /// (grates, lattices, grunge passes) measures much like a sparse prop.
     /// Handed to the name pass; see `classify_art`.
     Undecided,
+    /// Compositing art: a layer with NO near-opaque pixel anywhere, meant to be
+    /// drawn over something else — a drop shadow, a glow, a dirt or blood pass.
+    /// Never a placeable object: drawn on its own it is a smudge. Measured, not
+    /// named, so it holds for any pack's naming scheme. On this catalog it is
+    /// 2,082 of 183,190 tiles — 1,000 humanoid body overlays, 464 saliva
+    /// layers, ~155 tree and cactus shadows, cobwebs.
+    Overlay,
 }
 
 impl ArtSignals {
@@ -657,6 +666,9 @@ impl ArtSignals {
     /// That difference is semantic, not geometric — it stays with the category
     /// list, where being wrong on an unrecognised pack costs nothing.
     pub fn kind(&self) -> ArtKind {
+        if self.opaque == 0.0 {
+            return ArtKind::Overlay;
+        }
         if self.edges == 4 && self.opaque >= GROUND_OPAQUE_MIN {
             ArtKind::Ground
         } else if self.edges <= 1 && self.opaque < PROP_OPAQUE_MAX {
@@ -700,6 +712,7 @@ const GROUND_NAME_HINTS: &[&str] = &["overlay", "texture", "seamless", "tileable
 pub fn classify_art(rel_path: &str, signals: Option<ArtSignals>) -> ArtKind {
     match signals.map(|s| s.kind()) {
         Some(ArtKind::Ground) => ArtKind::Ground,
+        Some(ArtKind::Overlay) => ArtKind::Overlay,
         Some(ArtKind::Prop) | None => ArtKind::Prop,
         Some(ArtKind::Undecided) => {
             let name = rel_path.rsplit(['/', '\\']).next().unwrap_or(rel_path).to_lowercase();
@@ -735,8 +748,11 @@ pub fn art_signals(bytes: &[u8]) -> Option<ArtSignals> {
         y0 = y0.min(y);
         y1 = y1.max(y);
     }
+    // Decodable but never opaque is a RESULT, not a failure — it is exactly
+    // what a compositing layer measures like, and returning `None` made it
+    // indistinguishable from art we could not read at all. See ArtKind::Overlay.
     if opaque == 0 {
-        return None;
+        return Some(ArtSignals { opaque: 0.0, edges: 0, luminance: 0.0 });
     }
     // 2% of the canvas counts as "reaching the edge" — matches the tolerance the
     // signals were validated at.
@@ -842,14 +858,6 @@ const CONDITION_WORDS: &[&str] = &[
     // catalog with 1,417 tiles keyworded "tree" will happily hand a forest a
     // decorated Christmas one — reported live, twice.
     "christmas", "gingerbread", "candy",
-    // A `*_Shadow` file is the drop-shadow LAYER for another tile, meant to be
-    // composited underneath it — measured, `Palm_Tree_Trunk_Shadow` is RGB
-    // (4,7,6) at 39% alpha against the real trunk's (47,39,21) at 98%. Drawn on
-    // its own it is a black smudge, and 322 of them are reachable by an object
-    // slot. `Palm_Tree_Trunk_Shadow` was the TOP pick for a jungle canopy and
-    // got stamped across 45 cells. A label that actually says "shadowy" still
-    // asks for one, so this only demotes the unrequested case.
-    "shadow",
 ];
 
 /// How hard an entry is demoted per unrequested condition word it carries.
@@ -1535,6 +1543,17 @@ fn load_idf_cached(app: &AppHandle, manifest: &TileLibraryManifest) -> std::sync
     idf
 }
 
+/// Whether a shortlist request is for an OBJECT slot, which is what decides
+/// if art that MEASURES as ground or as a compositing layer gets dropped.
+///
+/// A request with no category is always an object slot. A categorised request
+/// is one only when the category isn't terrain: the floor resolver asking for
+/// `Textures` wants that shelf as-is, while a field cell asking for `Flora` or
+/// `Structures` is placing an object and still needs the measurement filter.
+fn is_object_slot(category: Option<&str>, profile: &PackProfile) -> bool {
+    category.is_none_or(|c| !profile.is_terrain_category(c))
+}
+
 fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &str, fw: u32, fh: u32, k: usize) -> Vec<TileCandidate> {
     let Some(manifest) = load_manifest_cached(app).ok().flatten() else { return Vec::new() };
     let tokens = tokenize_query(query);
@@ -1557,15 +1576,22 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
     } else {
         &manifest.entries
     };
-    // An explicit category means the caller wants that shelf as-is (the floor
-    // resolver asking for Textures); otherwise this is an OBJECT slot, so
-    // over-fetch and drop anything that measures as ground art. The category
-    // list catches this on packs we recognise — the measurement catches it on
-    // the ones we don't, which is the whole point.
-    let object_slot = category.is_none();
+    // Whether this is an OBJECT slot — the thing that decides if we over-fetch
+    // and drop art that MEASURES as ground or as a compositing layer. The
+    // category list catches those on packs we recognise; the measurement
+    // catches them on the ones we don't, which is the whole point.
+    //
+    // Asked of the PROFILE, not of `category.is_some()`. That shortcut was
+    // right only while the sole categorised caller was the floor resolver
+    // asking for Textures. Field cells now ask for Flora and Structures — real
+    // object shelves — and the shortcut silently switched their measurement
+    // filter off, putting 14 semi-transparent `Palm_Tree_Trunk_Shadow` layers
+    // back into a jungle canopy the moment the keyword backstop was removed.
+    let profile = load_profile_cached(app);
+    let object_slot = is_object_slot(category, &profile);
     let want = if object_slot { k + GROUND_FILTER_MARGIN } else { k };
     let overrides = load_overrides_cached(app);
-    shortlist_entries(entries, &tokens, &idf, scene, fw, fh, want, !object_slot, &load_profile_cached(app))
+    shortlist_entries(entries, &tokens, &idf, scene, fw, fh, want, !object_slot, &profile)
         .into_iter()
         .filter_map(|e| {
             // Prefer the audit's stored verdict; only decode when this entry has
@@ -1580,7 +1606,11 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
                 .copied()
                 .or(audited.map(|m| m.kind))
                 .unwrap_or_else(|| classify_art(&e.rel_path, signals));
-            if object_slot && kind == ArtKind::Ground {
+            // Ground art can't be an object, and neither can a compositing
+            // layer — a drop shadow or a dirt pass drawn on its own is a
+            // smudge. `Palm_Tree_Trunk_Shadow` was the top pick for a jungle
+            // canopy and got stamped across 45 cells.
+            if object_slot && matches!(kind, ArtKind::Ground | ArtKind::Overlay) {
                 return None;
             }
             let luminance = audited.map(|m| m.lum as f64).or(signals.map(|s| s.luminance));
@@ -2483,6 +2513,16 @@ mod tests {
         // walls. That one stays with the category list.
         assert_ne!(sig(0.35, 2, 90.0).kind(), ArtKind::Ground);
 
+        // A compositing layer has NO near-opaque pixel at all — that is what a
+        // drop shadow, glow or dirt pass measures like, and it is decided on
+        // pixels so it holds whatever a pack calls its files. `art_signals`
+        // reports it rather than returning None, which used to make it
+        // indistinguishable from art we couldn't read.
+        assert_eq!(sig(0.0, 0, 0.0).kind(), ArtKind::Overlay);
+        assert_eq!(classify_art("Palm_Tree_Trunk_Shadow_A3_3x4.webp", Some(sig(0.0, 0, 0.0))), ArtKind::Overlay);
+        // …and a name alone never makes one: this is a real, solid tile.
+        assert_eq!(classify_art("Shadow_Blade_A1_1x1.webp", Some(sig(0.20, 0, 90.0))), ArtKind::Prop);
+
         // Floor usability, calibrated on two real textures: Cave_Floor_02_A
         // rendered correctly, Gravel_05_F rendered as mud.
         assert!(luminance_is_usable_floor(91.9), "Cave_Floor_02_A must stay");
@@ -3031,6 +3071,21 @@ mod tests {
         assert_eq!(modal_category(&oversized, &profile, "pine"), Some("Flora"));
     }
 
+    /// The measurement filter must stay ON for a categorised OBJECT slot. It
+    /// was keyed on `category.is_none()`, which was right only while the floor
+    /// resolver was the sole categorised caller — field cells then began asking
+    /// for Flora and Structures, silently switching their filter off and
+    /// putting 14 semi-transparent shadow layers back into a jungle canopy.
+    #[test]
+    fn a_categorised_object_slot_still_measures_its_art() {
+        let p = PackProfile { terrain_categories: vec!["Textures".into(), "Shadow_Paths".into()], ..PackProfile::default() };
+        assert!(is_object_slot(None, &p), "an uncategorised request is always an object slot");
+        assert!(is_object_slot(Some("Flora"), &p), "a field cell placing foliage is an object slot");
+        assert!(is_object_slot(Some("Structures"), &p), "so is one placing rubble");
+        assert!(!is_object_slot(Some("Textures"), &p), "the floor resolver wants that shelf as-is");
+        assert!(!is_object_slot(Some("Shadow_Paths"), &p));
+    }
+
     /// An uncaptioned field cell asks the SCENE what its foliage is, by putting
     /// the pack's own biome folder at the head — where the x8 weight and the
     /// exact-head tier land — and demoting the English noun to a modifier.
@@ -3073,31 +3128,6 @@ mod tests {
         assert_eq!(strip_parentheticals("no parens here"), "no parens here");
     }
 
-    /// A `*_Shadow` file is the drop-shadow LAYER for another tile. Measured on
-    /// the real art: `Palm_Tree_Trunk_Shadow` is RGB (4,7,6) at 39% alpha, the
-    /// real trunk RGB (47,39,21) at 98% — drawn alone it is a black smudge, and
-    /// it was the TOP pick for a jungle canopy across 45 cells.
-    #[test]
-    fn a_drop_shadow_layer_loses_to_the_art_it_belongs_under() {
-        let e = |kw: &[&str]| TileLibraryEntry {
-            root: "r".into(),
-            rel_path: kw.join("_"),
-            biome: "Jungle".into(),
-            category: "Flora".into(),
-            keywords: kw.iter().map(|s| s.to_string()).collect(),
-            w: 3,
-            h: 3,
-        };
-        let entries = vec![e(&["palm", "tree", "trunk", "shadow"]), e(&["palm", "tree", "trunk", "green"])];
-        let idf = compute_idf(&entries);
-        let got = shortlist_entries(&entries, &tokenize_query("jungle canopy tree"), &idf, "jungle", 3, 3, 8, false, &prof());
-        assert_eq!(got.first().map(|e| e.rel_path.as_str()), Some("palm_tree_trunk_green"), "got: {got:?}");
-        // But a label that asks for one by name still gets it. Note it must be
-        // the word itself: the suffix rule accepts "s"/"es"/"en", so "shadowy"
-        // does NOT reach "shadow" and would be demoted like any other label.
-        let got = shortlist_entries(&entries, &tokenize_query("palm tree shadow"), &idf, "jungle", 3, 3, 8, false, &prof());
-        assert_eq!(got.first().map(|e| e.rel_path.as_str()), Some("palm_tree_trunk_shadow"), "got: {got:?}");
-    }
 
     /// A tile that answers MORE of the label wins, even from a foreign biome.
     /// Live: "bone pile" resolved to `Dice_D4_Bone` — a bone die — because the

@@ -4048,6 +4048,14 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         let glyph = p.field_glyph.unwrap();
         let cands = field_shortlists.entry((p.label.clone(), glyph)).or_insert_with(|| {
             let noun = field_glyph_noun(glyph);
+            // Searched at the DM guide's SMALLEST well-stocked footprint on
+            // purpose. Raising it to the pack's modal size (5x5 for "tree") did
+            // reach the whole `Palm_Tree_Green1` palms a jungle wants — and
+            // then 81 treeline cells drew them at 25x overlap, a mat of giant
+            // leaves with no readable grid under it. Field art is drawn
+            // oversized on a 1x1 cell, so the density is what bounds the size,
+            // not the catalog. The jungle's whole palms are simply too big to
+            // use at treeline density; its trunk fragments are the honest cost.
             let (gw, gh) = guide_size(noun, 1, 1);
             // The glyph's MEANING is enforced by its category, not by its word.
             // `T` searches Flora and `^` searches Structures, which is what
