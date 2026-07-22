@@ -630,6 +630,13 @@ pub struct ArtSignals {
     pub edges: u8,
     /// Mean perceived luminance of the opaque pixels, 0..255.
     pub luminance: f64,
+    /// Mean R,G,B of the opaque pixels, 0..255 each. Kept alongside luminance
+    /// because luminance ALONE cannot tell whether two terrains will read apart:
+    /// measured 2026-07-22, a volcano's basalt floor and its lava differ by only
+    /// 12 in luminance and are unmistakable on screen, while a bog's marsh and
+    /// its water differ by 21 and are indistinguishable. Hue is what separates
+    /// them. See `LIQUID_FLOOR_CONTRAST_MIN`.
+    pub rgb: [f64; 3],
 }
 
 /// What a tile is, once the pixels have had their say.
@@ -736,6 +743,7 @@ pub fn art_signals(bytes: &[u8]) -> Option<ArtSignals> {
         return None;
     }
     let (mut opaque, mut lum_sum) = (0u64, 0f64);
+    let mut rgb_sum = [0f64; 3];
     let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0u32, u32::MAX, 0u32);
     for (x, y, p) in img.enumerate_pixels() {
         if p[3] <= 200 {
@@ -743,6 +751,9 @@ pub fn art_signals(bytes: &[u8]) -> Option<ArtSignals> {
         }
         opaque += 1;
         lum_sum += 0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64;
+        for (i, s) in rgb_sum.iter_mut().enumerate() {
+            *s += p[i] as f64;
+        }
         x0 = x0.min(x);
         x1 = x1.max(x);
         y0 = y0.min(y);
@@ -752,13 +763,18 @@ pub fn art_signals(bytes: &[u8]) -> Option<ArtSignals> {
     // what a compositing layer measures like, and returning `None` made it
     // indistinguishable from art we could not read at all. See ArtKind::Overlay.
     if opaque == 0 {
-        return Some(ArtSignals { opaque: 0.0, edges: 0, luminance: 0.0 });
+        return Some(ArtSignals { opaque: 0.0, edges: 0, luminance: 0.0, rgb: [0.0; 3] });
     }
     // 2% of the canvas counts as "reaching the edge" — matches the tolerance the
     // signals were validated at.
     let (mx, my) = ((w as f64 * 0.02) as u32, (h as f64 * 0.02) as u32);
     let edges = [x0 <= mx, x1 + mx >= w - 1, y0 <= my, y1 + my >= h - 1].iter().filter(|b| **b).count() as u8;
-    Some(ArtSignals { opaque: opaque as f64 / (w as f64 * h as f64), edges, luminance: lum_sum / opaque as f64 })
+    Some(ArtSignals {
+        opaque: opaque as f64 / (w as f64 * h as f64),
+        edges,
+        luminance: lum_sum / opaque as f64,
+        rgb: rgb_sum.map(|s| s / opaque as f64),
+    })
 }
 
 /// Function words that can never name an object, but are long enough to
@@ -1594,6 +1610,9 @@ pub struct TileCandidate {
     /// Mean luminance 0-255, when known. `None` only if the art was neither
     /// audited nor decodable.
     pub luminance: Option<f64>,
+    /// Mean R,G,B when the art was decodable. Used to keep a liquid from
+    /// vanishing into the floor it is drawn on — see `mean_rgb`.
+    pub rgb: Option<[f64; 3]>,
 }
 
 /// The shortlist as loadable candidates (image bytes read + base64'd) for a
@@ -1699,7 +1718,17 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
                 return None;
             }
             let luminance = audited.map(|m| m.lum as f64).or(signals.map(|s| s.luminance));
-            Some(TileCandidate { root: e.root.clone(), rel_path: e.rel_path.clone(), w: e.w, h: e.h, data_url, biome: e.biome.clone(), kind, luminance })
+            Some(TileCandidate {
+                root: e.root.clone(),
+                rel_path: e.rel_path.clone(),
+                w: e.w,
+                h: e.h,
+                data_url,
+                biome: e.biome.clone(),
+                kind,
+                luminance,
+                rgb: signals.map(|s| s.rgb),
+            })
         })
         .take(k)
         .collect()
@@ -1783,6 +1812,29 @@ fn tile_luminance(e: &TileLibraryEntry, measured: &HashMap<String, MeasuredArt>)
         .and_then(|(_, s)| s)
         .filter(|s| s.kind() != ArtKind::Overlay)
         .map(|s| s.luminance)
+}
+
+/// How far apart, summed across R+G+B, a liquid and the floor it is drawn on
+/// must sit before they read as different terrain.
+///
+/// Calibrated 2026-07-22 against four rendered maps that had already been
+/// judged by eye, so the threshold is fitted to looking-right rather than to a
+/// number picked in advance: volcanic basalt vs lava 256 (great), horror flesh
+/// vs blood 222 (great, and red-on-red — the case a naive rule would reject),
+/// sewer stone vs murky water 176 (fine), swamp marsh vs swamp water 64 (the
+/// failure: 77 cells of channel a player simply cannot pick out from the bank).
+/// 120 sits in the empty gap between 64 and 176 with room on both sides.
+pub const LIQUID_FLOOR_CONTRAST_MIN: f64 = 120.0;
+
+/// Summed absolute R+G+B difference between two mean colours.
+pub fn colour_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
+}
+
+/// Mean R,G,B for one already-chosen tile, decoded now. `None` when the file
+/// can't be read — callers then skip the contrast test rather than guess.
+pub fn mean_rgb(root: &str, rel_path: &str) -> Option<[f64; 3]> {
+    load_tile_art(root, rel_path).and_then(|(_, s)| s).map(|s| s.rgb)
 }
 
 /// What the profiler is shown about one biome. The ground candidates carry
@@ -2664,7 +2716,7 @@ mod tests {
     /// entries, not invented thresholds.
     #[test]
     fn art_signals_separate_ground_from_props_and_flag_unusable_floors() {
-        let sig = |opaque: f64, edges: u8, luminance: f64| ArtSignals { opaque, edges, luminance };
+        let sig = |opaque: f64, edges: u8, luminance: f64| ArtSignals { opaque, edges, luminance, rgb: [luminance; 3] };
 
         // Ground: opaque corner to corner. (Textures measured ~1.00 / 4 edges.)
         assert_eq!(sig(1.00, 4, 92.0).kind(), ArtKind::Ground);
@@ -2810,7 +2862,7 @@ mod tests {
     /// rate from 96.9% (pixels alone) to 99.6%.
     #[test]
     fn the_name_pass_only_adjudicates_what_the_pixels_could_not() {
-        let sig = |opaque: f64, edges: u8| Some(ArtSignals { opaque, edges, luminance: 90.0 });
+        let sig = |opaque: f64, edges: u8| Some(ArtSignals { opaque, edges, luminance: 90.0, rgb: [90.0; 3] });
 
         // Confident pixels win outright — the name is never consulted, which is
         // what keeps a loose word list safe. Measured globally, "overlay" sits
@@ -3210,6 +3262,26 @@ mod tests {
         assert_eq!(look("Hearth"), "fireplace");
         // …and the synonym must not drag a fireplace into a genuine earth label.
         assert_eq!(look("Earth stone"), "earth_stone");
+    }
+
+    /// The four real floor/liquid pairs the threshold was fitted to, each
+    /// already judged by eye before any number was chosen. Volcanic is the one
+    /// that matters most: its lava is only 12 apart from the basalt in
+    /// LUMINANCE and looks spectacular, so any brightness-based rule would kill
+    /// it. Horror is the second trap — red blood on red flesh, which a naive
+    /// "same hue family" rule would reject.
+    #[test]
+    fn liquid_floor_contrast_separates_the_maps_that_read_from_the_one_that_didnt() {
+        let judged = [
+            ("volcanic basalt vs lava", [60.0, 61.0, 64.0], [207.0, 16.0, 0.0], true),
+            ("horror flesh vs blood", [137.0, 73.0, 59.0], [45.0, 1.0, 1.0], true),
+            ("sewer stone vs murky water", [104.0, 103.0, 100.0], [54.0, 53.0, 24.0], true),
+            ("swamp marsh vs swamp water", [80.0, 77.0, 38.0], [54.0, 53.0, 24.0], false),
+        ];
+        for (what, floor, liquid, should_read) in judged {
+            let d = colour_distance(floor, liquid);
+            assert_eq!(d >= LIQUID_FLOOR_CONTRAST_MIN, should_read, "{what}: distance {d} vs threshold {LIQUID_FLOOR_CONTRAST_MIN}");
+        }
     }
 
     #[test]

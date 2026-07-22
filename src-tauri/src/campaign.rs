@@ -4002,12 +4002,44 @@ fn resolve_floor(app: &AppHandle, profile: &PackProfile, biome: &str) -> Option<
 /// when the grid contains no `~`, which is most maps. Replaces a flat blue
 /// square drawn in code (`COLORS.water`) that read as a swimming pool next to
 /// the catalog art around it.
-fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[String]) -> Option<TileRef> {
+fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[String], floor: Option<&TileRef>) -> Option<TileRef> {
     if !rows.iter().any(|r| r.contains('~')) {
         return None;
     }
     let query = liquid_query(profile, biome);
-    let cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    let mut cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    // Drop any liquid that would vanish into the floor it is drawn on. `~` means
+    // "this square is different terrain"; a channel a player cannot pick out
+    // from the bank is not doing that job, however correct the material is.
+    //
+    // Live 2026-07-22: a bog's floor resolved to `Marsh_Wet_A_01` (80,77,38) and
+    // its water to `Water_Still_B_05` (54,53,24) — both from the pack's own
+    // Swamp folder, both olive, 64 apart. Every one of the 77 water cells read
+    // as more marsh. Note the liquid was not WRONG, which is why no
+    // biome/keyword rule catches this: swamp water in a swamp is the right
+    // answer, and it is only wrong NEXT TO that particular floor.
+    let floor_rgb = floor.and_then(|f| crate::tile_library::mean_rgb(&f.root, &f.rel_path));
+    if let Some(fr) = floor_rgb {
+        let clear: Vec<_> = cands
+            .iter()
+            .filter(|c| c.rgb.is_none_or(|cr| crate::tile_library::colour_distance(cr, fr) >= crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN))
+            .cloned()
+            .collect();
+        // Never empty the shortlist: a pack whose only liquid is floor-coloured
+        // should still draw its channels, and the built-in fallback is worse.
+        if !clear.is_empty() && clear.len() < cands.len() {
+            crate::maplog::log(
+                "LIQUID CONTRAST",
+                &format!(
+                    "floor mean rgb {fr:?}: dropped {} of {} candidate(s) closer than {} to it, so the liquid reads as its own terrain",
+                    cands.len() - clear.len(),
+                    cands.len(),
+                    crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN
+                ),
+            );
+            cands = clear;
+        }
+    }
     crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={query:?}, {} texture candidate(s)", cands.len()));
     // Name the liquid, don't just say "a pool". The shortlist is built from
     // `query`, so every candidate already matches it — which means a pack that
@@ -4272,7 +4304,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     objects.extend(flames);
     let floor = resolve_floor(app, &profile, &biome);
     let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
-    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows);
+    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows, floor.as_ref());
     let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&profile, &biome) };
     // Always write (even if nothing resolved) so the mtime gate marks this spec
     // done and we don't re-run the vision/classify calls on every dialog open.
@@ -8122,7 +8154,7 @@ Tactics:
     #[test]
     fn vision_message_asks_for_variety_across_repeated_slots() {
         let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: None };
-        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None };
+        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None, rgb: None };
         let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
         assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
     }
