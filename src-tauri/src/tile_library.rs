@@ -1522,7 +1522,7 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     let mut scored: Vec<((u32, f64), &TileLibraryEntry)> = identified
         .into_iter()
         .filter_map(|e| {
-            shortlist_rank(e, tokens, idf).map(|(cov, s)| ((cov, s * biome_affinity(want, &e.biome, profile) * condition_fit(e, tokens)), e))
+            shortlist_rank(e, tokens, idf).map(|(cov, s)| ((cov, s * biome_affinity(want, &e.biome, profile, allow_terrain) * condition_fit(e, tokens)), e))
         })
         .collect();
     // Upright before rotated at equal score, so a tile that already fits the
@@ -1610,9 +1610,31 @@ pub(crate) fn scene_biome<'a>(scene: &str, profile: &'a PackProfile) -> &'a str 
 /// exact name, the old hardcoded test made this return 0.15 for every tile in
 /// the catalog, uniformly — which doesn't reorder anything, so nothing looked
 /// broken, but it silently flattened biome affinity into a no-op.
-fn biome_affinity(scene_biome: &str, entry_biome: &str, profile: &PackProfile) -> f64 {
+///
+/// `ground` reverses the universal set's free pass, and ONLY for it. A barrel
+/// from the universal shelf belongs in any scene — that is what makes it
+/// universal. The ground does not: it is the one layer that IS the biome, so a
+/// tile from the scene's own folder must outrank the generic one whenever both
+/// answer the query.
+///
+/// Measured 2026-07-22 over the 72 saved maps — every one of these classified
+/// CORRECTLY and then drew a floor from `!Core_Settlements` anyway, because it
+/// owns 1,007 of the catalog's 3,453 textures and was scoring 1.0 against the
+/// right folder's 0.15:
+///   * `mine` → `Stone_Tiles_A_03`, dressed flagstone down a collapsed seam,
+///     while Mountain's own 123 stone textures sat at 0.15.
+///   * `factory` → `Grate_Metal_A_06`, a drain grate tiled across a foundry
+///     casting floor, over Industrial's own 125.
+///   * `volcanic` → `Rocks_Overlay_A.webp`, a transparent decal, ahead of
+///     `Lava_Rocks_A_01`.
+/// It changes nothing for a scene whose own folder IS the universal one (a
+/// tavern, a castle), and nothing for a scene with no textures of its own
+/// (Jungle has zero, Feywilds four) — there the whole field is foreign and
+/// scaling it uniformly reorders nothing, so borrowed grass still wins.
+fn biome_affinity(scene_biome: &str, entry_biome: &str, profile: &PackProfile, ground: bool) -> f64 {
     let universal = profile.universal_biome.as_deref();
-    if entry_biome.eq_ignore_ascii_case(scene_biome) || universal.is_some_and(|u| entry_biome.eq_ignore_ascii_case(u)) {
+    let own = entry_biome.eq_ignore_ascii_case(scene_biome);
+    if own || (!ground && universal.is_some_and(|u| entry_biome.eq_ignore_ascii_case(u))) {
         1.0
     } else {
         0.15
@@ -3048,13 +3070,29 @@ mod tests {
     /// the Horror pack, because ranking never looked at biome at all.
     #[test]
     fn biome_affinity_demotes_a_tile_from_an_unrelated_biome() {
-        assert_eq!(biome_affinity("!Core_Settlements", "!Core_Settlements", &prof()), 1.0);
-        assert_eq!(biome_affinity("Underdark", "Underdark", &prof()), 1.0);
+        assert_eq!(biome_affinity("!Core_Settlements", "!Core_Settlements", &prof(), false), 1.0);
+        assert_eq!(biome_affinity("Underdark", "Underdark", &prof(), false), 1.0);
         // The universal settlement set is welcome in any scene.
-        assert_eq!(biome_affinity("Underdark", "!Core_Settlements", &prof()), 1.0);
+        assert_eq!(biome_affinity("Underdark", "!Core_Settlements", &prof(), false), 1.0);
         // Horror flesh has no business in a tavern.
-        assert!(biome_affinity("!Core_Settlements", "Horror", &prof()) < 0.5);
-        assert!(biome_affinity("!Core_Settlements", "Arctic", &prof()) < 0.5);
+        assert!(biome_affinity("!Core_Settlements", "Horror", &prof(), false) < 0.5);
+        assert!(biome_affinity("!Core_Settlements", "Arctic", &prof(), false) < 0.5);
+    }
+
+    /// The universal set's free pass is for OBJECTS. Asking it for GROUND is
+    /// how a mine floor came out as settlement flagstone and a foundry's as a
+    /// drain grate — both correctly classified, both outvoted by the folder
+    /// that happens to own 29% of the catalog's textures.
+    #[test]
+    fn the_universal_set_is_not_a_peer_when_the_slot_is_the_ground() {
+        // Objects: unchanged, a universal barrel still belongs in a cavern.
+        assert_eq!(biome_affinity("Underdark", "!Core_Settlements", &prof(), false), 1.0);
+        // Ground: the scene's own folder wins.
+        assert!(biome_affinity("Underdark", "!Core_Settlements", &prof(), true) < 0.5);
+        assert_eq!(biome_affinity("Underdark", "Underdark", &prof(), true), 1.0);
+        // A settlement scene's own folder IS the universal one, so it keeps its
+        // ground — the rule must not lock a tavern out of its own floorboards.
+        assert_eq!(biome_affinity("!Core_Settlements", "!Core_Settlements", &prof(), true), 1.0);
     }
 
     /// The whole reason profiling exists. A pack that doesn't use Forgotten
@@ -3094,9 +3132,9 @@ mod tests {
         assert_eq!(scene_biome("cave", &profile), "Caverns");
         // …and affinity is no longer a uniform 0.15: own-biome and universal
         // are unpenalised, an unrelated biome is not.
-        assert_eq!(biome_affinity("Caverns", "Caverns", &profile), 1.0);
-        assert_eq!(biome_affinity("Caverns", "Township", &profile), 1.0);
-        assert!(biome_affinity("Township", "Caverns", &profile) < 0.5);
+        assert_eq!(biome_affinity("Caverns", "Caverns", &profile, false), 1.0);
+        assert_eq!(biome_affinity("Caverns", "Township", &profile, false), 1.0);
+        assert!(biome_affinity("Township", "Caverns", &profile, false) < 0.5);
 
         // An OBJECT slot must not be offered the tiling floor.
         let got: Vec<&str> = shortlist_entries(&entries, &tokenize_query("bone pile"), &idf, "cave", 1, 1, 8, false, &profile).iter().map(|e| e.rel_path.as_str()).collect();
@@ -3675,7 +3713,10 @@ mod tests {
             // Scenes: one on the universal folder and two on real biome
             // folders, because `biome_affinity` only has teeth on those.
             for scene in std::env::var("TILE_SCENES").unwrap_or_else(|_| "tavern,cavern".into()).split(',') {
-                let top = shortlist_entries(&man.entries, &tokens, &idf, scene, w, h, 3, false, &profile);
+                // Terrain admission has to match what production would do for
+                // this category, or a `TILE_CATEGORY=Textures` run reports
+                // "(none)" for every floor query — every texture IS terrain.
+                let top = shortlist_entries(&man.entries, &tokens, &idf, scene, w, h, 3, !is_object_slot(only.as_deref(), &profile), &profile);
                 let names: Vec<&str> = top.iter().map(|e| e.rel_path.rsplit('/').next().unwrap_or("")).collect();
                 out.push_str(&format!("{label} [{w}x{h}] @{scene} -> {}\n", if names.is_empty() { "(none)".into() } else { names.join(" | ") }));
             }

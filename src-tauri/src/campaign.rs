@@ -11297,4 +11297,77 @@ Tactics:
         assert!(s < f / 2, "body: full={f} streamlined={s} (legend {legend} discounted from both)");
         assert!(!streamlined.contains("Flooded Grotto"), "{streamlined}");
     }
+
+    /// Replays the REAL biome classifier — real `place_context`, real prompt,
+    /// real profile — over every map spec already sitting in the campaigns
+    /// folder, and prints one `campaign/slug<TAB>biome` line per map.
+    ///
+    /// Rendering a map to find out how it classified costs 200-420s of spec
+    /// generation before the classifier is even reached; this reaches it in
+    /// one text call, so a prompt change can be scored over ~70 real specs in
+    /// a couple of minutes instead of a night. Ignored because it needs the
+    /// live catalog AND spends subscription calls.
+    ///
+    /// `cargo test --lib classify_biome_over_the_real_map_corpus -- --ignored --nocapture`
+    ///   `MAP_CORPUS`  campaigns dir (default: the live one under APPDATA)
+    ///   `MAP_FILTER`  substring of `campaign/slug`, comma-separated alternatives
+    #[test]
+    #[ignore]
+    fn classify_biome_over_the_real_map_corpus() {
+        let appdata = PathBuf::from(std::env::var("APPDATA").unwrap());
+        let lib = appdata.join("com.nabil.dndsheet/tile_library");
+        let derived: crate::pack_profile::PackProfile =
+            serde_json::from_str(&fs::read_to_string(lib.join("pack_profile.json")).unwrap()).unwrap();
+        let corrections: crate::pack_profile::ProfileOverrides =
+            fs::read_to_string(lib.join("pack_profile_overrides.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let profile = derived.with_overrides(&corrections);
+
+        let root = std::env::var("MAP_CORPUS").map(PathBuf::from).unwrap_or_else(|_| appdata.join("com.nabil.dndsheet/campaigns"));
+        let filter = std::env::var("MAP_FILTER").unwrap_or_default();
+        let mut specs: Vec<(String, String)> = Vec::new();
+        for camp in fs::read_dir(&root).unwrap().filter_map(|e| e.ok()) {
+            let maps = camp.path().join("memory/battle_maps");
+            let Ok(entries) = fs::read_dir(&maps) else { continue };
+            for m in entries.filter_map(|e| e.ok()) {
+                let p = m.path();
+                if p.extension().is_none_or(|e| e != "md") || p.file_name().is_some_and(|f| f == "index.md") {
+                    continue;
+                }
+                let name = format!("{}/{}", camp.file_name().to_string_lossy(), p.file_stem().unwrap().to_string_lossy());
+                if !filter.is_empty() && !filter.split(',').any(|f| name.contains(f.trim())) {
+                    continue;
+                }
+                specs.push((name, fs::read_to_string(&p).unwrap()));
+            }
+        }
+        specs.sort_by(|a, b| a.0.cmp(&b.0));
+        eprintln!("{} specs", specs.len());
+
+        // Four at a time: these are cheap low-effort text calls, but they are
+        // still subscription calls and the point is a fast loop, not a flood.
+        let next = std::sync::Mutex::new(0usize);
+        let out = std::sync::Mutex::new(Vec::<(usize, String)>::new());
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| loop {
+                    let i = {
+                        let mut n = next.lock().unwrap();
+                        if *n >= specs.len() {
+                            return;
+                        }
+                        *n += 1;
+                        *n - 1
+                    };
+                    let biome = classify_biome(&profile, &specs[i].1);
+                    eprintln!("  [{}/{}] {}", i + 1, specs.len(), specs[i].0);
+                    out.lock().unwrap().push((i, format!("{}\t{biome}", specs[i].0)));
+                });
+            }
+        });
+        let mut rows = out.into_inner().unwrap();
+        rows.sort();
+        for (_, line) in rows {
+            println!("{line}");
+        }
+    }
 }
