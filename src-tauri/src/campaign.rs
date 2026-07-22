@@ -2438,6 +2438,20 @@ const DEPLOYMENT_RULE_LINE: &str = "- End with a `Deployment:` section: exactly 
         - `Party:` IS a zone, because the players choose their own squares inside it: at least 4 open, adjacent cells at a believable approach or entrance. If that approach is a doorway, that means the cells spreading INSIDE from it, not the door square itself. One cell is not a start zone — four or five miniatures cannot share a 5-ft square, and squeezing them onto a threshold makes every square beside it a chokepoint whether the map meant one or not.\n\
         - Deployment draws NO ONE — a creature never goes in the grid, Features, or Objects.\n";
 
+/// The map-SIZE rule, shared by both prompt variants. Its real job is the
+/// scaling clause: given only a size band the model picks one middling size for
+/// everything, so an epic forest and a broom closet came out the same ~14x13.
+/// This names which places are small and which are large. The bounds
+/// (`MAP_MIN_*`..`MAP_MAX_*`) are set far apart precisely so this has somewhere
+/// to go; a bigger map costs the model row-counting accuracy (the `repair_grid`
+/// backstop catches ragged rows) and some resolve time, which is why it is
+/// spent only where the fiction is genuinely open.
+fn battle_map_size_rule() -> String {
+    format!(
+        "- Size the map BETWEEN {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}, SCALED TO THE PLACE — do not default to one middling size for everything. An enclosed or cramped interior (a room, a cellar, a single cavern chamber, a hut, a narrow tunnel) is SMALL, near {MAP_MIN_COLS}x{MAP_MIN_ROWS}. A wide-open place (a forest, a clearing, a field, a moor, a plaza, a large courtyard, a broad cavern) is LARGE, toward {MAP_MAX_COLS}x{MAP_MAX_ROWS}, so there is room to move and for a treeline or terrain to sit around the fight. Most scenes fall in between. The `Grid:` line's <cols>x<rows> MUST equal the block you actually draw — count every row before you answer."
+    )
+}
+
 /// The streamlined prompt for a local model: one worked example instead of
 /// two, and only the mechanically-load-bearing rules (the ones
 /// validate_map_spec actually checks) — the qualitative layout advice
@@ -2463,7 +2477,7 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         - <cover, choke points, sightlines>\n\
         {DEPLOYMENT_FORMAT_LINE}\n\
         Rules — count carefully, a mistake gets the map rejected:\n\
-        - Size between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}. The `Grid:` line MUST match the block you actually draw — count every row before you answer.\n\
+        {size_rule}\n\
         - EVERY row must be the exact same number of characters as every other row.\n\
         - Enclose the room with `#` walls; a space is outside the map.\n\
         - A STRUCTURE standing in an outdoor scene is built with `B`, not `#`. Outdoors, `#` is drawn as the living rock or earth of the landscape itself, so a hut, cabin, watchtower, shrine, palisade or outbuilding drawn with `#` dissolves into the terrain — live: a witch's stilt-house in a swamp rendered as a patch of bog, walls and doorways and all. `B` is timber/plank/masonry someone ERECTED, and a `+` door set into it reads as a real door. Indoors (a tavern, a castle, a mine) `#` is already masonry, so `B` is not needed there.\n\
@@ -2497,6 +2511,7 @@ fn battle_map_format_instructions_streamlined(objects_enabled: bool, vocabulary:
         {MAP_SPEC_DELIMITER}\n\n\
         Draw a DIFFERENT room for THIS encounter — do not just copy that grid. Only draw a bar or tables if the encounter actually has them; a cave or tower would have none of that.\n\n\
         Output nothing outside the sections shown.",
+        size_rule = battle_map_size_rule(),
         example_grid = EXAMPLE_MAP_GRID.join("\n")
     )
 }
@@ -2519,7 +2534,7 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - <choke points, cover, and sightlines, referencing cells like C3 or K1>\n\
         {DEPLOYMENT_FORMAT_LINE}\n\
         Rules for the Map block — these are checked mechanically and a violation gets the map rejected:\n\
-        - Size it between {MAP_MIN_COLS}x{MAP_MIN_ROWS} and {MAP_MAX_COLS}x{MAP_MAX_ROWS}, and the `Grid:` line's <cols>x<rows> MUST equal the block you actually draw.\n\
+        {size_rule}\n\
         - EVERY row must be exactly <cols> characters wide — count them. Ragged rows are the single most common failure.\n\
         - Enclose the playable area with `#` walls; use a space for anything outside it.\n\
         - A STRUCTURE standing in an outdoor scene is built with `B`, not `#`. Outdoors, `#` is drawn as the living rock or earth of the landscape itself, so a hut, cabin, watchtower, shrine, palisade or outbuilding drawn with `#` dissolves into the terrain — live: a witch's stilt-house in a swamp rendered as a patch of bog, walls and doorways and all. `B` is timber/plank/masonry someone ERECTED, and a `+` door set into it reads as a real door. Indoors (a tavern, a castle, a mine) `#` is already masonry, so `B` is not needed there.\n\
@@ -2602,6 +2617,7 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         // line-continuation escapes, but indentation inside an interpolated
         // value is not — padding here would put leading spaces on every grid
         // row and the model would learn a grid that doesn't parse.
+        size_rule = battle_map_size_rule(),
         example_grid = EXAMPLE_MAP_GRID.join("\n"),
         example_cave_grid = EXAMPLE_CAVE_GRID.join("\n")
     )
@@ -2724,10 +2740,18 @@ fn feature_line_names_furniture(line: &str) -> bool {
 // the half-the-floor-stays-open rule it produced cavernous, empty-reading maps.
 // This range stays deliberately on the generous side of the guidance (the min
 // is already "large") while cutting the barn-sized upper end roughly in half.
-const MAP_MIN_COLS: usize = 10;
-const MAP_MIN_ROWS: usize = 10;
-const MAP_MAX_COLS: usize = 16;
-const MAP_MAX_ROWS: usize = 14;
+// The map's size is scaled to the SCENE, not fixed — the prompt's sizing rule
+// (see `battle_map_size_rule`) tells the model to draw an enclosed interior
+// small (near the minimum) and a wide-open outdoor place large (toward the
+// maximum). So the band is deliberately wide: a cramped cavern chamber at 9x9
+// and a forest clearing or field at 24x20 are BOTH right for what they depict.
+// This reverses the earlier blanket 16x14 cap (which read the DM guides'
+// "12x12 is huge" as a hard ceiling); Nabil's call 2026-07-22 — a huge place
+// should feel huge, an enclosed one cramped, and one size for both was wrong.
+const MAP_MIN_COLS: usize = 9;
+const MAP_MIN_ROWS: usize = 9;
+const MAP_MAX_COLS: usize = 24;
+const MAP_MAX_ROWS: usize = 20;
 /// How many extra attempts `generate_one_map_spec` gets after the first, each
 /// fed the concrete errors from the one before. Bounded rather than "until
 /// clean" — this is a real network call each time, and the caller needs a
@@ -8298,11 +8322,16 @@ Tactics:
         assert!(p.contains("alcove") || p.contains("jog"), "full prompt must push an irregular outer wall: {p}");
     }
 
-    /// Battlefield sizing: the guides top out around 12x12 "huge", so the cap
-    /// stays generous but must not drift back to the old barn-sized 24x18.
+    /// Battlefield sizing is now SCALED TO THE SCENE (`battle_map_size_rule`):
+    /// small enclosed interiors, large open outdoor places. So the band is wide
+    /// on purpose — but still bounded, because past ~24x20 the model loses
+    /// row-counting accuracy and a fight sprawls past where minis can reach in a
+    /// few turns. This guards the outer ceiling, not a blanket cap; raising it
+    /// further is a deliberate decision, not something to let drift.
     #[test]
     fn map_size_cap_stays_within_a_playable_battlefield() {
-        assert!(MAP_MAX_COLS <= 16 && MAP_MAX_ROWS <= 14, "map cap drifted back up: {MAP_MAX_COLS}x{MAP_MAX_ROWS}");
+        assert!(MAP_MAX_COLS <= 24 && MAP_MAX_ROWS <= 20, "map cap drifted past the playable ceiling: {MAP_MAX_COLS}x{MAP_MAX_ROWS}");
+        assert!(MAP_MIN_COLS >= 8, "floor too small to deploy a party and enemies: {MAP_MIN_COLS}x{MAP_MIN_ROWS}");
         assert!(MAP_MIN_COLS <= MAP_MAX_COLS && MAP_MIN_ROWS <= MAP_MAX_ROWS);
     }
 
