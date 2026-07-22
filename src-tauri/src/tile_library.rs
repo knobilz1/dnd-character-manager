@@ -1044,14 +1044,38 @@ fn same_word(a: &str, b: &str) -> bool {
 /// what the pack draws. With nothing to answer the label, a town market's four
 /// stalls resolved to `Fountain_Spill_Metal_Gold/Bronze_Tall`, so the square
 /// filled with metal fountains and 572 awnings went unreached.
-const SYNONYMS: &[(&str, &str)] =
-    &[("pillar", "column"), ("hearth", "fireplace"), ("iron", "metal"), ("stall", "awning")];
+/// The third field is `merges`: whether BOTH words are live vocabulary in the
+/// pack. Measured 2026-07-22 — this is not a judgement call, it's a count:
+///   hearth 0 tiles / fireplace 349    translation
+///   stall  0 tiles / awning    572    translation
+///   iron  50 tiles, every one a false friend (ironwood, laundry irons, an
+///         iron maiden) / metal        translation
+///   pillar 4,850 tiles / column 40    MERGE — the pack stocks both, for
+///                                     different art
+/// A translation renames a word the pack cannot answer, so counting it as the
+/// tile's own word costs nothing: no rival tile was going to answer `hearth`
+/// literally. A MERGE joins two populated vocabularies, and there counting it
+/// hands the joined tile a coverage point its rival earned literally — see
+/// `shortlist_rank`, where only `pillar`/`column` is held back.
+const SYNONYMS: &[(&str, &str, bool)] =
+    &[("pillar", "column", true), ("hearth", "fireplace", false), ("iron", "metal", false), ("stall", "awning", false)];
+
+/// The pair connecting `keyword` and `token`, if any.
+fn synonym_pair(keyword: &str, token: &str) -> Option<&'static (&'static str, &'static str, bool)> {
+    SYNONYMS
+        .iter()
+        .find(|(a, b, _)| (same_word(a, token) && same_word(b, keyword)) || (same_word(b, token) && same_word(a, keyword)))
+}
 
 fn token_matches(keyword: &str, token: &str) -> bool {
-    same_word(keyword, token)
-        || SYNONYMS
-            .iter()
-            .any(|(a, b)| (same_word(a, token) && same_word(b, keyword)) || (same_word(b, token) && same_word(a, keyword)))
+    same_word(keyword, token) || synonym_pair(keyword, token).is_some()
+}
+
+/// Whether this match is the keyword's OWN word — either literally, or through
+/// a synonym that merely renames something the pack doesn't stock. Only a
+/// coverage decision; scoring treats every synonym alike.
+fn answers_in_its_own_words(keyword: &str, token: &str) -> bool {
+    same_word(keyword, token) || synonym_pair(keyword, token).is_some_and(|(_, _, merges)| !merges)
 }
 
 /// Relevance of one catalog entry to a query. The LAST query token is the
@@ -1449,30 +1473,61 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
     let mut total = 0.0;
     let mut any = false;
     let mut coverage = 0;
+    let mut head_hit = false;
     for (i, t) in tokens.iter().enumerate() {
-        // Best (rarest) keyword matching this token, and whether it was exact.
-        let mut best: Option<(f64, bool)> = None;
+        // Best (rarest) keyword matching this token, whether that match was
+        // exact, and whether it was the keyword's OWN word rather than a
+        // declared synonym.
+        let mut best: Option<(f64, bool, bool)> = None;
         for k in &entry.keywords {
             let strict = token_matches(k, t);
             if !strict && !bridges(k, t) {
                 continue;
             }
             let w = idf.get(k.as_str()).copied().unwrap_or(1.0);
-            if best.map_or(true, |(bw, _)| w > bw) {
-                best = Some((w, strict));
+            if best.map_or(true, |(bw, _, _)| w > bw) {
+                best = Some((w, strict, answers_in_its_own_words(k, t)));
             }
         }
-        if let Some((w, strict)) = best {
+        if let Some((w, strict, literal)) = best {
             any = true;
-            // Only a STRICT match counts toward coverage. A bridge is a
+            // Only a LITERAL match counts toward coverage. A bridge is a
             // suffix/prefix coincidence as often as a real synonym, and
             // letting it buy coverage handed "driftwood pile" to
             // `Debris_Pile_Wood` (whose "wood" bridges "driftwood") over the
             // actual `Driftwood_Log`, and "dark mushroom" to an Underdark one.
-            if strict && !is_condition_word(t) {
+            //
+            // A MERGING synonym doesn't buy coverage either, though it still
+            // scores at full weight (see SYNONYMS for which pairs merge and
+            // why that is a measurement, not a judgement). Measured
+            // 2026-07-22: "Support pillar" drew `Ceremorph_Support_Column`
+            // (illithid) in EVERY scene — mine, foundry, tavern, cavern,
+            // horror — because `support` matched literally and `pillar`
+            // matched `column` through SYNONYMS, giving coverage 2 against
+            // `Pillar_Wood_Red`'s 1 for the literal `pillar`. Coverage sorts
+            // above biome affinity, so the 0.15x Astral penalty never got a
+            // vote. Live in both maps rendered that day: 5 columns down a
+            // dwarven mine, 6 across a foundry casting floor.
+            //
+            // Note what does NOT need this: "Iron support pillar" and "Stone
+            // pillar" were already correct, because their material word gives
+            // the right tile a literal match of its own and levels coverage.
+            // Only a pillar with no material word loses, which is exactly the
+            // case where affinity is the only signal left.
+            //
+            // Read off `best` (the rarest matching keyword) rather than "any
+            // keyword matched this literally", deliberately. The looser form
+            // was tried and reverted the same day: it also re-scored tiles
+            // carrying BOTH a bridge and a literal match for one token, which
+            // put `Underdark_Mushroom_Stalk_Dark` (literal `dark`, bridged
+            // `underdark`) at the head of "dark mushroom cluster" in taverns
+            // and forests — the exact live bug the bridge rule below was
+            // written to stop.
+            if literal && !is_condition_word(t) {
                 coverage += 1;
             }
             let is_head = i == tokens.len() - 1;
+            head_hit |= is_head;
             let head = if is_head { HEAD_MULT } else { 1.0 };
             total += w * head * if strict { 1.0 } else { BRIDGE_DISCOUNT };
             // An exact match on the head noun is the object's true identity —
@@ -1482,7 +1537,15 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
             }
         }
     }
-    any.then_some((coverage, total))
+    // A tile can reach here having answered the head noun through a SYNONYM
+    // alone, which buys no coverage above — but "covered none of the query" is
+    // then false, and a 0 sorts it below every literal match before affinity
+    // gets a vote. That is the containment this synonym was built with: on an
+    // illithid map a bare "Pillars" must still find the pack's own
+    // `Ceremorph_Support_Column`, and everywhere else the 0.15x Astral penalty
+    // must be what pushes it away. Floor coverage at 1 so the two are level and
+    // the biome decides.
+    any.then_some((coverage.max(u32::from(head_hit)), total))
 }
 
 fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf: &HashMap<String, f64>, scene: &str, fw: u32, fh: u32, k: usize, allow_terrain: bool, profile: &PackProfile) -> Vec<&'a TileLibraryEntry> {
@@ -3173,6 +3236,38 @@ mod tests {
         assert!(token_matches("table", "tables"));
         assert!(token_matches("wood", "wooden"));
         assert!(!token_matches("heart", "hearth"));
+    }
+
+    /// A MERGING synonym must not buy coverage, or the merged-in tile collects
+    /// a point its rival earned in the pack's own vocabulary — and coverage
+    /// sorts above biome affinity, so that one point silences the whole biome
+    /// dimension. Live 2026-07-22: "Support pillar" drew illithid columns in a
+    /// dwarven mine, a foundry, a tavern and a cavern alike.
+    #[test]
+    fn a_merging_synonym_earns_no_coverage_but_a_translating_one_does() {
+        let e = |kw: &[&str]| TileLibraryEntry {
+            root: "r".into(), rel_path: "p".into(), biome: "b".into(), category: "Structures".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(), w: 1, h: 1,
+        };
+        let idf = idf_map(&[("support", 5.0), ("column", 7.0), ("pillar", 2.0), ("metal", 2.0), ("bellow", 6.0), ("fireplace", 4.0), ("stone", 1.0)]);
+        let cov = |entry: &TileLibraryEntry, q: &str| shortlist_rank(entry, &tokenize_query(q), &idf).unwrap().0;
+
+        // pillar/column MERGES (the pack stocks 4,850 and 40): the column tile
+        // answers only "support" in its own words, levelling with the pillar.
+        assert_eq!(cov(&e(&["ceremorph", "support", "column"]), "support pillar"), 1);
+        assert_eq!(cov(&e(&["pillar", "wood", "red"]), "support pillar"), 1);
+        // iron/metal TRANSLATES (nothing in the pack is keyworded iron for
+        // being iron): the metal tile keeps both points, so a label naming the
+        // material still outranks one that doesn't.
+        assert_eq!(cov(&e(&["bellow", "metal", "gray"]), "iron bellow"), 2);
+        assert_eq!(cov(&e(&["bellows", "wood", "dark"]), "iron bellow"), 1);
+        // hearth/fireplace likewise — `hearth` matches 0 tiles, so there is no
+        // rival for the point to be unfair to.
+        assert_eq!(cov(&e(&["fireplace", "stone"]), "stone hearth"), 2);
+        // And a merging synonym still MATCHES; it just doesn't score coverage.
+        assert!(token_matches("column", "pillar"));
+        assert!(!answers_in_its_own_words("column", "pillar"));
+        assert!(answers_in_its_own_words("metal", "iron"));
     }
 
     /// The synonym must reach the Ceremorph columns on an illithid map WITHOUT
