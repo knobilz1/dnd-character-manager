@@ -1580,6 +1580,13 @@ pub struct TileCandidate {
     pub w: u32,
     pub h: u32,
     pub data_url: String,
+    /// The pack biome folder this tile came from. Carried through so a caller
+    /// spreading picks across a shortlist can keep them from ONE biome — see
+    /// the field variety pool in campaign.rs. Read from the profile-derived
+    /// entry rather than re-parsed out of `rel_path`, because deriving layout
+    /// from paths is `pack_profile`'s job and doing it twice is how the two
+    /// answers drift apart.
+    pub biome: String,
     /// What this tile IS, with overrides and the audit already applied — so
     /// callers never need to know whether it came from the manifest or from
     /// decoding the bytes just now.
@@ -1692,7 +1699,7 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
                 return None;
             }
             let luminance = audited.map(|m| m.lum as f64).or(signals.map(|s| s.luminance));
-            Some(TileCandidate { root: e.root.clone(), rel_path: e.rel_path.clone(), w: e.w, h: e.h, data_url, kind, luminance })
+            Some(TileCandidate { root: e.root.clone(), rel_path: e.rel_path.clone(), w: e.w, h: e.h, data_url, biome: e.biome.clone(), kind, luminance })
         })
         .take(k)
         .collect()

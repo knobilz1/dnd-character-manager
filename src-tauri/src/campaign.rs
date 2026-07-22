@@ -4140,7 +4140,23 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         // biome (both it and real trees are on-biome), so it ranks just below
         // the real ones — cycling the whole shortlist occasionally stamped one.
         // The ranking's top handful are the genuine varied trees.
-        let pool = cands.len().min(FIELD_VARIETY_POOL);
+        // …and vary only WITHIN one biome. When the scene's own biome stocks
+        // nothing for the glyph, every candidate is off-biome and
+        // `biome_affinity` demotes them all by the same 0.15x, so it cannot
+        // separate an off-biome tile that still looks right from one that looks
+        // absurd — the ranking's own order is the only signal left, and fanning
+        // out across it samples whatever landed at rank 4 and 5.
+        //
+        // Live 2026-07-22: the pack's Swamp folder is 92 lilypads and 24
+        // cattails — no tree, no moss, nothing woody at all — so a bog's 15
+        // "Dead moss-draped trees" reached cross-biome. Ranks 1-3 were fine
+        // (`Fir_Tree_Stump`, `Palm_Tree_Trunk_Dry`), but the spread also pulled
+        // Feywilds canopies, and the marsh came out dotted with fuchsia, cyan
+        // and teal trees. Holding the pool to the top pick's own biome keeps
+        // the substitution at least internally consistent — the same reasoning
+        // as the identical-label rule for `=` furnishings below.
+        let home = cands[0].biome.clone();
+        let pool = cands.iter().take(FIELD_VARIETY_POOL).take_while(|c| c.biome == home).count().max(1);
         // Deterministic per-cell spread so a Green/Red/Yellow mix repeats
         // stably across re-renders but neighbours differ.
         let (c, r) = p.cells[0];
@@ -8106,7 +8122,7 @@ Tactics:
     #[test]
     fn vision_message_asks_for_variety_across_repeated_slots() {
         let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: None };
-        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None };
+        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None };
         let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
         assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
     }
