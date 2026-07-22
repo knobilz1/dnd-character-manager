@@ -900,6 +900,38 @@ const CONDITION_WORDS: &[&str] = &[
     "christmas", "gingerbread", "candy", "gift",
 ];
 
+/// PART-WORDS DO NOT BELONG IN `CONDITION_WORDS` — tried and reverted
+/// 2026-07-22, recorded so it isn't retried.
+///
+/// The problem is real: measured across three biomes in one round, a desert's
+/// palms drew `Palm_Tree_Frond` slivers, a jungle's 27 canopy cells drew
+/// `Palm_Tree_Trunk` (fallen logs, read from above as brown coils) and an
+/// arctic treeline drew `Arctic_Fir_Tree_Stump_Snow`. A canopy of stumps is
+/// not a canopy.
+///
+/// But adding "stump"/"trunk"/"frond"/"branch"/"leaf" here regressed
+/// "fallen branch pile" to NOTHING, because `has_identity_match` strips
+/// condition words unconditionally — not just when the query didn't ask for
+/// them. So a word placed here stops being usable as an identity noun even in
+/// a label that names it outright: `[fallen, branch, pile]` reduces to
+/// `[pile]`, `Branch_Wood_Dark` carries no `pile` keyword, and the shortlist
+/// empties. Every word already in the list above is a pure qualifier
+/// ("fallen", "broken", "christmas"); these are plausible HEAD NOUNS, which is
+/// the difference.
+///
+/// Two further findings for whoever picks this up, both measured:
+///   * The stock decides what is even fixable. Desert carries 66 whole tree
+///     tiles at 1x1 against 120 parts, so there the whole tree exists and is
+///     merely outranked. Jungle's whole palms start at 4x5, so its trunks are
+///     a catalog limit no ranking change can touch.
+///   * Demotion could not have fixed the desert anyway: its whole 1x1 trees
+///     are cacti and yuccas matching only "tree" (coverage 1) against
+///     `Palm_Tree_Trunk` matching "palm"+"tree" (coverage 2), and coverage
+///     sorts above the score the demotion scales. A real fix has to address
+///     coverage-dominance, or pick the search size by glyph density so a
+///     sparse treeline asks for whole-tree footprints in the first place.
+const _PART_WORDS_ARE_NOT_CONDITION_WORDS: () = ();
+
 /// How hard an entry is demoted per unrequested condition word it carries.
 const CONDITION_PENALTY: f64 = 0.25;
 
