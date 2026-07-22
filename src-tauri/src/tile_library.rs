@@ -1680,11 +1680,24 @@ const SAMPLE_OBJECT_NAMES: usize = 8;
 
 /// Mean luminance for one tile: the audit's stored measurement when there is
 /// one, otherwise decoded now. `None` when the file can't be read.
+/// A compositing layer has no meaningful luminance as GROUND evidence, so it
+/// reports none — the profiler is being asked "is this material bright enough
+/// to place minis on", and a drop shadow or a grunge pass is not the material.
+///
+/// This matters because `art_signals` now REPORTS a fully-transparent tile
+/// (luminance 0.0) where it used to return `None` and be skipped here. 1,110
+/// unmeasured entries sit inside terrain categories — 42 in `Textures` and 15
+/// of the 28 `Texture_Overlays` — so without this a sampled overlay would drag
+/// a ground word's mean luminance toward zero and the profiler would reject a
+/// perfectly good floor as too dark to read minis on.
 fn tile_luminance(e: &TileLibraryEntry, measured: &HashMap<String, MeasuredArt>) -> Option<f64> {
     if let Some(m) = measured.get(&e.rel_path) {
-        return Some(m.lum as f64);
+        return (m.kind != ArtKind::Overlay).then_some(m.lum as f64);
     }
-    load_tile_art(&e.root, &e.rel_path).and_then(|(_, s)| s).map(|s| s.luminance)
+    load_tile_art(&e.root, &e.rel_path)
+        .and_then(|(_, s)| s)
+        .filter(|s| s.kind() != ArtKind::Overlay)
+        .map(|s| s.luminance)
 }
 
 /// What the profiler is shown about one biome. The ground candidates carry
@@ -3069,6 +3082,32 @@ mod tests {
         let mut oversized = entries.clone();
         oversized.push(TileLibraryEntry { w: 5, h: 5, ..e("Flora", &["pine", "shadow"]) });
         assert_eq!(modal_category(&oversized, &profile, "pine"), Some("Flora"));
+    }
+
+    /// A compositing layer must not count as ground evidence. `art_signals`
+    /// now REPORTS a fully-transparent tile at luminance 0 where it used to
+    /// return None and be skipped — and 1,110 unmeasured entries sit inside
+    /// terrain categories, including 15 of the 28 `Texture_Overlays`, so one
+    /// sampled overlay could drag a ground word's mean toward zero and get a
+    /// good floor rejected as too dark.
+    #[test]
+    fn an_overlay_contributes_no_ground_luminance() {
+        let e = |p: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: p.into(),
+            biome: "Woodlands".into(),
+            category: "Textures".into(),
+            keywords: vec!["grass".into()],
+            w: 1,
+            h: 1,
+        };
+        let m = |kind: ArtKind, lum: u8| MeasuredArt { kind, lum };
+        let measured: HashMap<String, MeasuredArt> =
+            [("real".to_string(), m(ArtKind::Ground, 120)), ("layer".to_string(), m(ArtKind::Overlay, 0))].into_iter().collect();
+        assert_eq!(tile_luminance(&e("real"), &measured), Some(120.0));
+        assert_eq!(tile_luminance(&e("layer"), &measured), None, "an overlay is not the material being judged");
+        // Unreadable/absent art still says nothing rather than guessing.
+        assert_eq!(tile_luminance(&e("missing-from-disk"), &measured), None);
     }
 
     /// The measurement filter must stay ON for a categorised OBJECT slot. It
