@@ -2129,6 +2129,38 @@ pub fn label_names_its_own_object(app: &AppHandle, label: &str, noun: &str) -> b
     }
 }
 
+/// Names any category the profiler put in NEITHER list, with its tile count.
+///
+/// Nothing is reclassified on its behalf, on measurement: `is_object_category`
+/// gates only the footprint guide and the object vocabulary — both prompt-side,
+/// so an unclassified category is still fully reachable by an object slot — and
+/// forcing this pack's `Structures` (57,496 tiles, 31% of the catalog) into the
+/// object list is a NET LOSS, evicting `bookshelf`, `oven`, `longsword` and
+/// `ballista` from the 40-slot guide for `awning`, `corrugated`, `pergola` and
+/// `support`. What was wrong was that it happened SILENTLY: on another pack the
+/// forgotten category could be Furniture, and nothing would say so.
+fn log_unclassified_categories(entries: &[TileLibraryEntry], profile: &PackProfile) {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for e in entries.iter().filter(|e| !profile.is_object_category(&e.category) && !profile.is_terrain_category(&e.category)) {
+        *counts.entry(e.category.as_str()).or_insert(0) += 1;
+    }
+    if counts.is_empty() {
+        return;
+    }
+    let mut rows: Vec<(&str, usize)> = counts.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    let total: usize = rows.iter().map(|(_, n)| n).sum();
+    crate::maplog::log(
+        "PACK PROFILE — categories in neither list",
+        &format!(
+            "{} categor(ies), {total} tile(s) — reachable by object slots, but absent from the map prompt's \
+             footprint guide and object vocabulary, so the model is never told these nouns exist:\n{}",
+            rows.len(),
+            rows.iter().map(|(c, n)| format!("  {n:>7}  {c}")).collect::<Vec<_>>().join("\n")
+        ),
+    );
+}
+
 /// Every distinct category name in the catalog, most common first.
 fn all_categories(entries: &[TileLibraryEntry]) -> Vec<String> {
     let mut counts: HashMap<&str, usize> = HashMap::new();
@@ -2209,6 +2241,7 @@ pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     let derived = carry_forward_settled_answers(&saved, derived, &entries, &manifest.measured);
+    log_unclassified_categories(&entries, &derived);
     // Same discipline as the layout pass: check the answer against the files
     // before trusting it. Runs LAST so a carried-forward query still has to
     // exist in the catalog this run scanned. See prune_unbacked_grounds.
@@ -3082,6 +3115,33 @@ mod tests {
         let mut oversized = entries.clone();
         oversized.push(TileLibraryEntry { w: 5, h: 5, ..e("Flora", &["pine", "shadow"]) });
         assert_eq!(modal_category(&oversized, &profile, "pine"), Some("Flora"));
+    }
+
+    /// A category the profiler forgets is invisible to the map prompt but still
+    /// reachable by object slots — a half-state that said nothing. On this pack
+    /// it is `Structures`, 31% of the catalog.
+    #[test]
+    fn an_unclassified_category_is_named_not_silently_reclassified() {
+        let e = |cat: &str| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: format!("x/{cat}.webp"),
+            biome: "b".into(),
+            category: cat.into(),
+            keywords: vec!["x".into()],
+            w: 1,
+            h: 1,
+        };
+        let entries = vec![e("Furniture"), e("Textures"), e("Structures"), e("Structures")];
+        let p = PackProfile {
+            object_categories: vec!["Furniture".into()],
+            terrain_categories: vec!["Textures".into()],
+            ..PackProfile::default()
+        };
+        // The point is that it stays reachable — this must NOT reclassify it.
+        assert!(!p.is_object_category("Structures"));
+        assert!(!p.is_terrain_category("Structures"), "still placeable by an object slot");
+        assert!(is_object_slot(Some("Structures"), &p), "and still measured like one");
+        log_unclassified_categories(&entries, &p); // writes the maplog line; must not panic
     }
 
     /// A compositing layer must not count as ground evidence. `art_signals`
