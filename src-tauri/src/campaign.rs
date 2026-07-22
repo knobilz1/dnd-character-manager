@@ -3861,10 +3861,17 @@ fn biome_ids(profile: &PackProfile) -> Vec<&str> {
 /// natural cave that happened to be ambushed by drow classified as `drow` and
 /// rendered with dressed masonry walls and a drow-tiled floor.
 ///
-/// The grid is dropped because every wall row starts with `#`, which the old
-/// filter also swept in — the doc comment claimed the grid was excluded while
-/// the code fed it in whole. Map codes carry no biome signal the captions
-/// don't carry better.
+/// The raw grid is still dropped — every wall row starts with `#`, which the
+/// old filter swept in, and rows of punctuation are not something to reason
+/// over. But a COUNT of its terrain is added, because the claim this comment
+/// used to make ("map codes carry no biome signal the captions don't carry
+/// better") turned out to be false. Live 2026-07-22: a jungle temple's
+/// captions were "carved archway", "standing stone columns", "fallen masonry",
+/// "fallen column rubble" — honestly read, a ruined stone temple, and it
+/// classified as `dungeon` and rendered with autumn Woodlands trees on a
+/// built-in floor. Meanwhile 42 of its ~180 squares were standing vegetation.
+/// The captions describe what someone BUILT there; the grid says what the
+/// place is now covered in, and for an overgrown ruin those disagree.
 fn place_context(spec: &str) -> String {
     let mut out: Vec<&str> = Vec::new();
     let mut in_place = false;
@@ -3884,7 +3891,67 @@ fn place_context(spec: &str) -> String {
             in_place = false;
         }
     }
+    let census = grid_census(spec);
+    if !census.is_empty() {
+        out.push(&census);
+    }
     out.join("\n")
+}
+
+/// One sentence naming how much of the drawn grid is each kind of TERRAIN, for
+/// `place_context`. Only the codes that say something about the setting are
+/// counted — vegetation, liquid, sand, rubble, chasm — plus whether the walls
+/// were drawn as living rock (`#`) or as something erected (`B`). Furniture,
+/// doors, pillars and fires are left out: they say who furnished the place,
+/// which is the caption's job and is exactly the signal that made an ambushed
+/// cave classify as `drow`.
+///
+/// Phrased as counts of squares rather than as the codes themselves, so the
+/// classifier reads terrain rather than punctuation.
+fn grid_census(spec: &str) -> String {
+    let mut counts: HashMap<char, usize> = HashMap::new();
+    let mut in_grid = false;
+    let mut total = 0usize;
+    for line in spec.lines() {
+        let t = line.trim_end();
+        if t.trim() == "Map:" {
+            in_grid = true;
+            continue;
+        }
+        if !in_grid {
+            continue;
+        }
+        // Section headers end the grid. A blank line does not — the grid may
+        // legitimately contain rows that are entirely void.
+        if t.trim().ends_with(':') && !t.trim().is_empty() {
+            break;
+        }
+        for ch in t.chars().filter(|c| !c.is_whitespace()) {
+            *counts.entry(ch).or_default() += 1;
+            total += 1;
+        }
+    }
+    if total == 0 {
+        return String::new();
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for (code, what) in [('T', "standing vegetation"), ('~', "standing liquid"), (',', "loose sand"), ('^', "stony rubble"), ('%', "open chasm")] {
+        if let Some(n) = counts.get(&code).filter(|n| **n > 0) {
+            parts.push(format!("{n} {what}"));
+        }
+    }
+    let (rock, built) = (counts.get(&'#').copied().unwrap_or(0), counts.get(&'B').copied().unwrap_or(0));
+    if rock > 0 || built > 0 {
+        parts.push(match (rock > 0, built > 0) {
+            (true, true) => format!("{rock} living-rock or masonry wall and {built} erected structure wall"),
+            (true, false) => format!("{rock} living-rock or masonry wall"),
+            _ => format!("{built} erected structure wall"),
+        });
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!("Of the {total} squares drawn, {} — the rest is open floor.", parts.join(", "))
 }
 
 /// Each scene word with the pack folder it draws from, e.g.
@@ -7271,10 +7338,13 @@ Tactics:
             "Bone Chamber of the Underdark\n\
              - Stalagmite at D3\n\
              - Glowing mushroom cluster at G3-H3\n\
-             - bleached bone skull pile at I4 (2x2)"
+             - bleached bone skull pile at I4 (2x2)\n\
+             Of the 42 squares drawn, 2 standing vegetation, 28 living-rock or masonry wall — the rest is open floor."
         );
         // The two things the old filter leaked, named explicitly so a future
-        // refactor can't quietly re-admit them.
+        // refactor can't quietly re-admit them. The census counts the SAME grid
+        // the second assertion forbids, which is the point: terrain reaches the
+        // classifier as a number of squares, never as rows of punctuation.
         assert!(!ctx.contains("Drow"), "Tactics names the occupants: {ctx}");
         assert!(!ctx.contains('#'), "wall rows start with '#' and must not reach the classifier: {ctx}");
     }
