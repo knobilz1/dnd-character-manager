@@ -22,7 +22,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -1057,8 +1057,36 @@ fn same_word(a: &str, b: &str) -> bool {
 /// literally. A MERGE joins two populated vocabularies, and there counting it
 /// hands the joined tile a coverage point its rival earned literally — see
 /// `shortlist_rank`, where only `pillar`/`column` is held back.
-const SYNONYMS: &[(&str, &str, bool)] =
-    &[("pillar", "column", true), ("hearth", "fireplace", false), ("iron", "metal", false), ("stall", "awning", false)];
+/// The last two came from the automated audit rather than from a rendered map
+/// (`vocabulary_misses_over_the_real_map_corpus`, 2026-07-22): across 83 saved
+/// maps and 2,639 labels, exactly 26 were headed by a word no tile carries,
+/// and these were the only recurring ones with a target specific enough to
+/// point at.
+///   buttress 0 tiles, asked 4x -> pillar    4,850
+///   dais     0 tiles, asked 1x -> platform    556
+///
+/// THE TARGET MUST BE A THING, NOT A MATERIAL. `masonry` (0 tiles, asked 5x)
+/// looked like the best candidate of the lot and was tried and dropped the
+/// same hour: pointed at `stone` it inherits 24,651 tiles, no one of which the
+/// query prefers, so the tiebreak decides — "Masonry" resolved to
+/// `Sending_Stones_A1`, a magic item, and "Fallen masonry" to a fallen stone
+/// BENCH. With no synonym it resolves to nothing and draws the built-in glyph,
+/// which is the honest answer and the better one. (`iron`/`metal` is not a
+/// counter-example: `iron` is always a modifier, so it adds coverage to a tile
+/// some other word already identified, and never picks the object itself.)
+///
+/// Also deliberately absent: `counter` (6x — a bar counter and a shop counter
+/// want different art, so the prompt asks the model to rename instead), and
+/// the one-offs `ale`, `spur`, `crockery`, `vessel`, `sac`, `lolth`, which the
+/// pack simply does not stock.
+const SYNONYMS: &[(&str, &str, bool)] = &[
+    ("pillar", "column", true),
+    ("hearth", "fireplace", false),
+    ("iron", "metal", false),
+    ("stall", "awning", false),
+    ("buttress", "pillar", false),
+    ("dais", "platform", false),
+];
 
 /// The pair connecting `keyword` and `token`, if any.
 fn synonym_pair(keyword: &str, token: &str) -> Option<&'static (&'static str, &'static str, bool)> {
@@ -1548,8 +1576,64 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
     any.then_some((coverage.max(u32::from(head_hit)), total))
 }
 
+/// Query words this catalog has no keyword for at all, counted across one
+/// map's resolution. Drained and logged by `resolve_map_tiles`.
+///
+/// Every vocabulary bug found so far was found the slow way — generate a map,
+/// render it, notice the art is absurd, then go count keywords by hand. All
+/// four were the same shape: the DM wrote a perfectly ordinary English noun
+/// the pack has never heard of, so the query fell through to whatever the
+/// remaining words matched. `hearth` (0 tiles, the pack files 349 under
+/// `fireplace`), `stall` (0, it draws 572 `awning`), `counter` (0, so "Shop
+/// counter" drew a hanging shop SIGN), `timber` (0, the pack says `wood`).
+///
+/// That check needs no model and no rendering: the answer is already sitting
+/// in the IDF map, which is keyword -> rarity over the whole catalog and so IS
+/// the pack's vocabulary — 2,616 words against 183,190 tiles, so this is a
+/// scan of thousands, not hundreds of thousands.
+static UNANSWERED: Mutex<BTreeMap<String, (usize, bool)>> = Mutex::new(BTreeMap::new());
+
+/// Count any query word the catalog's whole vocabulary can't answer. `bool` is
+/// "was it ever the HEAD noun" — a modifier the pack lacks (`timber`,
+/// `scorched`) costs a little precision, but a head noun it lacks means the
+/// thing being placed has no name here, and the pick is a guess off the
+/// remaining words.
+fn note_unanswered_words(tokens: &[String], idf: &HashMap<String, f64>) {
+    for (i, t) in tokens.iter().enumerate() {
+        if idf.keys().any(|k| token_matches(k, t) || bridges(k, t)) {
+            continue;
+        }
+        let mut seen = UNANSWERED.lock().unwrap();
+        let e = seen.entry(t.clone()).or_insert((0, false));
+        e.0 += 1;
+        e.1 |= i == tokens.len() - 1;
+    }
+}
+
+/// Take and clear what `note_unanswered_words` has collected:
+/// `(word, times asked, was ever a head noun)`, rarest-first by name.
+pub fn drain_unanswered_words() -> Vec<(String, usize, bool)> {
+    std::mem::take(&mut *UNANSWERED.lock().unwrap()).into_iter().map(|(w, (n, head))| (w, n, head)).collect()
+}
+
+/// The same check run over a batch of labels against a manifest on disk, for
+/// auditing a whole corpus of already-written maps at once instead of learning
+/// one map at a time. Uses the real tokenizer and the real vocabulary test, so
+/// it cannot drift from what generation actually does.
+pub fn audit_vocabulary_at(manifest_path: &Path, labels: &[String]) -> Vec<(String, usize, bool)> {
+    let Ok(text) = fs::read_to_string(manifest_path) else { return Vec::new() };
+    let Ok(manifest) = serde_json::from_str::<TileLibraryManifest>(&text) else { return Vec::new() };
+    let idf = compute_idf(&manifest.entries);
+    drain_unanswered_words(); // discard anything a caller left behind
+    for l in labels {
+        note_unanswered_words(&tokenize_query(l), &idf);
+    }
+    drain_unanswered_words()
+}
+
 fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf: &HashMap<String, f64>, scene: &str, fw: u32, fh: u32, k: usize, allow_terrain: bool, profile: &PackProfile) -> Vec<&'a TileLibraryEntry> {
     let want = scene_biome(scene, profile);
+    note_unanswered_words(tokens, idf);
     // Keep only tiles that match a word actually NAMING the object. If nothing
     // does, the shortlist is deliberately EMPTY so the caller falls back to the
     // built-in glyph — better to draw the plain sprite than to confidently

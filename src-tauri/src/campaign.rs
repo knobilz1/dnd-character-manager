@@ -4423,6 +4423,24 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             resolved.objects.iter().map(|o| format!("  {}", basename(&o.rel_path))).collect::<Vec<_>>().join("\n"),
         ),
     );
+    // Every vocabulary bug so far cost a generate-render-squint cycle to find,
+    // and each one was mechanically detectable the whole time. Say it out loud.
+    let unanswered = crate::tile_library::drain_unanswered_words();
+    if !unanswered.is_empty() {
+        let (heads, mods): (Vec<_>, Vec<_>) = unanswered.iter().partition(|(_, _, head)| *head);
+        let list = |v: &[&(String, usize, bool)]| v.iter().map(|(w, n, _)| if *n > 1 { format!("{w} (x{n})") } else { w.clone() }).collect::<Vec<_>>().join(", ");
+        crate::maplog::log(
+            "VOCABULARY MISSES",
+            &format!(
+                "{slug}: words this map asked for that NO tile in the catalog carries.\n\
+                 as the head noun (serious — the thing placed has no name here, so the pick is a \
+                 guess off the remaining words): {}\n\
+                 as a modifier (costs precision only): {}",
+                if heads.is_empty() { "none".into() } else { list(&heads) },
+                if mods.is_empty() { "none".into() } else { list(&mods) },
+            ),
+        );
+    }
     Ok(())
 }
 
@@ -11320,6 +11338,43 @@ Tactics:
         let (f, s) = (full.len() - legend, streamlined.len() - legend);
         assert!(s < f / 2, "body: full={f} streamlined={s} (legend {legend} discounted from both)");
         assert!(!streamlined.contains("Flooded Grotto"), "{streamlined}");
+    }
+
+    /// Every label in every saved map, checked against the catalog's whole
+    /// vocabulary — how much of what the DM writes the pack cannot answer.
+    /// Needs the live library, spends nothing (no model calls at all).
+    ///
+    /// `cargo test --lib vocabulary_misses_over_the_real_map_corpus -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn vocabulary_misses_over_the_real_map_corpus() {
+        let appdata = PathBuf::from(std::env::var("APPDATA").unwrap());
+        let root = std::env::var("MAP_CORPUS").map(PathBuf::from).unwrap_or_else(|_| appdata.join("com.nabil.dndsheet/campaigns"));
+        let mut labels: Vec<String> = Vec::new();
+        let mut maps = 0;
+        for camp in fs::read_dir(&root).unwrap().filter_map(|e| e.ok()) {
+            let Ok(entries) = fs::read_dir(camp.path().join("memory/battle_maps")) else { continue };
+            for m in entries.filter_map(|e| e.ok()).map(|e| e.path()) {
+                if m.extension().is_none_or(|e| e != "md") || m.file_name().is_some_and(|f| f == "index.md") {
+                    continue;
+                }
+                maps += 1;
+                // The REAL parser, so this measures what generation would ask.
+                labels.extend(parse_placements(&fs::read_to_string(&m).unwrap()).into_iter().map(|p| p.label));
+            }
+        }
+        let misses = crate::tile_library::audit_vocabulary_at(&appdata.join("com.nabil.dndsheet/tile_library/manifest.json"), &labels);
+        let (mut heads, mut mods): (Vec<_>, Vec<_>) = misses.into_iter().partition(|(_, _, head)| *head);
+        heads.sort_by_key(|(_, n, _)| std::cmp::Reverse(*n));
+        mods.sort_by_key(|(_, n, _)| std::cmp::Reverse(*n));
+        let asked: usize = heads.iter().map(|(_, n, _)| n).sum();
+        println!("{maps} maps, {} labels, {asked} of them headed by a word no tile carries\n", labels.len());
+        println!("HEAD NOUNS THE CATALOG CANNOT ANSWER ({}):", heads.len());
+        for (w, n, _) in &heads {
+            println!("  {w:<18} x{n}");
+        }
+        println!("\nmodifiers only ({}):", mods.len());
+        println!("  {}", mods.iter().map(|(w, n, _)| format!("{w} x{n}")).collect::<Vec<_>>().join(", "));
     }
 
     /// Replays the REAL biome classifier — real `place_context`, real prompt,
