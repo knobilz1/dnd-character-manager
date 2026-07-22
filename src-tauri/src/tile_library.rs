@@ -699,6 +699,16 @@ pub fn luminance_is_usable_floor(lum: f64) -> bool {
 const GROUND_OPAQUE_MIN: f64 = 0.92;
 const PROP_OPAQUE_MAX: f64 = 0.55;
 
+/// Whether this art can be the BOARD, as opposed to a decal laid over one.
+/// `ArtKind::Ground` answers "is this surface art?", which a scratch pass, an
+/// ivy sheet or a grate all pass — they tile, they have no silhouette, and the
+/// name pass promotes them because "overlay" is in `GROUND_NAME_HINTS`. Whether
+/// a surface can stand alone is a separate question and only the coverage
+/// answers it. Unmeasurable art is kept: a decode failure is not evidence.
+pub fn can_cover_the_board(signals: Option<ArtSignals>) -> bool {
+    signals.is_none_or(|s| s.opaque >= GROUND_OPAQUE_MIN)
+}
+
 /// Words that mean "surface art" in tileset vocabulary generally, not in one
 /// vendor's scheme. Consulted ONLY for `ArtKind::Undecided`, which is what makes
 /// a loose list safe: measured globally, "overlay" appears on 1,458 perfectly
@@ -1894,16 +1904,20 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
     // back into a jungle canopy the moment the keyword backstop was removed.
     let profile = load_profile_cached(app);
     let object_slot = is_object_slot(category, &profile);
-    let want = if object_slot { k + GROUND_FILTER_MARGIN } else { k };
+    let want = if object_slot { k + GROUND_FILTER_MARGIN } else { DECAL_SCAN_DEPTH.max(k) };
     let overrides = load_overrides_cached(app);
     shortlist_entries(entries, &tokens, &idf, scene, fw, fh, want, !object_slot, &profile)
         .into_iter()
         .filter_map(|e| {
             // Prefer the audit's stored verdict; only decode when this entry has
             // never been measured (un-audited library, or a pack merged in since
-            // the last audit).
+            // the last audit) — or when this is a GROUND slot, which needs the
+            // opacity below and the audit only stores kind + luminance. Decoding
+            // costs the pixels on top of a file read this arm already does to
+            // base64 it, and the `.take(k)` at the end keeps the whole chain
+            // lazy: only as many entries are decoded as it takes to fill k.
             let audited = manifest.measured.get(&e.rel_path).copied();
-            let decoded = if audited.is_none() { load_tile_art(&e.root, &e.rel_path)? } else { (load_tile_data_url(&e.root, &e.rel_path)?, None) };
+            let decoded = if audited.is_none() || !object_slot { load_tile_art(&e.root, &e.rel_path)? } else { (load_tile_data_url(&e.root, &e.rel_path)?, None) };
             let (data_url, signals) = decoded;
             // A human's correction always wins over anything we worked out.
             let kind = overrides
@@ -1916,6 +1930,23 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
             // smudge. `Palm_Tree_Trunk_Shadow` was the top pick for a jungle
             // canopy and got stamped across 45 cells.
             if object_slot && matches!(kind, ArtKind::Ground | ArtKind::Overlay) {
+                return None;
+            }
+            // The mirror of that rule, which was missing: a GROUND slot is the
+            // whole board, so its art has to actually COVER it. A decal — a
+            // scratch pass, an ivy sheet, a rug, a grate, a rock scatter — is
+            // surface art meant to be layered OVER a floor, and `ArtKind` can't
+            // separate it because `Overlay` demands opaque == 0.0 exactly while
+            // these carry real pixels. Measured over all 3,453 textures
+            // 2026-07-22: every genuine floor sits at 1.000 and the whole
+            // 0.55-0.92 band is grates, lattices, roofs and `_Overlay_` decals,
+            // so the existing ground threshold splits them cleanly. It drops 460
+            // (13%), including the four live wrong-ground picks —
+            // `Drow_Metal_Overlay_01` (0.066), `Flat_Stones_Overlay` (0.471) on
+            // a mine, `Rocks_Overlay_A` (0.682) on a volcano, and the foundry's
+            // drain grates (0.574-0.921). Undecodable art keeps its place rather
+            // than being judged on a measurement we don't have.
+            if !object_slot && !can_cover_the_board(signals) {
                 return None;
             }
             let luminance = audited.map(|m| m.lum as f64).or(signals.map(|s| s.luminance));
@@ -1938,6 +1969,15 @@ fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &
 /// How many extra candidates to rank so the measured ground filter has slack to
 /// drop some without shrinking the vision picker's choice below `k`.
 const GROUND_FILTER_MARGIN: usize = 4;
+
+/// How deep a GROUND slot ranks before giving up, so the decal filter has room
+/// to look past a run of them. A fixed small margin is not enough: `drow` puts
+/// 13 consecutive compositing decals at the head of its own folder (6
+/// `Drow_Metal_Overlay_*` then 7 `Drow_Overlay_Crystal_*`) ahead of the
+/// `Drow_Stone_Patterned_Tiles` that are the actual floor. Ranking is pure and
+/// runs over ~3.5k textures, so scanning deep is free; the decode stays lazy
+/// behind `.take(k)`, which stops as soon as k have survived.
+const DECAL_SCAN_DEPTH: usize = 64;
 
 /// A warm flame effect sprite (`!Effects/Fire/Fire_Red|Orange|Yellow_*`) to
 /// stack in a hearth's firebox, sized to fit within `fw`x`fh`. The catalog
@@ -3226,6 +3266,24 @@ mod tests {
         assert!(biome_affinity("!Core_Settlements", "Arctic", &prof(), false) < 0.5);
     }
 
+    /// Real opacity fractions, measured off the files 2026-07-22. Every one of
+    /// the rejects here was classified `Ground` and shipped as somebody's floor;
+    /// the point of the guard is that no NAME separates them from the keeps —
+    /// `Drow_Metal_Overlay` and `Drow_Stone_Patterned_Tiles` sit in one folder,
+    /// both tile, both are surface art, and only the coverage tells them apart.
+    #[test]
+    fn a_decal_is_surface_art_but_still_cannot_be_the_board() {
+        let art = |opaque: f64| Some(ArtSignals { opaque, edges: 4, luminance: 100.0, rgb: [100.0, 100.0, 100.0] });
+        for (opaque, what) in [(0.066, "Drow_Metal_Overlay_01"), (0.195, "Mycelial_Overlay_A"), (0.471, "Flat_Stones_Overlay"), (0.574, "Grate_Metal_E_01"), (0.682, "Rocks_Overlay_A")] {
+            assert!(!can_cover_the_board(art(opaque)), "{what} is a decal to lay ON a floor, not a floor");
+        }
+        for (opaque, what) in [(1.0, "Underdark_Rock_Texture_A"), (1.0, "Drow_Stone_Patterned_Tiles_01_B"), (0.95, "Roof_Texture_Tile_Black_H1")] {
+            assert!(can_cover_the_board(art(opaque)), "{what} covers what it is drawn on");
+        }
+        // A decode failure is not evidence of anything.
+        assert!(can_cover_the_board(None));
+    }
+
     /// The universal set's free pass is for OBJECTS. Asking it for GROUND is
     /// how a mine floor came out as settlement flagstone and a foundry's as a
     /// drain grate — both correctly classified, both outvoted by the folder
@@ -3895,7 +3953,8 @@ mod tests {
                 // Terrain admission has to match what production would do for
                 // this category, or a `TILE_CATEGORY=Textures` run reports
                 // "(none)" for every floor query — every texture IS terrain.
-                let top = shortlist_entries(&man.entries, &tokens, &idf, scene, w, h, 3, !is_object_slot(only.as_deref(), &profile), &profile);
+                let depth = std::env::var("TILE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+                let top = shortlist_entries(&man.entries, &tokens, &idf, scene, w, h, depth, !is_object_slot(only.as_deref(), &profile), &profile);
                 let names: Vec<&str> = top.iter().map(|e| e.rel_path.rsplit('/').next().unwrap_or("")).collect();
                 out.push_str(&format!("{label} [{w}x{h}] @{scene} -> {}\n", if names.is_empty() { "(none)".into() } else { names.join(" | ") }));
             }
