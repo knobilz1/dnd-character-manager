@@ -785,7 +785,12 @@ fn tokenize_query(q: &str) -> Vec<String> {
 /// loose glassware (Ink_Bottle, Milk_Bottle) and not one shelf — the contents
 /// should only ever be a modifier that biases WHICH shelf gets picked.
 fn normalize_query(q: &str) -> String {
-    let lower = q.to_lowercase();
+    // A parenthetical is an aside the DM wrote for a human — which bank, which
+    // passage, who stands where — never the object's name. It has to go before
+    // anything else looks at the HEAD noun, because it lands exactly there:
+    // "Jungle canopy (left bank)" made "bank" the head, so 45 canopy cells
+    // searched for a river bank and drew palm-tree trunks.
+    let lower = strip_parentheticals(&q.to_lowercase());
     match lower.split_once(" of ") {
         // Only swap for a real CONTAINER. "Stack of wooden crates" is still
         // about crates — a quantifier is not the object, and swapping made
@@ -795,6 +800,22 @@ fn normalize_query(q: &str) -> String {
         }
         _ => lower,
     }
+}
+
+/// Drops `(...)` spans, keeping the text either side. An unclosed `(` swallows
+/// the rest, which is the right call for a truncated caption.
+pub(crate) fn strip_parentheticals(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0u32;
+    for c in s.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
 }
 
 /// Words that count a thing rather than being the thing — "a stack of crates"
@@ -821,6 +842,14 @@ const CONDITION_WORDS: &[&str] = &[
     // catalog with 1,417 tiles keyworded "tree" will happily hand a forest a
     // decorated Christmas one — reported live, twice.
     "christmas", "gingerbread", "candy",
+    // A `*_Shadow` file is the drop-shadow LAYER for another tile, meant to be
+    // composited underneath it — measured, `Palm_Tree_Trunk_Shadow` is RGB
+    // (4,7,6) at 39% alpha against the real trunk's (47,39,21) at 98%. Drawn on
+    // its own it is a black smudge, and 322 of them are reachable by an object
+    // slot. `Palm_Tree_Trunk_Shadow` was the TOP pick for a jungle canopy and
+    // got stamped across 45 cells. A label that actually says "shadowy" still
+    // asks for one, so this only demotes the unrequested case.
+    "shadow",
 ];
 
 /// How hard an entry is demoted per unrequested condition word it carries.
@@ -1983,6 +2012,80 @@ fn carry_forward_settled_answers(
     derived
 }
 
+/// The object category this word MOSTLY lives in — `tree` and `mushroom` are
+/// both overwhelmingly `Flora`, `stand` is `Furniture`, `boulder` is `Decor`.
+/// The mode, not "any category it appears in": 20 of the 1,417 `tree` tiles
+/// are filed under `Decor`, which would otherwise make every `Decor` word look
+/// tree-like. Terrain categories are excluded because object slots can't reach
+/// them anyway. `None` for a word the catalog doesn't stock.
+///
+/// Size deliberately does NOT enter into it. An earlier version counted only
+/// tiles that fit the slot, to stop the two 5x5 `Pine_Shadow` tiles making
+/// "lone pine" look self-sufficient — but the category filter already blocks
+/// what that was really protecting against (`Pineapple` is `Clutter`, not
+/// `Flora`), and the size gate then became the one thing keeping "jungle
+/// canopy" broken: every Flora canopy tile is 4x5 or 5x5, and the only small
+/// ones are canopy BEDS under Furniture. A head that is stocked but never at a
+/// usable size simply yields an empty shortlist, which the caller falls back
+/// from.
+fn modal_category<'a>(entries: &'a [TileLibraryEntry], profile: &PackProfile, word: &str) -> Option<&'a str> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for e in entries.iter().filter(|e| !profile.is_terrain_category(&e.category) && e.keywords.iter().any(|k| token_matches(k, word))) {
+        *counts.entry(e.category.as_str()).or_insert(0) += 1;
+    }
+    // Name breaks a count tie, so the answer is stable across manifest order.
+    counts.into_iter().max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(a.0))).map(|(c, _)| c)
+}
+
+/// Whether a field glyph's DM-written label already names its own object, so
+/// the glyph's canonical noun must NOT be appended.
+///
+/// `T` cells search "<label> tree" and `^` cells "<label> rubble", because the
+/// appended noun is what guarantees an EXACT head match: without it "Pine
+/// treeline" bridges to both "tree" AND "line" and returns clotheslines,
+/// "loose scree" returns a DM screen, and "rockfall" a fountain waterfall.
+/// The append is doing real work and mostly must stay.
+///
+/// It backfires only when the label already names something stocked: a cave's
+/// "Glowing mushroom" became "Glowing mushroom tree", and since the appended
+/// word is the HEAD it took the x8 weight and the exact-head tier, burying all
+/// 2,164 mushrooms under a decorated Christmas tree.
+///
+/// The test is deliberately two-part. An exact head match alone is not enough
+/// — it would hand "pine stand" a winch stand and "overturned chairs" a
+/// torture chair. The head must ALSO live in the same modal category as the
+/// canonical noun, which is what separates `mushroom` and `log` (both `Flora`,
+/// like `tree`) from `stand` and `chair` (`Furniture`). A bridge match never
+/// counts, which is what keeps "lone pine" off `Pineapple`.
+/// The catalog category a field glyph's art lives in — `tree` resolves to
+/// `Flora`, `rubble` to `Structures`. Derived from the pack rather than
+/// hardcoded, so it holds for any imported catalog. `None` when the pack
+/// doesn't stock the noun at all, which means "don't restrict".
+///
+/// Restricting the search to it is what makes the glyph's MEANING enforceable
+/// instead of merely suggested. Every wrong pick the canonical-noun append was
+/// invented to prevent was a category error, not a word error: "Pine treeline"
+/// → a clothesLINE, "loose scree" → a DM SCREEN, "rockfall" → a fountain
+/// WATERFALL, "pine stand" → a music STAND, "overturned chairs" → a torture
+/// CHAIR. None of those are Flora or Structures, so none can survive the
+/// filter — and with them gone the label is free to name its own object.
+pub fn category_for_noun(app: &AppHandle, noun: &str) -> Option<String> {
+    let Ok(Some(manifest)) = load_manifest_cached(app) else { return None };
+    let profile = load_profile_cached(app);
+    modal_category(&manifest.entries, &profile, noun).map(str::to_string)
+}
+
+pub fn label_names_its_own_object(app: &AppHandle, label: &str, noun: &str) -> bool {
+    let Ok(Some(manifest)) = load_manifest_cached(app) else { return false };
+    let profile = load_profile_cached(app);
+    let tokens = tokenize_query(label);
+    let Some(head) = tokens.last() else { return false };
+    match (modal_category(&manifest.entries, &profile, head), modal_category(&manifest.entries, &profile, noun)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
 /// Every distinct category name in the catalog, most common first.
 fn all_categories(entries: &[TileLibraryEntry]) -> Vec<String> {
     let mut counts: HashMap<&str, usize> = HashMap::new();
@@ -2873,6 +2976,129 @@ mod tests {
         pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
     }
 
+    /// The whole decision table for the field-glyph noun, taken from the 42
+    /// labels that actually landed on a `T` or `^` cell across the saved maps.
+    /// Both halves matter: drop the exact-match half and "lone pine" bridges to
+    /// `Pineapple`; drop the category half and "pine stand" gets a winch stand.
+    #[test]
+    fn a_field_label_keeps_the_glyph_noun_unless_it_names_its_own_object() {
+        let e = |cat: &str, kw: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: kw.join("_"),
+            biome: "b".into(),
+            category: cat.into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w: 1,
+            h: 1,
+        };
+        // A catalog shaped like the real one: trees and mushrooms are Flora,
+        // stands and chairs are Furniture, rubble is Structures, and `tree`
+        // has a couple of stray Decor entries that must not widen the test.
+        let mut entries = vec![
+            e("Decor", &["tree", "feather", "token"]),
+            e("Furniture", &["winch", "stand", "wood"]),
+            e("Furniture", &["torture", "chair", "wood"]),
+            e("Decor", &["desert", "boulder", "chalk"]),
+            e("Flora", &["pineapple", "green"]),
+        ];
+        entries.extend((0..30).map(|i| e("Flora", &["tree", if i % 2 == 0 { "red" } else { "green" }])));
+        entries.extend((0..30).map(|i| e("Flora", &["mushroom", if i % 2 == 0 { "red" } else { "blue" }])));
+        entries.extend((0..10).map(|_| e("Flora", &["firewood", "log", "wood"])));
+        entries.extend((0..20).map(|_| e("Structures", &["rubble", "pile", "stone"])));
+
+        let profile = PackProfile { terrain_categories: vec!["Textures".into()], ..PackProfile::default() };
+        let modal = |w: &str| modal_category(&entries, &profile, w);
+        // The mode, not "any category it appears in" — `tree` has a Decor entry.
+        assert_eq!(modal("tree"), Some("Flora"));
+        assert_eq!(modal("mushroom"), Some("Flora"));
+        assert_eq!(modal("log"), Some("Flora"));
+        assert_eq!(modal("stand"), Some("Furniture"));
+        assert_eq!(modal("chair"), Some("Furniture"));
+        assert_eq!(modal("rubble"), Some("Structures"));
+        assert_eq!(modal("boulder"), Some("Decor"));
+        assert_eq!(modal("treeline"), None, "a bridge is not a match — nothing is keyworded 'treeline'");
+        assert_eq!(modal("scree"), None);
+
+        // Stocked has to mean stocked AT A USABLE SIZE. The real catalog's only
+        // two `pine` tiles are `Pine_Shadow_*_5x5`, which no field slot can
+        // take — counting them made "lone pine" look self-sufficient and handed
+        // it a Pineapple.
+        // A head stocked ONLY at an unusable size still counts here — the
+        // empty shortlist it produces is what the caller falls back from, and
+        // gating on size instead is what kept "jungle canopy" drawing trunks.
+        let mut oversized = entries.clone();
+        oversized.push(TileLibraryEntry { w: 5, h: 5, ..e("Flora", &["pine", "shadow"]) });
+        assert_eq!(modal_category(&oversized, &profile, "pine"), Some("Flora"));
+    }
+
+    /// An uncaptioned field cell asks the SCENE what its foliage is, by putting
+    /// the pack's own biome folder at the head — where the x8 weight and the
+    /// exact-head tier land — and demoting the English noun to a modifier.
+    /// Live: an Underdark fungal cavern drew 80 cells of autumn deciduous
+    /// forest because 80 uncaptioned `T` cells searched the literal word "tree".
+    #[test]
+    fn an_uncaptioned_field_cell_asks_its_biome_not_the_dictionary() {
+        let e = |biome: &str, kw: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: kw.join("_"),
+            biome: biome.into(),
+            category: "Flora".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w: 3,
+            h: 3,
+        };
+        let entries = vec![e("Underdark", &["underdark", "mushroom", "red"]), e("Woodlands", &["tree", "woodlands", "green"])];
+        let idf = compute_idf(&entries);
+        let top = |q: &str, scene: &str| {
+            shortlist_entries(&entries, &tokenize_query(q), &idf, scene, 3, 3, 8, false, &prof())
+                .first()
+                .map(|e| e.rel_path.clone())
+        };
+        assert_eq!(top("tree Underdark", "cavern").as_deref(), Some("underdark_mushroom_red"));
+        assert_eq!(top("tree Woodlands", "forest").as_deref(), Some("tree_woodlands_green"));
+        // The bug: the bare noun drags a Woodlands tree into the Underdark.
+        assert_eq!(top("tree", "cavern").as_deref(), Some("tree_woodlands_green"), "this is what the folder head exists to override");
+    }
+
+    /// A parenthetical is an aside for a human and lands exactly where it does
+    /// the most damage — on the HEAD noun. Live: "Jungle canopy (left bank)"
+    /// made "bank" the object's identity across 45 canopy cells.
+    #[test]
+    fn a_parenthetical_aside_never_becomes_the_head_noun() {
+        assert_eq!(tokenize_query("Jungle canopy (left bank)"), vec!["jungle", "canopy"]);
+        assert_eq!(tokenize_query("tunnel entrance (west passage)"), vec!["tunnel", "entrance"]);
+        // Text after the aside survives, and an unclosed paren swallows the rest.
+        assert_eq!(tokenize_query("bar counter (barkeep works row 2) polished"), vec!["bar", "counter", "polished"]);
+        assert_eq!(tokenize_query("crates (spilled"), vec!["crates"]);
+        assert_eq!(strip_parentheticals("no parens here"), "no parens here");
+    }
+
+    /// A `*_Shadow` file is the drop-shadow LAYER for another tile. Measured on
+    /// the real art: `Palm_Tree_Trunk_Shadow` is RGB (4,7,6) at 39% alpha, the
+    /// real trunk RGB (47,39,21) at 98% — drawn alone it is a black smudge, and
+    /// it was the TOP pick for a jungle canopy across 45 cells.
+    #[test]
+    fn a_drop_shadow_layer_loses_to_the_art_it_belongs_under() {
+        let e = |kw: &[&str]| TileLibraryEntry {
+            root: "r".into(),
+            rel_path: kw.join("_"),
+            biome: "Jungle".into(),
+            category: "Flora".into(),
+            keywords: kw.iter().map(|s| s.to_string()).collect(),
+            w: 3,
+            h: 3,
+        };
+        let entries = vec![e(&["palm", "tree", "trunk", "shadow"]), e(&["palm", "tree", "trunk", "green"])];
+        let idf = compute_idf(&entries);
+        let got = shortlist_entries(&entries, &tokenize_query("jungle canopy tree"), &idf, "jungle", 3, 3, 8, false, &prof());
+        assert_eq!(got.first().map(|e| e.rel_path.as_str()), Some("palm_tree_trunk_green"), "got: {got:?}");
+        // But a label that asks for one by name still gets it. Note it must be
+        // the word itself: the suffix rule accepts "s"/"es"/"en", so "shadowy"
+        // does NOT reach "shadow" and would be demoted like any other label.
+        let got = shortlist_entries(&entries, &tokenize_query("palm tree shadow"), &idf, "jungle", 3, 3, 8, false, &prof());
+        assert_eq!(got.first().map(|e| e.rel_path.as_str()), Some("palm_tree_trunk_shadow"), "got: {got:?}");
+    }
+
     /// A tile that answers MORE of the label wins, even from a foreign biome.
     /// Live: "bone pile" resolved to `Dice_D4_Bone` — a bone die — because the
     /// catalog files its `Beast_Bone_*_Pile` art under Horror and the 0.15
@@ -2933,6 +3159,58 @@ mod tests {
         assert!(same_word("wood", "wooden"));
     }
 
+    /// Prints the field-glyph decision for every label in a corpus against the
+    /// REAL catalog. `#[ignore]`d for the same reason as `rank_snapshot`.
+    ///   TILE_CORPUS=…/field-labels.txt cargo test --lib field_decision -- --ignored --nocapture
+    /// Corpus rows are `<glyph>\t<label>`.
+    #[test]
+    #[ignore]
+    fn field_decision_over_the_real_catalog() {
+        let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.nabil.dndsheet/tile_library");
+        let man: TileLibraryManifest = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+        let profile: PackProfile = serde_json::from_str(&std::fs::read_to_string(dir.join("pack_profile.json")).unwrap()).unwrap();
+        let idf = compute_idf(&man.entries);
+        let scene = std::env::var("TILE_SCENES").unwrap_or_else(|_| "forest".into());
+        for line in std::fs::read_to_string(std::env::var("TILE_CORPUS").unwrap()).unwrap().lines().filter(|l| !l.trim().is_empty()) {
+            let (glyph, label) = line.split_once('\t').unwrap();
+            let noun = if glyph == "^" { "rubble" } else { "tree" };
+            let (fw, fh) = if glyph == "^" { (2, 2) } else { (3, 3) };
+            let head = tokenize_query(label).last().cloned().unwrap_or_default();
+            let cat = modal_category(&man.entries, &profile, noun);
+            let use_label = matches!(
+                (modal_category(&man.entries, &profile, &head), cat),
+                (Some(a), Some(b)) if a == b
+            );
+            // Exactly what campaign.rs does: category-restricted, the label
+            // first when it names its own object, canonical noun as fallback.
+            let pool: Vec<TileLibraryEntry> = match cat {
+                Some(c) => man.entries.iter().filter(|e| e.category == c).cloned().collect(),
+                None => man.entries.clone(),
+            };
+            let look = |q: &str| {
+                shortlist_entries(&pool, &tokenize_query(q), &idf, &scene, fw, fh, 3, false, &profile)
+                    .iter()
+                    .map(|e| e.rel_path.rsplit('/').next().unwrap_or("").to_string())
+                    .collect::<Vec<_>>()
+            };
+            let with_noun = format!("{label} {noun}");
+            let (src, got) = match use_label {
+                true => match look(label) {
+                    v if !v.is_empty() => ("label", v),
+                    _ => ("noun<-empty", look(&with_noun)),
+                },
+                false => ("noun", look(&with_noun)),
+            };
+            println!(
+                "{:<36} [{:<11}] {:<11} -> {}",
+                label,
+                src,
+                cat.unwrap_or("(any)"),
+                if got.is_empty() { "*** NOTHING ***".to_string() } else { got.join(" | ") }
+            );
+        }
+    }
+
     /// Snapshot the whole ranking against the REAL imported catalog, so a
     /// scoring change can be diffed instead of argued about.
     ///
@@ -2953,6 +3231,15 @@ mod tests {
         let profile: PackProfile = serde_json::from_str(&std::fs::read_to_string(dir.join("pack_profile.json")).unwrap()).unwrap();
         let idf = compute_idf(&man.entries);
         let corpus = std::fs::read_to_string(std::env::var("TILE_CORPUS").unwrap()).unwrap();
+        // Optional single-category restriction, mirroring `shortlist_in_category`.
+        let only = std::env::var("TILE_CATEGORY").ok();
+        let man = TileLibraryManifest {
+            entries: match &only {
+                Some(c) => man.entries.iter().filter(|e| e.category.eq_ignore_ascii_case(c)).cloned().collect(),
+                None => man.entries,
+            },
+            ..Default::default()
+        };
 
         let mut out = String::new();
         for line in corpus.lines().filter(|l| !l.trim().is_empty()) {

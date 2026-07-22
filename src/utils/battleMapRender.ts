@@ -672,6 +672,20 @@ export function wallSpriteFor(neighbors: WallNeighbors): WallSpriteKey {
   return 'mid'; // interior wall mass, or bordered by void on every side
 }
 
+/** The three `top*` wall sprites are edge CAPS, not whole tiles: measured,
+ *  `wall_top_mid/left/right` are 25% opaque against `wall_mid/left/right` at
+ *  100%. Drawn on their own the other 75% shows whatever is behind — which
+ *  inside a dungeon is already dark stone, so nothing looked wrong for years.
+ *  A `B` structure standing in open terrain has snow or grass behind it
+ *  instead, and `wallSpriteFor` returns `topMid` for every cell with floor to
+ *  its south — so the whole north wall of a whaling hut rendered as a row of
+ *  black holes. Lay the solid body down first and let the cap detail sit on it. */
+function drawWallSprite(ctx: Ctx, style: StyleSpriteSet, key: WallSpriteKey, x: number, y: number, px: number): boolean {
+  const isCap = key === 'topLeft' || key === 'topMid' || key === 'topRight';
+  const base = isCap && drawSprite(ctx, style.wall.mid, x, y, px, style.filter);
+  return drawSprite(ctx, style.wall[key], x, y, px, style.filter) || base;
+}
+
 const NEUTRAL_WALL_NEIGHBORS: WallNeighbors = {
   n: true, s: true, e: true, w: true, nFloor: false, sFloor: false, eFloor: false, wFloor: false,
 };
@@ -837,14 +851,14 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       // swamp rendered as a patch of bog, walls and doorways and all, because
       // `naturalWalls` is a per-BIOME flag and a map can hold both kinds.
       const built = wallSpriteFor(wallNeighbors ?? NEUTRAL_WALL_NEIGHBORS);
-      if (drawSprite(ctx, style.wall[built], x, y, px, style.filter)) return;
+      if (drawWallSprite(ctx, style, built, x, y, px)) return;
       break;
     }
     case '#': {
       // Living rock in the wilderness; mortared masonry in a building.
       if (terrain?.naturalWalls && terrain.floor && drawShaded(ctx, terrain.floor, x, y, px, WALL_DARKNESS)) return;
       const key = wallSpriteFor(wallNeighbors ?? NEUTRAL_WALL_NEIGHBORS);
-      if (drawSprite(ctx, style.wall[key], x, y, px, style.filter)) return;
+      if (drawWallSprite(ctx, style, key, x, y, px)) return;
       break;
     }
     case '+':

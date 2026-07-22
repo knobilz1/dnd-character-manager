@@ -221,7 +221,7 @@ const MAP_SPEC_DELIMITER: &str = "===MAP===";
 /// (battleMapRender.ts must use the same codes). The model is told to use ONLY
 /// these so it never invents a code the renderer can't draw; the renderer has a
 /// fallback tile for anything unexpected anyway.
-const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ standing LIQUID — renders as whatever this scene's liquid actually is: water in most places, LAVA in a volcano, blood in a charnel house. Use it for every pool, channel, river or lake, INCLUDING a lethal one — a lava lake is `~`, never `%`  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T tree/foliage  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , sand/beach  % deep chasm/gorge/ravine — a DRY fatal drop onto rock far below, renders as a dark pit; nothing stands here and no one deploys in it. Lethal is not what picks this code — a lava lake is lethal and is still `~`; `%` is specifically empty air with a floor a long way down  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
+const MAP_LEGEND: &str = ". floor  # wall — in a wilderness scene this is the living rock/earth the space is cut from, so it renders as terrain  B BUILT wall — timber, plank or masonry someone ERECTED: use it for any structure standing IN a wilderness scene (a hut, cabin, watchtower, shrine, palisade, outbuilding) so it reads as a building instead of dissolving into the landscape; indoors, `#` is already masonry and `B` is unnecessary  + door  ~ standing LIQUID — renders as whatever this scene's liquid actually is: water in most places, LAVA in a volcano, blood in a charnel house. Use it for every pool, channel, river or lake, INCLUDING a lethal one — a lava lake is `~`, never `%`  o pillar  ^ stony rubble/debris (renders as a pile of grey rocks — ONLY for actual stone: caves, ruins, collapsed masonry)  = furniture/altar  T vegetation — renders as whatever THIS scene actually grows: trees in a forest, palms in a jungle, giant mushrooms in the Underdark, snow-firs in the arctic. Use it for any standing plant cover, including fungus in a cave  _ stairs  * open fire — campfire/brazier/fire pit (renders as a campfire ON THE FLOOR, not a built-in wall fireplace)  , loose SAND — renders as yellow beach sand in EVERY scene, so use it only for real sand: a desert dune, a shoreline beach, a sandy arena floor. A snowy shore, a muddy bank or a gravel margin is plain floor `.`, which already renders as this scene's own ground  % deep chasm/gorge/ravine — a DRY fatal drop onto rock far below, renders as a dark pit; nothing stands here and no one deploys in it. Lethal is not what picks this code — a lava lake is lethal and is still `~`; `%` is specifically empty air with a floor a long way down  H wooden bridge/plank span — a WALKABLE crossing laid OVER a chasm (put `%` chasm in the cells to either side so it reads as a bridge over the drop)  (space) = empty/void outside the map";
 
 /// A single chapter/section of an imported module — the unit of "what's
 /// currently loaded" (see active_module/current.md) versus "what's just
@@ -2647,6 +2647,34 @@ const FIELD_GLYPHS: &[char] = &['T', '^'];
 /// regardless of whether the DM labelled it "treeline", "foliage", or "woods"
 /// — the glyph's meaning is fixed by the legend even when the label isn't a
 /// catalog word.
+/// What a field cell actually searches for. Three cases, and the ORDER is the
+/// whole point:
+///
+/// 1. UNCAPTIONED — no Features line points at this cell, so `parse_placements`
+///    fell back to the bare glyph noun. Ask the SCENE what its foliage is by
+///    putting the pack's own biome folder at the head, where the x8 weight and
+///    the exact-head tier land. Live: an Underdark fungal cavern drew 151 cells
+///    of autumn deciduous forest because every uncaptioned `T` searched the
+///    literal word "tree".
+/// 2. The label names its own object (`label_names_its_own_object`) — search it
+///    alone, so "Glowing mushroom" isn't buried under an appended "tree".
+/// 3. Otherwise — append the canonical noun as the head, which is what stops
+///    "Pine treeline" reaching a clothesLINE.
+///
+/// Case 1 MUST be tested first: an uncaptioned label trivially names its own
+/// object (it IS the noun), so case 2 swallows it and searches the bare word.
+/// That is exactly the bug this ordering exists to prevent, and it survived a
+/// passing unit test of case 2 — the test exercised the query, not the path.
+fn field_query(label: &str, noun: &str, folder: &str, names_own: bool) -> String {
+    if label == noun {
+        format!("{noun} {folder}")
+    } else if names_own {
+        label.to_string()
+    } else {
+        format!("{label} {noun}")
+    }
+}
+
 fn field_glyph_noun(glyph: char) -> &'static str {
     match glyph {
         '^' => "rubble",
@@ -3184,7 +3212,7 @@ fn enforce_object_sizes(spec: &str, guide: &[(String, u32, u32)]) -> (String, Ve
             out_lines.push(line.to_string());
             continue;
         };
-        let lower = label.to_lowercase();
+        let lower = crate::tile_library::strip_parentheticals(&label.to_lowercase());
         let hit = guide.iter().find(|(noun, _, _)| lower.split(|ch: char| !ch.is_alphanumeric()).any(|word| word_hits(word, noun)));
         let Some((noun, gw, gh)) = hit else {
             out_lines.push(line.to_string());
@@ -3523,7 +3551,7 @@ struct ResolvedTile {
 /// otherwise the last word. Trailing "ss"/"us" are not plural markers, so
 /// glass and fungus stay singular.
 fn label_is_singular(label: &str) -> bool {
-    let lower = label.to_lowercase();
+    let lower = crate::tile_library::strip_parentheticals(&label.to_lowercase());
     let head = lower.split_whitespace().take_while(|w| *w != "of").last().unwrap_or("");
     let head = head.trim_matches(|c: char| !c.is_alphanumeric());
     if head.is_empty() {
@@ -3996,8 +4024,11 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     };
     let search_size = |label: &str, w: u32, h: u32| -> (u32, u32) {
         // HEAD word only — "bar stool" must not hit the "bar" guide entry and
-        // get offered actual bars.
-        let lower = label.to_lowercase();
+        // get offered actual bars. Parentheticals are stripped first, the same
+        // as the ranker does: "Pine trees (west slope)" took "slope" as its
+        // head, found no guide entry, and searched at 1x1 — so 57 treeline
+        // cells came back as `Fir_Tree_Stump` and `Yucca_Tree_Trunk`.
+        let lower = crate::tile_library::strip_parentheticals(&label.to_lowercase());
         match lower.split(|ch: char| !ch.is_alphanumeric()).filter(|t| !t.is_empty()).last() {
             Some(head) => guide_size(head, w, h),
             None => (w, h),
@@ -4017,13 +4048,31 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         let glyph = p.field_glyph.unwrap();
         let cands = field_shortlists.entry((p.label.clone(), glyph)).or_insert_with(|| {
             let noun = field_glyph_noun(glyph);
-            let (sw, sh) = guide_size(noun, 1, 1);
-            // Append the canonical noun so it's an EXACT head match. Without it,
-            // "Pine treeline" bridged to both "tree" AND "line" — and matched a
-            // clothesLINE, eleven of them. "Pine treeline tree" makes real trees
-            // (exact head "tree") outrank any bridge, while "pine" keeps flavour.
-            let query = format!("{} {noun}", p.label);
-            crate::tile_library::shortlist(app, &query, &biome, sw, sh, VISION_SHORTLIST_K)
+            let (gw, gh) = guide_size(noun, 1, 1);
+            // The glyph's MEANING is enforced by its category, not by its word.
+            // `T` searches Flora and `^` searches Structures, which is what
+            // makes every wrong pick the old canonical-noun append was invented
+            // to prevent structurally impossible — a clothesline, a DM screen,
+            // a fountain waterfall, a music stand and a torture chair are none
+            // of them Flora or Structures. See `category_for_noun`.
+            let cat = crate::tile_library::category_for_noun(app, noun);
+            let look = |q: &str, w: u32, h: u32| match &cat {
+                Some(c) => crate::tile_library::shortlist_in_category(app, q, c, &biome, w, h, VISION_SHORTLIST_K),
+                None => crate::tile_library::shortlist(app, q, &biome, w, h, VISION_SHORTLIST_K),
+            };
+            let uncaptioned = p.label == noun;
+            let names_own = !uncaptioned && crate::tile_library::label_names_its_own_object(app, &p.label, noun);
+            let query = field_query(&p.label, noun, crate::tile_library::scene_biome(&biome, &profile), names_own);
+            let (sw, sh) = if names_own { search_size(&p.label, 1, 1) } else { (gw, gh) };
+            let out = look(&query, sw, sh);
+            if !out.is_empty() {
+                return out;
+            }
+            // Never end up with LESS art than the plain canonical noun would
+            // have found — "felled pine" and "thick undergrowth" name nothing
+            // the catalog stocks, and an empty shortlist drops the cell to the
+            // bare procedural glyph.
+            look(&if uncaptioned { noun.to_string() } else { format!("{} {noun}", p.label) }, gw, gh)
         });
         if cands.is_empty() {
             continue; // nothing real to place — the procedural foliage glyph carries it
@@ -7030,6 +7079,24 @@ mod tests {
         // And with those gone, what's left is Features-only — which is what
         // routes the retry down the cheap caption branch instead of a redraw.
         assert!(all_features_only_issues(&fixed), "remaining issues should be features-only: {fixed:?}");
+    }
+
+    /// The ordering IS the fix. An uncaptioned field cell's label is the glyph
+    /// noun itself, which trivially "names its own object" — so if that case is
+    /// tested first the cell searches the bare word "tree" and an Underdark
+    /// fungal cavern fills with autumn deciduous forest. 151 cells of it, live,
+    /// while a unit test of the query itself passed.
+    #[test]
+    fn an_uncaptioned_field_cell_outranks_the_names_its_own_object_case() {
+        // Uncaptioned: label == noun. `names_own` is true here on purpose —
+        // that is exactly the input that used to take the wrong branch.
+        assert_eq!(field_query("tree", "tree", "Underdark", true), "tree Underdark");
+        assert_eq!(field_query("rubble", "rubble", "Volcanic", true), "rubble Volcanic");
+        // Captioned and self-naming: search the label alone.
+        assert_eq!(field_query("glowing mushroom", "tree", "Underdark", true), "glowing mushroom");
+        // Captioned but not self-naming: the canonical noun becomes the head.
+        assert_eq!(field_query("dense treeline", "tree", "Woodlands", false), "dense treeline tree");
+        assert_eq!(field_query("loose scree", "rubble", "Mountain", false), "loose scree rubble");
     }
 
     /// The biome classifier must be told about the PLACE, not its occupants.
