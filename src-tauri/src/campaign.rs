@@ -3960,6 +3960,30 @@ fn grid_census(spec: &str) -> String {
 /// `nautiloid` as "nautical" — a sea cove classified as an illithid ship.
 /// The folder is the pack's own grouping, so this needs no hand-written
 /// glosses and works for any imported pack.
+///
+/// **A richer gloss was built, measured over all 83 saved specs, and reverted
+/// (2026-07-22) — don't rebuild it without reading this.** The idea was to
+/// describe each folder by what is IN it, scored off the manifest as "common
+/// inside this folder, rare outside it", so the model would stop reading
+/// "Astral" as the astral sea. It derived cleanly (`Astral -> ceremorph,
+/// tentacle, space`; `Industrial -> cog, soot, metal`; `Underdark -> crystal,
+/// drow, mushroom`) and still failed:
+///   * `smugglers-cove-at-low-tide`, the case it was built for, answered
+///     `nautiloid` both before and after — UNCHANGED.
+///   * `illithid-colony-chamber` went `nautiloid -> horror`, because Horror's
+///     honest signature is `body, humanoid, flesh` and an illithid pod chamber
+///     is full of exactly that. The flagship Astral map, broken by it.
+///   * `moonlit-glade-of-the-blink-dogs` went `feywild -> forest` (Feywilds'
+///     own signature is the thin `plant, turquoise, lichen`).
+///   * Against 2 real improvements: an elder brain chamber `cavern ->
+///     nautiloid`, and a dwarven forge hall `volcanic -> mine`.
+/// Net 2 fixed, 3 broken, target case untouched.
+///
+/// The lesson is about the cove, not the gloss: it kept answering `nautiloid`
+/// because **this profile has no coastal scene word at all** (the hand-written
+/// default had `coast -> Aquatic, "beach sand"`; the profiler replaced it with
+/// `underwater -> Aquatic, "coral"`). No gloss can fix a list with no right
+/// answer in it. See the corpus harness in this file's tests to re-measure.
 fn glossed_biome_ids(profile: &PackProfile) -> String {
     std::iter::once(crate::pack_profile::BUILTIN_SCENE.to_string())
         .chain(profile.biomes.iter().map(|b| format!("{} ({})", b.scene, b.folder.trim_start_matches('!').replace('_', " "))))
