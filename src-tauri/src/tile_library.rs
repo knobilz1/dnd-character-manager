@@ -709,6 +709,23 @@ pub fn can_cover_the_board(signals: Option<ArtSignals>) -> bool {
     signals.is_none_or(|s| s.opaque >= GROUND_OPAQUE_MIN)
 }
 
+/// A "fill" is a compositing CONTENTS layer — the ore heaped in a cart, the
+/// water/acid/blood in an aqueduct — that the pack means to be drawn INSIDE a
+/// base object, never alone; on its own it is a dark blob (lum 9-14 for the ore
+/// fills). It is opaque, so the `ArtKind::Overlay` drop misses it, and worse it
+/// carries its CONTENTS word as a keyword (`Ore_Minecart_Fill_Red` →
+/// `["ore","minecart","fill",…]`), so "Iron ore minecart" gives it coverage 2
+/// (ore + minecart) over the real `Dwarven_Minecart_Hook`'s 1 and it wins the
+/// object slot — live, a red rectangle where a cart belonged. Measured
+/// 2026-07-22: every one of the 162 tiles keyworded `fill` is one of these
+/// layers (90 aqueduct, 60 ore-minecart, 12 coal), and a base object exists at
+/// every size each fill does, so dropping them always leaves a real pick. The
+/// pack's own name is the only signal — no pixel test separates a fill from a
+/// dark prop.
+fn is_contents_fill_layer(entry: &TileLibraryEntry) -> bool {
+    entry.keywords.iter().any(|k| k == "fill")
+}
+
 /// Words that mean "surface art" in tileset vocabulary generally, not in one
 /// vendor's scheme. Consulted ONLY for `ArtKind::Undecided`, which is what makes
 /// a loose list safe: measured globally, "overlay" appears on 1,458 perfectly
@@ -1755,9 +1772,16 @@ fn shortlist_entries<'a>(entries: &'a [TileLibraryEntry], tokens: &[String], idf
     // 1x2, so every one was excluded and a 2x1 wine rack was the only "rack"
     // left standing. The renderer draws the swap (see ResolvedTile::rotated).
     let fits = |e: &TileLibraryEntry| (e.w <= fw && e.h <= fh) || (e.h <= fw && e.w <= fh);
+    // Drop contents-fill compositing layers from OBJECT slots here, at ranking
+    // time — not after decode — so they never consume the shortlist's depth
+    // budget and starve the real object beneath them. Measured: 20 ore fills
+    // out-rank the first `MineCart_Metal_Gray`, more than the object slot's
+    // fetch depth, so a post-decode drop would empty the shortlist. See
+    // `is_contents_fill_layer`. (Terrain slots already exclude them by category.)
+    let object_slot = !allow_terrain;
     let identified: Vec<&TileLibraryEntry> = entries
         .iter()
-        .filter(|e| fits(e) && (allow_terrain || !profile.is_terrain_category(&e.category)) && has_identity_match(e, tokens))
+        .filter(|e| fits(e) && (allow_terrain || !profile.is_terrain_category(&e.category)) && !(object_slot && is_contents_fill_layer(e)) && has_identity_match(e, tokens))
         .collect();
     if identified.is_empty() {
         return Vec::new();
@@ -4199,6 +4223,35 @@ mod tests {
         assert_eq!(head("iron manacles"), "manacles", "a translation synonym (iron) must NOT steal head, even when it leads false-friend tiles");
         assert_eq!(head("hanging banner"), "banner", "a well-stocked suffix object (banner) keeps its head");
         assert_eq!(head("wooden crate"), "crate", "an unknown identity head stays put — nothing to promote");
+    }
+
+    /// A "fill" contents layer (ore in a cart) must be recognised as a
+    /// compositing piece so the object-slot filter drops it — its keyword, not
+    /// any pixel measurement, is the signal, and it carries the CONTENTS word
+    /// that lets it out-cover the real cart.
+    #[test]
+    fn a_contents_fill_layer_is_recognised_by_its_keyword() {
+        let fill = entry("workplace_equipment", &["ore", "minecart", "fill", "red"]);
+        let cart = entry("workplace_equipment", &["dwarven", "minecart", "hook", "metal", "gray"]);
+        assert!(is_contents_fill_layer(&fill), "an _Fill_ layer must be flagged");
+        assert!(!is_contents_fill_layer(&cart), "a real cart must not be");
+        // The reason it needs dropping at all: it out-RANKS the real cart (it
+        // ties on coverage — the cart reaches 2 via the iron→metal translation
+        // — then wins on the ore/minecart idf), so nothing else keeps it out of
+        // the slot. Confirmed live: it was the top pick for "Iron ore minecart".
+        let idf = idf_map(&[("ore", 6.0), ("minecart", 6.0), ("fill", 5.0), ("metal", 2.0), ("hook", 4.0)]);
+        let q = tokenize_query("iron ore minecart");
+        assert!(
+            shortlist_rank(&fill, &q, &idf) >= shortlist_rank(&cart, &q, &idf),
+            "the fill ranks at least as high as the cart — why the name drop is needed"
+        );
+        // The drop itself: in an OBJECT slot (allow_terrain=false) the fill is
+        // gone and the real cart is what's left; a GROUND slot is irrelevant
+        // (fills aren't terrain), but the object slot is the one that broke.
+        let entries = [fill.clone(), cart.clone()];
+        let got = shortlist_entries(&entries, &q, &idf, "", 2, 1, 8, false, &prof());
+        assert_eq!(got.len(), 1, "the fill must be dropped, leaving only the cart");
+        assert!(got[0].keywords.contains(&"hook".to_string()), "the survivor is the real cart");
     }
 
     #[test]
