@@ -1133,6 +1133,103 @@ fn score(entry: &TileLibraryEntry, query_tokens: &[String]) -> u32 {
     HEAD_WEIGHT + rest.iter().filter(|t| matches(t)).count() as u32
 }
 
+/// An entry's filename keywords, without the biome and category `parse_entry`
+/// appends to every entry. Index 0 is the identity slot — FA leads a filename
+/// with what the thing IS and trails it with material/shape/colour
+/// (`Stalagmite_Rock_Redrock`, `Pillar_Marble_Black`), so keywords[0] answers
+/// "is this token the tile's own identity?".
+fn filename_keywords(e: &TileLibraryEntry) -> &[String] {
+    // parse_entry pushes biome (only when non-empty) then category, in that
+    // order, at the end. Strip exactly that many.
+    let injected = 1 + usize::from(!e.biome.is_empty());
+    &e.keywords[..e.keywords.len().saturating_sub(injected)]
+}
+
+/// A word the SYNONYMS table only TRANSLATES (merges == false) is one the pack
+/// does not stock under this name — `iron`, `hearth`, `stall`, `buttress`,
+/// `dais`. It must never be promoted to head: its only LEADING tiles are false
+/// friends (`Iron_Maiden`, `Iron_Wood`), so "iron manacles" would resolve to a
+/// torture device. A MERGING synonym (`pillar`/`column`) IS stocked under its
+/// own name, so it stays promotable.
+fn is_translation_source(word: &str) -> bool {
+    SYNONYMS.iter().any(|(a, _, merges)| !merges && same_word(a, word))
+}
+
+/// A real object the pack merely files as a filename SUFFIX (`Wall_Banner`
+/// ×666, `Web_Cocoon` ×520) is never a leading identity, yet it IS the right
+/// answer and resolves correctly as head — so it keeps head. A pure shape /
+/// role / terrain word (`column` 40 astral, `channel` 0, `counter` 0) is what
+/// we reorder around. Measured over the real catalog: trailing-filed objects
+/// carry ≥72 tiles, role words ≤60; 64 sits in the gap.
+/// ponytail: measured ceiling — a pack whose real objects are rarer than this
+/// needs the floor lowered (or the head test replaced by "does the head resolve
+/// to on-theme art").
+const HEAD_STOCK_FLOOR: u32 = 64;
+
+/// How dominant a token's leading-identity use must be to claim head. `marble`
+/// leads 27 tiles but modifies 2,462 (0.01) — a material, not an identity;
+/// `stalagmite` leads 816 of 1,020 (0.80). 0.5 cleanly splits the two, so
+/// "marble column" keeps its head while "stalagmite column" does not.
+const IDENTITY_HEAD_FRAC: f64 = 0.5;
+
+/// English puts a caption's real identity noun FIRST when the trailing word is
+/// a shape or role: a "stalagmite column" is a stalagmite, a "lava channel" is
+/// lava, a "bar counter" is a bar. But `score`/`shortlist_rank` give the LAST
+/// token the head weight, so the shape word wins and the identity scores as a
+/// mere adjective — four "stalagmite columns" drew flat `Pillar_Metal_Gray`
+/// (live, x1-drow), every "lava channel" drew water. Move a leading-identity
+/// token into head position so it, not the shape word, gets the weight.
+///
+/// The signal is the pack's OWN filename convention (identity first; see
+/// `filename_keywords`), never a word list. Fires only when the current head is
+/// NEVER any tile's leading identity AND is barely stocked
+/// (`HEAD_STOCK_FLOOR`), and some earlier token usually IS a leading identity
+/// (`IDENTITY_HEAD_FRAC`) and isn't a translation synonym. Measured over the
+/// real catalog + 916 saved captions: fires on 47, every one an improvement or
+/// a no-op, none of the guard cases (marble column, iron support pillar,
+/// hanging banner, iron manacles, wooden crate, spore mushrooms) moved.
+///
+/// Left unfixed on purpose: labels whose head IS a real leading identity in its
+/// OWN right ("trophy armor display" → `Display_Pillow`, `Dais side board` →
+/// `Spirit_Board`). Those need real word-sense disambiguation, not a reorder,
+/// and this rule deliberately does not touch them rather than guess.
+fn promote_identity_head(entries: &[TileLibraryEntry], tokens: &mut Vec<String>) {
+    if tokens.len() < 2 {
+        return;
+    }
+    // lead[i] = tiles whose IDENTITY keyword is tokens[i]; seen[i] = tiles
+    // carrying tokens[i] anywhere in the filename. `same_word` (not synonyms):
+    // this measures the word's OWN stock, so `column` doesn't borrow `pillar`'s.
+    let mut lead = vec![0u32; tokens.len()];
+    let mut seen = vec![0u32; tokens.len()];
+    for e in entries {
+        let fk = filename_keywords(e);
+        let Some(first) = fk.first() else { continue };
+        for (i, t) in tokens.iter().enumerate() {
+            if same_word(first, t) {
+                lead[i] += 1;
+            }
+            if fk.iter().any(|k| same_word(k, t)) {
+                seen[i] += 1;
+            }
+        }
+    }
+    let last = tokens.len() - 1;
+    // The head already names an object the pack stocks — as an identity, or as
+    // a well-stocked suffix — so it resolves correctly. Leave it.
+    if lead[last] != 0 || seen[last] >= HEAD_STOCK_FLOOR {
+        return;
+    }
+    let frac = |i: usize| if seen[i] == 0 { 0.0 } else { f64::from(lead[i]) / f64::from(seen[i]) };
+    let promote = (0..last)
+        .filter(|&i| frac(i) >= IDENTITY_HEAD_FRAC && !is_translation_source(&tokens[i]))
+        .max_by(|&a, &b| frac(a).total_cmp(&frac(b)));
+    if let Some(i) = promote {
+        let w = tokens.remove(i);
+        tokens.push(w);
+    }
+}
+
 fn to_data_url(bytes: &[u8], ext: &str) -> String {
     let mime = match ext.to_lowercase().as_str() {
         "png" => "image/png",
@@ -1874,10 +1971,14 @@ fn is_object_slot(category: Option<&str>, profile: &PackProfile) -> bool {
 
 fn shortlist_impl(app: &AppHandle, query: &str, category: Option<&str>, scene: &str, fw: u32, fh: u32, k: usize) -> Vec<TileCandidate> {
     let Some(manifest) = load_manifest_cached(app).ok().flatten() else { return Vec::new() };
-    let tokens = tokenize_query(query);
+    let mut tokens = tokenize_query(query);
     if tokens.is_empty() {
         return Vec::new();
     }
+    // Give a caption's real identity noun the head weight when English left it
+    // in an adjective slot ("stalagmite column" → stalagmite). Over the whole
+    // catalog, not the category pool — identity is a global fact.
+    promote_identity_head(&manifest.entries, &mut tokens);
     // IDF is computed over the WHOLE catalog (a keyword's rarity doesn't depend
     // on which category we're currently searching), then applied to the pool.
     let idf = load_idf_cached(app, &manifest);
@@ -3993,7 +4094,8 @@ mod tests {
             let (size, label) = line.split_once('\t').unwrap();
             let (w, h) = size.split_once('x').unwrap();
             let (w, h) = (w.parse().unwrap(), h.parse().unwrap());
-            let tokens = tokenize_query(label);
+            let mut tokens = tokenize_query(label);
+            promote_identity_head(&man.entries, &mut tokens); // mirror shortlist_impl
             // Scenes: one on the universal folder and two on real biome
             // folders, because `biome_affinity` only has teeth on those.
             for scene in std::env::var("TILE_SCENES").unwrap_or_else(|_| "tavern,cavern".into()).split(',') {
@@ -4059,6 +4161,44 @@ mod tests {
         let got = shortlist_entries(std::slice::from_ref(&bar), &tokenize_query("Bar counter"), &idf, "", 6, 1, 8, false, &prof());
         assert_eq!(got.len(), 1, "the real bar tile must be shortlisted for 'Bar counter'");
         assert_eq!(got[0].rel_path, "bar_5x1");
+    }
+
+    /// A caption whose real identity noun sits in an adjective slot — because
+    /// English trails it with a shape/role word — must have that noun promoted
+    /// to head, but ONLY when the pack's own naming says the head is a mere
+    /// shape word and the earlier token is a genuine identity. Live: four
+    /// "Stalagmite columns" drew `Pillar_Metal_Gray`. Fixtures mirror
+    /// `parse_entry` (biome then category appended to keywords).
+    #[test]
+    fn a_shape_word_yields_head_to_the_identity_that_qualifies_it() {
+        fn e(name: &str, category: &str, biome: &str, kws: &[&str]) -> TileLibraryEntry {
+            let mut keywords: Vec<String> = kws.iter().map(|s| s.to_string()).collect();
+            keywords.push(biome.to_lowercase()); // parse_entry appends biome…
+            keywords.push(category.to_lowercase()); // …then category
+            TileLibraryEntry { root: String::new(), rel_path: format!("{biome}/{category}/{name}"), biome: biome.into(), category: category.into(), keywords, w: 1, h: 1 }
+        }
+        let mut entries = Vec::new();
+        // 100 stalagmites (identity-led) → frac 1.0.
+        for i in 0..100 { entries.push(e(&format!("Stalagmite_Rock_A{i}"), "Decor", "Mountain", &["stalagmite", "rock"])); }
+        // "column" is ONLY ever a trailing modifier here (Ceremorph_Support_Column) → lead 0.
+        for i in 0..6 { entries.push(e(&format!("Ceremorph_Support_Column_{i}"), "Structures", "Astral", &["ceremorph", "support", "column"])); }
+        // 100 marble-suffixed pillars → marble frac ~0.01, a material not an identity.
+        for i in 0..100 { entries.push(e(&format!("Pillar_Marble_{i}"), "Structures", "!Core_Settlements", &["pillar", "marble"])); }
+        // 40 "iron"-led false friends (Iron_Maiden) → frac 1.0, but iron is a
+        // translation synonym, so it must NOT be promoted.
+        for i in 0..40 { entries.push(e(&format!("Iron_Maiden_{i}"), "Decor", "!Core_Settlements", &["iron", "maiden"])); }
+        // 12 manacles, filed as a trailing suffix (lead 0, seen 12 < floor).
+        for i in 0..12 { entries.push(e(&format!("Prison_Manacles_{i}"), "Decor", "!Core_Settlements", &["prison", "manacles"])); }
+        // 70 banners, a real object filed as a suffix (Wall_Banner) → seen 70 >= floor, must keep head.
+        for i in 0..70 { entries.push(e(&format!("Wall_Banner_{i}"), "Decor", "!Core_Settlements", &["wall", "banner"])); }
+
+        let head = |label: &str| { let mut t = tokenize_query(label); promote_identity_head(&entries, &mut t); t.last().unwrap().clone() };
+
+        assert_eq!(head("stalagmite column"), "stalagmite", "the shape word 'column' must yield head to 'stalagmite'");
+        assert_eq!(head("marble column"), "column", "a material (marble, frac~0.01) must NOT steal head from 'column'");
+        assert_eq!(head("iron manacles"), "manacles", "a translation synonym (iron) must NOT steal head, even when it leads false-friend tiles");
+        assert_eq!(head("hanging banner"), "banner", "a well-stocked suffix object (banner) keeps its head");
+        assert_eq!(head("wooden crate"), "crate", "an unknown identity head stays put — nothing to promote");
     }
 
     #[test]
