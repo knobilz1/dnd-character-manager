@@ -293,13 +293,7 @@ function drawTileProcedural(ctx: Ctx, code: string, x: number, y: number, px: nu
     }
     case '^': {
       drawFloor(ctx, x, y, px);
-      ctx.fillStyle = COLORS.rubble;
-      const dots = [[0.3, 0.35], [0.6, 0.3], [0.45, 0.6], [0.7, 0.65], [0.25, 0.7]];
-      for (const [dx, dy] of dots) {
-        ctx.beginPath();
-        ctx.arc(x + px * dx, y + px * dy, px * 0.08, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      drawRubblePile(ctx, x, y, px);
       return;
     }
     case ',': {
@@ -821,6 +815,34 @@ function hazardVariantFor(label: string | undefined): keyof HazardSet {
   return 'fireplace';
 }
 
+/** A bunched heap of rubble: several stones clustered toward the centre with a
+ *  soft ground shadow and three depth-sorted shades, so a `^` reads as a pile
+ *  of rock rather than one lonely boulder. Deterministic (a fixed constellation
+ *  — no RNG), so every render of a cell is identical. Nabil, 2026-07-22: scatter
+ *  must be bunched and at least three per tile, never a single item adrift. */
+function drawRubblePile(ctx: Ctx, x: number, y: number, px: number) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.beginPath();
+  ctx.ellipse(x + px * 0.52, y + px * 0.68, px * 0.34, px * 0.15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // [dx, dy, radius, shade] — back/low/dark first, front/high/light last, so
+  // the stack overlaps into a heap with depth. shade indexes ROCK_SHADES.
+  const rocks: Array<[number, number, number, number]> = [
+    [0.40, 0.62, 0.155, 0], [0.61, 0.60, 0.140, 0], [0.52, 0.66, 0.120, 0],
+    [0.34, 0.52, 0.115, 1], [0.55, 0.49, 0.130, 1], [0.70, 0.55, 0.100, 1],
+    [0.45, 0.42, 0.100, 2], [0.62, 0.40, 0.088, 2],
+  ];
+  const ROCK_SHADES = ['#5f564a', COLORS.rubble, '#a89a82'];
+  for (const [dx, dy, r, sh] of rocks) {
+    ctx.fillStyle = ROCK_SHADES[sh];
+    ctx.beginPath();
+    ctx.arc(x + px * dx, y + px * dy, px * r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 /** Sprite-first tile dispatch, using whichever style `setActiveTileStyle`
  *  last selected: draws real art for the codes that style covers (falling
  *  back to the procedural renderer if sprites haven't finished loading
@@ -909,7 +931,12 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       break;
     }
     case '^':
-      if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.rubble, x, y, px, style.filter)) return;
+      // Not style.rubble (a single lonely boulder sprite) — draw the scene's
+      // ground, then a bunched heap of stones on top. See drawRubblePile.
+      if (drawGround(ctx, x, y, px, terrain, style)) {
+        drawRubblePile(ctx, x, y, px);
+        return;
+      }
       break;
     case 'T':
       if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.foliage, x, y, px, style.filter)) return;
@@ -1043,6 +1070,18 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
 
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // A `^` cell is procedural rubble — a bunched rock heap drawn by drawTile —
+  // not a catalog placement. Drop any tile the resolver produced for one so it
+  // can never override the heap with a single boulder or, worse, an off-biome
+  // Structure (live 2026-07-22: coast=Desert resolved "barnacled boulders" to
+  // fifteen Window tiles). Old sidecars carrying such tiles self-heal on
+  // re-render. Field `^` cells are 1x1, so the origin cell IS the glyph.
+  tiles = tiles.filter((t) => {
+    const oc = Math.min(...t.cells.map(([c]) => c));
+    const orr = Math.min(...t.cells.map(([, r]) => r));
+    return map.grid[orr]?.[oc] !== '^';
+  });
 
   // Cells a resolved catalog tile will cover — the base pass draws plain floor
   // there (not the built-in glyph sprite) so the real tile sits on floor with
