@@ -850,6 +850,43 @@ function drawRubblePile(ctx: Ctx, x: number, y: number, px: number) {
   ctx.restore();
 }
 
+/** Does this `_` stair climb? Read from its Features caption — "steps UP",
+ *  "ascend", "to the battlements above" all mean up; everything else (incl. a
+ *  bare "stairwell", and every down word) defaults to descending, which is what
+ *  the built-in sprite always drew. Nabil, 2026-07-22: a stair the DM means to
+ *  go UP was rendering as one going down. */
+function stairsGoUp(label?: string): boolean {
+  return !!label && /\b(up|upper|above|ascend|ascending|climb|climbing|rise|rising|overhead|upstairs)\b/.test(label);
+}
+
+/** A flight of steps for a `_` cell, drawn to CLIMB or DESCEND per its caption
+ *  (the built-in stairs sprite only ever descended). Light stone treads read as
+ *  rising into the level above; dark treads read as dropping into shadow below;
+ *  a chevron removes any doubt. Procedural so it tiles across a multi-cell stair
+ *  block and needs no second sprite. */
+function drawStairs(ctx: Ctx, x: number, y: number, px: number, up: boolean, terrain: MapTerrain | undefined, style: StyleSpriteSet) {
+  if (!drawGround(ctx, x, y, px, terrain, style)) drawFloor(ctx, x, y, px);
+  const n = 5;
+  const bandH = (px * 0.86) / n;
+  for (let i = 0; i < n; i++) {
+    const yy = y + px * 0.07 + i * bandH;
+    ctx.fillStyle = up ? 'rgba(206,201,190,0.94)' : 'rgba(104,100,95,0.94)';
+    ctx.fillRect(x + px * 0.13, yy, px * 0.74, bandH * 0.66);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; // riser shadow under each tread
+    ctx.fillRect(x + px * 0.13, yy + bandH * 0.66, px * 0.74, bandH * 0.34);
+  }
+  const cx = x + px * 0.5, cy = y + px * 0.5, s = px * 0.15;
+  ctx.fillStyle = up ? 'rgba(30,90,40,0.95)' : 'rgba(150,40,30,0.95)';
+  ctx.beginPath();
+  if (up) {
+    ctx.moveTo(cx, cy - s); ctx.lineTo(cx - s * 0.82, cy + s * 0.5); ctx.lineTo(cx + s * 0.82, cy + s * 0.5);
+  } else {
+    ctx.moveTo(cx, cy + s); ctx.lineTo(cx - s * 0.82, cy - s * 0.5); ctx.lineTo(cx + s * 0.82, cy - s * 0.5);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
 /** Sprite-first tile dispatch, using whichever style `setActiveTileStyle`
  *  last selected: draws real art for the codes that style covers (falling
  *  back to the procedural renderer if sprites haven't finished loading
@@ -918,8 +955,10 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       break;
     }
     case '_':
-      if (drawSprite(ctx, style.stairs, x, y, px, style.filter)) return;
-      break;
+      // Not style.stairs (always a DESCENDING sprite) — draw a flight that
+      // climbs or descends per the caption, so "steps up" reads as going up.
+      drawStairs(ctx, x, y, px, stairsGoUp(featureLabel), terrain, style);
+      return;
     case '~':
       if (terrain?.liquid && drawSprite(ctx, terrain.liquid, x, y, px)) return;
       if (drawSprite(ctx, style.water, x, y, px, style.filter)) return;
@@ -1138,7 +1177,7 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
         code = neighborGround;
       }
       const neighbors = code === '#' || code === 'B' ? wallNeighborsAt(map.grid, mapRow, mapCol) : undefined;
-      const featureLabel = code === '=' || code === '*' ? featureLabels.get(`${mapCol},${mapRow}`) : undefined;
+      const featureLabel = code === '=' || code === '*' || code === '_' ? featureLabels.get(`${mapCol},${mapRow}`) : undefined;
       // A `+` only earns a real door sprite outdoors when it is set into a
       // BUILT wall — otherwise it is a cave mouth or a trail gap.
       const builtAdj =
