@@ -3852,6 +3852,119 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Board reading (#39) — one photo of the PHYSICAL table → which grid cell each
+// miniature stands on, over the same multimodal path the tile resolver uses.
+//
+// Why there's no homography or fiducial markers here: every map this app
+// renders already prints the ruler frame's column letters + row numbers (see
+// `column_label`, and battleMapRender.ts's composeRulerFrame), and that SAME
+// render is what goes on the TV *and* what comes out of the PDF that gets
+// printed and taped down. So the model READS THE PRINTED LABELS off the photo
+// instead of us solving any camera geometry — which makes a TV and a paper map
+// the same problem. (Unlabelled 3D terrain is a later, separate strategy.)
+//
+// This NEVER draws a creature anywhere. The result is a hint for the DM to
+// confirm, which then lands only in the DM's own battle log; the physical minis
+// stay the only figures on the map (see `objects_rule_line` /
+// DEPLOYMENT_RULE_LINE).
+// ---------------------------------------------------------------------------
+
+/// One miniature the model located on the board.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct BoardMini {
+    /// The cell as read off the map's printed labels, upper-cased ("F7").
+    pub cell: String,
+    /// Short description so the DM can tell one mini from another.
+    pub description: String,
+    /// 0-based grid indices parsed from `cell` — ready for a combatant coord.
+    pub col: usize,
+    pub row: usize,
+}
+
+/// Builds the multimodal user message for one board read: the table photo plus
+/// the grid's real bounds, and an instruction to answer with ONLY JSON. Stating
+/// the bounds lets the model sanity-check its own reading (and lets
+/// `parse_board_read` drop anything outside them). Pure.
+fn build_board_read_message(media: &str, b64: &str, cols: usize, rows: usize) -> String {
+    use serde_json::json;
+    let last_col = column_label(cols.saturating_sub(1));
+    let content = vec![
+        json!({"type":"text","text": format!(
+            "This photograph shows a tabletop battle map with physical miniatures standing on it. The map is printed \
+             with a ruler frame: column letters run left-to-right along the top edge (A through {last_col}), and row \
+             numbers run top-to-bottom down the left edge (1 through {rows}). Each square is named by its column letter \
+             followed by its row number, e.g. \"F7\"."
+        )}),
+        json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}),
+        json!({"type":"text","text": format!(
+            "For EVERY miniature standing on the map, read the printed labels to work out the ONE square it stands on, \
+             and give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\"). \
+             Only report squares inside A1..{last_col}{rows}. If you cannot confidently tell which square a figure is on, \
+             LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands, scenery and anything \
+             that is not a miniature. Reply with ONLY this JSON and nothing else: \
+             {{\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
+        )}),
+    ];
+    json!({"type":"user","message":{"role":"user","content":content}}).to_string()
+}
+
+/// Parses a board-read reply into placed minis. Tolerant of prose around the
+/// JSON (the same `extract_json_object` the tile picker leans on) and of a
+/// missing description. DROPS anything that isn't a real cell reference or that
+/// falls outside this map's own grid, so a hallucinated "Z99" can never reach
+/// the DM's battle log. Pure.
+fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
+    // The asked-for shape is {"minis":[…]}, but a model that answers with a
+    // bare […] array shouldn't cost us the entire read.
+    let items: Vec<serde_json::Value> = serde_json::from_str::<serde_json::Value>(&extract_json_object(reply))
+        .ok()
+        .and_then(|v| v.get("minis").and_then(|m| m.as_array()).cloned())
+        .or_else(|| {
+            serde_json::from_str::<serde_json::Value>(reply.trim())
+                .ok()
+                .and_then(|v| v.as_array().cloned())
+        })
+        .unwrap_or_default();
+    items
+        .iter()
+        .filter_map(|item| {
+            let cell = item.get("cell")?.as_str()?.trim().to_ascii_uppercase();
+            let (col, row) = parse_cell_ref(&cell)?;
+            if col >= cols || row >= rows {
+                return None;
+            }
+            let description = item
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            Some(BoardMini { cell, description, col, row })
+        })
+        .collect()
+}
+
+/// Read the physical table: one photo (a data URL) → the cell each miniature is
+/// standing on, for the map whose grid is `cols` x `rows`.
+///
+/// Entirely opt-in: nothing calls this unless the DM asks for a board read, so a
+/// table with no camera behaves exactly as it always has. The answer is a HINT
+/// for the DM to confirm — never authority, and never drawn on the map.
+#[tauri::command]
+pub fn read_table_positions(photo: String, cols: usize, rows: usize) -> Result<Vec<BoardMini>, String> {
+    if cols == 0 || rows == 0 {
+        return Err("That map has no grid to read positions against.".into());
+    }
+    let (media, b64) = split_data_url(&photo);
+    if b64.trim().is_empty() {
+        return Err("The board photo was empty.".into());
+    }
+    let reply = crate::dm::run_claude_vision(&build_board_read_message(media, b64, cols, rows), Some(VISION_PICK_MODEL))?;
+    crate::maplog::log("BOARD READ (raw reply)", &reply);
+    Ok(parse_board_read(&reply, cols, rows))
+}
+
 // The per-place ground queries that used to live here are now
 // `pack_profile.rs`'s DEFAULT_BIOMES, so an imported pack can carry its own
 // instead of every install being told it owns Forgotten Adventures. The default
@@ -8844,6 +8957,53 @@ Tactics:
         assert_eq!(parse_vision_picks(r#"{"picks":[{"slot":"1","choice":"2"}]}"#, 1), vec![Some(1)]);
         // Still never panics on nonsense, and 0 still means "none of these".
         assert_eq!(parse_vision_picks(r#"{"picks":[{"slot":1,"choice":0.2}]}"#, 1), vec![None]);
+    }
+
+    /// A board read must never be able to invent a square. Anything that isn't a
+    /// real cell reference, or that falls outside THIS map's grid, is dropped
+    /// rather than handed to the DM as a position.
+    #[test]
+    fn parse_board_read_keeps_cells_inside_the_grid_and_drops_the_rest() {
+        let reply = r#"{"minis":[
+            {"cell":"F7","description":"tall knight"},
+            {"cell":"Z99","description":"off the map"},
+            {"cell":"nonsense","description":"not a cell"},
+            {"cell":"a1","description":"lowercase goblin"}
+        ]}"#;
+        let got = parse_board_read(reply, 10, 10);
+        assert_eq!(
+            got,
+            vec![
+                BoardMini { cell: "F7".into(), description: "tall knight".into(), col: 5, row: 6 },
+                BoardMini { cell: "A1".into(), description: "lowercase goblin".into(), col: 0, row: 0 },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_board_read_survives_prose_a_bare_array_and_a_missing_description() {
+        // Chatty model, object shape, no description field.
+        let prose = "Sure! Here's what I see:\n{\"minis\":[{\"cell\":\"B2\"}]}\nHope that helps.";
+        assert_eq!(
+            parse_board_read(prose, 5, 5),
+            vec![BoardMini { cell: "B2".into(), description: String::new(), col: 1, row: 1 }]
+        );
+        // A bare array instead of {"minis":[…]} shouldn't cost us the whole read.
+        assert_eq!(parse_board_read(r#"[{"cell":"C3","description":"ogre"}]"#, 5, 5).len(), 1);
+        // Junk answers read as "no minis found", never a panic.
+        assert!(parse_board_read("I can't tell from this photo.", 10, 10).is_empty());
+    }
+
+    #[test]
+    fn build_board_read_message_states_the_real_grid_bounds_and_carries_the_photo() {
+        let msg = build_board_read_message("image/jpeg", "QUJD", 8, 12);
+        // 8 columns → A..H, so the model is told the true bounds both times.
+        assert!(msg.contains("A through H"), "{msg}");
+        assert!(msg.contains("1 through 12"), "{msg}");
+        assert!(msg.contains("A1..H12"), "{msg}");
+        // The photo rides as a base64 image block, same shape as the tile picker.
+        assert!(msg.contains(r#""media_type":"image/jpeg""#), "{msg}");
+        assert!(msg.contains(r#""data":"QUJD""#), "{msg}");
     }
 
     #[test]
