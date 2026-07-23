@@ -239,6 +239,49 @@ export function battleMapFloorsToPngs(
   }));
 }
 
+/** One `_` stairwell's cross-floor link, for the multi-floor viewer's "↑ Upper"
+ *  hints and its misalignment warning. `dir` comes from the Features caption
+ *  (see stairsGoUp; an uncaptioned stair defaults DOWN, same as the render).
+ *  `toFloor` is the floor one step in that direction (ground-first order), null
+ *  when the stair points off the modelled stack — a ground-floor stair DOWN to
+ *  an undrawn cellar, or a top-floor stair/ladder UP to an undrawn roof; that is
+ *  a link to somewhere the map doesn't draw, NOT a misalignment. `aligned` is
+ *  whether that target floor actually has a `_` at the SAME cell (the LOCKED
+ *  design links stairs by cell-coincidence). */
+export interface FloorStairLink {
+  dir: 'up' | 'down';
+  toFloor: string | null;
+  aligned: boolean;
+  col: number;
+  row: number;
+}
+
+/** Per-floor stair links for a stack of parsed floors (ground first). Pure.
+ *  A single-floor stack yields one empty list (nothing to link to). Callers
+ *  warn only on a misaligned UP-stair (`dir==='up' && toFloor && !aligned`) —
+ *  an up-stair that should reach the floor above but finds no stair stacked
+ *  there — which is the real generation bug; down-stairs to undrawn levels are
+ *  expected and never warn. */
+export function floorStairLinks(floors: ParsedBattleMap[]): FloorStairLink[][] {
+  const stairCells = floors.map((f) => {
+    const set = new Set<string>();
+    f.grid.forEach((row, r) => {
+      for (let c = 0; c < row.length; c++) if (row[c] === '_') set.add(`${c},${r}`);
+    });
+    return set;
+  });
+  const labelsPer = floors.map((f) => parseFeatureLabels(f.features));
+  return floors.map((_f, i) =>
+    [...stairCells[i]].map((key) => {
+      const [col, row] = key.split(',').map(Number);
+      const up = stairsGoUp(labelsPer[i].get(key));
+      const ti = up ? i + 1 : i - 1;
+      const target = floors[ti];
+      return { dir: up ? 'up' : 'down', toFloor: target?.name ?? null, aligned: !!target && stairCells[ti].has(key), col, row } as FloorStairLink;
+    }),
+  );
+}
+
 // ── Procedural tile drawing ──────────────────────────────────────────────────
 // Each entry draws ONE cell into a `px`-sized square at (x, y). Kept small and
 // legible for print (line-art, high contrast) rather than photorealistic.

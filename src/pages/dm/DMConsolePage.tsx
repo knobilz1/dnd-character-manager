@@ -14,7 +14,7 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -356,6 +356,26 @@ function deploymentPerFloor(spec: string): Record<string, { enemies?: string; pa
     const end = i + 1 < marks.length ? (marks[i + 1].index ?? spec.length) : spec.length;
     out[m[1].trim()] = parseDeployment(spec.slice(start, end));
   });
+  return out;
+}
+
+/** Turns one floor's stair links into deduped display chips — an "↑ Upper"
+ *  connection hint per stair, or an amber warning when an UP-stair should reach
+ *  the floor above but no stair is stacked there (the misalignment bug). A
+ *  down-stair to an undrawn cellar/roof shows a plain "↓ stairwell", never a
+ *  warning — see floorStairLinks. */
+function stairHints(links: FloorStairLink[]): { text: string; warn: boolean }[] {
+  const seen = new Set<string>();
+  const out: { text: string; warn: boolean }[] = [];
+  for (const l of links) {
+    const warn = l.dir === 'up' && l.toFloor != null && !l.aligned;
+    const arrow = l.dir === 'up' ? '↑' : '↓';
+    const text = l.aligned && l.toFloor ? `${arrow} ${l.toFloor}` : warn ? `not aligned with ${l.toFloor}` : `${arrow} stairwell`;
+    const key = `${text}|${warn}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ text, warn });
+  }
   return out;
 }
 
@@ -3996,10 +4016,12 @@ export function DMConsolePage() {
                         // the ground floor's (the on-map overlay is already
                         // per-floor — this is its text twin).
                         const deps = deploymentPerFloor(card.spec);
+                        const stairLinks = floorStairLinks(parseBattleMapFloors(card.spec));
                         return (
                         <div className="flex flex-wrap gap-3">
-                          {card.floors.map((f) => {
+                          {card.floors.map((f, fi) => {
                             const dep = deps[f.name] ?? {};
+                            const hints = stairHints(stairLinks[fi] ?? []);
                             return (
                             <div key={f.name} className="flex-1 min-w-[240px] space-y-1">
                               <div className="flex items-center justify-between gap-2">
@@ -4010,6 +4032,14 @@ export function DMConsolePage() {
                                 </label>
                               </div>
                               <img src={f.png} alt={`${card.name} — ${f.name}`} className={`max-w-full rounded-lg border bg-slate-950 ${f.revealed ? 'border-emerald-700/70' : 'border-slate-700'}`} />
+                              {hints.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                                  <span className="text-slate-500">Stairs:</span>
+                                  {hints.map((h, hi) => (
+                                    <span key={hi} className={h.warn ? 'font-medium text-amber-400' : 'text-slate-400'}>{h.warn ? `⚠ ${h.text}` : h.text}</span>
+                                  ))}
+                                </div>
+                              )}
                               {(dep.enemies || dep.party) && (
                                 <div className="rounded border border-slate-800 bg-slate-900/50 px-2 py-1 text-[11px] space-y-0.5">
                                   {dep.enemies && <div><span className="font-medium text-red-400">Enemies:</span> <span className="text-slate-300">{dep.enemies}</span></div>}
