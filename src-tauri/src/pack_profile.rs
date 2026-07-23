@@ -321,6 +321,46 @@ impl PackProfile {
         }
         self
     }
+
+    /// A coastal scene word, added when the profile has none. A beach or cove is
+    /// a SAND-and-SEA board that no single art folder owns — FA keeps its sand
+    /// under Desert/Volcanic and its open water under Aquatic — so the
+    /// per-folder profiler structurally can't derive it: it gave Aquatic the one
+    /// word `underwater` (all coral and kelp). Left unsaid, a "smuggler's cove"
+    /// classified as `nautiloid`/`forest`/`underwater` and rendered as an
+    /// illithid ship, a grass clearing, or a coral seabed — measured 2026-07-22.
+    /// Seeded in code, like the built-in `dungeon`, so it survives a re-profile
+    /// without needing to be saved; folded in BEFORE `with_overrides` so the
+    /// panel can still correct it.
+    ///
+    /// folder Desert: object affinity for what is actually ON a beach —
+    /// driftwood, boulders, barrels, crates — which Desert stocks and Aquatic
+    /// (underwater) does not. floor_query "beach sand" resolves cross-folder to
+    /// the palest sand the vision picker finds; liquid_query "water" reaches
+    /// Aquatic's open blue Water_* for the `~` surf. natural_walls so a cove's
+    /// `#` cliffs read as living sea-rock rather than masonry.
+    ///
+    /// ponytail: fires on "no coastal word" alone. A pack with neither sand nor
+    /// open water would seed a coast that resolves to the built-in floor
+    /// (graceful, like any artless scene); add a manifest gate only if a real
+    /// pack regresses.
+    pub fn ensure_coast_scene(mut self) -> Self {
+        const COASTAL: &[&str] = &["coast", "beach", "shore", "cove", "seaside", "tidal"];
+        let has_coastal = self.biomes.iter().any(|b| {
+            let s = b.scene.to_ascii_lowercase();
+            COASTAL.iter().any(|w| s.contains(w))
+        });
+        if !has_coastal {
+            self.biomes.push(BiomeProfile {
+                scene: "coast".into(),
+                folder: "Desert".into(),
+                floor_query: Some("beach sand".into()),
+                natural_walls: true,
+                liquid_query: Some("water".into()),
+            });
+        }
+        self
+    }
 }
 
 /// What the panel writes. Every field optional: absent means "leave whatever
@@ -866,6 +906,32 @@ mod tests {
         let p = parse_semantics_reply(json, fa()).unwrap();
         assert!(p.scene(BUILTIN_SCENE).is_none(), "the built-in look must never resolve catalog art");
         assert_eq!(p.scene_words(), vec!["crypt"], "only the real place survives");
+    }
+
+    /// A learned profile with no coastal place gains `coast` (sand ground + sea
+    /// water); any existing coastal word blocks the seed so it can't duplicate.
+    #[test]
+    fn ensure_coast_scene_adds_a_coastal_word_only_when_none_exists() {
+        let bp = |scene: &str, folder: &str| BiomeProfile {
+            scene: scene.into(),
+            folder: folder.into(),
+            floor_query: None,
+            natural_walls: false,
+            liquid_query: None,
+        };
+        let none = PackProfile { biomes: vec![bp("underwater", "Aquatic"), bp("desert", "Desert")], ..Default::default() };
+        let seeded = none.ensure_coast_scene();
+        let coast = seeded.scene("coast").expect("a profile with no coastal word must gain `coast`");
+        assert_eq!(coast.folder, "Desert");
+        assert_eq!(coast.floor_query.as_deref(), Some("beach sand"));
+        assert_eq!(coast.liquid_query.as_deref(), Some("water"));
+        assert!(coast.natural_walls, "a cove's `#` cliffs must read as living sea-rock");
+
+        let has = PackProfile { biomes: vec![bp("seaside", "Aquatic")], ..Default::default() };
+        let n = has.biomes.len();
+        let after = has.ensure_coast_scene();
+        assert_eq!(after.biomes.len(), n, "an existing coastal word must block the seed");
+        assert!(after.scene("coast").is_none(), "no bare `coast` added when `seaside` already covers it");
     }
 
     /// The evidence block is the whole reason profiling works — if it stops

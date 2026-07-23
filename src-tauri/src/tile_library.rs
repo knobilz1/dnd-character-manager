@@ -263,7 +263,7 @@ pub(crate) fn load_profile_cached(app: &AppHandle) -> std::sync::Arc<PackProfile
     let read = |p: Result<PathBuf, String>| p.ok().and_then(|p| fs::read_to_string(p).ok());
     let derived: PackProfile = read(profile_path(app)).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let corrections: ProfileOverrides = read(profile_overrides_path(app)).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    let arc = std::sync::Arc::new(derived.with_overrides(&corrections));
+    let arc = std::sync::Arc::new(derived.ensure_coast_scene().with_overrides(&corrections));
     *guard = Some(arc.clone());
     arc
 }
