@@ -14,7 +14,7 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapToPdfBytes, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain } from '../../utils/battleMapRender';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -343,6 +343,22 @@ function parseDeployment(spec: string): { enemies?: string; party?: string } {
   return { enemies: grab('Enemies'), party: grab('Party') };
 }
 
+/** Per-floor deployment for a multi-floor spec, keyed by floor name. Each
+ *  `Floor:` block carries its OWN Deployment, so parseDeployment over the whole
+ *  spec (a single regex match) would surface only the ground floor's minis —
+ *  this splits on `Floor:` and parses each block so every floor shows its own.
+ *  Empty for a single-floor spec (the caller uses parseDeployment there). */
+function deploymentPerFloor(spec: string): Record<string, { enemies?: string; party?: string }> {
+  const marks = [...spec.matchAll(/^\s*Floor:\s*(.+)$/gim)];
+  const out: Record<string, { enemies?: string; party?: string }> = {};
+  marks.forEach((m, i) => {
+    const start = (m.index ?? 0) + m[0].length;
+    const end = i + 1 < marks.length ? (marks[i + 1].index ?? spec.length) : spec.length;
+    out[m[1].trim()] = parseDeployment(spec.slice(start, end));
+  });
+  return out;
+}
+
 /** A battle map card as rendered in the merged Plan Next Session dialog —
  *  BattleMapMeta plus the full spec text and its rendered preview PNG. */
 /** One PLACE the map resolver knows about, as pack_profile.rs derived it, plus
@@ -390,6 +406,12 @@ interface MapCard {
   /** Resolved catalog terrain — ground, water, and whether `#` is living
    *  rock. Empty object keeps the built-in tileset (dungeon / no library). */
   terrain: MapTerrain;
+  /** One preview per floor (ground first) for multi-story places; a single-
+   *  floor map has exactly one and `png === floors[0].png`. `revealed` gates
+   *  the Phase-5 player broadcast — ground revealed, upper floors hidden until
+   *  the DM flips them when the party climbs. Empty only if the grid didn't
+   *  parse (then `png` is null too). */
+  floors: { name: string; png: string; revealed: boolean }[];
 }
 
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
@@ -873,10 +895,22 @@ export function DMConsolePage() {
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
   const [showZones, setShowZones] = React.useState(true);
+  // Multi-story: rebuild a card's per-floor previews from its spec. Ground
+  // first; a single-floor map yields one floor whose png === the old single
+  // png (byte-identical), so existing maps are unchanged. `prev` carries the
+  // reveal state across a re-render (matched by floor name); a fresh card has
+  // none, so ground starts revealed and upper floors hidden — Phase 5 gates
+  // the LAN player broadcast on these flags.
+  const renderFloors = (spec: string, tiles: MapTileArt[], terrain: MapTerrain, prev?: MapCard['floors']): MapCard['floors'] =>
+    battleMapFloorsToPngs(spec, 64, tiles, terrain, showZones).map((f, i) => ({
+      name: f.name,
+      png: f.png,
+      revealed: prev?.find((p) => p.name === f.name)?.revealed ?? i === 0,
+    }));
   // Re-render every loaded card's preview when the toggle flips (no-op on mount
   // while the lists are still empty). Art is already cached from the first load.
   React.useEffect(() => {
-    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain, showZones) });
+    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.tiles, c.terrain, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }, [showZones]);
@@ -2838,7 +2872,8 @@ export function DMConsolePage() {
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
     const { tiles, terrain } = await fetchMapTiles(meta.slug);
-    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, png: battleMapToPngDataUrl(spec, 64, tiles, terrain, showZones) };
+    const floors = renderFloors(spec, tiles, terrain);
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, floors, png: floors[0]?.png ?? null };
   }
 
   /** Loads the currently-imported tile library's summary (if any) — called
@@ -2934,7 +2969,7 @@ export function DMConsolePage() {
    *  (see setActiveTileStyle), so switching styles doesn't touch any map's
    *  saved spec, just what art the already-loaded cards redraw with. */
   function refreshMapCardPreviews() {
-    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain, showZones) });
+    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.tiles, c.terrain, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }
@@ -3007,7 +3042,22 @@ export function DMConsolePage() {
     // Hand edits keep the card's already-resolved tiles (a live edit doesn't
     // re-run the vision resolver — that happens on regenerate); the preview
     // just redraws the edited grid under the existing tile art.
-    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec, 64, c.tiles, c.terrain, showZones) : c.png } : c));
+    const patch = (cards: MapCard[]) => cards.map((c) => {
+      if (c.slug !== slug) return c;
+      if (!updatePreview) return { ...c, spec };
+      const floors = renderFloors(spec, c.tiles, c.terrain, c.floors);
+      return { ...c, spec, floors, png: floors[0]?.png ?? null };
+    });
+    setPlanMapCards(patch);
+    setAdHocMapCards(patch);
+  }
+
+  /** Flip one floor's player-reveal flag (multi-story maps). The DM always sees
+   *  every floor in this console; the flag gates only the Phase-5 LAN player
+   *  broadcast, so the party can't peek upstairs before they climb. */
+  function toggleFloorReveal(slug: string, floorName: string) {
+    const patch = (cards: MapCard[]) => cards.map((c) =>
+      c.slug === slug ? { ...c, floors: c.floors.map((f) => (f.name === floorName ? { ...f, revealed: !f.revealed } : f)) } : c);
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
   }
@@ -3940,13 +3990,44 @@ export function DMConsolePage() {
                           <Button size="sm" variant="outline" onClick={() => exportMapPng(card)} disabled={!!planBusy}><Download size={14} /> PNG</Button>
                         </div>
                       </div>
-                      {card.png ? (
+                      {card.floors.length > 1 ? (() => {
+                        // Each floor carries its OWN Deployment; show it under
+                        // that floor so "place the minis" is per-level, not just
+                        // the ground floor's (the on-map overlay is already
+                        // per-floor — this is its text twin).
+                        const deps = deploymentPerFloor(card.spec);
+                        return (
+                        <div className="flex flex-wrap gap-3">
+                          {card.floors.map((f) => {
+                            const dep = deps[f.name] ?? {};
+                            return (
+                            <div key={f.name} className="flex-1 min-w-[240px] space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-medium text-slate-300">{f.name}</div>
+                                <label className="flex items-center gap-1 text-[10px] text-slate-400 cursor-pointer" title="Reveal this floor to players when the party climbs to it (LAN player view — Phase 5)">
+                                  <input type="checkbox" checked={f.revealed} onChange={() => toggleFloorReveal(card.slug, f.name)} className="accent-emerald-600" />
+                                  {f.revealed ? 'Shown to players' : 'Hidden'}
+                                </label>
+                              </div>
+                              <img src={f.png} alt={`${card.name} — ${f.name}`} className={`max-w-full rounded-lg border bg-slate-950 ${f.revealed ? 'border-emerald-700/70' : 'border-slate-700'}`} />
+                              {(dep.enemies || dep.party) && (
+                                <div className="rounded border border-slate-800 bg-slate-900/50 px-2 py-1 text-[11px] space-y-0.5">
+                                  {dep.enemies && <div><span className="font-medium text-red-400">Enemies:</span> <span className="text-slate-300">{dep.enemies}</span></div>}
+                                  {dep.party && <div><span className="font-medium text-sky-400">Party:</span> <span className="text-slate-300">{dep.party}</span></div>}
+                                </div>
+                              )}
+                            </div>
+                            );
+                          })}
+                        </div>
+                        );
+                      })() : card.png ? (
                         <img src={card.png} alt={`${card.name} preview`} className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
                       ) : (
                         <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
                       )}
 
-                      {(() => {
+                      {card.floors.length <= 1 && (() => {
                         const dep = parseDeployment(card.spec);
                         if (!dep.enemies && !dep.party) return null;
                         return (
