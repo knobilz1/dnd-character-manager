@@ -37,7 +37,9 @@ console.log(`grid  : ${cols} x ${rows}  (A..${(() => { let n = cols, s = ''; whi
 if (kb > 4000) console.log('warning: that is a big photo — if the call fails as "Prompt is too long", export a smaller one.');
 
 const targets = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter((t) => t.type === 'page');
-const page = targets.find((t) => (t.url || '').includes('5173')) || targets[0];
+// Don't assume the dev port: vite walks past 5173 whenever an old server is
+// still holding it, so match any localhost page (or the bundled app's origin).
+const page = targets.find((t) => /localhost:\d+|tauri:\/\//.test(t.url || '')) || targets[0];
 if (!page) {
   console.error('No dev app found on CDP :9222 — is the app running with --remote-debugging-port=9222?');
   process.exit(1);
