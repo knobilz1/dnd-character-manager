@@ -296,19 +296,11 @@ function drawTileProcedural(ctx: Ctx, code: string, x: number, y: number, px: nu
       drawRubblePile(ctx, x, y, px);
       return;
     }
-    case ',': {
-      // No real sand sprite yet (see TILE_STYLE_SPRITES) — this stays
-      // procedural-only, distinct from plain floor, until one's sourced.
-      fillCell(ctx, x, y, px, COLORS.sand);
-      ctx.fillStyle = COLORS.sandHi;
-      const grains = [[0.2, 0.25], [0.55, 0.2], [0.35, 0.5], [0.75, 0.45], [0.6, 0.75], [0.2, 0.7]];
-      for (const [dx, dy] of grains) {
-        ctx.beginPath();
-        ctx.arc(x + px * dx, y + px * dy, px * 0.05, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    case ',':
+      // No real sand sprite yet (see TILE_STYLE_SPRITES) — stays procedural-only,
+      // distinct from plain floor, until one's sourced. See drawSand.
+      drawSand(ctx, x, y, px);
       return;
-    }
     case '%': {
       // A deep chasm/gorge — a lethal drop, drawn as a dark pit with a faintly
       // lit rocky rim so it reads as depth, clearly NOT `~` water. No floor
@@ -815,6 +807,21 @@ function hazardVariantFor(label: string | undefined): keyof HazardSet {
   return 'fireplace';
 }
 
+/** The `,` loose-sand fill, factored out so a feature that draws its own ground
+ *  (a rubble heap) can seat itself on the SAME sand as the cells around it,
+ *  instead of the smooth catalog floor. Returns true so it composes where
+ *  drawGround would. */
+function drawSand(ctx: Ctx, x: number, y: number, px: number): boolean {
+  fillCell(ctx, x, y, px, COLORS.sand);
+  ctx.fillStyle = COLORS.sandHi;
+  for (const [dx, dy] of [[0.2, 0.25], [0.55, 0.2], [0.35, 0.5], [0.75, 0.45], [0.6, 0.75], [0.2, 0.7]] as const) {
+    ctx.beginPath();
+    ctx.arc(x + px * dx, y + px * dy, px * 0.05, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return true;
+}
+
 /** A bunched heap of rubble: several stones clustered toward the centre with a
  *  soft ground shadow and three depth-sorted shades, so a `^` reads as a pile
  *  of rock rather than one lonely boulder. Deterministic (a fixed constellation
@@ -852,7 +859,7 @@ function drawRubblePile(ctx: Ctx, x: number, y: number, px: number) {
  *  where it defaults to a plain wall face (see NEUTRAL_WALL_NEIGHBORS).
  *  `featureLabel` is only meaningful for `=`/`*` cells (see
  *  furnitureVariantFor/hazardVariantFor) — omit it for the fallback look. */
-function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string, terrain?: MapTerrain, builtWallAdjacent?: boolean) {
+function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wallNeighbors?: WallNeighbors, featureLabel?: string, terrain?: MapTerrain, builtWallAdjacent?: boolean, groundGlyph = '.') {
   const style = TILE_STYLE_SPRITES[activeTileStyle];
   switch (code) {
     case '.':
@@ -930,14 +937,17 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       }
       break;
     }
-    case '^':
-      // Not style.rubble (a single lonely boulder sprite) — draw the scene's
-      // ground, then a bunched heap of stones on top. See drawRubblePile.
-      if (drawGround(ctx, x, y, px, terrain, style)) {
+    case '^': {
+      // Not style.rubble (a single lonely boulder sprite) — draw the ground this
+      // heap sits on (its neighbours', so it matches: sand on a beach, stone in a
+      // cave), then a bunched pile of stones on top. See drawRubblePile.
+      const seated = groundGlyph === ',' ? drawSand(ctx, x, y, px) : drawGround(ctx, x, y, px, terrain, style);
+      if (seated) {
         drawRubblePile(ctx, x, y, px);
         return;
       }
       break;
+    }
     case 'T':
       if (drawGround(ctx, x, y, px, terrain, style) && drawSprite(ctx, style.foliage, x, y, px, style.filter)) return;
       break;
@@ -1059,6 +1069,22 @@ function drawZoneLabel(ctx: CanvasRenderingContext2D, text: string, px: number, 
   ctx.fillText(text, px, py);
 }
 
+/** The ground an object/feature cell should sit on to match its surroundings:
+ *  the commonest GROUND glyph (`.` `,` `~`) among its four orthogonal
+ *  neighbours, defaulting to plain floor when none is ground. So a crate in a
+ *  sand field draws sand at its edges, a brazier on a stone floor draws stone —
+ *  the object never sits on a mismatched square. */
+function dominantGroundNeighbor(grid: string[], col: number, row: number): string {
+  const counts: Record<string, number> = {};
+  for (const [c, r] of [[col - 1, row], [col + 1, row], [col, row - 1], [col, row + 1]] as const) {
+    const g = grid[r]?.[c];
+    if (g === '.' || g === ',' || g === '~') counts[g] = (counts[g] ?? 0) + 1;
+  }
+  let best = '.', n = 0;
+  for (const g in counts) if (counts[g] > n) { best = g; n = counts[g]; }
+  return best;
+}
+
 function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: RenderWindow, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
@@ -1094,7 +1120,23 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
     for (let c = 0; c < wCols; c++) {
       const mapRow = w.rowStart + r, mapCol = w.colStart + c;
       let code = map.grid[mapRow]?.[mapCol] ?? ' ';
-      if (covered.has(`${mapCol},${mapRow}`) && code !== '#' && code !== 'B' && code !== ' ') code = '.'; // resolved tile replaces the glyph
+      // A resolved tile sits on ground that matches the tile it's on (Nabil's
+      // rule: an object ALWAYS matches its surroundings). A GROUND glyph
+      // (`.` `,` `~`) is kept and drawn as itself — a boulder on `,` shows sand
+      // around it, a boat spanning `,`,`,`,`~` shows sand under two cells and
+      // water under the third. An OBJECT glyph replaced the terrain it stands
+      // on, so we can't read its ground off itself; draw the commonest ground of
+      // its neighbours instead (a crate in a sand field sits on sand, not the
+      // built-in floor), which also keeps its own procedural sprite from peeking
+      // out from under the art.
+      const isGroundGlyph = code === '.' || code === ',' || code === '~';
+      // The ground this cell's neighbours are made of — used both to seat a
+      // covered object (the swap below) and to seat an UNCOVERED feature that
+      // draws its own ground, e.g. a `^` rubble heap (passed to drawTile).
+      const neighborGround = isGroundGlyph ? code : dominantGroundNeighbor(map.grid, mapCol, mapRow);
+      if (covered.has(`${mapCol},${mapRow}`) && code !== '#' && code !== 'B' && code !== ' ' && !isGroundGlyph) {
+        code = neighborGround;
+      }
       const neighbors = code === '#' || code === 'B' ? wallNeighborsAt(map.grid, mapRow, mapCol) : undefined;
       const featureLabel = code === '=' || code === '*' ? featureLabels.get(`${mapCol},${mapRow}`) : undefined;
       // A `+` only earns a real door sprite outdoors when it is set into a
@@ -1104,7 +1146,7 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
         [[mapCol - 1, mapRow], [mapCol + 1, mapRow], [mapCol, mapRow - 1], [mapCol, mapRow + 1]].some(
           ([cc, rr]) => map.grid[rr]?.[cc] === 'B',
         );
-      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel, terrain, builtAdj);
+      drawTile(ctx, code, c * cellPx, r * cellPx, cellPx, neighbors, featureLabel, terrain, builtAdj, neighborGround);
     }
   }
 
