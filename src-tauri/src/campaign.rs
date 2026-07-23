@@ -4295,6 +4295,21 @@ fn biome_floor_query<'a>(profile: &'a PackProfile, scene: &str) -> Option<&'a st
 /// renderer then just uses its built-in sprites, exactly as before this
 /// existed. Command-layer helper (needs `AppHandle` for the manifest + the
 /// vision call), called right after a spec is written.
+/// Delete stale `<slug>.floorN.tiles.json` for N >= `keep_from` (min 1) — so a
+/// map that used to have more floors, or has become single-floor, leaves no
+/// orphaned upper-floor sidecars for `get_map_tiles` to read. Contiguous: stops
+/// at the first index with no file.
+fn remove_higher_floor_sidecars(dir: &Path, slug: &str, keep_from: usize) {
+    for i in keep_from.max(1).. {
+        let p = dir.join(format!("{slug}.floor{i}.tiles.json"));
+        if p.exists() {
+            let _ = fs::remove_file(&p);
+        } else {
+            break;
+        }
+    }
+}
+
 fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Result<(), String> {
     if !crate::tile_library::tile_library_configured(app) {
         return Ok(());
@@ -4316,6 +4331,54 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     // Classify the scene ONCE — it drives both the object picks (material fit)
     // and the ground texture.
     let biome = classify_biome(&profile, &spec);
+    // Ground texture + wall style are PLACE-level — one classification for the
+    // whole map, shared across every floor (a tower's floors are the same place,
+    // one biome, one ground). classify_biome and resolve_floor each make a model
+    // call (and resolve_floor rolls a d20), so resolving them per floor would
+    // triple the cost AND give each floor a different, inconsistent ground.
+    // Per-FLOOR below: the object picks and the `~` liquid (an upper floor may
+    // have no water). Multi-floor maps write one sidecar per floor —
+    // `<slug>.tiles.json` (ground, floor 0) + `<slug>.floorN.tiles.json`.
+    let floor = resolve_floor(app, &profile, &biome);
+    let natural_walls = has_natural_walls(&profile, &biome);
+    let write_floor = |i: usize, resolved: &ResolvedMap| -> Result<(), String> {
+        let path = if i == 0 { tiles_path.clone() } else { dir.join(format!("{slug}.floor{i}.tiles.json")) };
+        // Always write (even if nothing resolved) so the mtime gate marks this
+        // spec done and we don't re-run the vision/classify calls on every open.
+        write_atomic(&path, &serde_json::to_string_pretty(resolved).map_err(|e| e.to_string())?)
+    };
+    match floor_specs(&spec) {
+        None => {
+            let resolved = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, &spec, slug);
+            write_floor(0, &resolved)?;
+            remove_higher_floor_sidecars(&dir, slug, 1);
+        }
+        Some((_title, floors, _shared)) => {
+            // Ground (floor 0) is written LAST: `<slug>.tiles.json` carries the
+            // mtime gate, so it must not mark the map done until every upper
+            // floor's sidecar is on disk.
+            let mut ground: Option<ResolvedMap> = None;
+            for (i, (name, fspec)) in floors.iter().enumerate() {
+                let resolved = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, fspec, &format!("{slug} [{name}]"));
+                if i == 0 { ground = Some(resolved); } else { write_floor(i, &resolved)?; }
+            }
+            if let Some(g) = ground { write_floor(0, &g)?; }
+            remove_higher_floor_sidecars(&dir, slug, floors.len());
+        }
+    }
+    Ok(())
+}
+
+/// Resolve ONE standalone grid — a single floor, or a whole single-floor map —
+/// to its picked object tiles + `~` liquid. `biome`, `floor_texture` and
+/// `natural_walls` are PLACE-level: classified/picked once from the whole map by
+/// `resolve_map_tiles` and shared across floors (a place's floors are one biome
+/// and share a ground). Per-grid here: the object placements and the liquid.
+/// `label` tags the maplog lines (the slug, plus the floor name when multi-floor).
+fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_texture: &Option<TileRef>, natural_walls: bool, spec: &str, label: &str) -> ResolvedMap {
+    // Shadow to owned so the (verbatim) body below keeps its `&biome` / `&spec`.
+    let biome = biome.to_string();
+    let spec = spec.to_string();
     let placements = parse_placements(&spec);
     let t_short = std::time::Instant::now();
     // Search at the library's real size for guide nouns even when the placement
@@ -4384,7 +4447,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             };
             let uncaptioned = p.label == noun;
             let names_own = !uncaptioned && crate::tile_library::label_names_its_own_object(app, &p.label, noun);
-            let query = field_query(&p.label, noun, crate::tile_library::scene_biome(&biome, &profile), names_own);
+            let query = field_query(&p.label, noun, crate::tile_library::scene_biome(&biome, profile), names_own);
             let (sw, sh) = if names_own { search_size(&p.label, 1, 1) } else { (gw, gh) };
             let out = look(&query, sw, sh);
             if !out.is_empty() {
@@ -4443,7 +4506,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     if !slots.is_empty() {
         crate::maplog::log(
             "TILE RESOLUTION START",
-            &format!("{slug}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
+            &format!("{label}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
                 slots.iter().enumerate().map(|(i, (p, c))| format!("  [slot {}] \"{}\" {}x{} — {} candidates", i + 1, p.label, p.w, p.h, c.len())).collect::<Vec<_>>().join("\n")),
         );
         let mut picks = pick_tiles_via_vision(&slots, &biome);
@@ -4534,20 +4597,15 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         })
         .collect();
     objects.extend(flames);
-    let floor = resolve_floor(app, &profile, &biome);
     let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
     let liquid_caption = liquid_caption_query(&spec);
-    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows, floor.as_ref(), liquid_caption.as_deref());
-    let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&profile, &biome) };
-    // Always write (even if nothing resolved) so the mtime gate marks this spec
-    // done and we don't re-run the vision/classify calls on every dialog open.
-    let path = battle_maps_dir(root, id).join(format!("{slug}.tiles.json"));
-    write_atomic(&path, &serde_json::to_string_pretty(&resolved).map_err(|e| e.to_string())?)?;
+    let liquid = resolve_liquid(app, profile, &biome, &grid_rows, floor_texture.as_ref(), liquid_caption.as_deref());
+    let resolved = ResolvedMap { objects, floor: floor_texture.clone(), liquid, natural_walls };
     let basename = |p: &str| p.rsplit('/').next().unwrap_or("").to_string();
     crate::maplog::log(
         "TILE RESOLUTION DONE",
         &format!(
-            "{slug}: {} object tile(s) resolved; biome floor = {}\nchosen object tiles:\n{}",
+            "{label}: {} object tile(s) resolved; biome floor = {}\nchosen object tiles:\n{}",
             resolved.objects.len(),
             resolved.floor.as_ref().map(|f| basename(&f.rel_path)).unwrap_or_else(|| "kept built-in".into()),
             resolved.objects.iter().map(|o| format!("  {}", basename(&o.rel_path))).collect::<Vec<_>>().join("\n"),
@@ -4562,7 +4620,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         crate::maplog::log(
             "VOCABULARY MISSES",
             &format!(
-                "{slug}: words this map asked for that NO tile in the catalog carries.\n\
+                "{label}: words this map asked for that NO tile in the catalog carries.\n\
                  as the head noun (serious — the thing placed has no name here, so the pick is a \
                  guess off the remaining words): {}\n\
                  as a modifier (costs precision only): {}",
@@ -4571,7 +4629,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             ),
         );
     }
-    Ok(())
+    resolved
 }
 
 /// One resolved tile with fresh art, for the renderer. `cells` are (col,row);
@@ -4592,34 +4650,78 @@ pub struct MapTileArt {
     single: bool,
 }
 
-/// The resolved art for a map: the picked object tiles plus the biome ground
-/// texture (a data URL, or null to keep the built-in floor). Empty/null when
-/// nothing resolved or no sidecar exists.
-#[derive(Serialize, Clone, Debug)]
-pub struct MapTiles {
+/// The resolved art for ONE grid: the picked object tiles plus the biome ground
+/// texture (data URLs, or null to keep the built-in floor).
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct FloorArt {
     tiles: Vec<MapTileArt>,
     floor: Option<String>,
     liquid: Option<String>,
     natural_walls: bool,
 }
 
+/// The resolved art for a map. The top-level fields are the GROUND floor (floor
+/// 0), kept unchanged for every single-grid caller (export/PDF/thumbnail);
+/// `floors` is the per-floor art for a multi-story map (index 0 == ground), one
+/// entry the multi-floor viewer renders per floor. A single-floor map has exactly
+/// one `floors` entry, equal to the top-level fields. Empty when no sidecar.
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct MapTiles {
+    tiles: Vec<MapTileArt>,
+    floor: Option<String>,
+    liquid: Option<String>,
+    natural_walls: bool,
+    floors: Vec<FloorArt>,
+}
+
 #[tauri::command]
 pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
     let root = campaigns_root(&app)?;
-    let path = battle_maps_dir(&root, &id).join(format!("{slug}.tiles.json"));
-    let Ok(json) = fs::read_to_string(&path) else {
-        return Ok(MapTiles { tiles: Vec::new(), floor: None, liquid: None, natural_walls: false });
+    let dir = battle_maps_dir(&root, &id);
+    // Load one sidecar (`<slug>.tiles.json` = ground, `<slug>.floorN.tiles.json`
+    // above it) into a FloorArt with its art embedded. None when the file's absent.
+    let load_one = |path: &Path| -> Option<FloorArt> {
+        let json = fs::read_to_string(path).ok()?;
+        let resolved: ResolvedMap = serde_json::from_str(&json).unwrap_or_default();
+        let tiles = resolved
+            .objects
+            .into_iter()
+            .filter_map(|t| Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated, single: t.single }))
+            .collect();
+        let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
+        Some(FloorArt { tiles, floor: load(resolved.floor), liquid: load(resolved.liquid), natural_walls: resolved.natural_walls })
     };
-    let resolved: ResolvedMap = serde_json::from_str(&json).unwrap_or_default();
-    let tiles = resolved
-        .objects
-        .into_iter()
-        .filter_map(|t| {
-            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated, single: t.single })
-        })
-        .collect();
-    let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
-    Ok(MapTiles { tiles, floor: load(resolved.floor), liquid: load(resolved.liquid), natural_walls: resolved.natural_walls })
+    // Ground first, then floor1, floor2, … contiguously until one is missing.
+    let mut floors = Vec::new();
+    if let Some(ground) = load_one(&dir.join(format!("{slug}.tiles.json"))) {
+        floors.push(ground);
+        for i in 1.. {
+            match load_one(&dir.join(format!("{slug}.floor{i}.tiles.json"))) {
+                Some(f) => floors.push(f),
+                None => break,
+            }
+        }
+    }
+    // Top-level fields = ground (floor 0), for the single-grid callers.
+    let g = floors.first().cloned().unwrap_or_default();
+    Ok(MapTiles { tiles: g.tiles, floor: g.floor, liquid: g.liquid, natural_walls: g.natural_walls, floors })
+}
+
+/// Re-resolve catalog tiles for an EXISTING map (all floors), replacing its
+/// sidecars. Deletes the current sidecars first so the staleness gate can't skip
+/// — the on-demand equivalent of what generation does, for when the imported
+/// tile library changed under a map that was resolved against the old one.
+#[tauri::command]
+pub async fn reresolve_map_tiles(app: AppHandle, id: String, slug: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        let dir = battle_maps_dir(&root, &id);
+        let _ = fs::remove_file(dir.join(format!("{slug}.tiles.json")));
+        remove_higher_floor_sidecars(&dir, &slug, 1);
+        resolve_map_tiles(&app, &root, &id, &slug)
+    })
+    .await
+    .map_err(|e| format!("Re-resolve task failed: {e}"))?
 }
 
 /// True when every cell `line` refers to would pass `validate_map_spec`'s

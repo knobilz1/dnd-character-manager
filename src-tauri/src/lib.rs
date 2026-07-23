@@ -99,6 +99,7 @@ pub fn run() {
       campaign::read_battle_map,
       campaign::save_battle_map,
       campaign::get_map_tiles,
+      campaign::reresolve_map_tiles,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tile_library::import_tile_library,

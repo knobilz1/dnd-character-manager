@@ -420,12 +420,10 @@ interface MapCard {
   summary: string;
   spec: string;
   png: string | null;
-  /** Resolved catalog tiles (vision-picked at generation) — the render draws
-   *  these over the base grid. Empty when no library / nothing resolved. */
-  tiles: MapTileArt[];
-  /** Resolved catalog terrain — ground, water, and whether `#` is living
-   *  rock. Empty object keeps the built-in tileset (dungeon / no library). */
-  terrain: MapTerrain;
+  /** Resolved catalog art per floor (ground first), vision-picked at generation:
+   *  floorArt[i] is floor i's tiles + terrain, drawn over that floor's grid. One
+   *  entry for a single-floor map; empty when no library / nothing resolved. */
+  floorArt: Array<{ tiles: MapTileArt[]; terrain: MapTerrain }>;
   /** One preview per floor (ground first) for multi-story places; a single-
    *  floor map has exactly one and `png === floors[0].png`. `revealed` gates
    *  the Phase-5 player broadcast — ground revealed, upper floors hidden until
@@ -921,8 +919,8 @@ export function DMConsolePage() {
   // reveal state across a re-render (matched by floor name); a fresh card has
   // none, so ground starts revealed and upper floors hidden — Phase 5 gates
   // the LAN player broadcast on these flags.
-  const renderFloors = (spec: string, tiles: MapTileArt[], terrain: MapTerrain, prev?: MapCard['floors']): MapCard['floors'] =>
-    battleMapFloorsToPngs(spec, 64, tiles, terrain, showZones).map((f, i) => ({
+  const renderFloors = (spec: string, floorArt: MapCard['floorArt'], prev?: MapCard['floors']): MapCard['floors'] =>
+    battleMapFloorsToPngs(spec, 64, floorArt, showZones).map((f, i) => ({
       name: f.name,
       png: f.png,
       revealed: prev?.find((p) => p.name === f.name)?.revealed ?? i === 0,
@@ -930,7 +928,7 @@ export function DMConsolePage() {
   // Re-render every loaded card's preview when the toggle flips (no-op on mount
   // while the lists are still empty). Art is already cached from the first load.
   React.useEffect(() => {
-    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.tiles, c.terrain, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
+    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.floorArt, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }, [showZones]);
@@ -2878,22 +2876,26 @@ export function DMConsolePage() {
   /** The vision-resolved catalog tiles for one map, with their art preloaded
    *  so the synchronous render can draw them. Empty (silent) when no library is
    *  imported or nothing resolved — the render then uses built-in sprites. */
-  async function fetchMapTiles(slug: string): Promise<{ tiles: MapTileArt[]; terrain: MapTerrain }> {
+  async function fetchMapTiles(slug: string): Promise<MapCard['floorArt']> {
     try {
-      const res = await invoke<{ tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean }>('get_map_tiles', { id: activeCampaignId, slug });
-      const terrain: MapTerrain = { floor: res.floor, liquid: res.liquid, naturalWalls: res.natural_walls };
-      await preloadResolvedTileArt(res.tiles, terrain);
-      return { tiles: res.tiles, terrain };
+      type RawFloor = { tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean };
+      const res = await invoke<RawFloor & { floors?: RawFloor[] }>('get_map_tiles', { id: activeCampaignId, slug });
+      // Per-floor art (ground first). Fall back to the top-level fields as a
+      // single ground floor for a backend that predates `floors`.
+      const raw = res.floors?.length ? res.floors : [res];
+      const floorArt = raw.map((f) => ({ tiles: f.tiles, terrain: { floor: f.floor, liquid: f.liquid, naturalWalls: f.natural_walls } as MapTerrain }));
+      for (const fa of floorArt) await preloadResolvedTileArt(fa.tiles, fa.terrain);
+      return floorArt;
     } catch {
-      return { tiles: [], terrain: {} };
+      return [];
     }
   }
 
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
-    const { tiles, terrain } = await fetchMapTiles(meta.slug);
-    const floors = renderFloors(spec, tiles, terrain);
-    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, floors, png: floors[0]?.png ?? null };
+    const floorArt = await fetchMapTiles(meta.slug);
+    const floors = renderFloors(spec, floorArt);
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, floorArt, floors, png: floors[0]?.png ?? null };
   }
 
   /** Loads the currently-imported tile library's summary (if any) — called
@@ -2989,7 +2991,7 @@ export function DMConsolePage() {
    *  (see setActiveTileStyle), so switching styles doesn't touch any map's
    *  saved spec, just what art the already-loaded cards redraw with. */
   function refreshMapCardPreviews() {
-    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.tiles, c.terrain, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
+    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.floorArt, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }
@@ -3021,8 +3023,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Exporting PNG…');
     try {
-      await preloadResolvedTileArt(card.tiles, card.terrain);
-      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.tiles, card.terrain, showZones);
+      await preloadResolvedTileArt(card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain ?? {});
+      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain, showZones);
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -3042,8 +3044,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Exporting print-scaled PDF…');
     try {
-      await preloadResolvedTileArt(card.tiles, card.terrain);
-      const bytes = await battleMapToPdfBytes(card.spec, card.tiles, card.terrain, showZones);
+      await preloadResolvedTileArt(card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain ?? {});
+      const bytes = await battleMapToPdfBytes(card.spec, card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain, showZones);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -3065,7 +3067,7 @@ export function DMConsolePage() {
     const patch = (cards: MapCard[]) => cards.map((c) => {
       if (c.slug !== slug) return c;
       if (!updatePreview) return { ...c, spec };
-      const floors = renderFloors(spec, c.tiles, c.terrain, c.floors);
+      const floors = renderFloors(spec, c.floorArt, c.floors);
       return { ...c, spec, floors, png: floors[0]?.png ?? null };
     });
     setPlanMapCards(patch);
