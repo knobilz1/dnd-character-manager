@@ -909,6 +909,9 @@ export function DMConsolePage() {
   const [mapProgress, setMapProgress] = React.useState<{ phase: string; elapsed_s: number } | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
+  // The slug of the map currently shared to players over the LAN (Phase 5), or
+  // null when nothing is shared. Only one map is on the table at a time.
+  const [broadcastingSlug, setBroadcastingSlug] = React.useState<string | null>(null);
   // Draw the translucent Enemies/Party start-zones over the map previews. On by
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
@@ -3074,14 +3077,53 @@ export function DMConsolePage() {
     setAdHocMapCards(patch);
   }
 
+  /** The set of floors a player device should see for this map — name + PNG,
+   *  revealed floors only. This is exactly what party_listener.rs's
+   *  set_broadcast_map stores and DmMapView renders. Rendered WITHOUT
+   *  deployment zones (unlike the DM's own `f.png`, which honours showZones):
+   *  those zones are the DM's tactical overlay of where enemies/party start,
+   *  and showing them to players would spoil an ambush — the exact thing this
+   *  reveal-gated view exists to prevent. Floor order matches card.floors. */
+  function revealedPayload(card: MapCard) {
+    const clean = battleMapFloorsToPngs(card.spec, 64, card.floorArt, false);
+    return {
+      name: card.name,
+      floors: card.floors
+        .map((f, i) => ({ name: f.name, revealed: f.revealed, png: clean[i]?.png }))
+        .filter((f): f is { name: string; revealed: boolean; png: string } => f.revealed && !!f.png)
+        .map(({ name, png }) => ({ name, png })),
+    };
+  }
+
+  /** Start sharing this map with the table (Phase 5) — supersedes any map
+   *  already shared, since only one is on the table at a time. */
+  function broadcastMapCard(card: MapCard) {
+    void invoke('set_broadcast_map', { map: revealedPayload(card) });
+    setBroadcastingSlug(card.slug);
+  }
+
+  /** Stop sharing — players' DmMapView clears on their next poll. */
+  function stopBroadcast() {
+    void invoke('clear_broadcast_map');
+    setBroadcastingSlug(null);
+  }
+
   /** Flip one floor's player-reveal flag (multi-story maps). The DM always sees
    *  every floor in this console; the flag gates only the Phase-5 LAN player
-   *  broadcast, so the party can't peek upstairs before they climb. */
+   *  broadcast, so the party can't peek upstairs before they climb. If this map
+   *  is the one currently shared, push the new reveal set to players live. */
   function toggleFloorReveal(slug: string, floorName: string) {
+    const flip = (f: MapCard['floors'][number]) => (f.name === floorName ? { ...f, revealed: !f.revealed } : f);
     const patch = (cards: MapCard[]) => cards.map((c) =>
-      c.slug === slug ? { ...c, floors: c.floors.map((f) => (f.name === floorName ? { ...f, revealed: !f.revealed } : f)) } : c);
+      c.slug === slug ? { ...c, floors: c.floors.map(flip) } : c);
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
+    // React's state updaters may run after this function returns, so re-derive
+    // the flipped card from current state rather than reading it back.
+    if (slug === broadcastingSlug) {
+      const card = [...planMapCards, ...adHocMapCards].find((c) => c.slug === slug);
+      if (card) void invoke('set_broadcast_map', { map: revealedPayload({ ...card, floors: card.floors.map(flip) }) });
+    }
   }
 
   /** Persist hand edits to a map spec, then re-render its card's preview. */
@@ -4006,6 +4048,15 @@ export function DMConsolePage() {
                           {planOwnedSlugs.has(card.slug) && (
                             <Button size="sm" variant="ghost" onClick={() => regenerateOneMap(card)} disabled={!!planBusy}>
                               <RotateCcw size={14} /> Regenerate
+                            </Button>
+                          )}
+                          {broadcastingSlug === card.slug ? (
+                            <Button size="sm" variant="outline" onClick={stopBroadcast} className="border-emerald-600 text-emerald-400 hover:bg-emerald-950/40" title="Players are seeing this map's revealed floors — click to stop sharing">
+                              <Radio size={14} /> Sharing · Stop
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => broadcastMapCard(card)} title="Show this map's revealed floors on every connected player's device">
+                              <Radio size={14} /> Share
                             </Button>
                           )}
                           <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>

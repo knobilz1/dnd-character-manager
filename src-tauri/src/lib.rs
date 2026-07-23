@@ -49,6 +49,8 @@ pub fn run() {
       party_listener::local_lan_ip,
       party_listener::respond_to_player_turn,
       party_listener::push_narration,
+      party_listener::set_broadcast_map,
+      party_listener::clear_broadcast_map,
       campaign::list_campaigns,
       campaign::create_campaign,
       campaign::export_campaign,

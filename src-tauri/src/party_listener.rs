@@ -107,6 +107,36 @@ fn parse_since_param(request_line: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// The battle map the DM is currently sharing with players — Phase 5 of the
+/// multi-story map work. Unlike the narration log this is NOT a growing
+/// history: it is just the one map on the table right now, replaced wholesale
+/// whenever the DM shares a different map or flips a floor's reveal. `version`
+/// bumps on every change so a polling player device only re-downloads the
+/// image-heavy payload when it actually changed, not every poll. `payload` is
+/// None when nothing is shared (or the DM stopped sharing) — a player that
+/// sees a *new* version with a null payload clears its view.
+struct BroadcastMap {
+    version: u64,
+    payload: Option<serde_json::Value>,
+}
+
+fn broadcast_map() -> &'static Mutex<BroadcastMap> {
+    static MAP: OnceLock<Mutex<BroadcastMap>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(BroadcastMap { version: 0, payload: None }))
+}
+
+/// Pure: what `GET /map?since=<v>` returns. A player already on the current
+/// version (`since >= version`) gets just the version back — the heavy image
+/// payload is not re-sent. A player behind gets the current payload, which may
+/// itself be null (meaning "the DM stopped sharing — clear your view").
+fn map_response(current: &BroadcastMap, since: u64) -> serde_json::Value {
+    if since >= current.version {
+        serde_json::json!({ "version": current.version })
+    } else {
+        serde_json::json!({ "version": current.version, "map": current.payload })
+    }
+}
+
 fn write_response(stream: &mut TcpStream, status: u16, body: &str, content_type: &str) {
     let status_text = match status {
         200 => "OK",
@@ -170,6 +200,16 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let latest = log.entries.back().map(|e| e.seq).unwrap_or(since);
         drop(log);
         let body = serde_json::json!({ "entries": entries, "latest": latest }).to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
+    if request_line.starts_with("GET /map") {
+        // Player devices poll this for the DM's currently-shared map (revealed
+        // floors only). `since` is their last-seen version, so an unchanged map
+        // isn't re-sent — see map_response / useDmMapFeed.
+        let since = parse_since_param(&request_line);
+        let current = broadcast_map().lock().unwrap();
+        let body = map_response(&current, since).to_string();
+        drop(current);
         return write_response(&mut stream, 200, &body, "application/json");
     }
     if request_line.starts_with("GET") {
@@ -337,6 +377,30 @@ pub fn push_narration(text: String) {
     append_narration(&mut narration_log().lock().unwrap(), text);
 }
 
+/// Shares one battle map with every connected player device (Phase 5). The DM
+/// Console calls this with `{ name, floors: [{ name, png }] }` carrying only
+/// the floors the DM has revealed (see toggleFloorReveal). Replaces whatever
+/// was shared before and bumps the version so players pick it up on their next
+/// `GET /map` poll.
+#[tauri::command]
+pub fn set_broadcast_map(map: serde_json::Value) {
+    let mut current = broadcast_map().lock().unwrap();
+    current.version += 1;
+    current.payload = Some(map);
+}
+
+/// Stops sharing the current map — players polling `GET /map` see a new version
+/// with a null payload and clear their view. A no-op (no version bump) when
+/// nothing is shared, so idle calls don't churn the version.
+#[tauri::command]
+pub fn clear_broadcast_map() {
+    let mut current = broadcast_map().lock().unwrap();
+    if current.payload.is_some() {
+        current.version += 1;
+        current.payload = None;
+    }
+}
+
 /// Best-effort LAN-facing IP address, so the DM can read it out to players.
 /// Uses the "connect a UDP socket to a public IP, read local_addr()" trick —
 /// no packets actually need to leave the machine for this to resolve via the
@@ -433,6 +497,38 @@ mod tests {
         assert_eq!(parse_since_param("GET /narration?since=nope HTTP/1.1"), 0, "unparseable value");
         assert_eq!(parse_since_param("GET / HTTP/1.1"), 0, "unrelated path with no query");
         assert_eq!(parse_since_param("GET /narration?foo=bar&since=7 HTTP/1.1"), 7, "since not the first param");
+    }
+
+    #[test]
+    fn map_response_omits_the_payload_when_the_client_is_already_current() {
+        let bm = BroadcastMap { version: 3, payload: Some(serde_json::json!({ "name": "Tower" })) };
+        // Client already on v3 (or somehow ahead) → just the version, no re-send.
+        let r = map_response(&bm, 3);
+        assert_eq!(r["version"], 3);
+        assert!(r.get("map").is_none(), "a current client must not get the heavy payload again");
+    }
+
+    #[test]
+    fn map_response_sends_the_payload_when_the_client_is_behind() {
+        let bm = BroadcastMap { version: 3, payload: Some(serde_json::json!({ "name": "Tower" })) };
+        let r = map_response(&bm, 1);
+        assert_eq!(r["version"], 3);
+        assert_eq!(r["map"]["name"], "Tower");
+    }
+
+    #[test]
+    fn map_response_sends_null_map_when_sharing_stopped() {
+        // Version advanced but payload cleared → a behind client blanks its view.
+        let bm = BroadcastMap { version: 4, payload: None };
+        let r = map_response(&bm, 3);
+        assert_eq!(r["version"], 4);
+        assert!(r["map"].is_null(), "a new version with no payload clears the player's map");
+    }
+
+    #[test]
+    fn parse_since_param_reads_the_map_poll_query() {
+        assert_eq!(parse_since_param("GET /map?since=9 HTTP/1.1"), 9);
+        assert_eq!(parse_since_param("GET /map HTTP/1.1"), 0, "bare /map = everything (version 0)");
     }
 
     #[test]

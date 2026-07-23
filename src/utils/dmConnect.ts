@@ -95,6 +95,33 @@ export async function fetchNarrationSince(since: number, ip: string): Promise<{ 
   return (await res.json()) as { entries: NarrationEntry[]; latest: number };
 }
 
+/** One floor of the map the DM is sharing — a name and its already-rendered
+ *  PNG (data URL). Only floors the DM has revealed are ever sent. */
+export interface BroadcastFloor {
+  name: string;
+  png: string;
+}
+
+/** The battle map the DM is currently sharing with the table — mirrors
+ *  party_listener.rs's set_broadcast_map payload. */
+export interface BroadcastMap {
+  name: string;
+  floors: BroadcastFloor[];
+}
+
+/** Polls the DM's currently-shared map (multi-story Phase 5). `since` is the
+ *  last version this device saw; the DM only re-sends the (image-heavy)
+ *  payload when its version has advanced, so an unchanged map costs one tiny
+ *  `{version}` response per poll. When the version advanced, `map` is present:
+ *  the shared map, or `null` if the DM stopped sharing (blank the view). When
+ *  it hasn't, `map` is absent. Throws on an unreachable DM, same as
+ *  fetchNarrationSince — callers treat that as "try again next poll." */
+export async function fetchBroadcastMap(since: number, ip: string): Promise<{ version: number; map?: BroadcastMap | null }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/map?since=${since}`, { method: 'GET', connectTimeout: 5000 });
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  return (await res.json()) as { version: number; map?: BroadcastMap | null };
+}
+
 /** Send several characters; returns counts (and which ids actually succeeded,
  *  so callers can mark those characters as DM-synced) for partial success. */
 export async function sendAllToDM(
