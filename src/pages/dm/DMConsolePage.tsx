@@ -2,10 +2,12 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -912,6 +914,10 @@ export function DMConsolePage() {
   // The slug of the map currently shared to players over the LAN (Phase 5), or
   // null when nothing is shared. Only one map is on the table at a time.
   const [broadcastingSlug, setBroadcastingSlug] = React.useState<string | null>(null);
+  // The slug of the map currently on the TV / second display (spike Feature 1),
+  // or null when nothing is presented. Independent of the LAN Share above — a DM
+  // can present to the TV, share to players' devices, or both.
+  const [presentingSlug, setPresentingSlug] = React.useState<string | null>(null);
   // Draw the translucent Enemies/Party start-zones over the map previews. On by
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
@@ -3108,6 +3114,62 @@ export function DMConsolePage() {
     setBroadcastingSlug(null);
   }
 
+  /** Write the map the TV/table window should show to the shared localStorage
+   *  slot TableView polls. Same revealed, zone-free floors as the LAN broadcast
+   *  (revealedPayload) — the TV is a player-facing surface, so it must never
+   *  show an unrevealed floor or the enemy/party start-zones. */
+  function writeTableMap(card: MapCard, activeFloor = 0) {
+    const payload = { ...revealedPayload(card), activeFloor };
+    try {
+      localStorage.setItem('tavern-sheet-table-map', JSON.stringify(payload));
+    } catch {
+      /* localStorage quota — the map is large; nothing we can do but skip. */
+    }
+  }
+
+  /** Open (or just focus) the chrome-less table window. Places it full-screen on
+   *  a second monitor (the TV) when there is one, else a windowed preview on the
+   *  primary. Frontend-only — Tauri's WebviewWindow builds it; no Rust command.
+   *  Physical-scale calibration (1 square = 1") is intentionally skipped, so the
+   *  map is simply fit to the screen. */
+  async function openTableWindow() {
+    const existing = await WebviewWindow.getByLabel('table');
+    if (existing) { await existing.setFocus().catch(() => {}); return; }
+
+    const monitors = await availableMonitors().catch(() => []);
+    const primary = await primaryMonitor().catch(() => null);
+    const tv = monitors.find((m) => !primary || m.name !== primary.name);
+    const onTv = monitors.length > 1 && !!tv && (!primary || tv.name !== primary.name);
+
+    const w = new WebviewWindow('table', {
+      url: '/table',
+      title: 'Tavern Sheet — Table',
+      decorations: false,
+      focus: true,
+      ...(onTv && tv
+        ? { x: tv.position.x, y: tv.position.y, width: tv.size.width, height: tv.size.height, fullscreen: true }
+        : { width: 1280, height: 800, center: true }),
+    });
+    w.once('tauri://error', (e) => setError(`Table window: ${JSON.stringify(e.payload ?? e)}`));
+  }
+
+  /** Present this map on the TV (spike Feature 1). Independent of the LAN Share
+   *  button — a DM can do either or both. */
+  async function presentToTable(card: MapCard) {
+    writeTableMap(card);
+    setPresentingSlug(card.slug);
+    await openTableWindow();
+  }
+
+  /** Stop presenting — clear the slot and close the TV window (it's
+   *  decoration-less, so there's no titlebar to close it by hand). */
+  async function stopPresenting() {
+    try { localStorage.removeItem('tavern-sheet-table-map'); } catch { /* ignore */ }
+    setPresentingSlug(null);
+    const w = await WebviewWindow.getByLabel('table');
+    await w?.close().catch(() => {});
+  }
+
   /** Flip one floor's player-reveal flag (multi-story maps). The DM always sees
    *  every floor in this console; the flag gates only the Phase-5 LAN player
    *  broadcast, so the party can't peek upstairs before they climb. If this map
@@ -3119,10 +3181,15 @@ export function DMConsolePage() {
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
     // React's state updaters may run after this function returns, so re-derive
-    // the flipped card from current state rather than reading it back.
-    if (slug === broadcastingSlug) {
+    // the flipped card from current state rather than reading it back. Push the
+    // new reveal set live to whichever surfaces are showing this map.
+    if (slug === broadcastingSlug || slug === presentingSlug) {
       const card = [...planMapCards, ...adHocMapCards].find((c) => c.slug === slug);
-      if (card) void invoke('set_broadcast_map', { map: revealedPayload({ ...card, floors: card.floors.map(flip) }) });
+      if (card) {
+        const flipped = { ...card, floors: card.floors.map(flip) };
+        if (slug === broadcastingSlug) void invoke('set_broadcast_map', { map: revealedPayload(flipped) });
+        if (slug === presentingSlug) writeTableMap(flipped);
+      }
     }
   }
 
@@ -4057,6 +4124,15 @@ export function DMConsolePage() {
                           ) : (
                             <Button size="sm" variant="outline" onClick={() => broadcastMapCard(card)} title="Show this map's revealed floors on every connected player's device">
                               <Radio size={14} /> Share
+                            </Button>
+                          )}
+                          {presentingSlug === card.slug ? (
+                            <Button size="sm" variant="outline" onClick={stopPresenting} className="border-sky-600 text-sky-400 hover:bg-sky-950/40" title="This map is on the TV / second display — click to take it down">
+                              <Tv size={14} /> On TV · Stop
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => presentToTable(card)} title="Show this map's revealed floors full-screen on a TV / second display for the players">
+                              <Tv size={14} /> Present to TV
                             </Button>
                           )}
                           <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>
