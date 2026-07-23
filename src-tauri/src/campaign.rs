@@ -2612,6 +2612,60 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - Party: B5, B6, B7, C7 — spread just inside the cave mouth, with the rockfall ahead of them.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         A wizard's tower, an octopus-ship hold, a goblin warren — none of them are a tavern. Only draw `=` furniture, a bar, tables, stools, when the encounter actually has them. Fit the room to what was asked for, not to whichever example above looks closest.\n\n\
+        A MULTI-STOREY PLACE — and ONLY a place that genuinely has vertical levels, like a two-storey house, a tower with floors, or a building over a cellar — is drawn as SEVERAL FLOORS in this one map instead of a single grid. This is the EXCEPTION: a location on one level has NO `Floor:` line and looks exactly like every example above, and that is almost every map. Only reach for floors when the fiction plainly has them.\n\
+        When it does: put a `Floor: <name>` line before EACH floor (the ground/entry floor FIRST — e.g. `Floor: Ground`, then `Floor: Upper` or `Floor: Cellar`), and give each floor its own COMPLETE block — its own Grid, Legend, Map, Features and Deployment — exactly like a single map. The extra rules for a stack:\n\
+        - EVERY floor is the SAME <cols>x<rows> and shares the SAME outer-wall footprint, so the floors stack directly on top of one another: the upper floor's outer walls sit in the same cells as the ground floor's.\n\
+        - CONNECT the floors with stairs at MATCHING cells — draw a `_` where the stair is, and put a `_` at the SAME cell on the floor above. Caption them so the direction reads: on the lower floor \"Stairs up to the <upper> at <cell>\", on the upper floor \"Stairs down to the <lower> at <cell>\". (A bare \"stairwell\" with no up/down word renders as going DOWN.)\n\
+        - Give each floor its OWN Deployment — who starts the fight on THAT level. Then write ONE shared `Tactics:` section AFTER the last floor; it covers the whole multi-level fight.\n\n\
+        Worked two-storey example — a cottage reached by one stair at F5, stacked on both floors, same 12x10 footprint:\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # The Weaver's Cottage\n\
+        Floor: Ground\n\
+        Grid: 12x10, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        ############\n\
+        #..........#\n\
+        #..=.......#\n\
+        #..........#\n\
+        #...._.....#\n\
+        #..........#\n\
+        #..........#\n\
+        #.......==.#\n\
+        #..........#\n\
+        #####+######\n\
+        Features:\n\
+        - Loom at D3\n\
+        - Stairs up to the upper floor at F5\n\
+        - Workbench at I8-J8\n\
+        - Front door at F10\n\
+        Deployment:\n\
+        - Enemies: Bandit at I3, J3 — dug in by the east wall\n\
+        - Party: E9, F9, G9 — just inside the front door\n\
+        Floor: Upper\n\
+        Grid: 12x10, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        ############\n\
+        #..==......#\n\
+        #..........#\n\
+        #..........#\n\
+        #...._.....#\n\
+        #..........#\n\
+        #..........#\n\
+        #..........#\n\
+        #..........#\n\
+        ############\n\
+        Features:\n\
+        - Bed at D2-E2\n\
+        - Stairs down to the ground floor at F5\n\
+        Deployment:\n\
+        - Enemies: Bandit Captain at D3 — holding the top of the stair by the bed\n\
+        - Party: F5 — arriving up the stairs\n\
+        Tactics:\n\
+        - The stair at F5 is the only way between floors; whoever holds its top fights climbers one at a time, so the party should clear the ground floor before pushing up.\n\
+        - The loom (D3) and workbench (I8-J8) give half cover on the ground floor's two flanks; the upper floor is bare, so the captain fights from the corner by the bed.\n\
+        {MAP_SPEC_DELIMITER}\n\n\
         Output nothing outside the sections shown.",
         // Plain "\n": the source indentation around this is stripped by Rust's
         // line-continuation escapes, but indentation inside an interpolated
@@ -4695,6 +4749,136 @@ fn normalize_map_spec(spec: &str) -> String {
     out.join("\n")
 }
 
+// ── Multi-storey maps ────────────────────────────────────────────────────────
+// A vertical place (a two-storey house, a tower, a building over a cellar) is
+// ONE map with several `Floor:` blocks stacked on the same footprint. All the
+// validation/normalization above is single-grid, and stays that way: these
+// wrappers split a multi-floor spec into per-floor standalone specs, run the
+// UNCHANGED single-grid machinery on each, and stitch the result back. A spec
+// with no `Floor:` line is a single floor and passes straight through, so the
+// common case is byte-for-byte identical to before. Mirrors the frontend
+// `parseBattleMapFloors` so the renderer and the validator agree on the split.
+
+/// Splits a spec into `(title_line, [(floor_name, standalone_spec)], shared_tactics)`.
+/// Each `standalone_spec` is `# <title>` + that floor's own block (Grid / Map /
+/// Features / Objects / Deployment, the `Floor:` line dropped) so a single-grid
+/// fn sees an ordinary one-floor spec. A `Tactics:` section AFTER the last floor
+/// is SHARED across the building. Returns None when there's no `Floor:` line.
+fn floor_specs(spec: &str) -> Option<(String, Vec<(String, String)>, String)> {
+    let lines: Vec<&str> = spec.lines().collect();
+    let marks: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.trim_start().to_ascii_lowercase().starts_with("floor:"))
+        .map(|(i, _)| i)
+        .collect();
+    if marks.is_empty() {
+        return None;
+    }
+    let title = lines
+        .iter()
+        .find(|l| l.starts_with("# "))
+        .map(|l| l.to_string())
+        .unwrap_or_else(|| "# Battle Map".to_string());
+    let is_section_header = |l: &str| {
+        let t = l.trim_start();
+        ["Features:", "Objects:", "Deployment:", "Legend:", "Grid:", "Map:", "Floor:", "Tactics:"]
+            .iter()
+            .any(|h| t.len() >= h.len() && t.as_bytes()[..h.len()].eq_ignore_ascii_case(h.as_bytes()))
+    };
+    let last = *marks.last().unwrap();
+    // First `Tactics:` header after the last floor marker → the shared tail.
+    let tail_start = lines
+        .iter()
+        .enumerate()
+        .position(|(i, l)| i > last && l.trim().trim_end_matches(':').eq_ignore_ascii_case("tactics"));
+    let shared = match tail_start {
+        Some(ts) => lines[ts + 1..]
+            .iter()
+            .filter(|l| !is_section_header(l))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string(),
+        None => String::new(),
+    };
+    let mut floors = Vec::new();
+    for (m, &start) in marks.iter().enumerate() {
+        let end = if m + 1 < marks.len() {
+            marks[m + 1]
+        } else {
+            tail_start.unwrap_or(lines.len())
+        };
+        let raw_name = lines[start].trim_start().get(6..).unwrap_or("").trim();
+        let name = if raw_name.is_empty() { format!("Floor {}", m + 1) } else { raw_name.to_string() };
+        let body = lines[start + 1..end].join("\n");
+        floors.push((name, format!("{title}\n{body}")));
+    }
+    Some((title, floors, shared))
+}
+
+/// Applies a per-floor string transform (normalize, size-repair) to every floor
+/// and re-stitches one multi-floor spec. Single-floor specs run `f` once, whole.
+fn per_floor_string(spec: &str, f: impl Fn(&str) -> String) -> String {
+    let Some((title, floors, shared)) = floor_specs(spec) else {
+        return f(spec);
+    };
+    let title_prefix = format!("{title}\n");
+    let mut out = vec![title];
+    for (name, standalone) in &floors {
+        let done = f(standalone);
+        // Peel the title back off — normalize/enforce keep it as line 1, but if
+        // some future transform drops it, fall back to "everything after line 1"
+        // so the title never leaks into a floor body.
+        let body = done
+            .strip_prefix(&title_prefix)
+            .map(str::to_string)
+            .unwrap_or_else(|| done.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_else(|| done.clone()));
+        out.push(format!("Floor: {name}"));
+        out.push(body);
+    }
+    if !shared.is_empty() {
+        out.push("Tactics:".to_string());
+        out.push(shared);
+    }
+    out.join("\n")
+}
+
+/// Runs a per-floor issue check across every floor, tagging each issue with the
+/// floor it came from so a retry knows which level to fix. Single-floor specs
+/// run `f` once, untagged (identical to calling `f` directly).
+fn per_floor_issues(spec: &str, f: impl Fn(&str) -> Vec<String>) -> Vec<String> {
+    let Some((_, floors, _)) = floor_specs(spec) else {
+        return f(spec);
+    };
+    let mut issues = Vec::new();
+    for (name, standalone) in &floors {
+        for i in f(standalone) {
+            issues.push(format!("Floor \"{name}\": {i}"));
+        }
+    }
+    issues
+}
+
+/// `validate_map_spec` for a possibly-multi-storey spec: every floor is checked
+/// on its own, plus the cross-floor rule that makes a stack coherent — all
+/// floors must be the same size so they sit directly on top of each other.
+fn validate_spec_any(spec: &str) -> Vec<String> {
+    let mut issues = per_floor_issues(spec, validate_map_spec);
+    if let Some((_, floors, _)) = floor_specs(spec) {
+        let dims: std::collections::HashSet<(usize, usize)> =
+            floors.iter().filter_map(|(_, s)| declared_dims(s)).collect();
+        if dims.len() > 1 {
+            issues.push(
+                "The floors are not all the same size. Every floor of a multi-storey map must share the SAME Grid <cols>x<rows> and the same outer wall footprint, so the floors stack directly on top of each other."
+                    .to_string(),
+            );
+        }
+    }
+    issues
+}
+
 /// Asks for a map spec, and — if the reply is structurally broken — re-asks
 /// with the concrete errors fed back, up to `max_retries` times, keeping the
 /// best attempt seen (fewest issues; a verbatim copy of the worked example
@@ -4754,7 +4938,7 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[St
         // forced every one of those retries down the EXPENSIVE full-redraw
         // branch (~27k chars) instead of the cheap caption branch (~3k).
         Ok(split_map_specs(&reply).into_iter().next().map(|raw| {
-            let fixed = normalize_map_spec(&raw);
+            let fixed = per_floor_string(&raw, normalize_map_spec);
             // Say so when the repair actually did something. Without this the
             // trace can't distinguish "the model drew a clean grid" from "the
             // model drew a ragged one and this silently saved a retry" — they
@@ -4775,7 +4959,7 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[St
             // place when the floor allows it. Free, and unlike the prompt's
             // SIZE GUIDE it can't be ignored (live: eleven 1x1 pine trees
             // written straight past the guide line).
-            let (resized, _) = enforce_object_sizes(&fixed, &size_guide);
+            let resized = per_floor_string(&fixed, |s| enforce_object_sizes(s, &size_guide).0);
             if resized != fixed {
                 crate::maplog::log("OBJECT SIZES REPAIRED (saved a retry)", "under-sized guide objects grown in place on open floor");
             }
@@ -4783,8 +4967,8 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[St
         }))
     };
     let issues_for = |spec: &str| -> Vec<String> {
-        let mut issues = validate_map_spec(spec);
-        issues.extend(enforce_object_sizes(spec, &size_guide).1);
+        let mut issues = validate_spec_any(spec);
+        issues.extend(per_floor_issues(spec, |s| enforce_object_sizes(s, &size_guide).1));
         if copies_the_example(spec) {
             issues.push(
                 "You returned the example map (The Bent Nail) verbatim instead of drawing the encounter you were asked for. The example only demonstrates habits — irregular spacing, mixed object sizes, an occupied centre, a bar with floor behind it. Draw a DIFFERENT room that has those habits."
@@ -7409,6 +7593,119 @@ mod tests {
         // And with those gone, what's left is Features-only — which is what
         // routes the retry down the cheap caption branch instead of a redraw.
         assert!(all_features_only_issues(&fixed), "remaining issues should be features-only: {fixed:?}");
+    }
+
+    /// A single-floor spec (no `Floor:` line) must go through the multi-storey
+    /// wrappers byte-for-byte as the base fns — this is the 99%-common path, and
+    /// the wrappers exist to leave it exactly alone.
+    #[test]
+    fn single_floor_spec_is_unchanged_by_the_multi_floor_wrappers() {
+        let spec = "\
+# One Floor
+Grid: 12x3, 5 ft squares.
+Map:
+############
+#....=.....#
+############
+Features:
+- Table at F2";
+        assert_eq!(per_floor_string(spec, normalize_map_spec), normalize_map_spec(spec));
+        assert_eq!(validate_spec_any(spec), validate_map_spec(spec));
+    }
+
+    /// A multi-storey map runs every floor through the SAME single-grid checks,
+    /// so a ragged row or a phantom feature on the UPPER floor — which the old
+    /// single-grid path never even looked at — is caught, tagged with its floor,
+    /// and (for the grid) repaired by normalize.
+    #[test]
+    fn multi_floor_normalize_and_validate_cover_every_floor() {
+        let spec = "\
+# Two-Floor Test
+Floor: Ground
+Grid: 12x10, 5 ft squares. Columns A onward left-to-right.
+Map:
+############
+#..........#
+#..........#
+#..........#
+#...._.....#
+#..........#
+#..........#
+#..........#
+#..........#
+############
+Features:
+- Stairs up to the upper floor at F5
+Floor: Upper
+Grid: 12x10, 5 ft squares. Columns A onward left-to-right.
+Map:
+############
+#..........#
+#..........###
+#..........#
+#...._.....#
+#..........#
+#..........#
+#..........#
+#..........#
+############
+Features:
+- Bed at C2
+- Stairs down to the ground floor at F5
+Tactics:
+- The stair at F5 is the only way up.";
+        let issues = validate_spec_any(spec);
+        assert!(
+            issues.iter().any(|i| i.starts_with("Floor \"Upper\"") && i.contains("not all the same width")),
+            "the upper floor's ragged row must be caught AND tagged: {issues:?}"
+        );
+        assert!(
+            issues.iter().any(|i| i.starts_with("Floor \"Upper\"") && i.contains("C2")),
+            "the upper floor's phantom \"Bed at C2\" must be caught AND tagged: {issues:?}"
+        );
+        assert!(
+            !issues.iter().any(|i| i.starts_with("Floor \"Ground\"")),
+            "the ground floor is clean, so nothing should be tagged to it: {issues:?}"
+        );
+        // Normalize repairs the ragged UPPER grid and re-stitches a spec that
+        // still has both floors and the shared Tactics tail.
+        let fixed = per_floor_string(spec, normalize_map_spec);
+        let after = validate_spec_any(&fixed);
+        assert!(
+            !after.iter().any(|i| i.contains("not all the same width")),
+            "normalize must settle EVERY floor's width, not just the ground: {after:?}"
+        );
+        assert!(
+            fixed.contains("Floor: Ground") && fixed.contains("Floor: Upper") && fixed.contains("\nTactics:"),
+            "reassembly keeps both floor headers and the shared Tactics: {fixed}"
+        );
+    }
+
+    /// Floors must share a footprint so they stack — differing Grid sizes are a
+    /// cross-floor error a per-floor check alone can't see.
+    #[test]
+    fn multi_floor_flags_mismatched_footprints() {
+        let spec = "\
+# Mismatch
+Floor: Ground
+Grid: 12x3, 5 ft squares.
+Map:
+############
+#..........#
+############
+Floor: Upper
+Grid: 10x3, 5 ft squares.
+Map:
+##########
+#........#
+##########
+Tactics:
+- x";
+        assert!(
+            validate_spec_any(spec).iter().any(|i| i.contains("same size")),
+            "floors of different sizes must be flagged: {:?}",
+            validate_spec_any(spec)
+        );
     }
 
     /// The ordering IS the fix. An uncaptioned field cell's label is the glyph
