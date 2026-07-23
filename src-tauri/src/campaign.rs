@@ -3858,6 +3858,54 @@ fn liquid_query<'a>(profile: &'a PackProfile, scene: &str) -> &'a str {
     profile.scene(scene).and_then(|b| b.liquid_query.as_deref()).unwrap_or(LIQUID_QUERY)
 }
 
+/// A caption's fluid word mapped to the pack's OWN texture vocabulary, or None
+/// if it names a fluid this pack cannot draw. Measured 2026-07-22 over the
+/// catalog's Textures: water 54, lava 70 (Volcanic only), blood 6, acid 8,
+/// mud 19; and NOTHING keyworded molten/magma/oil/slime/sewage/brine/poison/
+/// ichor. That is why the last group is absent — with no tile a caption-derived
+/// query for them finds nothing, so the scene default (usually water) is the
+/// honest fallback. molten/magma ARE lava; the pack just files them under
+/// `lava`, so they translate rather than falling through. Which word a pack
+/// files a fluid under is not something the map author should have to know —
+/// same reasoning as the object SYNONYMS, kept here so it touches only liquids.
+fn canonical_liquid(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "water" => "water",
+        "lava" | "molten" | "magma" | "magmatic" => "lava",
+        "blood" | "gore" => "blood",
+        "acid" | "acidic" => "acid",
+        "mud" | "muck" | "mire" | "bog" => "mud",
+        _ => return None,
+    })
+}
+
+/// The liquid a map's `~` cells should render as, read from the Features caption
+/// that NAMES them ("Molten casting vat", "Lava channel", "Blood pool") instead
+/// of from the per-scene default. This is what fixes a foundry's molten vat
+/// rendering as water: the Industrial folder stocks no lava, but "molten" maps
+/// to `lava` and the query reaches Volcanic's `Lava_A` cross-folder
+/// (`biome_affinity` only demotes off-biome art, never excludes it — verified).
+///
+/// Only a caption that actually covers a `~` cell counts, so a "Blood-stained
+/// altar" on a `=` cell can't turn the map's water red. `~` is ONE liquid per
+/// map (`ResolvedMap.liquid` is a single tile), which the corpus backs: of 34
+/// of 87 saved maps that use `~`, only 3 mix fluids and every mix is
+/// near-synonymous (blood/ichor, sewage/water, mud/water), where the pack draws
+/// them identically anyway. Pure — unit-testable on a spec string.
+fn liquid_caption_query(spec: &str) -> Option<String> {
+    let (_, rows, suffix) = split_spec_grid(spec)?;
+    for line in feature_lines(&suffix) {
+        if !cell_refs_in(&line).iter().any(|(_, c, r)| cell_at(&rows, *c, *r) == Some('~')) {
+            continue;
+        }
+        let label = feature_line_name(&line).to_lowercase();
+        if let Some(q) = label.split(|c: char| !c.is_alphanumeric()).filter_map(canonical_liquid).next() {
+            return Some(q.to_string());
+        }
+    }
+    None
+}
+
 /// The ground query for `biome` given a d20 `roll` — the alternate material if
 /// the roll reaches its threshold, else the biome's default. Pure, so the odds
 /// are testable without the RNG.
@@ -4118,11 +4166,14 @@ fn resolve_floor(app: &AppHandle, profile: &PackProfile, biome: &str) -> Option<
 /// when the grid contains no `~`, which is most maps. Replaces a flat blue
 /// square drawn in code (`COLORS.water`) that read as a swimming pool next to
 /// the catalog art around it.
-fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[String], floor: Option<&TileRef>) -> Option<TileRef> {
+fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[String], floor: Option<&TileRef>, caption_query: Option<&str>) -> Option<TileRef> {
     if !rows.iter().any(|r| r.contains('~')) {
         return None;
     }
-    let query = liquid_query(profile, biome);
+    // The caption that names the `~` cells wins over the per-scene default — a
+    // molten vat is lava even on a foundry whose folder stocks none. See
+    // `liquid_caption_query`.
+    let query = caption_query.unwrap_or_else(|| liquid_query(profile, biome));
     let mut cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
     // Drop any liquid that would vanish into the floor it is drawn on. `~` means
     // "this square is different terrain"; a channel a player cannot pick out
@@ -4431,7 +4482,8 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     objects.extend(flames);
     let floor = resolve_floor(app, &profile, &biome);
     let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
-    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows, floor.as_ref());
+    let liquid_caption = liquid_caption_query(&spec);
+    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows, floor.as_ref(), liquid_caption.as_deref());
     let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&profile, &biome) };
     // Always write (even if nothing resolved) so the mtime gate marks this spec
     // done and we don't re-run the vision/classify calls on every dialog open.
@@ -7552,6 +7604,29 @@ Tactics:
         // An unknown scene must degrade to the built-in dungeon look, never panic.
         assert_eq!(roll_floor_query(&p, "atlantis", 10), None);
         assert!(!has_natural_walls(&p, "atlantis"));
+    }
+
+    /// The `~` liquid comes from the caption that names it, not the per-scene
+    /// default — so a foundry's molten vat is lava, not water. `~` at C3-D4.
+    #[test]
+    fn liquid_caption_reads_the_fluid_from_a_tilde_captions_words() {
+        let grid = "##########\n#........#\n#.~~.....#\n#.~~.....#\n#........#\n#....=...#\n#........#\n#........#\n#........#\n##########";
+        let spec = |feats: &str| format!("# M\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  ~ liquid  = furniture\nMap:\n{grid}\nFeatures:\n{feats}Tactics:\n- x");
+
+        // "molten" -> the pack's `lava`, overriding the scene default.
+        assert_eq!(liquid_caption_query(&spec("- Molten casting vat at C3-D4\n- Anvil at F6\n")).as_deref(), Some("lava"));
+        // A fluid word on a `=` cell (not `~`) must NOT recolour the map's water.
+        assert_eq!(
+            liquid_caption_query(&spec("- Water channel at C3-D4\n- Blood-soaked altar at F6\n")).as_deref(),
+            Some("water"),
+            "blood is on the = altar, not the ~ channel — it must be ignored"
+        );
+        // A `~` map whose caption names no drawable fluid falls through to the
+        // scene default (`None` here).
+        assert_eq!(liquid_caption_query(&spec("- Still pool at C3-D4\n")), None);
+        // No `~` at all: nothing to resolve.
+        let dry = "# D\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall\nMap:\n##########\n#........#\n#........#\n#........#\n#........#\n#........#\n#........#\n#........#\n#........#\n##########\nFeatures:\n- Lava everywhere at C3\nTactics:\n- x";
+        assert_eq!(liquid_caption_query(dry), None, "a lava word with no ~ cell it covers resolves nothing");
     }
 
     /// The whole point of the rewrite: the flame lands on the sprite's own
