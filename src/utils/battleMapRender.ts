@@ -178,6 +178,48 @@ export function parseBattleMap(spec: string): ParsedBattleMap | null {
   return { name, cols, rows: grid.length, cellFeet, grid, features: section('Features:'), objects: section('Objects:'), tactics: section('Tactics:'), deployment: { enemies: enemyPlacements(), party: zoneCells('Party') } };
 }
 
+/** Splits a spec into its floors (ground first) and parses each. A spec with NO
+ *  `Floor:` line is a single floor — the whole spec — so every existing map
+ *  parses byte-for-byte as before. In a multi-floor place each `Floor: <name>`
+ *  block is a self-contained single-floor spec (its own Grid/Map/Features/
+ *  Objects/Deployment); one shared `Tactics:` after the last floor covers the
+ *  whole cross-floor fight and is copied onto every floor. Floors share a
+ *  footprint, and a `_ up` links to the `_ down` at the same cell one floor up.
+ *  Each returned map's `name` is its floor label, for the floor switcher. */
+export function parseBattleMapFloors(spec: string): ParsedBattleMap[] {
+  const lines = spec.replace(/\r\n/g, '\n').split('\n');
+  const marks = lines.flatMap((l, i) => (/^\s*Floor:/i.test(l) ? [i] : []));
+  if (marks.length === 0) {
+    const one = parseBattleMap(spec);
+    return one ? [one] : [];
+  }
+  const title = lines.find((l) => l.startsWith('# ')) ?? '';
+  // A `Tactics:` header AFTER the last floor marker is the shared cross-floor
+  // tail; its bullets belong to the whole encounter, not one floor.
+  const tailStart = lines.findIndex((l, i) => i > marks[marks.length - 1] && l.trim().replace(/:$/, '').toLowerCase() === 'tactics');
+  const sharedTactics =
+    tailStart === -1
+      ? ''
+      : lines
+          .slice(tailStart + 1)
+          .filter((l) => !/^\s*(Features:|Objects:|Deployment:|Legend:|Grid:|Map:|Floor:)/i.test(l))
+          .join('\n')
+          .trim();
+  const floors: ParsedBattleMap[] = [];
+  for (let m = 0; m < marks.length; m++) {
+    const start = marks[m];
+    const end = m + 1 < marks.length ? marks[m + 1] : tailStart === -1 ? lines.length : tailStart;
+    const label = lines[start].replace(/^\s*Floor:\s*/i, '').trim() || `Floor ${m + 1}`;
+    // A self-contained single-floor spec: the place title + this floor's block.
+    const parsed = parseBattleMap([title, ...lines.slice(start + 1, end)].join('\n'));
+    if (!parsed) continue;
+    parsed.name = label;
+    if (sharedTactics && !parsed.tactics) parsed.tactics = sharedTactics;
+    floors.push(parsed);
+  }
+  return floors;
+}
+
 // ── Procedural tile drawing ──────────────────────────────────────────────────
 // Each entry draws ONE cell into a `px`-sized square at (x, y). Kept small and
 // legible for print (line-art, high contrast) rather than photorealistic.
