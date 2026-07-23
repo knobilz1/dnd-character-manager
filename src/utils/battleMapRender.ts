@@ -220,6 +220,25 @@ export function parseBattleMapFloors(spec: string): ParsedBattleMap[] {
   return floors;
 }
 
+/** Renders every floor of a spec to a PNG (ground first). A single-floor spec
+ *  gives a one-element array whose PNG matches battleMapToPngDataUrl exactly, so
+ *  existing maps are unchanged. NOTE: the backend's resolved `tiles`/`terrain`
+ *  cover the GROUND floor only today (get_map_tiles reads the first grid), so
+ *  upper floors render with the built-in procedural tileset until per-floor
+ *  resolution lands — still fully legible line-art. */
+export function battleMapFloorsToPngs(
+  spec: string,
+  cellPx = 64,
+  tiles: MapTileArt[] = [],
+  terrain?: MapTerrain,
+  showDeployment = false,
+): Array<{ name: string; png: string }> {
+  return parseBattleMapFloors(spec).map((floor, i) => ({
+    name: floor.name,
+    png: renderBattleMapToCanvas(floor, cellPx, undefined, i === 0 ? tiles : [], i === 0 ? terrain : undefined, showDeployment).toDataURL('image/png'),
+  }));
+}
+
 // ── Procedural tile drawing ──────────────────────────────────────────────────
 // Each entry draws ONE cell into a `px`-sized square at (x, y). Kept small and
 // legible for print (line-art, high contrast) rather than photorealistic.
