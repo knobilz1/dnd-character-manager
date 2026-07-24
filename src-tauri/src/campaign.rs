@@ -2433,7 +2433,7 @@ const DEPLOYMENT_FORMAT_LINE: &str = "Deployment:\n\
 /// where a drop actually fits, exactly like the bar/cave rules.
 const CHASM_BRIDGE_RULE_LINE: &str = "- For a mountain pass, canyon, ravine, gorge, cliff edge, or any scene with a deep drop, draw the fall with the `%` chasm code — a LETHAL drop, never water, so never use `~` for a gorge — and cross it with an `H` bridge: a run of `H` laid over the chasm, anchored to solid floor at both ends, with `%` in the cells to either side so it reads as a span over the void. A bridge is a superb set piece: it forces a narrow BOTTLENECK, it is a fall hazard (a creature shoved off the edge drops into the `%`), and its anchor or ropes can be attacked and cut to drop the whole span. Put that in Tactics — the bridge's width and choke, that the `%` chasm is a fatal fall for anyone pushed in, and (where it fits) an anchor/rope with an AC and HP that severs the bridge when destroyed.\n";
 
-const DEPLOYMENT_RULE_LINE: &str = "- End with a `Deployment:` section: exactly one `Enemies:` line and one `Party:` line. Each ends with ` — ` and a short prose reason naming NO further cells; somewhere a side only moves TOWARD later (cover to reach, an exit to flee to) belongs in Tactics, not here. This is placement guidance for PHYSICAL MINIATURES, so every cell listed is a square someone really sets a figure down on: open floor a creature can stand on, never inside a wall, and the two sides never mixed in among each other.\n\
+const DEPLOYMENT_RULE_LINE: &str = "- End with a `Deployment:` section: exactly one `Enemies:` line and one `Party:` line. Each ends with ` — ` and a short prose reason naming NO further cells; somewhere a side only moves TOWARD later (cover to reach, an exit to flee to) belongs in Tactics, not here. This is placement guidance for PHYSICAL MINIATURES, so every cell listed is a square someone really sets a figure down on: open floor a creature can stand on, never inside a wall, a `%` chasm, an `o` pillar, a `*` fire, or a `=` piece of furniture such as a table, altar, bar or crate — a figure physically will not sit on top of those. A chair, stool or bench is the ONE exception, since a creature can genuinely be seated on one, so an enemy starting a fight seated at a table is fine. The two sides are never mixed in among each other.\n\
         - `Enemies:` is a PLACEMENT LIST, not a zone: one entry per individual miniature, naming the creature TYPE and the exact cell it stands on, entries separated by `;` — \"Goblin Boss at K3; Goblin at J2, L2, M4; Worg at M6\". Identical creatures may share one name followed by one cell each. NEVER write a range here: \"J2-M5\" is twelve squares that say nothing about how many of what go where, so whoever sets up the board is guessing and the DM starts round one with no idea which creature is on which square. The number of cells you list IS the number of creatures in the fight — list exactly as many as the encounter fields, no more. Name them by what they are: the creature the encounter actually uses when you know it, otherwise the role it plays (\"Archer\", \"Brute\", \"Caster\").\n\
         - `Party:` IS a zone, because the players choose their own squares inside it: at least 4 open, adjacent cells at a believable approach or entrance. If that approach is a doorway, that means the cells spreading INSIDE from it, not the door square itself. One cell is not a start zone — four or five miniatures cannot share a 5-ft square, and squeezing them onto a threshold makes every square beside it a chokepoint whether the map meant one or not.\n\
         - Deployment draws NO ONE — a creature never goes in the grid, Features, or Objects.\n";
@@ -3004,6 +3004,37 @@ fn deployment_lines(suffix: &[String]) -> Vec<String> {
     bullets_under(suffix, "Deployment:")
 }
 
+/// Seating is the one `=` a miniature legitimately shares a square with. The
+/// map prompt explicitly tells the model to seat its tables ("chairs, stools or
+/// benches"), and enemies sitting at one when the fight opens is a normal
+/// tableau — so a chair is standable and the altar beside it, drawn with the
+/// very same code, is not.
+///
+/// Measured across the 76 saved maps: 9 Deployment cells sat on `=`. Five were
+/// altars, a long dining table and stacked crates (wrong); four were chairs and
+/// stools with enemies deliberately seated on them (right). Rejecting `=`
+/// outright would have called those four broken.
+/// Deliberately NOT "seat": it matches inside "Long table, seats eight", which
+/// would hand a table the chair's exemption and silently let the bug back in.
+const SEATING_WORDS: &[&str] = &["chair", "stool", "bench", "pew"];
+
+/// Cells a `Features:` line calls seating — see `SEATING_WORDS`. Cheap because
+/// `cell_refs_in` already expands ranges, so "Benches at D4-D8" claims all five.
+fn seating_cells(suffix: &[String]) -> std::collections::HashSet<(usize, usize)> {
+    let mut out = std::collections::HashSet::new();
+    for line in feature_lines(suffix) {
+        // The LABEL, not the whole bullet — same split `feature_line_names_furniture`
+        // uses, so "Long table, seats eight, at E6-M7" stays a table.
+        let name = feature_line_name(&line).to_lowercase();
+        if SEATING_WORDS.iter().any(|w| name.contains(w)) {
+            for (_, c, r) in cell_refs_in(&line) {
+                out.insert((c, r));
+            }
+        }
+    }
+    out
+}
+
 /// The `- ...` bullets under `Objects:` — see `parse_object_line`.
 fn object_lines(suffix: &[String]) -> Vec<String> {
     bullets_under(suffix, "Objects:")
@@ -3198,6 +3229,7 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
     // NOTHING. Live: a swamp map put `Party: G13, H13, I13, J13, K13` on row
     // 13, which was solid `#`, and the map shipped with no party start marked
     // at all while the text told the players to stand inside a wall.
+    let seats = seating_cells(&suffix);
     for line in deployment_lines(&suffix) {
         let side = if line.to_lowercase().contains("party") { "Party" } else { "Enemies" };
         let mut bad: Vec<String> = Vec::new();
@@ -3207,12 +3239,19 @@ fn validate_map_spec(spec: &str) -> Vec<String> {
                 Some(ch) if MAP_WALL_CODES.contains(&ch) => bad.push(format!("{tok} (`{ch}` wall)")),
                 Some(' ') => bad.push(format!("{tok} (void)")),
                 Some('%') => bad.push(format!("{tok} (`%` chasm — a fatal drop)")),
+                // Solid the same way a wall is, just smaller. Live across the
+                // saved maps: enemies deployed onto stalagmites, into a goblin
+                // campfire, and onto two altars, a long dining table and a
+                // stack of crates. Seating is the deliberate exception.
+                Some('o') => bad.push(format!("{tok} (`o` pillar)")),
+                Some('*') => bad.push(format!("{tok} (`*` open fire)")),
+                Some('=') if !seats.contains(&(c, r)) => bad.push(format!("{tok} (`=` furniture)")),
                 _ => {}
             }
         }
         if !bad.is_empty() {
             issues.push(format!(
-                "Deployment `{side}:` names squares nobody can stand on: {}. Every cell there is where a physical miniature is set down, so it must be open floor — never a wall, the void, or a chasm.",
+                "Deployment `{side}:` names squares nobody can stand on: {}. Every cell there is where a physical miniature is set down, so it must be open floor — never a wall, the void, a chasm, a pillar, a fire, or a piece of furniture. A chair, stool or bench IS fine (a creature can sit); a table, altar or crate is not.",
                 bad.join(", ")
             ));
         }
@@ -8622,6 +8661,84 @@ Tactics:
 
         let fine = base.replace("PARTYLINE", "- Party: B2, C2, D2, E2 — just inside the north wall");
         assert_eq!(validate_map_spec(&fine), Vec::<String>::new(), "open floor must pass");
+    }
+
+    /// A wall is not the only thing a figure won't sit on top of. Measured over
+    /// the 76 saved maps: enemies were deployed onto four stalagmites, into a
+    /// goblin campfire, and onto two altars, a long dining table and a stack of
+    /// crates — 14 cells across 18 maps, none of which the wall/void/chasm check
+    /// saw. Seating is the deliberate exception, and it is not a small one:
+    /// four of the nine `=` hits were chairs and stools with enemies seated on
+    /// them on purpose, so rejecting `=` outright would have called correct maps
+    /// broken.
+    #[test]
+    fn deployment_onto_a_pillar_fire_or_table_is_caught_but_a_chair_is_fine() {
+        let base = "# X\nGrid: 10x10, 5 ft squares.\nLegend: . floor  # wall  o pillar  * fire  = furniture\nMap:\n##########\n#........#\n#..o.....#\n#........#\n#....*...#\n#........#\n#..=.....#\n#......=.#\n#........#\n##########\nFeatures:\n- Stalagmite at D3\n- Goblin campfire at F5\n- Long dining table at D7\n- Chair at H8\nDeployment:\nENEMYLINE\n- Party: B2, C2, D2, E2 — in from the north\nTactics:\n- x";
+
+        for (cell, want) in [("D3", "`o` pillar"), ("F5", "`*` open fire"), ("D7", "`=` furniture")] {
+            let spec = base.replace("ENEMYLINE", &format!("- Enemies: Goblin at {cell} — up on it"));
+            let issues = validate_map_spec(&spec);
+            assert!(
+                issues.iter().any(|i| i.contains("nobody can stand on") && i.contains(want)),
+                "{cell} should be refused as {want}: {issues:?}"
+            );
+        }
+
+        // H8 is `=` too, but its Features line calls it a chair — a creature
+        // genuinely sits there, so this map is correct and must pass clean.
+        let seated = base.replace("ENEMYLINE", "- Enemies: Goblin at H8 — sprawled in the chair, drinking");
+        assert_eq!(validate_map_spec(&seated), Vec::<String>::new(), "an enemy seated on a chair is legitimate");
+    }
+
+    /// Runs the real validator over every map actually saved on this machine
+    /// and prints which Deployment cells it now refuses. Unit tests prove the
+    /// rule; this proves it fires on real maps and — the part that matters —
+    /// that it spares the chairs. Point MAP_SCAN_DIR elsewhere to scan another
+    /// campaigns folder.
+    ///
+    ///   cargo test --lib deployment_standability_over_the_real_maps -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn deployment_standability_over_the_real_maps() {
+        let root = std::env::var("MAP_SCAN_DIR").unwrap_or_else(|_| {
+            format!("{}\\com.nabil.dndsheet\\campaigns", std::env::var("APPDATA").unwrap_or_default())
+        });
+        let mut scanned = 0usize;
+        let mut flagged: Vec<String> = Vec::new();
+        for campaign in std::fs::read_dir(&root).expect("campaigns dir — is MAP_SCAN_DIR right?").flatten() {
+            let maps = campaign.path().join("memory").join("battle_maps");
+            let Ok(entries) = std::fs::read_dir(&maps) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue }
+                if path.file_name().and_then(|n| n.to_str()) == Some("index.md") { continue }
+                let Ok(spec) = std::fs::read_to_string(&path) else { continue };
+                scanned += 1;
+                for issue in validate_map_spec(&spec) {
+                    if issue.contains("nobody can stand on") {
+                        flagged.push(format!("{}\n      {issue}", path.file_name().unwrap().to_string_lossy()));
+                    }
+                }
+            }
+        }
+        println!("\nscanned {scanned} saved maps — {} with an unstandable Deployment cell:", flagged.len());
+        for f in &flagged { println!("  - {f}"); }
+    }
+
+    /// The exception keys off what the Features line CALLS the cell, so the
+    /// bar stool passes and the altar drawn with the identical `=` does not.
+    /// The third case is why "seat" is not a seating word: it matches inside a
+    /// table's own description and would quietly exempt the table.
+    #[test]
+    fn seating_cells_reads_the_features_label_not_the_whole_line() {
+        let suffix: Vec<String> = "Features:\n- Bar stool at C4\n- Altar at D4\n- Long table, seats eight, at E4"
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let seats = seating_cells(&suffix);
+        assert!(seats.contains(&(2, 3)), "a bar stool is seating");
+        assert!(!seats.contains(&(3, 3)), "an altar is not");
+        assert!(!seats.contains(&(4, 3)), "'seats eight' in a table's prose must not make it seating");
     }
 
     /// The real spec the generator shipped for "Bar Fight" (test-campaign,
