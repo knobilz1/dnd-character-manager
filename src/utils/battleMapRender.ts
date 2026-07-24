@@ -687,6 +687,93 @@ function drawSpriteScaled(ctx: Ctx, url: string, x: number, y: number, w: number
   return true;
 }
 
+/** The box a REPEATING tile should be stepped by, as fractions of its own
+ *  image — the answer to "if I lay two of these end to end, where do they have
+ *  to sit so they meet?".
+ *
+ *  Two things make that not simply the image box. First, catalog art is padded:
+ *  `Bar_Wood_Red_A1_5x1.webp` is a 1000x200 png whose bar only spans x=130..802,
+ *  so it paints 3.37 of its 5 declared cells. Stepping by the image butts the
+ *  PADDING and the margins show as a hole — measured live: a ten-cell bar
+ *  counter drew two slabs with 1.6 cells of bare floor between them.
+ *
+ *  Second, stepping by the opaque box isn't enough either, because a
+ *  manufactured fixture has END CAPS. The bar's ink reaches full height in 15px
+ *  and falls off in 25px; butt those and the two rounded ends meet, which drew
+ *  ~12px of half-transparent ramp over bare floor at every joint. So a NARROW
+ *  shoulder is trimmed off the step, letting the caps overlap onto the
+ *  neighbouring copy's body — where they read as a joint in a long counter.
+ *
+ *  A shoulder that is not narrow is left alone, because then it isn't a cap:
+ *  the same rubble pile ramps in over 224px (22% of its width), and that edge
+ *  is the pile getting sparser. Two sparse edges laid together read as one
+ *  continuous field; trimming them would stack six copies where two belong and
+ *  bring back the repeating-lattice look. The two live cases sit an order of
+ *  magnitude either side of the threshold.
+ *
+ *  Memoized per URL — one getImageData per distinct sprite, not per draw. */
+type InkBox = { x: number; y: number; w: number; h: number };
+const inkBoxCache = new Map<string, InkBox | null>();
+
+/** A shoulder up to this fraction of the art's own length is an end cap to be
+ *  overlapped; anything longer is the shape itself, and is stepped on. */
+const CAP_SHOULDER = 0.05;
+/** How much of the tallest slice's ink a slice needs before it counts as the
+ *  solid body rather than the ramp leading into it. */
+const SOLID_SLICE = 0.9;
+
+/** Trims a narrow leading/trailing ramp off one axis. `counts` is per-slice ink
+ *  along that axis; `lo`/`hi` the first/last non-empty slice. */
+function trimCaps(counts: number[], lo: number, hi: number): [number, number] {
+  const peak = Math.max(...counts);
+  let first = lo, last = hi;
+  while (first < hi && counts[first] < peak * SOLID_SLICE) first++;
+  while (last > lo && counts[last] < peak * SOLID_SLICE) last--;
+  const span = counts.length * CAP_SHOULDER;
+  return [first - lo <= span ? first : lo, hi - last <= span ? last : hi];
+}
+
+function inkBox(url: string): InkBox | null {
+  const hit = inkBoxCache.get(url);
+  if (hit !== undefined) return hit;
+  const img = spriteCache.get(url);
+  let box: InkBox | null = null;
+  if (img?.naturalWidth && img.naturalHeight) {
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    if (cx) {
+      cx.drawImage(img, 0, 0);
+      const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+      const cols = new Array<number>(cv.width).fill(0);
+      const rows = new Array<number>(cv.height).fill(0);
+      for (let y = 0; y < cv.height; y++) {
+        for (let x = 0; x < cv.width; x++) {
+          // Ignore all-but-invisible pixels: art often has a faint halo whose
+          // alpha is 1-2, and counting it would report a full-bleed box.
+          if (d[(y * cv.width + x) * 4 + 3] <= 8) continue;
+          cols[x]++;
+          rows[y]++;
+        }
+      }
+      const x0 = cols.findIndex((n) => n > 0), y0 = rows.findIndex((n) => n > 0);
+      if (x0 >= 0 && y0 >= 0) {
+        let x1 = cv.width - 1; while (cols[x1] === 0) x1--;
+        let y1 = cv.height - 1; while (rows[y1] === 0) y1--;
+        const [tx0, tx1] = trimCaps(cols, x0, x1);
+        const [ty0, ty1] = trimCaps(rows, y0, y1);
+        box = {
+          x: tx0 / cv.width, w: (tx1 - tx0 + 1) / cv.width,
+          y: ty0 / cv.height, h: (ty1 - ty0 + 1) / cv.height,
+        };
+      }
+    }
+  }
+  inkBoxCache.set(url, box);
+  return box;
+}
+
 /** Whether the grid cell at (row, col) is a wall — out-of-bounds counts as
  *  "not a wall" (the map edge reads the same as open space). Pure. */
 function isWallAt(grid: string[], row: number, col: number): boolean {
@@ -1371,6 +1458,42 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
       const cx = (originCol - w.colStart + t.w / 2) * cellPx;
       const cy = (originRow - w.rowStart + t.h / 2) * cellPx;
       drawSpriteScaled(ctx, t.data_url, cx - dw / 2, cy - dh / 2, dw, dh, t.rotated);
+      continue;
+    }
+    // A run repeats to fill its slot, so its copies have to MEET. Stepping by
+    // the image box doesn't do that when the art is padded (see inkBox): the
+    // margins stack into a gap at every seam. Step by the ink instead, and pick
+    // the copy count that divides the run most evenly — the leftover is spread
+    // over every copy as a few percent of stretch along the run axis rather
+    // than dumped into one squashed remainder at the end.
+    //
+    // Rotated art is left to the old loop on purpose: its ink box would need
+    // transposing to match the quarter-turn blit, and there is no observed
+    // rotated run to check that against. It gaps exactly as it did before.
+    const ink = runX || runY ? (t.rotated ? null : inkBox(t.data_url)) : null;
+    if (ink) {
+      const span = runX ? t.w : t.h;                                  // cells to fill
+      const inkCells = runX ? ink.w * t.tw : ink.h * t.th;            // cells one copy covers
+      // The fewest copies that can cover the run, laid at NATIVE size with the
+      // first and last flush to its ends and the slack shared out as equal
+      // overlap. Rounding to the nearest count and stretching each copy to suit
+      // was the obvious alternative and is worse: the count is quantized, so
+      // when it rounds DOWN the copies only meet at their sparse outer edges —
+      // measured on an 8-cell rubble run, that left a 1.2-cell channel of bare
+      // floor down the middle of what the label called one pile. Overlapping
+      // never leaves a hole, and costs nothing but overdraw.
+      //
+      // Never more copies than cells, which bounds the loop if art somehow
+      // reports almost no ink at all.
+      const n = Math.max(2, Math.min(span, Math.ceil(span / inkCells)));
+      const gap = (span - inkCells) / (n - 1);
+      const back = runX ? ink.x * t.tw : ink.y * t.th;   // cells of margin before the ink
+      const x0 = (originCol - w.colStart) * cellPx;
+      const y0 = (originRow - w.rowStart) * cellPx;
+      for (let i = 0; i < n; i++) {
+        const lead = (i * gap - back) * cellPx;
+        drawSpriteScaled(ctx, t.data_url, x0 + (runX ? lead : 0), y0 + (runY ? lead : 0), t.tw * cellPx, t.th * cellPx);
+      }
       continue;
     }
     const stepX = Math.max(1, t.tw), stepY = Math.max(1, t.th);
