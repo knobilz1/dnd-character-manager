@@ -50,3 +50,6 @@ public/models/Dwarf_Female_Anims.glb
 # public/models/Human_Male_Idle.glb
 # public/models/Human_Female_Idle.glb
 # public/models/Elf_Male_Idle.glb
+
+# Diagnostic output from scripts/freeze-capture.mjs
+scripts/freeze-capture.log
