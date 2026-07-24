@@ -4151,18 +4151,30 @@ export function DMConsolePage() {
               />
             </div>
           </div>
-        ) : !planText ? (
+        ) : !planText && planMapCards.length === 0 && adHocMapCards.length === 0 ? (
           <div className="text-center py-6">
             <p className="text-sm text-slate-400 mb-3">No plan generated yet for what's coming up.</p>
             <Button onClick={() => generatePlan(false)}>Generate</Button>
           </div>
         ) : (
           <>
-            <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
+            {/* Maps outlive the plan: anything made with "…or describe one more
+                encounter" sits on disk with no plan attached, and gating this
+                whole section on `planText` made those maps unreachable — the
+                dialog said "No plan generated yet" while openPlanMode had
+                already loaded them into adHocMapCards. */}
+            {planText ? (
+              <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
+            ) : (
+              <div className="flex items-center justify-between gap-3 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 mb-3">
+                <p className="text-sm text-slate-400">No plan generated yet — the maps below were made without one.</p>
+                <Button size="sm" onClick={() => generatePlan(false)}>Generate</Button>
+              </div>
+            )}
 
             {battleMode === 'grid' && (
               <div className="mb-3">
-                <h4 className="text-xs font-semibold text-slate-300 mb-2">Battle maps for this plan's encounters</h4>
+                <h4 className="text-xs font-semibold text-slate-300 mb-2">{planText ? "Battle maps for this plan's encounters" : 'Battle maps in this campaign'}</h4>
                 {failedMaps.length > 0 && (
                   <p className="text-xs text-amber-400 mb-2">
                     {failedMaps.length} map{failedMaps.length > 1 ? 's' : ''} didn't generate ({failedMaps.join(', ')}) — this set is partial. Try Regenerate.
