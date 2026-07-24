@@ -4134,8 +4134,33 @@ fn liquid_caption_query(spec: &str) -> Option<String> {
 /// The ground query for `biome` given a d20 `roll` — the alternate material if
 /// the roll reaches its threshold, else the biome's default. Pure, so the odds
 /// are testable without the RNG.
+/// The ground for the built-in scene — "dungeon", plus any place the classifier
+/// names that this pack has no row for. It used to be nothing at all: this
+/// function returned `None` and the renderer drew the floor in code, so the most
+/// ordinary D&D scene there is came out flatter than the jungle beside it while
+/// 136 `Stone_Floors` and 217 `Stone_Square_Tiles` sat unused in the catalog.
+/// Live: a cult shrine generated with `biome=dungeon` and `floor: null`.
+///
+/// PROBED against the live catalog, exactly like every query in the profile
+/// table — never reasoned about from the wording:
+///   "stone floor" → Flat_Stone_Floor_A_01..05
+///   "flagstone"   → Large_Flagstone_A_01..05
+/// "dungeon floor" is deliberately NOT the query: a bare "floor" head noun lands
+/// on generic `Brick_Floor_A` whatever the scene (probed — it really does), the
+/// same trap the profile table documents, which is why "brick floor" is the one
+/// query there allowed to end that way.
+const BUILTIN_FLOOR_QUERY: &str = "stone floor";
+/// Flagstone from 14 up, the same d20 swap every profiled place gets (and the
+/// same threshold as the tavern row) so a night of dungeons isn't one stone.
+const BUILTIN_FLOOR_ALT: (&str, u32) = ("flagstone", 14);
+
 fn roll_floor_query<'a>(profile: &'a PackProfile, scene: &str, roll: u32) -> Option<&'a str> {
-    let primary = biome_floor_query(profile, scene)?;
+    let Some(primary) = biome_floor_query(profile, scene) else {
+        // No row for this place: the built-in scene, or a word the pack doesn't
+        // stock. Real stone beats a floor drawn in code either way. Costs the
+        // same one vision pick every other scene already pays.
+        return Some(if roll >= BUILTIN_FLOOR_ALT.1 { BUILTIN_FLOOR_ALT.0 } else { BUILTIN_FLOOR_QUERY });
+    };
     match BIOME_FLOOR_ALTS.iter().find(|(b, _, _)| *b == scene) {
         Some((_, alt, at)) if roll >= *at => Some(alt),
         _ => Some(primary),
@@ -4355,12 +4380,14 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
 }
 
 /// Resolve the biome ground texture for a finished spec: classify the biome,
-/// then vision-pick a ground tile from the catalog's Textures. `None` for a
-/// dungeon (keep the built-in stone floor), an unknown biome, or no candidates.
+/// then vision-pick a ground tile from the catalog's Textures. A scene with no
+/// profile row (the built-in "dungeon", or a place this pack doesn't stock)
+/// takes `BUILTIN_FLOOR_QUERY` rather than dropping to the code-drawn floor.
+/// Still `None` when no tile library is imported or nothing survives the filters.
 fn resolve_floor(app: &AppHandle, profile: &PackProfile, biome: &str) -> Option<TileRef> {
     use rand::Rng;
     let roll = rand::thread_rng().gen_range(1..=20);
-    let query = roll_floor_query(profile, biome, roll)?; // "dungeon" has no profile entry → None → keep built-in
+    let query = roll_floor_query(profile, biome, roll)?; // no profile row → BUILTIN_FLOOR_QUERY, not the code-drawn floor
     let all = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
     // A `Textures/Liquids/*` tile is a POOL, not ground — it belongs to `~`
     // cells, and `resolve_liquid` asks for it there by name. Live: "ceremorph"
@@ -8083,8 +8110,13 @@ Tactics:
         assert!(rolls.contains(&"brick floor") && rolls.contains(&"wooden flooring"), "{rolls:?}");
         // A biome with no alternate ignores the roll entirely.
         assert_eq!(roll_floor_query(&p, "snow", 1), roll_floor_query(&p, "snow", 20));
-        // And "dungeon" still opts out of the whole ground swap.
-        assert_eq!(roll_floor_query(&p, "dungeon", 20), None);
+        // "dungeon" has no profile row, so it takes the built-in ground — real
+        // catalog stone, not the code-drawn floor it used to get — and gets the
+        // same d20 swap as everything else.
+        assert_eq!(roll_floor_query(&p, "dungeon", 1), Some(BUILTIN_FLOOR_QUERY));
+        assert_eq!(roll_floor_query(&p, "dungeon", 13), Some(BUILTIN_FLOOR_QUERY));
+        assert_eq!(roll_floor_query(&p, "dungeon", 14), Some(BUILTIN_FLOOR_ALT.0));
+        assert_eq!(roll_floor_query(&p, "dungeon", 20), Some(BUILTIN_FLOOR_ALT.0));
     }
 
     /// Snow and volcanic must NOT gain an alternate on autopilot: the only
@@ -8171,8 +8203,9 @@ Tactics:
         assert_eq!(liquid_query(&p, "illithid"), "ceremorph magical liquid");
         assert_eq!(liquid_query(&p, "cave"), LIQUID_QUERY);
         assert!(has_natural_walls(&p, "cave") && !has_natural_walls(&p, "tavern"));
-        // An unknown scene must degrade to the built-in dungeon look, never panic.
-        assert_eq!(roll_floor_query(&p, "atlantis", 10), None);
+        // An unknown scene must degrade to the built-in dungeon look, never panic
+        // — which since the built-in gained a ground query means real stone.
+        assert_eq!(roll_floor_query(&p, "atlantis", 10), Some(BUILTIN_FLOOR_QUERY));
         assert!(!has_natural_walls(&p, "atlantis"));
     }
 
