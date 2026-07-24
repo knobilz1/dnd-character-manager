@@ -3870,6 +3870,17 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
 // DEPLOYMENT_RULE_LINE).
 // ---------------------------------------------------------------------------
 
+/// Vision model for a board read. NOT the tile picker's `sonnet`: measured on
+/// two photos of the same 6-piece board (2026-07-23), sonnet matched an
+/// independent reading on 1 of 6 and — the damning part — agreed with ITSELF on
+/// only 1 of 6 across the two shots, confidently inventing cells either way.
+/// Opus matched 3 of 6 exactly with the rest within one column, gave identical
+/// COLUMNS across both shots, and abstained on pieces it couldn't place instead
+/// of guessing. It was also ~3x faster (28s vs 100s). Reading a grid off a photo
+/// is a much harder visual-reasoning job than "which tile looks like a barrel",
+/// and the model tier is where that shows.
+const BOARD_READ_MODEL: &str = "opus";
+
 /// One miniature the model located on the board.
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
 pub struct BoardMini {
@@ -3948,11 +3959,14 @@ fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
 /// Read the physical table: one photo (a data URL) → the cell each miniature is
 /// standing on, for the map whose grid is `cols` x `rows`.
 ///
+/// `model` overrides the vision model; the default is `BOARD_READ_MODEL` (opus),
+/// which the comment there justifies with measurements.
+///
 /// Entirely opt-in: nothing calls this unless the DM asks for a board read, so a
 /// table with no camera behaves exactly as it always has. The answer is a HINT
 /// for the DM to confirm — never authority, and never drawn on the map.
 #[tauri::command]
-pub fn read_table_positions(photo: String, cols: usize, rows: usize) -> Result<Vec<BoardMini>, String> {
+pub fn read_table_positions(photo: String, cols: usize, rows: usize, model: Option<String>) -> Result<Vec<BoardMini>, String> {
     if cols == 0 || rows == 0 {
         return Err("That map has no grid to read positions against.".into());
     }
@@ -3960,7 +3974,11 @@ pub fn read_table_positions(photo: String, cols: usize, rows: usize) -> Result<V
     if b64.trim().is_empty() {
         return Err("The board photo was empty.".into());
     }
-    let reply = crate::dm::run_claude_vision(&build_board_read_message(media, b64, cols, rows), Some(VISION_PICK_MODEL))?;
+    let model = model.filter(|m| !m.trim().is_empty());
+    let reply = crate::dm::run_claude_vision(
+        &build_board_read_message(media, b64, cols, rows),
+        Some(model.as_deref().unwrap_or(BOARD_READ_MODEL)),
+    )?;
     crate::maplog::log("BOARD READ (raw reply)", &reply);
     Ok(parse_board_read(&reply, cols, rows))
 }

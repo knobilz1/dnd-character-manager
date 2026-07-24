@@ -16,10 +16,11 @@
 import { readFileSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 
-const [photoPath, colsArg, rowsArg] = process.argv.slice(2);
+const [photoPath, colsArg, rowsArg, modelArg] = process.argv.slice(2);
 if (!photoPath || !colsArg || !rowsArg) {
-  console.error('Usage: node scripts/board-read.mjs <photo.jpg> <cols> <rows>');
+  console.error('Usage: node scripts/board-read.mjs <photo.jpg> <cols> <rows> [model]');
   console.error('  cols/rows = the map grid size (see the "Grid: WxH" line in the map spec).');
+  console.error('  model     = optional vision model, e.g. opus (default: sonnet).');
   process.exit(2);
 }
 const cols = Number(colsArg), rows = Number(rowsArg);
@@ -34,6 +35,7 @@ const b64 = readFileSync(photoPath).toString('base64');
 const kb = Math.round(b64.length / 1366);
 console.log(`photo : ${basename(photoPath)} — ${kb} KB as ${media}`);
 console.log(`grid  : ${cols} x ${rows}  (A..${(() => { let n = cols, s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; })()}, 1..${rows})`);
+console.log(`model : ${modelArg || 'default (opus — see BOARD_READ_MODEL)'}`);
 if (kb > 4000) console.log('warning: that is a big photo — if the call fails as "Prompt is too long", export a smaller one.');
 
 const targets = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter((t) => t.type === 'page');
@@ -59,7 +61,8 @@ const r = await send('Runtime.evaluate', {
   expression: `(async () => {
     try {
       const minis = await window.__TAURI_INTERNALS__.invoke('read_table_positions', {
-        photo: ${JSON.stringify(`data:${media};base64,${b64}`)}, cols: ${cols}, rows: ${rows}
+        photo: ${JSON.stringify(`data:${media};base64,${b64}`)}, cols: ${cols}, rows: ${rows},
+        model: ${JSON.stringify(modelArg || null)}
       });
       return { ok: true, minis };
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
