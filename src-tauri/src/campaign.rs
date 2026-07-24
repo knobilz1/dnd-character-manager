@@ -3504,7 +3504,20 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
             }
             let (w, h) = bbox_wh(&comp);
             claimed.extend(comp.iter().copied());
-            out.push(Placement { label: label.clone(), cells: comp, w, h, field_glyph: None });
+            // Carry the glyph's canonical noun, the same guarantee the field
+            // path makes ("never end up with LESS art than the plain canonical
+            // noun would have found"). Claiming these cells takes them OUT of
+            // that path, so without this a label the catalog has never heard of
+            // resolves NOTHING and every cell drops to the procedural glyph —
+            // strictly worse than leaving the run unnamed. Probed on the live
+            // catalog: "Collapsed ceiling" [3x2] → (none), and so does
+            // "Collapsed masonry", the very label this named-run branch was
+            // written for; "Collapsed ceiling rubble" [3x2] →
+            // Rubble_Pile_Stone_Slate_A5_3x2. Live: a burial crypt's collapsed
+            // ceiling drew six identical built-in smears in a 3x2 lattice.
+            let noun = field_glyph_noun('^');
+            let label = if label.to_lowercase().contains(noun) { label.clone() } else { format!("{label} {noun}") };
+            out.push(Placement { label, cells: comp, w, h, field_glyph: None });
         }
         for comp in connected_components(&solid) {
             let (w, h) = bbox_wh(&comp);
@@ -11952,8 +11965,12 @@ mod example_map_tests {
         assert!(trees.iter().all(|t| t.w == 1 && t.h == 1));
 
         // The NAMED 2-cell run is one 2x1 object, so the resolver can ask the
-        // catalog for a pile that size instead of two pebbles.
-        let pile = p.iter().find(|x| x.label == "Collapsed masonry").expect("the named run survives as a placement");
+        // catalog for a pile that size instead of two pebbles — and it carries
+        // the canonical noun, because claiming these cells takes them out of the
+        // field path that would otherwise have guaranteed it. Probed live:
+        // "Collapsed masonry" [2x1] finds NOTHING (so every cell fell back to
+        // the procedural glyph), "Collapsed masonry rubble" finds the pile.
+        let pile = p.iter().find(|x| x.label == "Collapsed masonry rubble").expect("the named run survives, with the canonical noun appended");
         assert_eq!((pile.w, pile.h), (2, 1), "a named rubble run takes the size of the run");
         assert_eq!(pile.field_glyph, None, "it is an object now, not a field");
         assert_eq!(pile.cells.len(), 2);
@@ -11963,6 +11980,15 @@ mod example_map_tests {
         let loose: Vec<_> = p.iter().filter(|x| x.field_glyph == Some('^')).collect();
         assert_eq!(loose.len(), 1, "unnamed rubble keeps the per-cell path: {loose:?}");
         assert_eq!((loose[0].w, loose[0].h), (1, 1));
+
+        // A label that already says "rubble" must not end up saying it twice.
+        let spec2 = spec.replace("Collapsed masonry at D4-E4", "Rubble pile at D4-E4");
+        let again = parse_placements(&spec2);
+        assert!(
+            again.iter().any(|x| x.label == "Rubble pile") && !again.iter().any(|x| x.label.contains("rubble rubble")),
+            "{:?}",
+            again.iter().map(|x| &x.label).collect::<Vec<_>>()
+        );
 
         // The table is NOT a field — it stays a single connected object.
         let table = p.iter().find(|x| x.label == "Table").unwrap();

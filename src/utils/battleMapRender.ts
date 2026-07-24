@@ -1241,13 +1241,23 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // A `^` cell is procedural rubble — a bunched rock heap drawn by drawTile —
-  // not a catalog placement. Drop any tile the resolver produced for one so it
-  // can never override the heap with a single boulder or, worse, an off-biome
-  // Structure (live 2026-07-22: coast=Desert resolved "barnacled boulders" to
-  // fifteen Window tiles). Old sidecars carrying such tiles self-heal on
-  // re-render. Field `^` cells are 1x1, so the origin cell IS the glyph.
+  // A SCATTERED `^` cell is procedural rubble — a bunched rock heap drawn by
+  // drawTile — not a catalog placement. Drop any tile the resolver produced for
+  // one so it can never override the heap with a single boulder or, worse, an
+  // off-biome Structure (live 2026-07-22: coast=Desert resolved "barnacled
+  // boulders" to fifteen Window tiles — fifteen SEPARATE 1x1 placements, each
+  // caught by the cell count below). Old sidecars self-heal on re-render.
+  //
+  // A multi-cell tile is a different animal: a Features line NAMED that run, so
+  // parse_placements deliberately merged it into ONE pile the size of the run
+  // and the resolver shopped for art that size. This filter used to bin those
+  // too — "field `^` cells are 1x1, so the origin cell IS the glyph" stopped
+  // being true the moment named runs existed — which left the whole named-pile
+  // path dead at the last step. Live: a crypt's collapsed ceiling resolved
+  // Rubble_Pile_Stone_Slate_A28_5x3 and still drew as 24 identical procedural
+  // blobs in a perfect 8x3 lattice.
   tiles = tiles.filter((t) => {
+    if (t.cells.length > 1) return true; // a named run is one real pile — keep it
     const oc = Math.min(...t.cells.map(([c]) => c));
     const orr = Math.min(...t.cells.map(([, r]) => r));
     return map.grid[orr]?.[oc] !== '^';
