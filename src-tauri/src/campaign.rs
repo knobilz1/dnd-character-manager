@@ -3909,9 +3909,15 @@ fn build_board_read_message(media: &str, b64: &str, cols: usize, rows: usize) ->
         )}),
         json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}),
         json!({"type":"text","text": format!(
-            "For EVERY miniature standing on the map, read the printed labels to work out the ONE square it stands on, \
-             and give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\"). \
-             Only report squares inside A1..{last_col}{rows}. If you cannot confidently tell which square a figure is on, \
+            "For EVERY miniature on the map, work out the ONE square it occupies:\n\
+             1. A miniature is EITHER a standing figure (artwork held upright in a clear base) OR a small flat token lying \
+             on the map — count BOTH kinds. Judge by where the piece MEETS THE MAP: for a standing figure that is the base \
+             it sits in, NOT the top of its artwork (the art leans and sits high, overhanging squares it is not on); for a \
+             flat token it is the token itself.\n\
+             2. From that base, trace straight UP to the column letter printed along the top edge, and straight LEFT to the \
+             row number printed down the left edge. READ those two printed characters — do not estimate the position.\n\
+             3. Give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\").\n\
+             Only report squares inside A1..{last_col}{rows}. If you cannot confidently read BOTH labels for a figure, \
              LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands, scenery and anything \
              that is not a miniature. Reply with ONLY this JSON and nothing else: \
              {{\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
