@@ -4320,8 +4320,13 @@ export function DMConsolePage() {
                 )}
 
                 {/* Table camera (#39) — where a "Read the board" photo comes from.
-                    Hidden entirely when there's no map to read and no camera. */}
-                {[...planMapCards, ...adHocMapCards].length > 0 && (tableCameras.length > 0 || tableCameraSource === 'player') && (
+                    Shown whenever there's a map to read, INCLUDING when this
+                    machine has no camera: the DM box is often headless/remote
+                    with the table (and its camera) in the players' room, and this
+                    row is the only way to switch the source to "a player". Gating
+                    it on owning a camera deadlocked exactly that setup — the
+                    selector was hidden until you'd already selected. */}
+                {[...planMapCards, ...adHocMapCards].length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
                     <Camera size={13} className="text-slate-500" />
                     <span>Board photos from</span>
@@ -4343,8 +4348,14 @@ export function DMConsolePage() {
                         >
                           {tableCameras.map((c) => <option key={c.deviceId} value={c.deviceId}>{c.label}</option>)}
                         </select>
+                      ) : tableCameras[0] ? (
+                        <span className="text-slate-500">{tableCameras[0].label}</span>
                       ) : (
-                        <span className="text-slate-500">{tableCameras[0]?.label ?? 'no camera found'}</span>
+                        // Headless/remote DM box. Say what to do rather than
+                        // just reporting the absence.
+                        <span className="text-amber-400/80">
+                          no camera on this machine — pick “a player” if the table is in another room
+                        </span>
                       )
                     ) : cameraHolder ? (
                       <>
