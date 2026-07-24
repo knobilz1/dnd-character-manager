@@ -95,6 +95,78 @@ export async function fetchNarrationSince(since: number, ip: string): Promise<{ 
   return (await res.json()) as { entries: NarrationEntry[]; latest: number };
 }
 
+/** One floor of the map the DM is sharing — a name and its already-rendered
+ *  PNG (data URL). Only floors the DM has revealed are ever sent. */
+export interface BroadcastFloor {
+  name: string;
+  png: string;
+}
+
+/** The battle map the DM is currently sharing with the table — mirrors
+ *  party_listener.rs's set_broadcast_map payload. */
+export interface BroadcastMap {
+  name: string;
+  floors: BroadcastFloor[];
+}
+
+/** Polls the DM's currently-shared map (multi-story Phase 5). `since` is the
+ *  last version this device saw; the DM only re-sends the (image-heavy)
+ *  payload when its version has advanced, so an unchanged map costs one tiny
+ *  `{version}` response per poll. When the version advanced, `map` is present:
+ *  the shared map, or `null` if the DM stopped sharing (blank the view). When
+ *  it hasn't, `map` is absent. Throws on an unreachable DM, same as
+ *  fetchNarrationSince — callers treat that as "try again next poll." */
+export async function fetchBroadcastMap(since: number, ip: string): Promise<{ version: number; map?: BroadcastMap | null }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/map?since=${since}`, { method: 'GET', connectTimeout: 5000 });
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  return (await res.json()) as { version: number; map?: BroadcastMap | null };
+}
+
+/** Who currently holds the "table camera" role (null if free), plus the DM's
+ *  photo-request counter. Players PULL from the DM, so this counter is how a
+ *  "the DM asked for a photo" request reaches the holder: when `requestSeq`
+ *  advances past the last one this device served, it takes the photo itself.
+ *  See party_listener.rs — exactly one player at a time may send table photos. */
+export async function fetchTableCameraState(ip: string): Promise<{ holder: string | null; requestSeq: number }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/camera`, { method: 'GET', connectTimeout: 5000 });
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const j = (await res.json()) as { holder?: string | null; requestSeq?: number };
+  return { holder: j.holder ?? null, requestSeq: j.requestSeq ?? 0 };
+}
+
+/** Claim (or with `release`, hand back) the table camera. `granted` is false
+ *  when someone else already holds it — the caller shows who rather than
+ *  silently stealing it. */
+export async function claimTableCamera(
+  name: string, ip: string, release = false,
+): Promise<{ granted: boolean; holder: string | null }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/camera-claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, release }),
+    connectTimeout: 5000,
+  });
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const j = (await res.json()) as { granted?: boolean; holder?: string | null };
+  return { granted: !!j.granted, holder: j.holder ?? null };
+}
+
+/** Push one photo of the physical table to the DM. Rejected (409) unless this
+ *  player currently holds the camera. The DM never applies it blind — it runs
+ *  the board read and shows the DM a confirm panel. */
+export async function sendTablePhoto(name: string, photo: string, ip: string): Promise<void> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/table-photo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, photo }),
+    connectTimeout: 15000, // a photo is a far bigger body than a line of talk
+  });
+  if (!res.ok) {
+    const msg = await res.json().catch(() => ({}));
+    throw new Error((msg as { error?: string }).error ?? `DM responded ${res.status}`);
+  }
+}
+
 /** Send several characters; returns counts (and which ids actually succeeded,
  *  so callers can mark those characters as DM-synced) for partial success. */
 export async function sendAllToDM(

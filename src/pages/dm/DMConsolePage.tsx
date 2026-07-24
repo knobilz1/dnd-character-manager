@@ -2,10 +2,12 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -14,7 +16,8 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapToPdfBytes, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
+import { listTableCameras, captureTableFrame, type TableCamera } from '../../utils/tableCamera';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -343,6 +346,42 @@ function parseDeployment(spec: string): { enemies?: string; party?: string } {
   return { enemies: grab('Enemies'), party: grab('Party') };
 }
 
+/** Per-floor deployment for a multi-floor spec, keyed by floor name. Each
+ *  `Floor:` block carries its OWN Deployment, so parseDeployment over the whole
+ *  spec (a single regex match) would surface only the ground floor's minis —
+ *  this splits on `Floor:` and parses each block so every floor shows its own.
+ *  Empty for a single-floor spec (the caller uses parseDeployment there). */
+function deploymentPerFloor(spec: string): Record<string, { enemies?: string; party?: string }> {
+  const marks = [...spec.matchAll(/^\s*Floor:\s*(.+)$/gim)];
+  const out: Record<string, { enemies?: string; party?: string }> = {};
+  marks.forEach((m, i) => {
+    const start = (m.index ?? 0) + m[0].length;
+    const end = i + 1 < marks.length ? (marks[i + 1].index ?? spec.length) : spec.length;
+    out[m[1].trim()] = parseDeployment(spec.slice(start, end));
+  });
+  return out;
+}
+
+/** Turns one floor's stair links into deduped display chips — an "↑ Upper"
+ *  connection hint per stair, or an amber warning when an UP-stair should reach
+ *  the floor above but no stair is stacked there (the misalignment bug). A
+ *  down-stair to an undrawn cellar/roof shows a plain "↓ stairwell", never a
+ *  warning — see floorStairLinks. */
+function stairHints(links: FloorStairLink[]): { text: string; warn: boolean }[] {
+  const seen = new Set<string>();
+  const out: { text: string; warn: boolean }[] = [];
+  for (const l of links) {
+    const warn = l.dir === 'up' && l.toFloor != null && !l.aligned;
+    const arrow = l.dir === 'up' ? '↑' : '↓';
+    const text = l.aligned && l.toFloor ? `${arrow} ${l.toFloor}` : warn ? `not aligned with ${l.toFloor}` : `${arrow} stairwell`;
+    const key = `${text}|${warn}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ text, warn });
+  }
+  return out;
+}
+
 /** A battle map card as rendered in the merged Plan Next Session dialog —
  *  BattleMapMeta plus the full spec text and its rendered preview PNG. */
 /** One PLACE the map resolver knows about, as pack_profile.rs derived it, plus
@@ -384,12 +423,16 @@ interface MapCard {
   summary: string;
   spec: string;
   png: string | null;
-  /** Resolved catalog tiles (vision-picked at generation) — the render draws
-   *  these over the base grid. Empty when no library / nothing resolved. */
-  tiles: MapTileArt[];
-  /** Resolved catalog terrain — ground, water, and whether `#` is living
-   *  rock. Empty object keeps the built-in tileset (dungeon / no library). */
-  terrain: MapTerrain;
+  /** Resolved catalog art per floor (ground first), vision-picked at generation:
+   *  floorArt[i] is floor i's tiles + terrain, drawn over that floor's grid. One
+   *  entry for a single-floor map; empty when no library / nothing resolved. */
+  floorArt: Array<{ tiles: MapTileArt[]; terrain: MapTerrain }>;
+  /** One preview per floor (ground first) for multi-story places; a single-
+   *  floor map has exactly one and `png === floors[0].png`. `revealed` gates
+   *  the Phase-5 player broadcast — ground revealed, upper floors hidden until
+   *  the DM flips them when the party climbs. Empty only if the grid didn't
+   *  parse (then `png` is null too). */
+  floors: { name: string; png: string; revealed: boolean }[];
 }
 
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
@@ -869,14 +912,88 @@ export function DMConsolePage() {
   const [mapProgress, setMapProgress] = React.useState<{ phase: string; elapsed_s: number } | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
+  // The slug of the map currently shared to players over the LAN (Phase 5), or
+  // null when nothing is shared. Only one map is on the table at a time.
+  const [broadcastingSlug, setBroadcastingSlug] = React.useState<string | null>(null);
+  // The slug of the map currently on the TV / second display (spike Feature 1),
+  // or null when nothing is presented. Independent of the LAN Share above — a DM
+  // can present to the TV, share to players' devices, or both.
+  const [presentingSlug, setPresentingSlug] = React.useState<string | null>(null);
+  // Board reading (#39) — cameras we could point at the table. EMPTY is the
+  // normal, fully-supported case: no camera means the "Read the board" control
+  // never appears and nothing else about the console or the DM changes.
+  const [tableCameras, setTableCameras] = React.useState<TableCamera[]>([]);
+  const tableCameraSource = useSettingsStore((s) => s.tableCameraSource);
+  const setTableCameraSource = useSettingsStore((s) => s.setTableCameraSource);
+  const tableCameraId = useSettingsStore((s) => s.tableCameraDeviceId);
+  const setTableCameraId = useSettingsStore((s) => s.setTableCameraDeviceId);
+  /** Which player currently holds the table camera, polled while the source is
+   *  'player' so the DM can see who to ask (and revoke a hold someone forgot). */
+  const [cameraHolder, setCameraHolder] = React.useState<string | null>(null);
+  const [boardBusy, setBoardBusy] = React.useState<string | null>(null);
+  // The dm-table-photo listener is mounted once (deps []), so it must read the
+  // CURRENT cards/presented map through refs rather than close over the first
+  // render's copies — same reason battleLogRef exists.
+  const planMapCardsRef = React.useRef(planMapCards);
+  planMapCardsRef.current = planMapCards;
+  const adHocMapCardsRef = React.useRef(adHocMapCards);
+  adHocMapCardsRef.current = adHocMapCards;
+  const presentingSlugRef = React.useRef(presentingSlug);
+  presentingSlugRef.current = presentingSlug;
+  /** A finished board read waiting for the DM to confirm it. The read is a HINT,
+   *  never authority: measured accuracy is ~4-6 of 6 with the misses landing one
+   *  column out, so the DM assigns each piece to a combatant and fixes any square
+   *  BEFORE any of it reaches the battle log. `assign`/`cell` are keyed by the
+   *  read's index. */
+  const [boardRead, setBoardRead] = React.useState<
+    { name: string; photo: string; cols: number; rows: number;
+      minis: Array<{ cell: string; description: string }>;
+      assign: string[]; cells: string[] } | null
+  >(null);
+
+  // Look for cameras once. enumerateDevices does NOT prompt for permission, so
+  // opening the console never trips a camera prompt — that happens on the first
+  // actual capture.
+  React.useEffect(() => {
+    let cancelled = false;
+    void listTableCameras().then((cams) => {
+      if (cancelled) return;
+      setTableCameras(cams);
+      if (!tableCameraId && cams[0]) setTableCameraId(cams[0].deviceId);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Who holds the table camera, while we're expecting photos from a player.
+  React.useEffect(() => {
+    if (tableCameraSource !== 'player') { setCameraHolder(null); return; }
+    let cancelled = false;
+    const tick = () => { void invoke<string | null>('table_camera_holder').then((h) => { if (!cancelled) setCameraHolder(h); }).catch(() => {}); };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tableCameraSource]);
   // Draw the translucent Enemies/Party start-zones over the map previews. On by
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
   const [showZones, setShowZones] = React.useState(true);
+  // Multi-story: rebuild a card's per-floor previews from its spec. Ground
+  // first; a single-floor map yields one floor whose png === the old single
+  // png (byte-identical), so existing maps are unchanged. `prev` carries the
+  // reveal state across a re-render (matched by floor name); a fresh card has
+  // none, so ground starts revealed and upper floors hidden — Phase 5 gates
+  // the LAN player broadcast on these flags.
+  const renderFloors = (spec: string, floorArt: MapCard['floorArt'], prev?: MapCard['floors']): MapCard['floors'] =>
+    battleMapFloorsToPngs(spec, 64, floorArt, showZones).map((f, i) => ({
+      name: f.name,
+      png: f.png,
+      revealed: prev?.find((p) => p.name === f.name)?.revealed ?? i === 0,
+    }));
   // Re-render every loaded card's preview when the toggle flips (no-op on mount
   // while the lists are still empty). Art is already cached from the first load.
   React.useEffect(() => {
-    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain, showZones) });
+    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.floorArt, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }, [showZones]);
@@ -1632,6 +1749,37 @@ export function DMConsolePage() {
     const unlisten = listen<PlayerTurn>('dm-player-turn', (event) => {
       queueRef.current.push(event.payload);
       drainQueue();
+    });
+    return () => { unlisten.then((fn) => fn()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A photo of the table pushed by whichever player holds the camera (#39). It
+  // lands in exactly the same confirm panel a locally-captured photo does — a
+  // player's photo is never applied blind. Uses the map the DM is presenting to
+  // the table if there is one, else the only map they have, since the sender
+  // can't know which map card the DM means.
+  React.useEffect(() => {
+    const unlisten = listen<{ name: string; photo: string }>('dm-table-photo', (event) => {
+      const cards = [...planMapCardsRef.current, ...adHocMapCardsRef.current];
+      const card = cards.find((c) => c.slug === presentingSlugRef.current) ?? (cards.length === 1 ? cards[0] : undefined);
+      if (!card) {
+        setError(`${event.payload.name} sent a table photo, but there's no map to read it against — present a map first.`);
+        return;
+      }
+      const floor = parseBattleMapFloors(card.spec)[0];
+      if (!floor) return;
+      setBoardBusy('Reading the board…');
+      invoke<Array<{ cell: string; description: string }>>('read_table_positions', {
+        photo: event.payload.photo, cols: floor.cols, rows: floor.rows,
+      })
+        .then((minis) => setBoardRead({
+          name: `${card.name} — photo from ${event.payload.name}`,
+          photo: event.payload.photo, cols: floor.cols, rows: floor.rows, minis,
+          assign: minis.map(() => ''), cells: minis.map((m) => m.cell),
+        }))
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+        .finally(() => setBoardBusy(null));
     });
     return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2824,21 +2972,26 @@ export function DMConsolePage() {
   /** The vision-resolved catalog tiles for one map, with their art preloaded
    *  so the synchronous render can draw them. Empty (silent) when no library is
    *  imported or nothing resolved — the render then uses built-in sprites. */
-  async function fetchMapTiles(slug: string): Promise<{ tiles: MapTileArt[]; terrain: MapTerrain }> {
+  async function fetchMapTiles(slug: string): Promise<MapCard['floorArt']> {
     try {
-      const res = await invoke<{ tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean }>('get_map_tiles', { id: activeCampaignId, slug });
-      const terrain: MapTerrain = { floor: res.floor, liquid: res.liquid, naturalWalls: res.natural_walls };
-      await preloadResolvedTileArt(res.tiles, terrain);
-      return { tiles: res.tiles, terrain };
+      type RawFloor = { tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean };
+      const res = await invoke<RawFloor & { floors?: RawFloor[] }>('get_map_tiles', { id: activeCampaignId, slug });
+      // Per-floor art (ground first). Fall back to the top-level fields as a
+      // single ground floor for a backend that predates `floors`.
+      const raw = res.floors?.length ? res.floors : [res];
+      const floorArt = raw.map((f) => ({ tiles: f.tiles, terrain: { floor: f.floor, liquid: f.liquid, naturalWalls: f.natural_walls } as MapTerrain }));
+      for (const fa of floorArt) await preloadResolvedTileArt(fa.tiles, fa.terrain);
+      return floorArt;
     } catch {
-      return { tiles: [], terrain: {} };
+      return [];
     }
   }
 
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
-    const { tiles, terrain } = await fetchMapTiles(meta.slug);
-    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, tiles, terrain, png: battleMapToPngDataUrl(spec, 64, tiles, terrain, showZones) };
+    const floorArt = await fetchMapTiles(meta.slug);
+    const floors = renderFloors(spec, floorArt);
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, floorArt, floors, png: floors[0]?.png ?? null };
   }
 
   /** Loads the currently-imported tile library's summary (if any) — called
@@ -2934,7 +3087,7 @@ export function DMConsolePage() {
    *  (see setActiveTileStyle), so switching styles doesn't touch any map's
    *  saved spec, just what art the already-loaded cards redraw with. */
   function refreshMapCardPreviews() {
-    const rerender = (c: MapCard) => ({ ...c, png: battleMapToPngDataUrl(c.spec, 64, c.tiles, c.terrain, showZones) });
+    const rerender = (c: MapCard) => { const floors = renderFloors(c.spec, c.floorArt, c.floors); return { ...c, floors, png: floors[0]?.png ?? null }; };
     setPlanMapCards((cards) => cards.map(rerender));
     setAdHocMapCards((cards) => cards.map(rerender));
   }
@@ -2966,8 +3119,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Exporting PNG…');
     try {
-      await preloadResolvedTileArt(card.tiles, card.terrain);
-      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.tiles, card.terrain, showZones);
+      await preloadResolvedTileArt(card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain ?? {});
+      const dataUrl = battleMapToPngDataUrl(card.spec, 96, card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain, showZones);
       if (!dataUrl) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       const b64 = dataUrl.split(',')[1];
       const bin = atob(b64);
@@ -2987,8 +3140,8 @@ export function DMConsolePage() {
     if (!dest) return;
     setPlanBusy('Exporting print-scaled PDF…');
     try {
-      await preloadResolvedTileArt(card.tiles, card.terrain);
-      const bytes = await battleMapToPdfBytes(card.spec, card.tiles, card.terrain, showZones);
+      await preloadResolvedTileArt(card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain ?? {});
+      const bytes = await battleMapToPdfBytes(card.spec, card.floorArt[0]?.tiles ?? [], card.floorArt[0]?.terrain, showZones);
       if (!bytes) { setError('This map couldn’t be rendered — its grid may be malformed.'); return; }
       await writeFile(dest, bytes);
       await openPath(dest);
@@ -3007,9 +3160,197 @@ export function DMConsolePage() {
     // Hand edits keep the card's already-resolved tiles (a live edit doesn't
     // re-run the vision resolver — that happens on regenerate); the preview
     // just redraws the edited grid under the existing tile art.
-    const patch = (cards: MapCard[]) => cards.map((c) => (c.slug === slug ? { ...c, spec, png: updatePreview ? battleMapToPngDataUrl(spec, 64, c.tiles, c.terrain, showZones) : c.png } : c));
+    const patch = (cards: MapCard[]) => cards.map((c) => {
+      if (c.slug !== slug) return c;
+      if (!updatePreview) return { ...c, spec };
+      const floors = renderFloors(spec, c.floorArt, c.floors);
+      return { ...c, spec, floors, png: floors[0]?.png ?? null };
+    });
     setPlanMapCards(patch);
     setAdHocMapCards(patch);
+  }
+
+  /** The set of floors a player device should see for this map — name + PNG,
+   *  revealed floors only. This is exactly what party_listener.rs's
+   *  set_broadcast_map stores and DmMapView renders. Rendered WITHOUT
+   *  deployment zones (unlike the DM's own `f.png`, which honours showZones):
+   *  those zones are the DM's tactical overlay of where enemies/party start,
+   *  and showing them to players would spoil an ambush — the exact thing this
+   *  reveal-gated view exists to prevent. Floor order matches card.floors. */
+  function revealedPayload(card: MapCard) {
+    const clean = battleMapFloorsToPngs(card.spec, 64, card.floorArt, false);
+    return {
+      name: card.name,
+      floors: card.floors
+        .map((f, i) => ({ name: f.name, revealed: f.revealed, png: clean[i]?.png }))
+        .filter((f): f is { name: string; revealed: boolean; png: string } => f.revealed && !!f.png)
+        .map(({ name, png }) => ({ name, png })),
+    };
+  }
+
+  /** Start sharing this map with the table (Phase 5) — supersedes any map
+   *  already shared, since only one is on the table at a time. */
+  function broadcastMapCard(card: MapCard) {
+    void invoke('set_broadcast_map', { map: revealedPayload(card) });
+    setBroadcastingSlug(card.slug);
+  }
+
+  /** Stop sharing — players' DmMapView clears on their next poll. */
+  function stopBroadcast() {
+    void invoke('clear_broadcast_map');
+    setBroadcastingSlug(null);
+  }
+
+  /** Write the map the TV/table window should show to the shared localStorage
+   *  slot TableView polls. Same revealed, zone-free floors as the LAN broadcast
+   *  (revealedPayload) — the TV is a player-facing surface, so it must never
+   *  show an unrevealed floor or the enemy/party start-zones. */
+  function writeTableMap(card: MapCard, activeFloor = 0) {
+    const payload = { ...revealedPayload(card), activeFloor };
+    try {
+      localStorage.setItem('tavern-sheet-table-map', JSON.stringify(payload));
+    } catch {
+      /* localStorage quota — the map is large; nothing we can do but skip. */
+    }
+  }
+
+  /** Open (or just focus) the chrome-less table window. Places it full-screen on
+   *  a second monitor (the TV) when there is one, else a windowed preview on the
+   *  primary. Frontend-only — Tauri's WebviewWindow builds it; no Rust command.
+   *  Physical-scale calibration (1 square = 1") is intentionally skipped, so the
+   *  map is simply fit to the screen. */
+  async function openTableWindow() {
+    const existing = await WebviewWindow.getByLabel('table');
+    if (existing) { await existing.setFocus().catch(() => {}); return; }
+
+    const monitors = await availableMonitors().catch(() => []);
+    const primary = await primaryMonitor().catch(() => null);
+    const tv = monitors.find((m) => !primary || m.name !== primary.name);
+    const onTv = monitors.length > 1 && !!tv && (!primary || tv.name !== primary.name);
+
+    const w = new WebviewWindow('table', {
+      url: '/table',
+      title: 'Tavern Sheet — Table',
+      decorations: false,
+      focus: true,
+      ...(onTv && tv
+        ? { x: tv.position.x, y: tv.position.y, width: tv.size.width, height: tv.size.height, fullscreen: true }
+        : { width: 1280, height: 800, center: true }),
+    });
+    w.once('tauri://error', (e) => setError(`Table window: ${JSON.stringify(e.payload ?? e)}`));
+  }
+
+  /** Present this map on the TV (spike Feature 1). Independent of the LAN Share
+   *  button — a DM can do either or both. */
+  async function presentToTable(card: MapCard) {
+    writeTableMap(card);
+    setPresentingSlug(card.slug);
+    await openTableWindow();
+  }
+
+  /** Photograph the physical table and ask the vision model which square each
+   *  miniature is on (#39). Opt-in per click; needs a camera, and the button
+   *  that calls this only renders when one exists.
+   *
+   *  The map may be on the TV, printed and taped down, or anything else — the
+   *  model reads the grid labels printed in the map's own ruler frame, so the
+   *  surface doesn't matter. Nothing is applied here: the result opens a confirm
+   *  panel first (see applyBoardRead). */
+  async function readTheBoard(card: MapCard) {
+    // Multi-story maps read one floor at a time; the ground floor is the one
+    // the minis are standing on unless/until we add a floor picker.
+    const floor = parseBattleMapFloors(card.spec)[0];
+    if (!floor) {
+      setError("That map's grid didn't parse, so there's nothing to read positions against.");
+      return;
+    }
+    // The table is in the players' room: ask whoever holds the camera to take
+    // the photo. It arrives asynchronously on the dm-table-photo event and lands
+    // in the same confirm panel, so there's nothing to await here.
+    if (tableCameraSource === 'player') {
+      const seq = await invoke<number | null>('request_table_photo');
+      if (seq === null) {
+        setError('No player is the table camera right now — ask someone to turn it on.');
+        return;
+      }
+      setBoardBusy('Waiting for the photo…');
+      // Give up waiting rather than leaving the button disabled forever if that
+      // player's device never answers (app closed, phone asleep, off the LAN).
+      window.setTimeout(() => setBoardBusy((b) => (b === 'Waiting for the photo…' ? null : b)), 60000);
+      return;
+    }
+    setBoardBusy('Taking the photo…');
+    try {
+      const photo = await captureTableFrame(tableCameraId || undefined);
+      setBoardBusy('Reading the board…');
+      const minis = await invoke<Array<{ cell: string; description: string }>>('read_table_positions', {
+        photo, cols: floor.cols, rows: floor.rows,
+      });
+      setBoardRead({
+        name: card.name, photo, cols: floor.cols, rows: floor.rows, minis,
+        assign: minis.map(() => ''),           // unassigned until the DM says who
+        cells: minis.map((m) => m.cell),       // editable, so a one-off drift is fixable
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBoardBusy(null);
+    }
+  }
+
+  /** Commit the DM-confirmed board read into the battle log. Only rows the DM
+   *  actually named are written, and only if the (possibly corrected) square is
+   *  a real cell inside this map — so a misread or a blank row can't invent a
+   *  position. Writes through applyBattleLog's upsert-by-name, exactly like the
+   *  DM's own `battleLog` action, which means the coords flow to the voice DM
+   *  next turn via battleLogStatusText with NO extra prompt wiring. */
+  function applyBoardRead() {
+    if (!boardRead) return;
+    const combatants = boardRead.minis
+      .map((_, i) => {
+        const name = boardRead.assign[i]?.trim();
+        if (!name) return null;
+        const parsed = parseCellRefToken((boardRead.cells[i] ?? '').trim().toUpperCase());
+        if (!parsed) return null;
+        const [q, r] = parsed;
+        if (q >= boardRead.cols || r >= boardRead.rows) return null;
+        return { name, coord: { q, r } };
+      })
+      .filter((c): c is { name: string; coord: { q: number; r: number } } => !!c);
+    if (combatants.length) setBattleLog((prev) => applyBattleLog(prev, { combatants }));
+    setBoardRead(null);
+  }
+
+  /** Stop presenting — clear the slot and close the TV window (it's
+   *  decoration-less, so there's no titlebar to close it by hand). */
+  async function stopPresenting() {
+    try { localStorage.removeItem('tavern-sheet-table-map'); } catch { /* ignore */ }
+    setPresentingSlug(null);
+    const w = await WebviewWindow.getByLabel('table');
+    await w?.close().catch(() => {});
+  }
+
+  /** Flip one floor's player-reveal flag (multi-story maps). The DM always sees
+   *  every floor in this console; the flag gates only the Phase-5 LAN player
+   *  broadcast, so the party can't peek upstairs before they climb. If this map
+   *  is the one currently shared, push the new reveal set to players live. */
+  function toggleFloorReveal(slug: string, floorName: string) {
+    const flip = (f: MapCard['floors'][number]) => (f.name === floorName ? { ...f, revealed: !f.revealed } : f);
+    const patch = (cards: MapCard[]) => cards.map((c) =>
+      c.slug === slug ? { ...c, floors: c.floors.map(flip) } : c);
+    setPlanMapCards(patch);
+    setAdHocMapCards(patch);
+    // React's state updaters may run after this function returns, so re-derive
+    // the flipped card from current state rather than reading it back. Push the
+    // new reveal set live to whichever surfaces are showing this map.
+    if (slug === broadcastingSlug || slug === presentingSlug) {
+      const card = [...planMapCards, ...adHocMapCards].find((c) => c.slug === slug);
+      if (card) {
+        const flipped = { ...card, floors: card.floors.map(flip) };
+        if (slug === broadcastingSlug) void invoke('set_broadcast_map', { map: revealedPayload(flipped) });
+        if (slug === presentingSlug) writeTableMap(flipped);
+      }
+    }
   }
 
   /** Persist hand edits to a map spec, then re-render its card's preview. */
@@ -3464,6 +3805,70 @@ export function DMConsolePage() {
         </div>
       </div>
 
+      {/* Board read confirmation (#39). The read is a HINT — the DM says who each
+          piece is and fixes any square before a single coord reaches the log. */}
+      {/* `elevated` because this panel always opens on top of the Plan dialog —
+          the map cards it reads against only exist while that dialog is up, so
+          at equal z-index the Plan dialog (later in the DOM) hid it outright. */}
+      <Dialog open={!!boardRead} onClose={() => setBoardRead(null)} title={boardRead ? `Read the board — ${boardRead.name}` : ''} wide elevated>
+        {boardRead && (
+          <div className="space-y-3">
+            <img src={boardRead.photo} alt="The table as the camera saw it" className="w-full rounded-lg border border-slate-700" />
+            {boardRead.minis.length === 0 ? (
+              <p className="text-sm text-amber-400">
+                No pieces were read. Shoot straight down over the map, and make sure the printed row/column labels are in frame.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-slate-400">
+                  Read {boardRead.minis.length} piece{boardRead.minis.length === 1 ? '' : 's'}. Say who each one is — blank rows are
+                  ignored — and correct any square that's off. Only what you name here reaches the battle log.
+                </p>
+                <datalist id="board-read-names">
+                  {(battleLog?.combatants ?? []).map((c) => <option key={c.name} value={c.name} />)}
+                </datalist>
+                <div className="space-y-1.5">
+                  {boardRead.minis.map((m, i) => {
+                    const cell = (boardRead.cells[i] ?? '').trim().toUpperCase();
+                    const parsed = parseCellRefToken(cell);
+                    const bad = !parsed || parsed[0] >= boardRead.cols || parsed[1] >= boardRead.rows;
+                    return (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="flex-1 text-xs text-slate-400 truncate" title={m.description}>{m.description || 'unidentified piece'}</span>
+                        <input
+                          value={boardRead.cells[i] ?? ''}
+                          onChange={(e) => setBoardRead((b) => b && { ...b, cells: b.cells.map((c, j) => (j === i ? e.target.value : c)) })}
+                          className={`w-16 px-2 py-1 rounded bg-slate-900 border text-sm text-center ${bad ? 'border-red-600 text-red-400' : 'border-slate-700 text-slate-200'}`}
+                          title={bad ? 'Not a square on this map' : `Square (model read ${m.cell})`}
+                        />
+                        <input
+                          list="board-read-names"
+                          value={boardRead.assign[i] ?? ''}
+                          onChange={(e) => setBoardRead((b) => b && { ...b, assign: b.assign.map((a, j) => (j === i ? e.target.value : a)) })}
+                          placeholder="who is this?"
+                          className="w-44 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-sm text-slate-200"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button size="sm" variant="ghost" onClick={() => setBoardRead(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={applyBoardRead}
+                disabled={!boardRead.assign.some((a) => a.trim())}
+                title="Write the named pieces' squares into the battle log"
+              >
+                Apply to battle log
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
       <Dialog open={newCampaignOpen} onClose={() => setNewCampaignOpen(false)} title="New Campaign" wide>
         <p className="text-xs text-slate-400 mb-3">
           This bakes straight into the campaign's CLAUDE.md, so the DM already knows it on session one instead of starting blank. You can always add more later via Notes.
@@ -3749,18 +4154,30 @@ export function DMConsolePage() {
               />
             </div>
           </div>
-        ) : !planText ? (
+        ) : !planText && planMapCards.length === 0 && adHocMapCards.length === 0 ? (
           <div className="text-center py-6">
             <p className="text-sm text-slate-400 mb-3">No plan generated yet for what's coming up.</p>
             <Button onClick={() => generatePlan(false)}>Generate</Button>
           </div>
         ) : (
           <>
-            <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
+            {/* Maps outlive the plan: anything made with "…or describe one more
+                encounter" sits on disk with no plan attached, and gating this
+                whole section on `planText` made those maps unreachable — the
+                dialog said "No plan generated yet" while openPlanMode had
+                already loaded them into adHocMapCards. */}
+            {planText ? (
+              <div className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[35vh] overflow-y-auto mb-3">{planText}</div>
+            ) : (
+              <div className="flex items-center justify-between gap-3 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 mb-3">
+                <p className="text-sm text-slate-400">No plan generated yet — the maps below were made without one.</p>
+                <Button size="sm" onClick={() => generatePlan(false)}>Generate</Button>
+              </div>
+            )}
 
             {battleMode === 'grid' && (
               <div className="mb-3">
-                <h4 className="text-xs font-semibold text-slate-300 mb-2">Battle maps for this plan's encounters</h4>
+                <h4 className="text-xs font-semibold text-slate-300 mb-2">{planText ? "Battle maps for this plan's encounters" : 'Battle maps in this campaign'}</h4>
                 {failedMaps.length > 0 && (
                   <p className="text-xs text-amber-400 mb-2">
                     {failedMaps.length} map{failedMaps.length > 1 ? 's' : ''} didn't generate ({failedMaps.join(', ')}) — this set is partial. Try Regenerate.
@@ -3917,6 +4334,61 @@ export function DMConsolePage() {
                   </label>
                 )}
 
+                {/* Table camera (#39) — where a "Read the board" photo comes from.
+                    Shown whenever there's a map to read, INCLUDING when this
+                    machine has no camera: the DM box is often headless/remote
+                    with the table (and its camera) in the players' room, and this
+                    row is the only way to switch the source to "a player". Gating
+                    it on owning a camera deadlocked exactly that setup — the
+                    selector was hidden until you'd already selected. */}
+                {[...planMapCards, ...adHocMapCards].length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
+                    <Camera size={13} className="text-slate-500" />
+                    <span>Board photos from</span>
+                    <select
+                      value={tableCameraSource}
+                      onChange={(e) => setTableCameraSource(e.target.value as 'direct' | 'player')}
+                      className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-200"
+                      title="Direct = a camera on this machine. From a player = the table is in the players' room and someone there sends the photo."
+                    >
+                      <option value="direct">this machine</option>
+                      <option value="player">a player</option>
+                    </select>
+                    {tableCameraSource === 'direct' ? (
+                      tableCameras.length > 1 ? (
+                        <select
+                          value={tableCameraId}
+                          onChange={(e) => setTableCameraId(e.target.value)}
+                          className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-200 max-w-[14rem]"
+                        >
+                          {tableCameras.map((c) => <option key={c.deviceId} value={c.deviceId}>{c.label}</option>)}
+                        </select>
+                      ) : tableCameras[0] ? (
+                        <span className="text-slate-500">{tableCameras[0].label}</span>
+                      ) : (
+                        // Headless/remote DM box. Say what to do rather than
+                        // just reporting the absence.
+                        <span className="text-amber-400/80">
+                          no camera on this machine — pick “a player” if the table is in another room
+                        </span>
+                      )
+                    ) : cameraHolder ? (
+                      <>
+                        <span className="text-emerald-400">{cameraHolder} is holding it</span>
+                        <button
+                          onClick={() => { void invoke('release_table_camera').then(() => setCameraHolder(null)); }}
+                          className="text-slate-500 hover:text-red-400 underline"
+                          title="Free the camera — use if they've left the table or forgot to turn it off"
+                        >
+                          revoke
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">nobody has turned it on yet</span>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
                   {[...planMapCards, ...adHocMapCards].length === 0 && !planBusy && (
                     <p className="text-xs text-slate-500">No combat encounters in this plan called for a map yet.</p>
@@ -3925,28 +4397,103 @@ export function DMConsolePage() {
                     const planOwnedSlugs = new Set(planMapCards.map((c) => c.slug));
                     return [...planMapCards, ...adHocMapCards].map((card) => (
                     <div key={card.slug} className="border border-slate-800 rounded-lg p-3">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <div>
+                      {/* Wraps rather than holding one line: the control row grew
+                          to five buttons (Share / TV / Read the board / PDF / PNG)
+                          and `shrink-0` on it crushed the title into a one-word-
+                          per-line column while the last button still overflowed. */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="min-w-[12rem] flex-1">
                           <div className="text-sm font-medium text-slate-100">{card.name}</div>
                           {card.summary && <div className="text-xs text-slate-500">{card.summary}</div>}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           {planOwnedSlugs.has(card.slug) && (
                             <Button size="sm" variant="ghost" onClick={() => regenerateOneMap(card)} disabled={!!planBusy}>
                               <RotateCcw size={14} /> Regenerate
+                            </Button>
+                          )}
+                          {broadcastingSlug === card.slug ? (
+                            <Button size="sm" variant="outline" onClick={stopBroadcast} className="border-emerald-600 text-emerald-400 hover:bg-emerald-950/40" title="Players are seeing this map's revealed floors — click to stop sharing">
+                              <Radio size={14} /> Sharing · Stop
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => broadcastMapCard(card)} title="Show this map's revealed floors on every connected player's device">
+                              <Radio size={14} /> Share
+                            </Button>
+                          )}
+                          {presentingSlug === card.slug ? (
+                            <Button size="sm" variant="outline" onClick={stopPresenting} className="border-sky-600 text-sky-400 hover:bg-sky-950/40" title="This map is on the TV / second display — click to take it down">
+                              <Tv size={14} /> On TV · Stop
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => presentToTable(card)} title="Show this map's revealed floors full-screen on a TV / second display for the players">
+                              <Tv size={14} /> Present to TV
+                            </Button>
+                          )}
+                          {(tableCameras.length > 0 || tableCameraSource === 'player') && (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => readTheBoard(card)}
+                              disabled={!!boardBusy}
+                              title={tableCameraSource === 'player'
+                                ? "Ask whoever's holding the table camera for a photo — you confirm the squares before anything reaches the battle log"
+                                : 'Photograph the table and read which square each miniature is on — you confirm it before anything reaches the battle log'}
+                            >
+                              <Camera size={14} /> {boardBusy ?? 'Read the board'}
                             </Button>
                           )}
                           <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>
                           <Button size="sm" variant="outline" onClick={() => exportMapPng(card)} disabled={!!planBusy}><Download size={14} /> PNG</Button>
                         </div>
                       </div>
-                      {card.png ? (
+                      {card.floors.length > 1 ? (() => {
+                        // Each floor carries its OWN Deployment; show it under
+                        // that floor so "place the minis" is per-level, not just
+                        // the ground floor's (the on-map overlay is already
+                        // per-floor — this is its text twin).
+                        const deps = deploymentPerFloor(card.spec);
+                        const stairLinks = floorStairLinks(parseBattleMapFloors(card.spec));
+                        return (
+                        <div className="flex flex-wrap gap-3">
+                          {card.floors.map((f, fi) => {
+                            const dep = deps[f.name] ?? {};
+                            const hints = stairHints(stairLinks[fi] ?? []);
+                            return (
+                            <div key={f.name} className="flex-1 min-w-[240px] space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-medium text-slate-300">{f.name}</div>
+                                <label className="flex items-center gap-1 text-[10px] text-slate-400 cursor-pointer" title="Reveal this floor to players when the party climbs to it (LAN player view — Phase 5)">
+                                  <input type="checkbox" checked={f.revealed} onChange={() => toggleFloorReveal(card.slug, f.name)} className="accent-emerald-600" />
+                                  {f.revealed ? 'Shown to players' : 'Hidden'}
+                                </label>
+                              </div>
+                              <img src={f.png} alt={`${card.name} — ${f.name}`} className={`max-w-full rounded-lg border bg-slate-950 ${f.revealed ? 'border-emerald-700/70' : 'border-slate-700'}`} />
+                              {hints.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                                  <span className="text-slate-500">Stairs:</span>
+                                  {hints.map((h, hi) => (
+                                    <span key={hi} className={h.warn ? 'font-medium text-amber-400' : 'text-slate-400'}>{h.warn ? `⚠ ${h.text}` : h.text}</span>
+                                  ))}
+                                </div>
+                              )}
+                              {(dep.enemies || dep.party) && (
+                                <div className="rounded border border-slate-800 bg-slate-900/50 px-2 py-1 text-[11px] space-y-0.5">
+                                  {dep.enemies && <div><span className="font-medium text-red-400">Enemies:</span> <span className="text-slate-300">{dep.enemies}</span></div>}
+                                  {dep.party && <div><span className="font-medium text-sky-400">Party:</span> <span className="text-slate-300">{dep.party}</span></div>}
+                                </div>
+                              )}
+                            </div>
+                            );
+                          })}
+                        </div>
+                        );
+                      })() : card.png ? (
                         <img src={card.png} alt={`${card.name} preview`} className="max-w-full rounded-lg border border-slate-700 bg-slate-950" />
                       ) : (
                         <p className="text-xs text-amber-400">This map's grid didn't parse — check the spec below.</p>
                       )}
 
-                      {(() => {
+                      {card.floors.length <= 1 && (() => {
                         const dep = parseDeployment(card.spec);
                         if (!dep.enemies && !dep.party) return null;
                         return (

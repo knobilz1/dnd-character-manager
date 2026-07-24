@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "main",
+    "table"
   ],
   "permissions": [
     "core:default",
@@ -27,6 +28,11 @@
     },
     "opener:default",
     "opener:allow-open-url",
-    "opener:allow-open-path"
+    "opener:allow-open-path",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-available-monitors",
+    "core:window:allow-primary-monitor",
+    "core:window:allow-close",
+    "core:window:allow-set-focus"
   ]
 }

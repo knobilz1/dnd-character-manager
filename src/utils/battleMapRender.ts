@@ -222,21 +222,65 @@ export function parseBattleMapFloors(spec: string): ParsedBattleMap[] {
 
 /** Renders every floor of a spec to a PNG (ground first). A single-floor spec
  *  gives a one-element array whose PNG matches battleMapToPngDataUrl exactly, so
- *  existing maps are unchanged. NOTE: the backend's resolved `tiles`/`terrain`
- *  cover the GROUND floor only today (get_map_tiles reads the first grid), so
- *  upper floors render with the built-in procedural tileset until per-floor
- *  resolution lands — still fully legible line-art. */
+ *  existing maps are unchanged. `floorArt[i]` is floor i's resolved catalog art
+ *  (tiles + terrain) from get_map_tiles's per-floor `floors`; a floor with no
+ *  entry renders with the built-in procedural tileset (still legible line-art). */
 export function battleMapFloorsToPngs(
   spec: string,
   cellPx = 64,
-  tiles: MapTileArt[] = [],
-  terrain?: MapTerrain,
+  floorArt: Array<{ tiles: MapTileArt[]; terrain?: MapTerrain }> = [],
   showDeployment = false,
 ): Array<{ name: string; png: string }> {
-  return parseBattleMapFloors(spec).map((floor, i) => ({
-    name: floor.name,
-    png: renderBattleMapToCanvas(floor, cellPx, undefined, i === 0 ? tiles : [], i === 0 ? terrain : undefined, showDeployment).toDataURL('image/png'),
-  }));
+  return parseBattleMapFloors(spec).map((floor, i) => {
+    const art = floorArt[i];
+    return {
+      name: floor.name,
+      png: renderBattleMapToCanvas(floor, cellPx, undefined, art?.tiles ?? [], art?.terrain, showDeployment).toDataURL('image/png'),
+    };
+  });
+}
+
+/** One `_` stairwell's cross-floor link, for the multi-floor viewer's "↑ Upper"
+ *  hints and its misalignment warning. `dir` comes from the Features caption
+ *  (see stairsGoUp; an uncaptioned stair defaults DOWN, same as the render).
+ *  `toFloor` is the floor one step in that direction (ground-first order), null
+ *  when the stair points off the modelled stack — a ground-floor stair DOWN to
+ *  an undrawn cellar, or a top-floor stair/ladder UP to an undrawn roof; that is
+ *  a link to somewhere the map doesn't draw, NOT a misalignment. `aligned` is
+ *  whether that target floor actually has a `_` at the SAME cell (the LOCKED
+ *  design links stairs by cell-coincidence). */
+export interface FloorStairLink {
+  dir: 'up' | 'down';
+  toFloor: string | null;
+  aligned: boolean;
+  col: number;
+  row: number;
+}
+
+/** Per-floor stair links for a stack of parsed floors (ground first). Pure.
+ *  A single-floor stack yields one empty list (nothing to link to). Callers
+ *  warn only on a misaligned UP-stair (`dir==='up' && toFloor && !aligned`) —
+ *  an up-stair that should reach the floor above but finds no stair stacked
+ *  there — which is the real generation bug; down-stairs to undrawn levels are
+ *  expected and never warn. */
+export function floorStairLinks(floors: ParsedBattleMap[]): FloorStairLink[][] {
+  const stairCells = floors.map((f) => {
+    const set = new Set<string>();
+    f.grid.forEach((row, r) => {
+      for (let c = 0; c < row.length; c++) if (row[c] === '_') set.add(`${c},${r}`);
+    });
+    return set;
+  });
+  const labelsPer = floors.map((f) => parseFeatureLabels(f.features));
+  return floors.map((_f, i) =>
+    [...stairCells[i]].map((key) => {
+      const [col, row] = key.split(',').map(Number);
+      const up = stairsGoUp(labelsPer[i].get(key));
+      const ti = up ? i + 1 : i - 1;
+      const target = floors[ti];
+      return { dir: up ? 'up' : 'down', toFloor: target?.name ?? null, aligned: !!target && stairCells[ti].has(key), col, row } as FloorStairLink;
+    }),
+  );
 }
 
 // ── Procedural tile drawing ──────────────────────────────────────────────────
@@ -762,7 +806,7 @@ function parseFeatureLabels(features: string): Map<string, string> {
 const RANGE_DASHES = new Set(['-', '–', '—']); // hyphen, en dash, em dash
 
 /** "B2" → [1, 1] (0-indexed col/row), or null for anything else. */
-function parseCellRefToken(tok: string): [number, number] | null {
+export function parseCellRefToken(tok: string): [number, number] | null {
   const m = /^([A-Za-z]{1,2})(\d{1,2})$/.exec(tok);
   if (!m) return null;
   let col = 0;
@@ -1349,32 +1393,48 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
 }
 
 /** Draws the coordinate ruler (A../1..) around a content layer and returns
- *  the composed full-size canvas. */
+ *  the composed full-size canvas.
+ *
+ *  `edges` picks which sides get a ruler gutter, and matters for the tiled PDF
+ *  print. A ruler is half a cell WIDE — drawing one on every tile's left/top
+ *  puts a strip of row numbers down the middle of the assembled map, so the
+ *  sheets physically can't butt together (you tape [1..10][A-G][1..10][H-N]).
+ *  The print therefore asks for a gutter only on the map's OUTER edges, so
+ *  interior seams meet flush and the ruler frames the whole taped map. Defaults
+ *  to both, which is what every single-image render (preview, PNG, the TV)
+ *  wants. */
 function composeRulerFrame(
-  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, content: CanvasImageSource
+  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, content: CanvasImageSource,
+  edges: { left: boolean; top: boolean } = { left: true, top: true }
 ): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
   const wRows = w.rowEnd - w.rowStart;
   const ruler = Math.round(cellPx * 0.5);
+  const padLeft = edges.left ? ruler : 0;
+  const padTop = edges.top ? ruler : 0;
   const canvas = document.createElement('canvas');
-  canvas.width = ruler + wCols * cellPx;
-  canvas.height = ruler + wRows * cellPx;
+  canvas.width = padLeft + wCols * cellPx;
+  canvas.height = padTop + wRows * cellPx;
   const ctx = canvas.getContext('2d')!;
 
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(content, ruler, ruler, wCols * cellPx, wRows * cellPx);
+  ctx.drawImage(content, padLeft, padTop, wCols * cellPx, wRows * cellPx);
 
   ctx.fillStyle = '#e8e2d2';
   ctx.font = `${Math.round(ruler * 0.5)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for (let c = 0; c < wCols; c++) {
-    ctx.fillText(columnLabel(w.colStart + c), ruler + c * cellPx + cellPx / 2, ruler / 2);
+  if (edges.top) {
+    for (let c = 0; c < wCols; c++) {
+      ctx.fillText(columnLabel(w.colStart + c), padLeft + c * cellPx + cellPx / 2, padTop / 2);
+    }
   }
-  for (let r = 0; r < wRows; r++) {
-    ctx.fillText(String(w.rowStart + r + 1), ruler / 2, ruler + r * cellPx + cellPx / 2);
+  if (edges.left) {
+    for (let r = 0; r < wRows; r++) {
+      ctx.fillText(String(w.rowStart + r + 1), padLeft / 2, padTop + r * cellPx + cellPx / 2);
+    }
   }
   return canvas;
 }
@@ -1422,8 +1482,14 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 }
 
 /** Builds a print-scaled PDF: every grid square is exactly 1 inch, and a map
- *  bigger than one page is tiled across multiple Letter sheets (with the
- *  coordinate ruler repeated on each) to tape together. */
+ *  bigger than one page is tiled across multiple Letter sheets to tape together.
+ *
+ *  The ruler goes on the assembled map's OUTER edges only — row numbers on the
+ *  leftmost column of sheets, column letters on the top row of sheets. Putting
+ *  one on every sheet (as this used to) buried a half-inch strip of row numbers
+ *  at each vertical seam, so the halves couldn't be lined up at all: the right
+ *  sheet's numbers landed in the middle of the board. Interior sheets now carry
+ *  pure map, edge to edge, and butt flush once the page margin is trimmed. */
 export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
@@ -1439,7 +1505,8 @@ export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = []
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
       const source = renderBattleMapContent(map, RENDER_PX, win, tiles, terrain, showDeployment);
-      const canvas = composeRulerFrame(map, RENDER_PX, win, source);
+      // Outer edges only, so interior seams have no ruler strip to line up over.
+      const canvas = composeRulerFrame(map, RENDER_PX, win, source, { left: rx === 0, top: ry === 0 });
       const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));
       const page = pdf.addPage([PAGE_W, PAGE_H]);

@@ -107,6 +107,107 @@ fn parse_since_param(request_line: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// The battle map the DM is currently sharing with players — Phase 5 of the
+/// multi-story map work. Unlike the narration log this is NOT a growing
+/// history: it is just the one map on the table right now, replaced wholesale
+/// whenever the DM shares a different map or flips a floor's reveal. `version`
+/// bumps on every change so a polling player device only re-downloads the
+/// image-heavy payload when it actually changed, not every poll. `payload` is
+/// None when nothing is shared (or the DM stopped sharing) — a player that
+/// sees a *new* version with a null payload clears its view.
+struct BroadcastMap {
+    version: u64,
+    payload: Option<serde_json::Value>,
+}
+
+fn broadcast_map() -> &'static Mutex<BroadcastMap> {
+    static MAP: OnceLock<Mutex<BroadcastMap>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(BroadcastMap { version: 0, payload: None }))
+}
+
+/// Pure: what `GET /map?since=<v>` returns. A player already on the current
+/// version (`since >= version`) gets just the version back — the heavy image
+/// payload is not re-sent. A player behind gets the current payload, which may
+/// itself be null (meaning "the DM stopped sharing — clear your view").
+fn map_response(current: &BroadcastMap, since: u64) -> serde_json::Value {
+    if since >= current.version {
+        serde_json::json!({ "version": current.version })
+    } else {
+        serde_json::json!({ "version": current.version, "map": current.payload })
+    }
+}
+
+// ── The table camera (#39) ───────────────────────────────────────────────────
+//
+// The DM bot often runs on a different machine from the table, with the players
+// in another room — so the camera pointed at the map is on a PLAYER's device,
+// and the photo has to travel to the DM. Players already push to this listener
+// (`POST /talk`), so a photo is the same shape.
+//
+// Exactly ONE player holds the "table camera" role at a time. Without that, two
+// players snapping at once would race two different boards into the DM's read.
+// The role is claimed and released by a toggle on the player's sheet, and the DM
+// can revoke it.
+
+/// A stale hold is auto-released: a player who claims the camera and then closes
+/// their app would otherwise own it forever. Any claim or photo from the holder
+/// refreshes it, so an active camera never expires mid-session.
+const CAMERA_HOLD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+
+struct CameraHolder {
+    name: String,
+    at: std::time::Instant,
+}
+
+fn camera_holder() -> &'static Mutex<Option<CameraHolder>> {
+    static HOLDER: OnceLock<Mutex<Option<CameraHolder>>> = OnceLock::new();
+    HOLDER.get_or_init(|| Mutex::new(None))
+}
+
+/// Bumped when the DM asks for a photo ("automatic" delivery). Players PULL from
+/// the DM, so there's no way to call out to a player's device — instead the
+/// holder polls `GET /camera`, notices the sequence advanced past the last one it
+/// acted on, and takes the photo itself. A monotonic counter rather than a bool
+/// so there's no clear-it-afterwards race: each request is a distinct number, and
+/// a device that has already served request N simply ignores anything <= N.
+fn camera_request_seq() -> &'static Mutex<u64> {
+    static SEQ: OnceLock<Mutex<u64>> = OnceLock::new();
+    SEQ.get_or_init(|| Mutex::new(0))
+}
+
+/// The holder, if the hold is still fresh — clearing it in place when it has
+/// gone stale, so expiry happens lazily on read without a background timer.
+fn fresh_camera_holder(slot: &mut Option<CameraHolder>) -> Option<String> {
+    if let Some(h) = slot.as_ref() {
+        if h.at.elapsed() < CAMERA_HOLD_TIMEOUT {
+            return Some(h.name.clone());
+        }
+    }
+    *slot = None;
+    None
+}
+
+/// Pure claim policy, split from the clock so it can be tested: given who holds
+/// the camera now, what does this request do? Returns (new holder, granted).
+///
+/// Claiming is idempotent for the current holder (a re-claim just refreshes the
+/// hold), a claim by anyone else while it's held is REFUSED rather than stealing
+/// it, and releasing only works for the holder — so a player closing their sheet
+/// can't knock someone else off the camera.
+fn resolve_camera_claim(current: Option<&str>, requester: &str, release: bool) -> (Option<String>, bool) {
+    let is_holder = current.is_some_and(|c| c.eq_ignore_ascii_case(requester));
+    match (release, current) {
+        (true, _) if is_holder => (None, true),
+        (true, _) => (current.map(str::to_string), false),
+        (false, None) => (Some(requester.to_string()), true),
+        // A re-claim keeps the name ALREADY on record rather than adopting the
+        // requester's casing, so "ana" refreshing her hold doesn't rename the
+        // holder everyone else sees from "Ana" to "ana".
+        (false, _) if is_holder => (current.map(str::to_string), true),
+        (false, _) => (current.map(str::to_string), false),
+    }
+}
+
 fn write_response(stream: &mut TcpStream, status: u16, body: &str, content_type: &str) {
     let status_text = match status {
         200 => "OK",
@@ -170,6 +271,26 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let latest = log.entries.back().map(|e| e.seq).unwrap_or(since);
         drop(log);
         let body = serde_json::json!({ "entries": entries, "latest": latest }).to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
+    if request_line.starts_with("GET /map") {
+        // Player devices poll this for the DM's currently-shared map (revealed
+        // floors only). `since` is their last-seen version, so an unchanged map
+        // isn't re-sent — see map_response / useDmMapFeed.
+        let since = parse_since_param(&request_line);
+        let current = broadcast_map().lock().unwrap();
+        let body = map_response(&current, since).to_string();
+        drop(current);
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
+    if request_line.starts_with("GET /camera") {
+        // Who currently holds the table camera, so a player's toggle can show
+        // "Ana is the table camera" instead of letting them think it's free.
+        let mut slot = camera_holder().lock().unwrap();
+        let holder = fresh_camera_holder(&mut slot);
+        drop(slot);
+        let requested = *camera_request_seq().lock().unwrap();
+        let body = serde_json::json!({ "holder": holder, "requestSeq": requested }).to_string();
         return write_response(&mut stream, 200, &body, "application/json");
     }
     if request_line.starts_with("GET") {
@@ -278,7 +399,85 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         return write_response(&mut stream, 200, &body, "application/json");
     }
 
+    if request_line.starts_with("POST /camera-claim") {
+        // Toggle the "table camera" role. `release: true` hands it back.
+        let parsed: serde_json::Value = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::Null);
+        let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let release = parsed.get("release").and_then(|v| v.as_bool()).unwrap_or(false);
+        if name.is_empty() {
+            return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"who are you?\"}", "application/json");
+        }
+        let mut slot = camera_holder().lock().unwrap();
+        let current = fresh_camera_holder(&mut slot);
+        let (holder, granted) = resolve_camera_claim(current.as_deref(), &name, release);
+        *slot = holder.clone().map(|n| CameraHolder { name: n, at: std::time::Instant::now() });
+        drop(slot);
+        let _ = app.emit("dm-table-camera", serde_json::json!({ "holder": holder }));
+        let body = serde_json::json!({ "ok": true, "granted": granted, "holder": holder }).to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
+
+    if request_line.starts_with("POST /table-photo") {
+        // A photo of the physical table from the player holding the camera. Only
+        // the holder may send, so the DM can't be fed two different boards at
+        // once. The DM Console picks this up, runs the board read, and shows the
+        // usual confirm panel — a photo from a player is never applied blind.
+        let parsed: serde_json::Value = match serde_json::from_str(&body_str) {
+            Ok(v) => v,
+            Err(e) => {
+                return write_response(&mut stream, 400, &format!("{{\"ok\":false,\"error\":\"{e}\"}}"), "application/json");
+            }
+        };
+        let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let photo = parsed.get("photo").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if photo.trim().is_empty() {
+            return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"no photo\"}", "application/json");
+        }
+        let mut slot = camera_holder().lock().unwrap();
+        let current = fresh_camera_holder(&mut slot);
+        if !current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&name)) {
+            drop(slot);
+            let body = serde_json::json!({
+                "ok": false,
+                "error": match current { Some(h) => format!("{h} is the table camera right now."), None => "Turn on 'table camera' first.".into() },
+            }).to_string();
+            return write_response(&mut stream, 409, &body, "application/json");
+        }
+        // Sending a photo counts as activity, so an in-use camera never expires.
+        *slot = Some(CameraHolder { name: name.clone(), at: std::time::Instant::now() });
+        drop(slot);
+        let _ = app.emit("dm-table-photo", serde_json::json!({ "name": name, "photo": photo }));
+        return write_response(&mut stream, 200, "{\"ok\":true}", "application/json");
+    }
+
     write_response(&mut stream, 404, "not found", "text/plain");
+}
+
+/// Force-release the table camera (the DM's revoke). Also used when the DM
+/// switches the photo source back to a directly-connected camera.
+#[tauri::command]
+pub fn release_table_camera() {
+    *camera_holder().lock().unwrap() = None;
+}
+
+/// Who holds the table camera right now, for the DM Console's own display.
+#[tauri::command]
+pub fn table_camera_holder() -> Option<String> {
+    let mut slot = camera_holder().lock().unwrap();
+    fresh_camera_holder(&mut slot)
+}
+
+/// Ask the holding player's device to take a photo now ("automatic" delivery —
+/// the DM presses one button instead of asking a player out loud). Returns the
+/// new request number, or None when nobody holds the camera to ask.
+#[tauri::command]
+pub fn request_table_photo() -> Option<u64> {
+    let mut slot = camera_holder().lock().unwrap();
+    fresh_camera_holder(&mut slot)?;
+    drop(slot);
+    let mut seq = camera_request_seq().lock().unwrap();
+    *seq += 1;
+    Some(*seq)
 }
 
 /// Starts the party listener on the given port (idempotent — a second call
@@ -335,6 +534,30 @@ pub fn push_narration(text: String) {
         return;
     }
     append_narration(&mut narration_log().lock().unwrap(), text);
+}
+
+/// Shares one battle map with every connected player device (Phase 5). The DM
+/// Console calls this with `{ name, floors: [{ name, png }] }` carrying only
+/// the floors the DM has revealed (see toggleFloorReveal). Replaces whatever
+/// was shared before and bumps the version so players pick it up on their next
+/// `GET /map` poll.
+#[tauri::command]
+pub fn set_broadcast_map(map: serde_json::Value) {
+    let mut current = broadcast_map().lock().unwrap();
+    current.version += 1;
+    current.payload = Some(map);
+}
+
+/// Stops sharing the current map — players polling `GET /map` see a new version
+/// with a null payload and clear their view. A no-op (no version bump) when
+/// nothing is shared, so idle calls don't churn the version.
+#[tauri::command]
+pub fn clear_broadcast_map() {
+    let mut current = broadcast_map().lock().unwrap();
+    if current.payload.is_some() {
+        current.version += 1;
+        current.payload = None;
+    }
 }
 
 /// Best-effort LAN-facing IP address, so the DM can read it out to players.
@@ -433,6 +656,64 @@ mod tests {
         assert_eq!(parse_since_param("GET /narration?since=nope HTTP/1.1"), 0, "unparseable value");
         assert_eq!(parse_since_param("GET / HTTP/1.1"), 0, "unrelated path with no query");
         assert_eq!(parse_since_param("GET /narration?foo=bar&since=7 HTTP/1.1"), 7, "since not the first param");
+    }
+
+    #[test]
+    fn map_response_omits_the_payload_when_the_client_is_already_current() {
+        let bm = BroadcastMap { version: 3, payload: Some(serde_json::json!({ "name": "Tower" })) };
+        // Client already on v3 (or somehow ahead) → just the version, no re-send.
+        let r = map_response(&bm, 3);
+        assert_eq!(r["version"], 3);
+        assert!(r.get("map").is_none(), "a current client must not get the heavy payload again");
+    }
+
+    #[test]
+    fn map_response_sends_the_payload_when_the_client_is_behind() {
+        let bm = BroadcastMap { version: 3, payload: Some(serde_json::json!({ "name": "Tower" })) };
+        let r = map_response(&bm, 1);
+        assert_eq!(r["version"], 3);
+        assert_eq!(r["map"]["name"], "Tower");
+    }
+
+    #[test]
+    fn map_response_sends_null_map_when_sharing_stopped() {
+        // Version advanced but payload cleared → a behind client blanks its view.
+        let bm = BroadcastMap { version: 4, payload: None };
+        let r = map_response(&bm, 3);
+        assert_eq!(r["version"], 4);
+        assert!(r["map"].is_null(), "a new version with no payload clears the player's map");
+    }
+
+    #[test]
+    fn parse_since_param_reads_the_map_poll_query() {
+        assert_eq!(parse_since_param("GET /map?since=9 HTTP/1.1"), 9);
+        assert_eq!(parse_since_param("GET /map HTTP/1.1"), 0, "bare /map = everything (version 0)");
+    }
+
+    #[test]
+    fn table_camera_is_first_come_and_cannot_be_stolen() {
+        // Free → the first asker gets it.
+        assert_eq!(resolve_camera_claim(None, "Ana", false), (Some("Ana".into()), true));
+        // Held → someone else is REFUSED, and the holder is unchanged. This is
+        // the whole point: two players snapping at once would race two different
+        // boards into one read.
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Bo", false), (Some("Ana".into()), false));
+        // The holder re-claiming is fine (that's the heartbeat that keeps a hold
+        // from going stale mid-session) and is case-insensitive — but it keeps
+        // the name already on record, so refreshing as "ana" doesn't rename the
+        // holder everyone else sees from "Ana".
+        assert_eq!(resolve_camera_claim(Some("Ana"), "ana", false), (Some("Ana".into()), true));
+    }
+
+    #[test]
+    fn only_the_table_camera_holder_can_release_it() {
+        // The holder hands it back → free for anyone.
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Ana", true), (None, true));
+        // A non-holder releasing must NOT knock the holder off — otherwise any
+        // player closing their sheet would steal the camera from whoever has it.
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Bo", true), (Some("Ana".into()), false));
+        // Releasing when nobody holds it is a harmless no-op.
+        assert_eq!(resolve_camera_claim(None, "Bo", true), (None, false));
     }
 
     #[test]

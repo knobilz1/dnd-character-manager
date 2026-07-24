@@ -2612,6 +2612,60 @@ fn battle_map_format_instructions_full(objects_enabled: bool, vocabulary: &[Stri
         - Party: B5, B6, B7, C7 — spread just inside the cave mouth, with the rockfall ahead of them.\n\
         {MAP_SPEC_DELIMITER}\n\n\
         A wizard's tower, an octopus-ship hold, a goblin warren — none of them are a tavern. Only draw `=` furniture, a bar, tables, stools, when the encounter actually has them. Fit the room to what was asked for, not to whichever example above looks closest.\n\n\
+        A MULTI-STOREY PLACE — and ONLY a place that genuinely has vertical levels, like a two-storey house, a tower with floors, or a building over a cellar — is drawn as SEVERAL FLOORS in this one map instead of a single grid. This is the EXCEPTION: a location on one level has NO `Floor:` line and looks exactly like every example above, and that is almost every map. Only reach for floors when the fiction plainly has them.\n\
+        When it does: put a `Floor: <name>` line before EACH floor (the ground/entry floor FIRST — e.g. `Floor: Ground`, then `Floor: Upper` or `Floor: Cellar`), and give each floor its own COMPLETE block — its own Grid, Legend, Map, Features and Deployment — exactly like a single map. The extra rules for a stack:\n\
+        - EVERY floor is the SAME <cols>x<rows> and shares the SAME outer-wall footprint, so the floors stack directly on top of one another: the upper floor's outer walls sit in the same cells as the ground floor's.\n\
+        - CONNECT the floors with stairs at MATCHING cells — draw a `_` where the stair is, and put a `_` at the SAME cell on the floor above. Caption them so the direction reads: on the lower floor \"Stairs up to the <upper> at <cell>\", on the upper floor \"Stairs down to the <lower> at <cell>\". (A bare \"stairwell\" with no up/down word renders as going DOWN.)\n\
+        - Give each floor its OWN Deployment — who starts the fight on THAT level. Then write ONE shared `Tactics:` section AFTER the last floor; it covers the whole multi-level fight.\n\n\
+        Worked two-storey example — a cottage reached by one stair at F5, stacked on both floors, same 12x10 footprint:\n\n\
+        {MAP_SPEC_DELIMITER}\n\
+        # The Weaver's Cottage\n\
+        Floor: Ground\n\
+        Grid: 12x10, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        ############\n\
+        #..........#\n\
+        #..=.......#\n\
+        #..........#\n\
+        #...._.....#\n\
+        #..........#\n\
+        #..........#\n\
+        #.......==.#\n\
+        #..........#\n\
+        #####+######\n\
+        Features:\n\
+        - Loom at D3\n\
+        - Stairs up to the upper floor at F5\n\
+        - Workbench at I8-J8\n\
+        - Front door at F10\n\
+        Deployment:\n\
+        - Enemies: Bandit at I3, J3 — dug in by the east wall\n\
+        - Party: E9, F9, G9 — just inside the front door\n\
+        Floor: Upper\n\
+        Grid: 12x10, 5 ft squares. Columns A onward left-to-right, rows 1 onward top-to-bottom.\n\
+        Legend: {MAP_LEGEND}\n\
+        Map:\n\
+        ############\n\
+        #..==......#\n\
+        #..........#\n\
+        #..........#\n\
+        #...._.....#\n\
+        #..........#\n\
+        #..........#\n\
+        #..........#\n\
+        #..........#\n\
+        ############\n\
+        Features:\n\
+        - Bed at D2-E2\n\
+        - Stairs down to the ground floor at F5\n\
+        Deployment:\n\
+        - Enemies: Bandit Captain at D3 — holding the top of the stair by the bed\n\
+        - Party: F5 — arriving up the stairs\n\
+        Tactics:\n\
+        - The stair at F5 is the only way between floors; whoever holds its top fights climbers one at a time, so the party should clear the ground floor before pushing up.\n\
+        - The loom (D3) and workbench (I8-J8) give half cover on the ground floor's two flanks; the upper floor is bare, so the captain fights from the corner by the bed.\n\
+        {MAP_SPEC_DELIMITER}\n\n\
         Output nothing outside the sections shown.",
         // Plain "\n": the source indentation around this is stripped by Rust's
         // line-continuation escapes, but indentation inside an interpolated
@@ -3798,6 +3852,138 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Board reading (#39) — one photo of the PHYSICAL table → which grid cell each
+// miniature stands on, over the same multimodal path the tile resolver uses.
+//
+// Why there's no homography or fiducial markers here: every map this app
+// renders already prints the ruler frame's column letters + row numbers (see
+// `column_label`, and battleMapRender.ts's composeRulerFrame), and that SAME
+// render is what goes on the TV *and* what comes out of the PDF that gets
+// printed and taped down. So the model READS THE PRINTED LABELS off the photo
+// instead of us solving any camera geometry — which makes a TV and a paper map
+// the same problem. (Unlabelled 3D terrain is a later, separate strategy.)
+//
+// This NEVER draws a creature anywhere. The result is a hint for the DM to
+// confirm, which then lands only in the DM's own battle log; the physical minis
+// stay the only figures on the map (see `objects_rule_line` /
+// DEPLOYMENT_RULE_LINE).
+// ---------------------------------------------------------------------------
+
+/// Vision model for a board read. NOT the tile picker's `sonnet`: measured on
+/// two photos of the same 6-piece board (2026-07-23), sonnet matched an
+/// independent reading on 1 of 6 and — the damning part — agreed with ITSELF on
+/// only 1 of 6 across the two shots, confidently inventing cells either way.
+/// Opus matched 3 of 6 exactly with the rest within one column, gave identical
+/// COLUMNS across both shots, and abstained on pieces it couldn't place instead
+/// of guessing. It was also ~3x faster (28s vs 100s). Reading a grid off a photo
+/// is a much harder visual-reasoning job than "which tile looks like a barrel",
+/// and the model tier is where that shows.
+const BOARD_READ_MODEL: &str = "opus";
+
+/// One miniature the model located on the board.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct BoardMini {
+    /// The cell as read off the map's printed labels, upper-cased ("F7").
+    pub cell: String,
+    /// Short description so the DM can tell one mini from another.
+    pub description: String,
+    /// 0-based grid indices parsed from `cell` — ready for a combatant coord.
+    pub col: usize,
+    pub row: usize,
+}
+
+/// Builds the multimodal user message for one board read: the table photo plus
+/// the grid's real bounds, and an instruction to answer with ONLY JSON. Stating
+/// the bounds lets the model sanity-check its own reading (and lets
+/// `parse_board_read` drop anything outside them). Pure.
+fn build_board_read_message(media: &str, b64: &str, cols: usize, rows: usize) -> String {
+    use serde_json::json;
+    let last_col = column_label(cols.saturating_sub(1));
+    let content = vec![
+        json!({"type":"text","text": format!(
+            "This photograph shows a tabletop battle map with physical miniatures standing on it. The map is printed \
+             with a ruler frame: column letters run left-to-right along the top edge (A through {last_col}), and row \
+             numbers run top-to-bottom down the left edge (1 through {rows}). Each square is named by its column letter \
+             followed by its row number, e.g. \"F7\"."
+        )}),
+        json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}),
+        json!({"type":"text","text": format!(
+            "For EVERY playing piece on the map — BOTH upright figures in stands AND small flat tokens lying on the map \
+             count as pieces — read the printed labels to work out the ONE square it occupies, \
+             and give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\"). \
+             Only report squares inside A1..{last_col}{rows}. If you cannot confidently tell which square a figure is on, \
+             LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands and scenery. \
+             Reply with ONLY this JSON and nothing else: \
+             {{\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
+        )}),
+    ];
+    json!({"type":"user","message":{"role":"user","content":content}}).to_string()
+}
+
+/// Parses a board-read reply into placed minis. Tolerant of prose around the
+/// JSON (the same `extract_json_object` the tile picker leans on) and of a
+/// missing description. DROPS anything that isn't a real cell reference or that
+/// falls outside this map's own grid, so a hallucinated "Z99" can never reach
+/// the DM's battle log. Pure.
+fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
+    // The asked-for shape is {"minis":[…]}, but a model that answers with a
+    // bare […] array shouldn't cost us the entire read.
+    let items: Vec<serde_json::Value> = serde_json::from_str::<serde_json::Value>(&extract_json_object(reply))
+        .ok()
+        .and_then(|v| v.get("minis").and_then(|m| m.as_array()).cloned())
+        .or_else(|| {
+            serde_json::from_str::<serde_json::Value>(reply.trim())
+                .ok()
+                .and_then(|v| v.as_array().cloned())
+        })
+        .unwrap_or_default();
+    items
+        .iter()
+        .filter_map(|item| {
+            let cell = item.get("cell")?.as_str()?.trim().to_ascii_uppercase();
+            let (col, row) = parse_cell_ref(&cell)?;
+            if col >= cols || row >= rows {
+                return None;
+            }
+            let description = item
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            Some(BoardMini { cell, description, col, row })
+        })
+        .collect()
+}
+
+/// Read the physical table: one photo (a data URL) → the cell each miniature is
+/// standing on, for the map whose grid is `cols` x `rows`.
+///
+/// `model` overrides the vision model; the default is `BOARD_READ_MODEL` (opus),
+/// which the comment there justifies with measurements.
+///
+/// Entirely opt-in: nothing calls this unless the DM asks for a board read, so a
+/// table with no camera behaves exactly as it always has. The answer is a HINT
+/// for the DM to confirm — never authority, and never drawn on the map.
+#[tauri::command]
+pub fn read_table_positions(photo: String, cols: usize, rows: usize, model: Option<String>) -> Result<Vec<BoardMini>, String> {
+    if cols == 0 || rows == 0 {
+        return Err("That map has no grid to read positions against.".into());
+    }
+    let (media, b64) = split_data_url(&photo);
+    if b64.trim().is_empty() {
+        return Err("The board photo was empty.".into());
+    }
+    let model = model.filter(|m| !m.trim().is_empty());
+    let reply = crate::dm::run_claude_vision(
+        &build_board_read_message(media, b64, cols, rows),
+        Some(model.as_deref().unwrap_or(BOARD_READ_MODEL)),
+    )?;
+    crate::maplog::log("BOARD READ (raw reply)", &reply);
+    Ok(parse_board_read(&reply, cols, rows))
+}
+
 // The per-place ground queries that used to live here are now
 // `pack_profile.rs`'s DEFAULT_BIOMES, so an imported pack can carry its own
 // instead of every install being told it owns Forgotten Adventures. The default
@@ -4241,6 +4427,21 @@ fn biome_floor_query<'a>(profile: &'a PackProfile, scene: &str) -> Option<&'a st
 /// renderer then just uses its built-in sprites, exactly as before this
 /// existed. Command-layer helper (needs `AppHandle` for the manifest + the
 /// vision call), called right after a spec is written.
+/// Delete stale `<slug>.floorN.tiles.json` for N >= `keep_from` (min 1) — so a
+/// map that used to have more floors, or has become single-floor, leaves no
+/// orphaned upper-floor sidecars for `get_map_tiles` to read. Contiguous: stops
+/// at the first index with no file.
+fn remove_higher_floor_sidecars(dir: &Path, slug: &str, keep_from: usize) {
+    for i in keep_from.max(1).. {
+        let p = dir.join(format!("{slug}.floor{i}.tiles.json"));
+        if p.exists() {
+            let _ = fs::remove_file(&p);
+        } else {
+            break;
+        }
+    }
+}
+
 fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Result<(), String> {
     if !crate::tile_library::tile_library_configured(app) {
         return Ok(());
@@ -4262,6 +4463,54 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     // Classify the scene ONCE — it drives both the object picks (material fit)
     // and the ground texture.
     let biome = classify_biome(&profile, &spec);
+    // Ground texture + wall style are PLACE-level — one classification for the
+    // whole map, shared across every floor (a tower's floors are the same place,
+    // one biome, one ground). classify_biome and resolve_floor each make a model
+    // call (and resolve_floor rolls a d20), so resolving them per floor would
+    // triple the cost AND give each floor a different, inconsistent ground.
+    // Per-FLOOR below: the object picks and the `~` liquid (an upper floor may
+    // have no water). Multi-floor maps write one sidecar per floor —
+    // `<slug>.tiles.json` (ground, floor 0) + `<slug>.floorN.tiles.json`.
+    let floor = resolve_floor(app, &profile, &biome);
+    let natural_walls = has_natural_walls(&profile, &biome);
+    let write_floor = |i: usize, resolved: &ResolvedMap| -> Result<(), String> {
+        let path = if i == 0 { tiles_path.clone() } else { dir.join(format!("{slug}.floor{i}.tiles.json")) };
+        // Always write (even if nothing resolved) so the mtime gate marks this
+        // spec done and we don't re-run the vision/classify calls on every open.
+        write_atomic(&path, &serde_json::to_string_pretty(resolved).map_err(|e| e.to_string())?)
+    };
+    match floor_specs(&spec) {
+        None => {
+            let resolved = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, &spec, slug);
+            write_floor(0, &resolved)?;
+            remove_higher_floor_sidecars(&dir, slug, 1);
+        }
+        Some((_title, floors, _shared)) => {
+            // Ground (floor 0) is written LAST: `<slug>.tiles.json` carries the
+            // mtime gate, so it must not mark the map done until every upper
+            // floor's sidecar is on disk.
+            let mut ground: Option<ResolvedMap> = None;
+            for (i, (name, fspec)) in floors.iter().enumerate() {
+                let resolved = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, fspec, &format!("{slug} [{name}]"));
+                if i == 0 { ground = Some(resolved); } else { write_floor(i, &resolved)?; }
+            }
+            if let Some(g) = ground { write_floor(0, &g)?; }
+            remove_higher_floor_sidecars(&dir, slug, floors.len());
+        }
+    }
+    Ok(())
+}
+
+/// Resolve ONE standalone grid — a single floor, or a whole single-floor map —
+/// to its picked object tiles + `~` liquid. `biome`, `floor_texture` and
+/// `natural_walls` are PLACE-level: classified/picked once from the whole map by
+/// `resolve_map_tiles` and shared across floors (a place's floors are one biome
+/// and share a ground). Per-grid here: the object placements and the liquid.
+/// `label` tags the maplog lines (the slug, plus the floor name when multi-floor).
+fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_texture: &Option<TileRef>, natural_walls: bool, spec: &str, label: &str) -> ResolvedMap {
+    // Shadow to owned so the (verbatim) body below keeps its `&biome` / `&spec`.
+    let biome = biome.to_string();
+    let spec = spec.to_string();
     let placements = parse_placements(&spec);
     let t_short = std::time::Instant::now();
     // Search at the library's real size for guide nouns even when the placement
@@ -4330,7 +4579,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             };
             let uncaptioned = p.label == noun;
             let names_own = !uncaptioned && crate::tile_library::label_names_its_own_object(app, &p.label, noun);
-            let query = field_query(&p.label, noun, crate::tile_library::scene_biome(&biome, &profile), names_own);
+            let query = field_query(&p.label, noun, crate::tile_library::scene_biome(&biome, profile), names_own);
             let (sw, sh) = if names_own { search_size(&p.label, 1, 1) } else { (gw, gh) };
             let out = look(&query, sw, sh);
             if !out.is_empty() {
@@ -4389,7 +4638,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     if !slots.is_empty() {
         crate::maplog::log(
             "TILE RESOLUTION START",
-            &format!("{slug}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
+            &format!("{label}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
                 slots.iter().enumerate().map(|(i, (p, c))| format!("  [slot {}] \"{}\" {}x{} — {} candidates", i + 1, p.label, p.w, p.h, c.len())).collect::<Vec<_>>().join("\n")),
         );
         let mut picks = pick_tiles_via_vision(&slots, &biome);
@@ -4480,20 +4729,15 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         })
         .collect();
     objects.extend(flames);
-    let floor = resolve_floor(app, &profile, &biome);
     let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
     let liquid_caption = liquid_caption_query(&spec);
-    let liquid = resolve_liquid(app, &profile, &biome, &grid_rows, floor.as_ref(), liquid_caption.as_deref());
-    let resolved = ResolvedMap { objects, floor, liquid, natural_walls: has_natural_walls(&profile, &biome) };
-    // Always write (even if nothing resolved) so the mtime gate marks this spec
-    // done and we don't re-run the vision/classify calls on every dialog open.
-    let path = battle_maps_dir(root, id).join(format!("{slug}.tiles.json"));
-    write_atomic(&path, &serde_json::to_string_pretty(&resolved).map_err(|e| e.to_string())?)?;
+    let liquid = resolve_liquid(app, profile, &biome, &grid_rows, floor_texture.as_ref(), liquid_caption.as_deref());
+    let resolved = ResolvedMap { objects, floor: floor_texture.clone(), liquid, natural_walls };
     let basename = |p: &str| p.rsplit('/').next().unwrap_or("").to_string();
     crate::maplog::log(
         "TILE RESOLUTION DONE",
         &format!(
-            "{slug}: {} object tile(s) resolved; biome floor = {}\nchosen object tiles:\n{}",
+            "{label}: {} object tile(s) resolved; biome floor = {}\nchosen object tiles:\n{}",
             resolved.objects.len(),
             resolved.floor.as_ref().map(|f| basename(&f.rel_path)).unwrap_or_else(|| "kept built-in".into()),
             resolved.objects.iter().map(|o| format!("  {}", basename(&o.rel_path))).collect::<Vec<_>>().join("\n"),
@@ -4508,7 +4752,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
         crate::maplog::log(
             "VOCABULARY MISSES",
             &format!(
-                "{slug}: words this map asked for that NO tile in the catalog carries.\n\
+                "{label}: words this map asked for that NO tile in the catalog carries.\n\
                  as the head noun (serious — the thing placed has no name here, so the pick is a \
                  guess off the remaining words): {}\n\
                  as a modifier (costs precision only): {}",
@@ -4517,7 +4761,7 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             ),
         );
     }
-    Ok(())
+    resolved
 }
 
 /// One resolved tile with fresh art, for the renderer. `cells` are (col,row);
@@ -4538,34 +4782,78 @@ pub struct MapTileArt {
     single: bool,
 }
 
-/// The resolved art for a map: the picked object tiles plus the biome ground
-/// texture (a data URL, or null to keep the built-in floor). Empty/null when
-/// nothing resolved or no sidecar exists.
-#[derive(Serialize, Clone, Debug)]
-pub struct MapTiles {
+/// The resolved art for ONE grid: the picked object tiles plus the biome ground
+/// texture (data URLs, or null to keep the built-in floor).
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct FloorArt {
     tiles: Vec<MapTileArt>,
     floor: Option<String>,
     liquid: Option<String>,
     natural_walls: bool,
 }
 
+/// The resolved art for a map. The top-level fields are the GROUND floor (floor
+/// 0), kept unchanged for every single-grid caller (export/PDF/thumbnail);
+/// `floors` is the per-floor art for a multi-story map (index 0 == ground), one
+/// entry the multi-floor viewer renders per floor. A single-floor map has exactly
+/// one `floors` entry, equal to the top-level fields. Empty when no sidecar.
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct MapTiles {
+    tiles: Vec<MapTileArt>,
+    floor: Option<String>,
+    liquid: Option<String>,
+    natural_walls: bool,
+    floors: Vec<FloorArt>,
+}
+
 #[tauri::command]
 pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
     let root = campaigns_root(&app)?;
-    let path = battle_maps_dir(&root, &id).join(format!("{slug}.tiles.json"));
-    let Ok(json) = fs::read_to_string(&path) else {
-        return Ok(MapTiles { tiles: Vec::new(), floor: None, liquid: None, natural_walls: false });
+    let dir = battle_maps_dir(&root, &id);
+    // Load one sidecar (`<slug>.tiles.json` = ground, `<slug>.floorN.tiles.json`
+    // above it) into a FloorArt with its art embedded. None when the file's absent.
+    let load_one = |path: &Path| -> Option<FloorArt> {
+        let json = fs::read_to_string(path).ok()?;
+        let resolved: ResolvedMap = serde_json::from_str(&json).unwrap_or_default();
+        let tiles = resolved
+            .objects
+            .into_iter()
+            .filter_map(|t| Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated, single: t.single }))
+            .collect();
+        let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
+        Some(FloorArt { tiles, floor: load(resolved.floor), liquid: load(resolved.liquid), natural_walls: resolved.natural_walls })
     };
-    let resolved: ResolvedMap = serde_json::from_str(&json).unwrap_or_default();
-    let tiles = resolved
-        .objects
-        .into_iter()
-        .filter_map(|t| {
-            Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated, single: t.single })
-        })
-        .collect();
-    let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
-    Ok(MapTiles { tiles, floor: load(resolved.floor), liquid: load(resolved.liquid), natural_walls: resolved.natural_walls })
+    // Ground first, then floor1, floor2, … contiguously until one is missing.
+    let mut floors = Vec::new();
+    if let Some(ground) = load_one(&dir.join(format!("{slug}.tiles.json"))) {
+        floors.push(ground);
+        for i in 1.. {
+            match load_one(&dir.join(format!("{slug}.floor{i}.tiles.json"))) {
+                Some(f) => floors.push(f),
+                None => break,
+            }
+        }
+    }
+    // Top-level fields = ground (floor 0), for the single-grid callers.
+    let g = floors.first().cloned().unwrap_or_default();
+    Ok(MapTiles { tiles: g.tiles, floor: g.floor, liquid: g.liquid, natural_walls: g.natural_walls, floors })
+}
+
+/// Re-resolve catalog tiles for an EXISTING map (all floors), replacing its
+/// sidecars. Deletes the current sidecars first so the staleness gate can't skip
+/// — the on-demand equivalent of what generation does, for when the imported
+/// tile library changed under a map that was resolved against the old one.
+#[tauri::command]
+pub async fn reresolve_map_tiles(app: AppHandle, id: String, slug: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        let dir = battle_maps_dir(&root, &id);
+        let _ = fs::remove_file(dir.join(format!("{slug}.tiles.json")));
+        remove_higher_floor_sidecars(&dir, &slug, 1);
+        resolve_map_tiles(&app, &root, &id, &slug)
+    })
+    .await
+    .map_err(|e| format!("Re-resolve task failed: {e}"))?
 }
 
 /// True when every cell `line` refers to would pass `validate_map_spec`'s
@@ -4695,6 +4983,136 @@ fn normalize_map_spec(spec: &str) -> String {
     out.join("\n")
 }
 
+// ── Multi-storey maps ────────────────────────────────────────────────────────
+// A vertical place (a two-storey house, a tower, a building over a cellar) is
+// ONE map with several `Floor:` blocks stacked on the same footprint. All the
+// validation/normalization above is single-grid, and stays that way: these
+// wrappers split a multi-floor spec into per-floor standalone specs, run the
+// UNCHANGED single-grid machinery on each, and stitch the result back. A spec
+// with no `Floor:` line is a single floor and passes straight through, so the
+// common case is byte-for-byte identical to before. Mirrors the frontend
+// `parseBattleMapFloors` so the renderer and the validator agree on the split.
+
+/// Splits a spec into `(title_line, [(floor_name, standalone_spec)], shared_tactics)`.
+/// Each `standalone_spec` is `# <title>` + that floor's own block (Grid / Map /
+/// Features / Objects / Deployment, the `Floor:` line dropped) so a single-grid
+/// fn sees an ordinary one-floor spec. A `Tactics:` section AFTER the last floor
+/// is SHARED across the building. Returns None when there's no `Floor:` line.
+fn floor_specs(spec: &str) -> Option<(String, Vec<(String, String)>, String)> {
+    let lines: Vec<&str> = spec.lines().collect();
+    let marks: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.trim_start().to_ascii_lowercase().starts_with("floor:"))
+        .map(|(i, _)| i)
+        .collect();
+    if marks.is_empty() {
+        return None;
+    }
+    let title = lines
+        .iter()
+        .find(|l| l.starts_with("# "))
+        .map(|l| l.to_string())
+        .unwrap_or_else(|| "# Battle Map".to_string());
+    let is_section_header = |l: &str| {
+        let t = l.trim_start();
+        ["Features:", "Objects:", "Deployment:", "Legend:", "Grid:", "Map:", "Floor:", "Tactics:"]
+            .iter()
+            .any(|h| t.len() >= h.len() && t.as_bytes()[..h.len()].eq_ignore_ascii_case(h.as_bytes()))
+    };
+    let last = *marks.last().unwrap();
+    // First `Tactics:` header after the last floor marker → the shared tail.
+    let tail_start = lines
+        .iter()
+        .enumerate()
+        .position(|(i, l)| i > last && l.trim().trim_end_matches(':').eq_ignore_ascii_case("tactics"));
+    let shared = match tail_start {
+        Some(ts) => lines[ts + 1..]
+            .iter()
+            .filter(|l| !is_section_header(l))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string(),
+        None => String::new(),
+    };
+    let mut floors = Vec::new();
+    for (m, &start) in marks.iter().enumerate() {
+        let end = if m + 1 < marks.len() {
+            marks[m + 1]
+        } else {
+            tail_start.unwrap_or(lines.len())
+        };
+        let raw_name = lines[start].trim_start().get(6..).unwrap_or("").trim();
+        let name = if raw_name.is_empty() { format!("Floor {}", m + 1) } else { raw_name.to_string() };
+        let body = lines[start + 1..end].join("\n");
+        floors.push((name, format!("{title}\n{body}")));
+    }
+    Some((title, floors, shared))
+}
+
+/// Applies a per-floor string transform (normalize, size-repair) to every floor
+/// and re-stitches one multi-floor spec. Single-floor specs run `f` once, whole.
+fn per_floor_string(spec: &str, f: impl Fn(&str) -> String) -> String {
+    let Some((title, floors, shared)) = floor_specs(spec) else {
+        return f(spec);
+    };
+    let title_prefix = format!("{title}\n");
+    let mut out = vec![title];
+    for (name, standalone) in &floors {
+        let done = f(standalone);
+        // Peel the title back off — normalize/enforce keep it as line 1, but if
+        // some future transform drops it, fall back to "everything after line 1"
+        // so the title never leaks into a floor body.
+        let body = done
+            .strip_prefix(&title_prefix)
+            .map(str::to_string)
+            .unwrap_or_else(|| done.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_else(|| done.clone()));
+        out.push(format!("Floor: {name}"));
+        out.push(body);
+    }
+    if !shared.is_empty() {
+        out.push("Tactics:".to_string());
+        out.push(shared);
+    }
+    out.join("\n")
+}
+
+/// Runs a per-floor issue check across every floor, tagging each issue with the
+/// floor it came from so a retry knows which level to fix. Single-floor specs
+/// run `f` once, untagged (identical to calling `f` directly).
+fn per_floor_issues(spec: &str, f: impl Fn(&str) -> Vec<String>) -> Vec<String> {
+    let Some((_, floors, _)) = floor_specs(spec) else {
+        return f(spec);
+    };
+    let mut issues = Vec::new();
+    for (name, standalone) in &floors {
+        for i in f(standalone) {
+            issues.push(format!("Floor \"{name}\": {i}"));
+        }
+    }
+    issues
+}
+
+/// `validate_map_spec` for a possibly-multi-storey spec: every floor is checked
+/// on its own, plus the cross-floor rule that makes a stack coherent — all
+/// floors must be the same size so they sit directly on top of each other.
+fn validate_spec_any(spec: &str) -> Vec<String> {
+    let mut issues = per_floor_issues(spec, validate_map_spec);
+    if let Some((_, floors, _)) = floor_specs(spec) {
+        let dims: std::collections::HashSet<(usize, usize)> =
+            floors.iter().filter_map(|(_, s)| declared_dims(s)).collect();
+        if dims.len() > 1 {
+            issues.push(
+                "The floors are not all the same size. Every floor of a multi-storey map must share the SAME Grid <cols>x<rows> and the same outer wall footprint, so the floors stack directly on top of each other."
+                    .to_string(),
+            );
+        }
+    }
+    issues
+}
+
 /// Asks for a map spec, and — if the reply is structurally broken — re-asks
 /// with the concrete errors fed back, up to `max_retries` times, keeping the
 /// best attempt seen (fewest issues; a verbatim copy of the worked example
@@ -4754,7 +5172,7 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[St
         // forced every one of those retries down the EXPENSIVE full-redraw
         // branch (~27k chars) instead of the cheap caption branch (~3k).
         Ok(split_map_specs(&reply).into_iter().next().map(|raw| {
-            let fixed = normalize_map_spec(&raw);
+            let fixed = per_floor_string(&raw, normalize_map_spec);
             // Say so when the repair actually did something. Without this the
             // trace can't distinguish "the model drew a clean grid" from "the
             // model drew a ragged one and this silently saved a retry" — they
@@ -4775,7 +5193,7 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[St
             // place when the floor allows it. Free, and unlike the prompt's
             // SIZE GUIDE it can't be ignored (live: eleven 1x1 pine trees
             // written straight past the guide line).
-            let (resized, _) = enforce_object_sizes(&fixed, &size_guide);
+            let resized = per_floor_string(&fixed, |s| enforce_object_sizes(s, &size_guide).0);
             if resized != fixed {
                 crate::maplog::log("OBJECT SIZES REPAIRED (saved a retry)", "under-sized guide objects grown in place on open floor");
             }
@@ -4783,8 +5201,8 @@ fn generate_one_map_spec(prompt: &str, max_retries: usize, footprint_guide: &[St
         }))
     };
     let issues_for = |spec: &str| -> Vec<String> {
-        let mut issues = validate_map_spec(spec);
-        issues.extend(enforce_object_sizes(spec, &size_guide).1);
+        let mut issues = validate_spec_any(spec);
+        issues.extend(per_floor_issues(spec, |s| enforce_object_sizes(s, &size_guide).1));
         if copies_the_example(spec) {
             issues.push(
                 "You returned the example map (The Bent Nail) verbatim instead of drawing the encounter you were asked for. The example only demonstrates habits — irregular spacing, mixed object sizes, an occupied centre, a bar with floor behind it. Draw a DIFFERENT room that has those habits."
@@ -7411,6 +7829,119 @@ mod tests {
         assert!(all_features_only_issues(&fixed), "remaining issues should be features-only: {fixed:?}");
     }
 
+    /// A single-floor spec (no `Floor:` line) must go through the multi-storey
+    /// wrappers byte-for-byte as the base fns — this is the 99%-common path, and
+    /// the wrappers exist to leave it exactly alone.
+    #[test]
+    fn single_floor_spec_is_unchanged_by_the_multi_floor_wrappers() {
+        let spec = "\
+# One Floor
+Grid: 12x3, 5 ft squares.
+Map:
+############
+#....=.....#
+############
+Features:
+- Table at F2";
+        assert_eq!(per_floor_string(spec, normalize_map_spec), normalize_map_spec(spec));
+        assert_eq!(validate_spec_any(spec), validate_map_spec(spec));
+    }
+
+    /// A multi-storey map runs every floor through the SAME single-grid checks,
+    /// so a ragged row or a phantom feature on the UPPER floor — which the old
+    /// single-grid path never even looked at — is caught, tagged with its floor,
+    /// and (for the grid) repaired by normalize.
+    #[test]
+    fn multi_floor_normalize_and_validate_cover_every_floor() {
+        let spec = "\
+# Two-Floor Test
+Floor: Ground
+Grid: 12x10, 5 ft squares. Columns A onward left-to-right.
+Map:
+############
+#..........#
+#..........#
+#..........#
+#...._.....#
+#..........#
+#..........#
+#..........#
+#..........#
+############
+Features:
+- Stairs up to the upper floor at F5
+Floor: Upper
+Grid: 12x10, 5 ft squares. Columns A onward left-to-right.
+Map:
+############
+#..........#
+#..........###
+#..........#
+#...._.....#
+#..........#
+#..........#
+#..........#
+#..........#
+############
+Features:
+- Bed at C2
+- Stairs down to the ground floor at F5
+Tactics:
+- The stair at F5 is the only way up.";
+        let issues = validate_spec_any(spec);
+        assert!(
+            issues.iter().any(|i| i.starts_with("Floor \"Upper\"") && i.contains("not all the same width")),
+            "the upper floor's ragged row must be caught AND tagged: {issues:?}"
+        );
+        assert!(
+            issues.iter().any(|i| i.starts_with("Floor \"Upper\"") && i.contains("C2")),
+            "the upper floor's phantom \"Bed at C2\" must be caught AND tagged: {issues:?}"
+        );
+        assert!(
+            !issues.iter().any(|i| i.starts_with("Floor \"Ground\"")),
+            "the ground floor is clean, so nothing should be tagged to it: {issues:?}"
+        );
+        // Normalize repairs the ragged UPPER grid and re-stitches a spec that
+        // still has both floors and the shared Tactics tail.
+        let fixed = per_floor_string(spec, normalize_map_spec);
+        let after = validate_spec_any(&fixed);
+        assert!(
+            !after.iter().any(|i| i.contains("not all the same width")),
+            "normalize must settle EVERY floor's width, not just the ground: {after:?}"
+        );
+        assert!(
+            fixed.contains("Floor: Ground") && fixed.contains("Floor: Upper") && fixed.contains("\nTactics:"),
+            "reassembly keeps both floor headers and the shared Tactics: {fixed}"
+        );
+    }
+
+    /// Floors must share a footprint so they stack — differing Grid sizes are a
+    /// cross-floor error a per-floor check alone can't see.
+    #[test]
+    fn multi_floor_flags_mismatched_footprints() {
+        let spec = "\
+# Mismatch
+Floor: Ground
+Grid: 12x3, 5 ft squares.
+Map:
+############
+#..........#
+############
+Floor: Upper
+Grid: 10x3, 5 ft squares.
+Map:
+##########
+#........#
+##########
+Tactics:
+- x";
+        assert!(
+            validate_spec_any(spec).iter().any(|i| i.contains("same size")),
+            "floors of different sizes must be flagged: {:?}",
+            validate_spec_any(spec)
+        );
+    }
+
     /// The ordering IS the fix. An uncaptioned field cell's label is the glyph
     /// noun itself, which trivially "names its own object" — so if that case is
     /// tested first the cell searches the bare word "tree" and an Underdark
@@ -8445,6 +8976,53 @@ Tactics:
         assert_eq!(parse_vision_picks(r#"{"picks":[{"slot":"1","choice":"2"}]}"#, 1), vec![Some(1)]);
         // Still never panics on nonsense, and 0 still means "none of these".
         assert_eq!(parse_vision_picks(r#"{"picks":[{"slot":1,"choice":0.2}]}"#, 1), vec![None]);
+    }
+
+    /// A board read must never be able to invent a square. Anything that isn't a
+    /// real cell reference, or that falls outside THIS map's grid, is dropped
+    /// rather than handed to the DM as a position.
+    #[test]
+    fn parse_board_read_keeps_cells_inside_the_grid_and_drops_the_rest() {
+        let reply = r#"{"minis":[
+            {"cell":"F7","description":"tall knight"},
+            {"cell":"Z99","description":"off the map"},
+            {"cell":"nonsense","description":"not a cell"},
+            {"cell":"a1","description":"lowercase goblin"}
+        ]}"#;
+        let got = parse_board_read(reply, 10, 10);
+        assert_eq!(
+            got,
+            vec![
+                BoardMini { cell: "F7".into(), description: "tall knight".into(), col: 5, row: 6 },
+                BoardMini { cell: "A1".into(), description: "lowercase goblin".into(), col: 0, row: 0 },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_board_read_survives_prose_a_bare_array_and_a_missing_description() {
+        // Chatty model, object shape, no description field.
+        let prose = "Sure! Here's what I see:\n{\"minis\":[{\"cell\":\"B2\"}]}\nHope that helps.";
+        assert_eq!(
+            parse_board_read(prose, 5, 5),
+            vec![BoardMini { cell: "B2".into(), description: String::new(), col: 1, row: 1 }]
+        );
+        // A bare array instead of {"minis":[…]} shouldn't cost us the whole read.
+        assert_eq!(parse_board_read(r#"[{"cell":"C3","description":"ogre"}]"#, 5, 5).len(), 1);
+        // Junk answers read as "no minis found", never a panic.
+        assert!(parse_board_read("I can't tell from this photo.", 10, 10).is_empty());
+    }
+
+    #[test]
+    fn build_board_read_message_states_the_real_grid_bounds_and_carries_the_photo() {
+        let msg = build_board_read_message("image/jpeg", "QUJD", 8, 12);
+        // 8 columns → A..H, so the model is told the true bounds both times.
+        assert!(msg.contains("A through H"), "{msg}");
+        assert!(msg.contains("1 through 12"), "{msg}");
+        assert!(msg.contains("A1..H12"), "{msg}");
+        // The photo rides as a base64 image block, same shape as the tile picker.
+        assert!(msg.contains(r#""media_type":"image/jpeg""#), "{msg}");
+        assert!(msg.contains(r#""data":"QUJD""#), "{msg}");
     }
 
     #[test]

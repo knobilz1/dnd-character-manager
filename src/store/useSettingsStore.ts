@@ -77,6 +77,17 @@ interface SettingsState {
    *  means map generation never even mentions the Objects: layer. */
   tileLibraryPath: string | null;
   setTileLibraryPath: (v: string | null) => void;
+  /** Where a "read the board" photo of the physical table comes from (#39):
+   *  'direct' = a camera on this (the DM's) machine; 'player' = the table is in
+   *  the players' room, so whichever player holds the table-camera role takes it
+   *  and pushes it over the LAN. Only meaningful on the DM's device. */
+  tableCameraSource: 'direct' | 'player';
+  setTableCameraSource: (v: 'direct' | 'player') => void;
+  /** Which local camera to use when tableCameraSource is 'direct'. Remembered so
+   *  a DM with a webcam AND an overhead table cam doesn't re-pick every session.
+   *  Empty = whatever the browser gives us first. */
+  tableCameraDeviceId: string;
+  setTableCameraDeviceId: (v: string) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -107,6 +118,10 @@ export const useSettingsStore = create<SettingsState>()(
       setBattleTileStyle: (v) => set({ battleTileStyle: v }),
       tileLibraryPath: null,
       setTileLibraryPath: (v) => set({ tileLibraryPath: v }),
+      tableCameraSource: 'direct',
+      setTableCameraSource: (v) => set({ tableCameraSource: v }),
+      tableCameraDeviceId: '',
+      setTableCameraDeviceId: (v) => set({ tableCameraDeviceId: v }),
     }),
     { name: 'tavern-sheet-settings' }
   )
