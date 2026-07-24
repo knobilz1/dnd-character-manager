@@ -1393,32 +1393,48 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
 }
 
 /** Draws the coordinate ruler (A../1..) around a content layer and returns
- *  the composed full-size canvas. */
+ *  the composed full-size canvas.
+ *
+ *  `edges` picks which sides get a ruler gutter, and matters for the tiled PDF
+ *  print. A ruler is half a cell WIDE — drawing one on every tile's left/top
+ *  puts a strip of row numbers down the middle of the assembled map, so the
+ *  sheets physically can't butt together (you tape [1..10][A-G][1..10][H-N]).
+ *  The print therefore asks for a gutter only on the map's OUTER edges, so
+ *  interior seams meet flush and the ruler frames the whole taped map. Defaults
+ *  to both, which is what every single-image render (preview, PNG, the TV)
+ *  wants. */
 function composeRulerFrame(
-  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, content: CanvasImageSource
+  map: ParsedBattleMap, cellPx: number, win: RenderWindow | undefined, content: CanvasImageSource,
+  edges: { left: boolean; top: boolean } = { left: true, top: true }
 ): HTMLCanvasElement {
   const w = win ?? { colStart: 0, colEnd: map.cols, rowStart: 0, rowEnd: map.rows };
   const wCols = w.colEnd - w.colStart;
   const wRows = w.rowEnd - w.rowStart;
   const ruler = Math.round(cellPx * 0.5);
+  const padLeft = edges.left ? ruler : 0;
+  const padTop = edges.top ? ruler : 0;
   const canvas = document.createElement('canvas');
-  canvas.width = ruler + wCols * cellPx;
-  canvas.height = ruler + wRows * cellPx;
+  canvas.width = padLeft + wCols * cellPx;
+  canvas.height = padTop + wRows * cellPx;
   const ctx = canvas.getContext('2d')!;
 
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(content, ruler, ruler, wCols * cellPx, wRows * cellPx);
+  ctx.drawImage(content, padLeft, padTop, wCols * cellPx, wRows * cellPx);
 
   ctx.fillStyle = '#e8e2d2';
   ctx.font = `${Math.round(ruler * 0.5)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for (let c = 0; c < wCols; c++) {
-    ctx.fillText(columnLabel(w.colStart + c), ruler + c * cellPx + cellPx / 2, ruler / 2);
+  if (edges.top) {
+    for (let c = 0; c < wCols; c++) {
+      ctx.fillText(columnLabel(w.colStart + c), padLeft + c * cellPx + cellPx / 2, padTop / 2);
+    }
   }
-  for (let r = 0; r < wRows; r++) {
-    ctx.fillText(String(w.rowStart + r + 1), ruler / 2, ruler + r * cellPx + cellPx / 2);
+  if (edges.left) {
+    for (let r = 0; r < wRows; r++) {
+      ctx.fillText(String(w.rowStart + r + 1), padLeft / 2, padTop + r * cellPx + cellPx / 2);
+    }
   }
   return canvas;
 }
@@ -1466,8 +1482,14 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
 }
 
 /** Builds a print-scaled PDF: every grid square is exactly 1 inch, and a map
- *  bigger than one page is tiled across multiple Letter sheets (with the
- *  coordinate ruler repeated on each) to tape together. */
+ *  bigger than one page is tiled across multiple Letter sheets to tape together.
+ *
+ *  The ruler goes on the assembled map's OUTER edges only — row numbers on the
+ *  leftmost column of sheets, column letters on the top row of sheets. Putting
+ *  one on every sheet (as this used to) buried a half-inch strip of row numbers
+ *  at each vertical seam, so the halves couldn't be lined up at all: the right
+ *  sheet's numbers landed in the middle of the board. Interior sheets now carry
+ *  pure map, edge to edge, and butt flush once the page margin is trimmed. */
 export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = [], terrain?: MapTerrain, showDeployment = false): Promise<Uint8Array | null> {
   const map = parseBattleMap(spec);
   if (!map) return null;
@@ -1483,7 +1505,8 @@ export async function battleMapToPdfBytes(spec: string, tiles: MapTileArt[] = []
         rowStart: ry, rowEnd: Math.min(map.rows, ry + usableSquaresY),
       };
       const source = renderBattleMapContent(map, RENDER_PX, win, tiles, terrain, showDeployment);
-      const canvas = composeRulerFrame(map, RENDER_PX, win, source);
+      // Outer edges only, so interior seams have no ruler strip to line up over.
+      const canvas = composeRulerFrame(map, RENDER_PX, win, source, { left: rx === 0, top: ry === 0 });
       const dataUrl = canvas.toDataURL('image/png');
       const png = await pdf.embedPng(dataUrlToBytes(dataUrl));
       const page = pdf.addPage([PAGE_W, PAGE_H]);
