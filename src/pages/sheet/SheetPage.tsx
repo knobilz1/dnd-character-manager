@@ -21,6 +21,7 @@ import { RageOverlay } from '../../components/RageOverlay';
 import { TalkToDMButton } from '../../components/TalkToDMButton';
 import { DmNarrationLog } from '../../components/DmNarrationLog';
 import { DmMapView } from '../../components/DmMapView';
+import { TableCameraButton } from '../../components/TableCameraButton';
 import { SendToDmButton } from '../../components/SendToDmButton';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
@@ -317,6 +318,7 @@ export function SheetPage() {
           <TalkToDMButton characterName={character.name} />
           <DmNarrationLog />
           <DmMapView />
+          <TableCameraButton characterName={character.name} />
           <div className="relative">
             <button
               onClick={async () => {

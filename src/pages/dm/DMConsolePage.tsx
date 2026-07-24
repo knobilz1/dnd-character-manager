@@ -925,6 +925,15 @@ export function DMConsolePage() {
   const [tableCameras, setTableCameras] = React.useState<TableCamera[]>([]);
   const [tableCameraId, setTableCameraId] = React.useState<string>('');
   const [boardBusy, setBoardBusy] = React.useState<string | null>(null);
+  // The dm-table-photo listener is mounted once (deps []), so it must read the
+  // CURRENT cards/presented map through refs rather than close over the first
+  // render's copies — same reason battleLogRef exists.
+  const planMapCardsRef = React.useRef(planMapCards);
+  planMapCardsRef.current = planMapCards;
+  const adHocMapCardsRef = React.useRef(adHocMapCards);
+  adHocMapCardsRef.current = adHocMapCards;
+  const presentingSlugRef = React.useRef(presentingSlug);
+  presentingSlugRef.current = presentingSlug;
   /** A finished board read waiting for the DM to confirm it. The read is a HINT,
    *  never authority: measured accuracy is ~4-6 of 6 with the misses landing one
    *  column out, so the DM assigns each piece to a combatant and fixes any square
@@ -1723,6 +1732,37 @@ export function DMConsolePage() {
     const unlisten = listen<PlayerTurn>('dm-player-turn', (event) => {
       queueRef.current.push(event.payload);
       drainQueue();
+    });
+    return () => { unlisten.then((fn) => fn()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A photo of the table pushed by whichever player holds the camera (#39). It
+  // lands in exactly the same confirm panel a locally-captured photo does — a
+  // player's photo is never applied blind. Uses the map the DM is presenting to
+  // the table if there is one, else the only map they have, since the sender
+  // can't know which map card the DM means.
+  React.useEffect(() => {
+    const unlisten = listen<{ name: string; photo: string }>('dm-table-photo', (event) => {
+      const cards = [...planMapCardsRef.current, ...adHocMapCardsRef.current];
+      const card = cards.find((c) => c.slug === presentingSlugRef.current) ?? (cards.length === 1 ? cards[0] : undefined);
+      if (!card) {
+        setError(`${event.payload.name} sent a table photo, but there's no map to read it against — present a map first.`);
+        return;
+      }
+      const floor = parseBattleMapFloors(card.spec)[0];
+      if (!floor) return;
+      setBoardBusy('Reading the board…');
+      invoke<Array<{ cell: string; description: string }>>('read_table_positions', {
+        photo: event.payload.photo, cols: floor.cols, rows: floor.rows,
+      })
+        .then((minis) => setBoardRead({
+          name: `${card.name} — photo from ${event.payload.name}`,
+          photo: event.payload.photo, cols: floor.cols, rows: floor.rows, minis,
+          assign: minis.map(() => ''), cells: minis.map((m) => m.cell),
+        }))
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+        .finally(() => setBoardBusy(null));
     });
     return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
