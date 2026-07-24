@@ -806,7 +806,7 @@ function parseFeatureLabels(features: string): Map<string, string> {
 const RANGE_DASHES = new Set(['-', '–', '—']); // hyphen, en dash, em dash
 
 /** "B2" → [1, 1] (0-indexed col/row), or null for anything else. */
-function parseCellRefToken(tok: string): [number, number] | null {
+export function parseCellRefToken(tok: string): [number, number] | null {
   const m = /^([A-Za-z]{1,2})(\d{1,2})$/.exec(tok);
   if (!m) return null;
   let col = 0;

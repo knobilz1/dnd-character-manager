@@ -7,7 +7,7 @@ import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -16,7 +16,8 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
-import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
+import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
+import { listTableCameras, captureTableFrame, type TableCamera } from '../../utils/tableCamera';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -918,6 +919,35 @@ export function DMConsolePage() {
   // or null when nothing is presented. Independent of the LAN Share above — a DM
   // can present to the TV, share to players' devices, or both.
   const [presentingSlug, setPresentingSlug] = React.useState<string | null>(null);
+  // Board reading (#39) — cameras we could point at the table. EMPTY is the
+  // normal, fully-supported case: no camera means the "Read the board" control
+  // never appears and nothing else about the console or the DM changes.
+  const [tableCameras, setTableCameras] = React.useState<TableCamera[]>([]);
+  const [tableCameraId, setTableCameraId] = React.useState<string>('');
+  const [boardBusy, setBoardBusy] = React.useState<string | null>(null);
+  /** A finished board read waiting for the DM to confirm it. The read is a HINT,
+   *  never authority: measured accuracy is ~4-6 of 6 with the misses landing one
+   *  column out, so the DM assigns each piece to a combatant and fixes any square
+   *  BEFORE any of it reaches the battle log. `assign`/`cell` are keyed by the
+   *  read's index. */
+  const [boardRead, setBoardRead] = React.useState<
+    { name: string; photo: string; cols: number; rows: number;
+      minis: Array<{ cell: string; description: string }>;
+      assign: string[]; cells: string[] } | null
+  >(null);
+
+  // Look for cameras once. enumerateDevices does NOT prompt for permission, so
+  // opening the console never trips a camera prompt — that happens on the first
+  // actual capture.
+  React.useEffect(() => {
+    let cancelled = false;
+    void listTableCameras().then((cams) => {
+      if (cancelled) return;
+      setTableCameras(cams);
+      setTableCameraId((prev) => prev || cams[0]?.deviceId || '');
+    });
+    return () => { cancelled = true; };
+  }, []);
   // Draw the translucent Enemies/Party start-zones over the map previews. On by
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
@@ -3161,6 +3191,64 @@ export function DMConsolePage() {
     await openTableWindow();
   }
 
+  /** Photograph the physical table and ask the vision model which square each
+   *  miniature is on (#39). Opt-in per click; needs a camera, and the button
+   *  that calls this only renders when one exists.
+   *
+   *  The map may be on the TV, printed and taped down, or anything else — the
+   *  model reads the grid labels printed in the map's own ruler frame, so the
+   *  surface doesn't matter. Nothing is applied here: the result opens a confirm
+   *  panel first (see applyBoardRead). */
+  async function readTheBoard(card: MapCard) {
+    // Multi-story maps read one floor at a time; the ground floor is the one
+    // the minis are standing on unless/until we add a floor picker.
+    const floor = parseBattleMapFloors(card.spec)[0];
+    if (!floor) {
+      setError("That map's grid didn't parse, so there's nothing to read positions against.");
+      return;
+    }
+    setBoardBusy('Taking the photo…');
+    try {
+      const photo = await captureTableFrame(tableCameraId || undefined);
+      setBoardBusy('Reading the board…');
+      const minis = await invoke<Array<{ cell: string; description: string }>>('read_table_positions', {
+        photo, cols: floor.cols, rows: floor.rows,
+      });
+      setBoardRead({
+        name: card.name, photo, cols: floor.cols, rows: floor.rows, minis,
+        assign: minis.map(() => ''),           // unassigned until the DM says who
+        cells: minis.map((m) => m.cell),       // editable, so a one-off drift is fixable
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBoardBusy(null);
+    }
+  }
+
+  /** Commit the DM-confirmed board read into the battle log. Only rows the DM
+   *  actually named are written, and only if the (possibly corrected) square is
+   *  a real cell inside this map — so a misread or a blank row can't invent a
+   *  position. Writes through applyBattleLog's upsert-by-name, exactly like the
+   *  DM's own `battleLog` action, which means the coords flow to the voice DM
+   *  next turn via battleLogStatusText with NO extra prompt wiring. */
+  function applyBoardRead() {
+    if (!boardRead) return;
+    const combatants = boardRead.minis
+      .map((_, i) => {
+        const name = boardRead.assign[i]?.trim();
+        if (!name) return null;
+        const parsed = parseCellRefToken((boardRead.cells[i] ?? '').trim().toUpperCase());
+        if (!parsed) return null;
+        const [q, r] = parsed;
+        if (q >= boardRead.cols || r >= boardRead.rows) return null;
+        return { name, coord: { q, r } };
+      })
+      .filter((c): c is { name: string; coord: { q: number; r: number } } => !!c);
+    if (combatants.length) setBattleLog((prev) => applyBattleLog(prev, { combatants }));
+    setBoardRead(null);
+  }
+
   /** Stop presenting — clear the slot and close the TV window (it's
    *  decoration-less, so there's no titlebar to close it by hand). */
   async function stopPresenting() {
@@ -3644,6 +3732,67 @@ export function DMConsolePage() {
           </div>
         </div>
       </div>
+
+      {/* Board read confirmation (#39). The read is a HINT — the DM says who each
+          piece is and fixes any square before a single coord reaches the log. */}
+      <Dialog open={!!boardRead} onClose={() => setBoardRead(null)} title={boardRead ? `Read the board — ${boardRead.name}` : ''} wide>
+        {boardRead && (
+          <div className="space-y-3">
+            <img src={boardRead.photo} alt="The table as the camera saw it" className="w-full rounded-lg border border-slate-700" />
+            {boardRead.minis.length === 0 ? (
+              <p className="text-sm text-amber-400">
+                No pieces were read. Shoot straight down over the map, and make sure the printed row/column labels are in frame.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-slate-400">
+                  Read {boardRead.minis.length} piece{boardRead.minis.length === 1 ? '' : 's'}. Say who each one is — blank rows are
+                  ignored — and correct any square that's off. Only what you name here reaches the battle log.
+                </p>
+                <datalist id="board-read-names">
+                  {(battleLog?.combatants ?? []).map((c) => <option key={c.name} value={c.name} />)}
+                </datalist>
+                <div className="space-y-1.5">
+                  {boardRead.minis.map((m, i) => {
+                    const cell = (boardRead.cells[i] ?? '').trim().toUpperCase();
+                    const parsed = parseCellRefToken(cell);
+                    const bad = !parsed || parsed[0] >= boardRead.cols || parsed[1] >= boardRead.rows;
+                    return (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="flex-1 text-xs text-slate-400 truncate" title={m.description}>{m.description || 'unidentified piece'}</span>
+                        <input
+                          value={boardRead.cells[i] ?? ''}
+                          onChange={(e) => setBoardRead((b) => b && { ...b, cells: b.cells.map((c, j) => (j === i ? e.target.value : c)) })}
+                          className={`w-16 px-2 py-1 rounded bg-slate-900 border text-sm text-center ${bad ? 'border-red-600 text-red-400' : 'border-slate-700 text-slate-200'}`}
+                          title={bad ? 'Not a square on this map' : `Square (model read ${m.cell})`}
+                        />
+                        <input
+                          list="board-read-names"
+                          value={boardRead.assign[i] ?? ''}
+                          onChange={(e) => setBoardRead((b) => b && { ...b, assign: b.assign.map((a, j) => (j === i ? e.target.value : a)) })}
+                          placeholder="who is this?"
+                          className="w-44 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-sm text-slate-200"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button size="sm" variant="ghost" onClick={() => setBoardRead(null)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={applyBoardRead}
+                disabled={!boardRead.assign.some((a) => a.trim())}
+                title="Write the named pieces' squares into the battle log"
+              >
+                Apply to battle log
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
 
       <Dialog open={newCampaignOpen} onClose={() => setNewCampaignOpen(false)} title="New Campaign" wide>
         <p className="text-xs text-slate-400 mb-3">
@@ -4133,6 +4282,16 @@ export function DMConsolePage() {
                           ) : (
                             <Button size="sm" variant="outline" onClick={() => presentToTable(card)} title="Show this map's revealed floors full-screen on a TV / second display for the players">
                               <Tv size={14} /> Present to TV
+                            </Button>
+                          )}
+                          {tableCameras.length > 0 && (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => readTheBoard(card)}
+                              disabled={!!boardBusy}
+                              title="Photograph the table and read which square each miniature is on — you confirm it before anything reaches the battle log"
+                            >
+                              <Camera size={14} /> {boardBusy ?? 'Read the board'}
                             </Button>
                           )}
                           <Button size="sm" variant="outline" onClick={() => exportMapPdf(card)} disabled={!!planBusy}><Download size={14} /> PDF</Button>
