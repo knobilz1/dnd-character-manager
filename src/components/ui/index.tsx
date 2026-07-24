@@ -216,11 +216,16 @@ interface DialogProps {
   title?: string;
   children: React.ReactNode;
   wide?: boolean;
+  /** For a dialog that opens while another one is already up. Every dialog is
+   *  z-50, so with two open the one painted on top is whichever sits later in
+   *  the DOM — and the loser isn't dimmed, it's invisible. Set this on the one
+   *  that has to win. */
+  elevated?: boolean;
 }
-export function Dialog({ open, onClose, title, children, wide }: DialogProps) {
+export function Dialog({ open, onClose, title, children, wide, elevated }: DialogProps) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className={cn('fixed inset-0 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm', elevated ? 'z-[60]' : 'z-50')} onClick={onClose}>
       <div
         className={cn('bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto scrollbar-thin', wide ? 'w-full max-w-2xl' : 'w-full max-w-lg')}
         onClick={e => e.stopPropagation()}

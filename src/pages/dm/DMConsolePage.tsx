@@ -3807,7 +3807,10 @@ export function DMConsolePage() {
 
       {/* Board read confirmation (#39). The read is a HINT — the DM says who each
           piece is and fixes any square before a single coord reaches the log. */}
-      <Dialog open={!!boardRead} onClose={() => setBoardRead(null)} title={boardRead ? `Read the board — ${boardRead.name}` : ''} wide>
+      {/* `elevated` because this panel always opens on top of the Plan dialog —
+          the map cards it reads against only exist while that dialog is up, so
+          at equal z-index the Plan dialog (later in the DOM) hid it outright. */}
+      <Dialog open={!!boardRead} onClose={() => setBoardRead(null)} title={boardRead ? `Read the board — ${boardRead.name}` : ''} wide elevated>
         {boardRead && (
           <div className="space-y-3">
             <img src={boardRead.photo} alt="The table as the camera saw it" className="w-full rounded-lg border border-slate-700" />
@@ -4394,12 +4397,16 @@ export function DMConsolePage() {
                     const planOwnedSlugs = new Set(planMapCards.map((c) => c.slug));
                     return [...planMapCards, ...adHocMapCards].map((card) => (
                     <div key={card.slug} className="border border-slate-800 rounded-lg p-3">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <div>
+                      {/* Wraps rather than holding one line: the control row grew
+                          to five buttons (Share / TV / Read the board / PDF / PNG)
+                          and `shrink-0` on it crushed the title into a one-word-
+                          per-line column while the last button still overflowed. */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="min-w-[12rem] flex-1">
                           <div className="text-sm font-medium text-slate-100">{card.name}</div>
                           {card.summary && <div className="text-xs text-slate-500">{card.summary}</div>}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           {planOwnedSlugs.has(card.slug) && (
                             <Button size="sm" variant="ghost" onClick={() => regenerateOneMap(card)} disabled={!!planBusy}>
                               <RotateCcw size={14} /> Regenerate
