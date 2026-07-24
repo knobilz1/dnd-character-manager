@@ -105,6 +105,7 @@ pub fn run() {
       campaign::read_table_positions,
       party_listener::release_table_camera,
       party_listener::table_camera_holder,
+      party_listener::request_table_photo,
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tile_library::import_tile_library,

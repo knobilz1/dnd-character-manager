@@ -122,12 +122,16 @@ export async function fetchBroadcastMap(since: number, ip: string): Promise<{ ve
   return (await res.json()) as { version: number; map?: BroadcastMap | null };
 }
 
-/** Who currently holds the "table camera" role, or null if it's free.
+/** Who currently holds the "table camera" role (null if free), plus the DM's
+ *  photo-request counter. Players PULL from the DM, so this counter is how a
+ *  "the DM asked for a photo" request reaches the holder: when `requestSeq`
+ *  advances past the last one this device served, it takes the photo itself.
  *  See party_listener.rs — exactly one player at a time may send table photos. */
-export async function fetchTableCameraHolder(ip: string): Promise<string | null> {
+export async function fetchTableCameraState(ip: string): Promise<{ holder: string | null; requestSeq: number }> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/camera`, { method: 'GET', connectTimeout: 5000 });
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
-  return ((await res.json()) as { holder: string | null }).holder ?? null;
+  const j = (await res.json()) as { holder?: string | null; requestSeq?: number };
+  return { holder: j.holder ?? null, requestSeq: j.requestSeq ?? 0 };
 }
 
 /** Claim (or with `release`, hand back) the table camera. `granted` is false

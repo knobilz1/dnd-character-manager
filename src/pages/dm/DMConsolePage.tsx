@@ -923,7 +923,13 @@ export function DMConsolePage() {
   // normal, fully-supported case: no camera means the "Read the board" control
   // never appears and nothing else about the console or the DM changes.
   const [tableCameras, setTableCameras] = React.useState<TableCamera[]>([]);
-  const [tableCameraId, setTableCameraId] = React.useState<string>('');
+  const tableCameraSource = useSettingsStore((s) => s.tableCameraSource);
+  const setTableCameraSource = useSettingsStore((s) => s.setTableCameraSource);
+  const tableCameraId = useSettingsStore((s) => s.tableCameraDeviceId);
+  const setTableCameraId = useSettingsStore((s) => s.setTableCameraDeviceId);
+  /** Which player currently holds the table camera, polled while the source is
+   *  'player' so the DM can see who to ask (and revoke a hold someone forgot). */
+  const [cameraHolder, setCameraHolder] = React.useState<string | null>(null);
   const [boardBusy, setBoardBusy] = React.useState<string | null>(null);
   // The dm-table-photo listener is mounted once (deps []), so it must read the
   // CURRENT cards/presented map through refs rather than close over the first
@@ -953,10 +959,21 @@ export function DMConsolePage() {
     void listTableCameras().then((cams) => {
       if (cancelled) return;
       setTableCameras(cams);
-      setTableCameraId((prev) => prev || cams[0]?.deviceId || '');
+      if (!tableCameraId && cams[0]) setTableCameraId(cams[0].deviceId);
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Who holds the table camera, while we're expecting photos from a player.
+  React.useEffect(() => {
+    if (tableCameraSource !== 'player') { setCameraHolder(null); return; }
+    let cancelled = false;
+    const tick = () => { void invoke<string | null>('table_camera_holder').then((h) => { if (!cancelled) setCameraHolder(h); }).catch(() => {}); };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [tableCameraSource]);
   // Draw the translucent Enemies/Party start-zones over the map previews. On by
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
@@ -3247,6 +3264,21 @@ export function DMConsolePage() {
       setError("That map's grid didn't parse, so there's nothing to read positions against.");
       return;
     }
+    // The table is in the players' room: ask whoever holds the camera to take
+    // the photo. It arrives asynchronously on the dm-table-photo event and lands
+    // in the same confirm panel, so there's nothing to await here.
+    if (tableCameraSource === 'player') {
+      const seq = await invoke<number | null>('request_table_photo');
+      if (seq === null) {
+        setError('No player is the table camera right now — ask someone to turn it on.');
+        return;
+      }
+      setBoardBusy('Waiting for the photo…');
+      // Give up waiting rather than leaving the button disabled forever if that
+      // player's device never answers (app closed, phone asleep, off the LAN).
+      window.setTimeout(() => setBoardBusy((b) => (b === 'Waiting for the photo…' ? null : b)), 60000);
+      return;
+    }
     setBoardBusy('Taking the photo…');
     try {
       const photo = await captureTableFrame(tableCameraId || undefined);
@@ -4287,6 +4319,50 @@ export function DMConsolePage() {
                   </label>
                 )}
 
+                {/* Table camera (#39) — where a "Read the board" photo comes from.
+                    Hidden entirely when there's no map to read and no camera. */}
+                {[...planMapCards, ...adHocMapCards].length > 0 && (tableCameras.length > 0 || tableCameraSource === 'player') && (
+                  <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
+                    <Camera size={13} className="text-slate-500" />
+                    <span>Board photos from</span>
+                    <select
+                      value={tableCameraSource}
+                      onChange={(e) => setTableCameraSource(e.target.value as 'direct' | 'player')}
+                      className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-200"
+                      title="Direct = a camera on this machine. From a player = the table is in the players' room and someone there sends the photo."
+                    >
+                      <option value="direct">this machine</option>
+                      <option value="player">a player</option>
+                    </select>
+                    {tableCameraSource === 'direct' ? (
+                      tableCameras.length > 1 ? (
+                        <select
+                          value={tableCameraId}
+                          onChange={(e) => setTableCameraId(e.target.value)}
+                          className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-200 max-w-[14rem]"
+                        >
+                          {tableCameras.map((c) => <option key={c.deviceId} value={c.deviceId}>{c.label}</option>)}
+                        </select>
+                      ) : (
+                        <span className="text-slate-500">{tableCameras[0]?.label ?? 'no camera found'}</span>
+                      )
+                    ) : cameraHolder ? (
+                      <>
+                        <span className="text-emerald-400">{cameraHolder} is holding it</span>
+                        <button
+                          onClick={() => { void invoke('release_table_camera').then(() => setCameraHolder(null)); }}
+                          className="text-slate-500 hover:text-red-400 underline"
+                          title="Free the camera — use if they've left the table or forgot to turn it off"
+                        >
+                          revoke
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">nobody has turned it on yet</span>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1">
                   {[...planMapCards, ...adHocMapCards].length === 0 && !planBusy && (
                     <p className="text-xs text-slate-500">No combat encounters in this plan called for a map yet.</p>
@@ -4324,12 +4400,14 @@ export function DMConsolePage() {
                               <Tv size={14} /> Present to TV
                             </Button>
                           )}
-                          {tableCameras.length > 0 && (
+                          {(tableCameras.length > 0 || tableCameraSource === 'player') && (
                             <Button
                               size="sm" variant="outline"
                               onClick={() => readTheBoard(card)}
                               disabled={!!boardBusy}
-                              title="Photograph the table and read which square each miniature is on — you confirm it before anything reaches the battle log"
+                              title={tableCameraSource === 'player'
+                                ? "Ask whoever's holding the table camera for a photo — you confirm the squares before anything reaches the battle log"
+                                : 'Photograph the table and read which square each miniature is on — you confirm it before anything reaches the battle log'}
                             >
                               <Camera size={14} /> {boardBusy ?? 'Read the board'}
                             </Button>

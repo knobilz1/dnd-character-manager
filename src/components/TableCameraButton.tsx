@@ -3,7 +3,7 @@ import { Camera } from 'lucide-react';
 import { useDmConnection } from '../hooks/useDmConnection';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { listTableCameras, captureTableFrame, type TableCamera } from '../utils/tableCamera';
-import { fetchTableCameraHolder, claimTableCamera, sendTablePhoto } from '../utils/dmConnect';
+import { fetchTableCameraState, claimTableCamera, sendTablePhoto } from '../utils/dmConnect';
 import { Dialog, Button } from './ui';
 
 /**
@@ -41,16 +41,52 @@ export function TableCameraButton({ characterName }: { characterName: string }) 
     });
   }, []);
 
-  // Keep the holder fresh while the panel is open, so a player watching it sees
-  // the role free up when whoever had it hands it back.
+  // Poll whenever this device could BE the camera — not just while the panel is
+  // open — because that poll is also how the DM's "take a photo now" request
+  // reaches us: players pull from the DM, so there's no way for the DM to call
+  // out to this device. When the request counter passes the last one we served,
+  // and we're the holder, take the photo without the player touching anything.
+  const servedRef = React.useRef<number | null>(null);
+  const busyRef = React.useRef(false);
   React.useEffect(() => {
-    if (!open || !connected || !dmIp.trim()) return;
+    if (!connected || !dmIp.trim() || cameras.length === 0) return;
     let cancelled = false;
-    const tick = () => { void fetchTableCameraHolder(dmIp).then((h) => { if (!cancelled) setHolder(h); }).catch(() => {}); };
-    tick();
-    const id = setInterval(tick, 4000);
+    const tick = async () => {
+      try {
+        const { holder: h, requestSeq } = await fetchTableCameraState(dmIp);
+        if (cancelled) return;
+        setHolder(h);
+        // First sighting just records where the counter is, so a request made
+        // before we were even listening doesn't fire a surprise photo.
+        if (servedRef.current === null) { servedRef.current = requestSeq; return; }
+        const isMine = !!h && h.toLowerCase() === characterName.trim().toLowerCase();
+        if (isMine && requestSeq > servedRef.current && !busyRef.current) {
+          servedRef.current = requestSeq;
+          void autoSend();
+        }
+      } catch { /* unreachable this tick — try again next one */ }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 4000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [open, connected, dmIp]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, dmIp, cameras.length, characterName]);
+
+  /** Serve the DM's request: photograph and send with no player interaction. */
+  async function autoSend() {
+    busyRef.current = true;
+    setBusy('The DM asked for a photo…');
+    try {
+      const photo = await captureTableFrame(cameraId || undefined);
+      await sendTablePhoto(characterName, photo, dmIp);
+      setStatus('Sent a photo the DM asked for.');
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      busyRef.current = false;
+      setBusy(null);
+    }
+  }
 
   if (!connected || cameras.length === 0) return null;
 

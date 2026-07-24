@@ -164,6 +164,17 @@ fn camera_holder() -> &'static Mutex<Option<CameraHolder>> {
     HOLDER.get_or_init(|| Mutex::new(None))
 }
 
+/// Bumped when the DM asks for a photo ("automatic" delivery). Players PULL from
+/// the DM, so there's no way to call out to a player's device — instead the
+/// holder polls `GET /camera`, notices the sequence advanced past the last one it
+/// acted on, and takes the photo itself. A monotonic counter rather than a bool
+/// so there's no clear-it-afterwards race: each request is a distinct number, and
+/// a device that has already served request N simply ignores anything <= N.
+fn camera_request_seq() -> &'static Mutex<u64> {
+    static SEQ: OnceLock<Mutex<u64>> = OnceLock::new();
+    SEQ.get_or_init(|| Mutex::new(0))
+}
+
 /// The holder, if the hold is still fresh — clearing it in place when it has
 /// gone stale, so expiry happens lazily on read without a background timer.
 fn fresh_camera_holder(slot: &mut Option<CameraHolder>) -> Option<String> {
@@ -278,7 +289,8 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let mut slot = camera_holder().lock().unwrap();
         let holder = fresh_camera_holder(&mut slot);
         drop(slot);
-        let body = serde_json::json!({ "holder": holder }).to_string();
+        let requested = *camera_request_seq().lock().unwrap();
+        let body = serde_json::json!({ "holder": holder, "requestSeq": requested }).to_string();
         return write_response(&mut stream, 200, &body, "application/json");
     }
     if request_line.starts_with("GET") {
@@ -453,6 +465,19 @@ pub fn release_table_camera() {
 pub fn table_camera_holder() -> Option<String> {
     let mut slot = camera_holder().lock().unwrap();
     fresh_camera_holder(&mut slot)
+}
+
+/// Ask the holding player's device to take a photo now ("automatic" delivery —
+/// the DM presses one button instead of asking a player out loud). Returns the
+/// new request number, or None when nobody holds the camera to ask.
+#[tauri::command]
+pub fn request_table_photo() -> Option<u64> {
+    let mut slot = camera_holder().lock().unwrap();
+    fresh_camera_holder(&mut slot)?;
+    drop(slot);
+    let mut seq = camera_request_seq().lock().unwrap();
+    *seq += 1;
+    Some(*seq)
 }
 
 /// Starts the party listener on the given port (idempotent — a second call
