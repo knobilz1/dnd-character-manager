@@ -3909,11 +3909,12 @@ fn build_board_read_message(media: &str, b64: &str, cols: usize, rows: usize) ->
         )}),
         json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}),
         json!({"type":"text","text": format!(
-            "For EVERY miniature standing on the map, read the printed labels to work out the ONE square it stands on, \
+            "For EVERY playing piece on the map — BOTH upright figures in stands AND small flat tokens lying on the map \
+             count as pieces — read the printed labels to work out the ONE square it occupies, \
              and give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\"). \
              Only report squares inside A1..{last_col}{rows}. If you cannot confidently tell which square a figure is on, \
-             LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands, scenery and anything \
-             that is not a miniature. Reply with ONLY this JSON and nothing else: \
+             LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands and scenery. \
+             Reply with ONLY this JSON and nothing else: \
              {{\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
         )}),
     ];
