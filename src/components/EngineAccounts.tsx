@@ -2,7 +2,7 @@ import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Check, Download, LogIn, RefreshCw } from 'lucide-react';
-import { Button } from './ui';
+import { Button, Dialog } from './ui';
 
 /**
  * EngineAccounts — sign in to each DM engine from inside the app.
@@ -64,6 +64,7 @@ export function EngineAccounts() {
   const [codeFor, setCodeFor] = React.useState<EngineId | null>(null);
   const [loginUrl, setLoginUrl] = React.useState('');
   const [code, setCode] = React.useState('');
+  const [pasteOpen, setPasteOpen] = React.useState<EngineId | null>(null);
 
   const refresh = React.useCallback(async () => {
     const next: Partial<Record<EngineId, State>> = {};
@@ -161,12 +162,12 @@ export function EngineAccounts() {
     }
   }
 
-  async function submitCode(id: EngineId) {
+  async function submitCode(id: EngineId, codeOverride?: string) {
     setBusy(id);
     setError(null);
     setStep('Finishing sign-in…');
     try {
-      const ok = await invoke<boolean>('submit_login_code', { engine: id, code });
+      const ok = await invoke<boolean>('submit_login_code', { engine: id, code: codeOverride ?? code });
       await refresh();
       setCodeFor(null);
       setCode('');
@@ -176,6 +177,24 @@ export function EngineAccounts() {
     } finally {
       setBusy(null);
       setStep('');
+    }
+  }
+
+  /** Open the paste dialog and make sure a sign-in is actually waiting for the
+   *  code. The code is bound by PKCE to the CLI run that produced the URL, so a
+   *  code pasted with nothing waiting cannot work — starting one here is what
+   *  makes this dialog usable on its own, from a cold start. */
+  async function openPasteDialog(id: EngineId) {
+    setPasteOpen(id);
+    setError(null);
+    setCode('');
+    if (!loginUrl) {
+      try {
+        const url = await invoke<string | null>('begin_engine_login', { engine: id });
+        if (url) setLoginUrl(url);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     }
   }
 
@@ -239,6 +258,15 @@ export function EngineAccounts() {
                   </div>
                 )}
               </div>
+              {s?.installed && !s.signedIn && (
+                <button
+                  onClick={() => void openPasteDialog(e.id)}
+                  className="text-[11px] text-slate-400 hover:text-emerald-400 underline whitespace-nowrap self-center"
+                  title="Sign in by pasting the code the browser gives you"
+                >
+                  Paste a code
+                </button>
+              )}
               {s && !s.signedIn && (
                 <Button
                   size="sm"
@@ -254,6 +282,60 @@ export function EngineAccounts() {
           );
         })}
       </div>
+
+      {/* The manual route, always one click away from any signed-out row.
+          Automatic capture is nicer when it works, but a sign-in that can only
+          be completed by a mechanism the user can't see or retry is worse than
+          one honest text box. */}
+      <Dialog open={!!pasteOpen} onClose={() => setPasteOpen(null)} title="Sign in with a code">
+        <div className="space-y-3">
+          <ol className="text-xs text-slate-400 space-y-1.5 list-decimal list-inside">
+            <li>
+              Open the sign-in page and approve it.{' '}
+              {loginUrl ? (
+                <button onClick={() => void openUrl(loginUrl)} className="text-emerald-400 underline">
+                  Open sign-in page
+                </button>
+              ) : (
+                <span className="text-slate-500">preparing…</span>
+              )}
+            </li>
+            <li>Google shows you a code. Hit <span className="text-slate-300">Copy to Clipboard</span> on that page.</li>
+            <li>Paste it below and press Sign in.</li>
+          </ol>
+
+          <textarea
+            autoFocus
+            value={code}
+            onChange={(ev) => setCode(ev.target.value)}
+            rows={3}
+            placeholder="Paste the code here (starts with 4/)"
+            className="w-full px-2 py-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-200 font-mono break-all"
+          />
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={!code.trim() || !!busy}
+              onClick={async () => {
+                const id = pasteOpen!;
+                // Whitespace is expected, not exceptional: the page wraps the
+                // code across two lines, so copying it often brings a newline.
+                const cleaned = code.replace(/\s+/g, '');
+                setCode(cleaned);
+                await submitCode(id, cleaned);
+                if (!error) setPasteOpen(null);
+              }}
+            >
+              {busy ? 'Signing in…' : 'Sign in'}
+            </Button>
+            <span className="text-[11px] text-slate-500">
+              {code.trim() ? `${code.replace(/\s+/g, '').length} characters` : 'Codes expire fast — grab a fresh one if this fails.'}
+            </span>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+      </Dialog>
 
       {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
       <p className="text-[11px] text-slate-600 mt-2">

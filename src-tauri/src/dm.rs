@@ -982,31 +982,57 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
             .spawn()
             .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
 
-        // Read the child's own output until it shows us a URL. Bounded, so an
-        // engine that never prints one fails fast instead of hanging.
-        let stdout = child.stdout.take().ok_or("no stdout pipe")?;
+        // Read the child's output until it shows us a URL, watching BOTH streams.
+        //
+        // Not optional: agy prints "Authentication required. Please visit the
+        // URL to log in:" to STDERR and leaves stdout completely empty. Reading
+        // only stdout meant the app never saw a URL at all — the sign-in sat on
+        // "preparing…" forever with nothing to click, which is exactly what it
+        // looked like from the outside. Claude and Codex use stdout, so both are
+        // watched and whichever produces a URL first wins.
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
-        std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            let mut buf = String::new();
-            loop {
-                let mut line = String::new();
-                match reader.read_line(&mut line) {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        buf.push_str(&line);
-                        if let Some(url) = find_login_url(&buf) {
-                            let _ = tx.send(Some(url));
-                            return;
+        for stream in [
+            child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
+            child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream);
+                let mut buf = String::new();
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => break,
+                        Ok(_) => {
+                            buf.push_str(&line);
+                            if let Some(url) = find_login_url(&buf) {
+                                let _ = tx.send(Some(url));
+                                return;
+                            }
                         }
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
-            }
-            let _ = tx.send(None);
-        });
+                let _ = tx.send(None);
+            });
+        }
+        drop(tx); // so recv ends once every reader is done
 
-        let found = rx.recv_timeout(Duration::from_secs(45)).unwrap_or(None);
+        // Either stream may report "nothing" first; keep taking answers until a
+        // real URL turns up or the readers are exhausted.
+        let deadline = std::time::Instant::now() + Duration::from_secs(45);
+        let mut found = None;
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(Some(url)) => { found = Some(url); break; }
+                Ok(None) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(_) => break, // all readers gone
+            }
+        }
         let stdin = child.stdin.take();
         *pending_login().lock().unwrap() = Some(PendingLogin { child, stdin });
         Ok(found)
