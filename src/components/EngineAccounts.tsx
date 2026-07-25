@@ -65,6 +65,8 @@ export function EngineAccounts() {
   const [loginUrl, setLoginUrl] = React.useState('');
   const [code, setCode] = React.useState('');
   const [pasteOpen, setPasteOpen] = React.useState<EngineId | null>(null);
+  const pasteOpenRef = React.useRef<EngineId | null>(null);
+  pasteOpenRef.current = pasteOpen;
 
   const refresh = React.useCallback(async () => {
     const next: Partial<Record<EngineId, State>> = {};
@@ -123,6 +125,9 @@ export function EngineAccounts() {
         setCodeFor(id);
         setStep('Waiting for you to approve it…');
         for (let i = 0; i < 60; i++) {
+          // The paste dialog takes ownership if the user opens it — two flows
+          // both calling begin_engine_login would kill each other's process.
+          if (pasteOpenRef.current) return;
           await new Promise((r) => { setTimeout(r, 2000); });
           // Either the window caught the code for us...
           const caught = await invoke<string | null>('take_captured_login_code');
@@ -188,13 +193,21 @@ export function EngineAccounts() {
     setPasteOpen(id);
     setError(null);
     setCode('');
-    if (!loginUrl) {
-      try {
-        const url = await invoke<string | null>('begin_engine_login', { engine: id });
-        if (url) setLoginUrl(url);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+    setLoginUrl('');
+    // ALWAYS start a fresh sign-in. Never reuse a URL from an earlier attempt.
+    //
+    // The authorization code is PKCE-bound to the exact CLI run that produced
+    // its URL. Reusing a stale URL — or letting the Sign in button's own attempt
+    // race this one, since starting a login kills the previous — means the user
+    // approves against one challenge and the code is handed to a process holding
+    // a different one. It is then correctly rejected, which looks from outside
+    // like a sign-in that just sits there and eventually fails for no reason.
+    try {
+      const url = await invoke<string | null>('begin_engine_login', { engine: id });
+      if (url) setLoginUrl(url);
+      else setError("Couldn't start the sign-in — no URL came back. Try again.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -327,10 +340,14 @@ export function EngineAccounts() {
                 if (!error) setPasteOpen(null);
               }}
             >
-              {busy ? 'Signing in…' : 'Sign in'}
+              {busy ? 'Checking…' : 'Sign in'}
             </Button>
             <span className="text-[11px] text-slate-500">
-              {code.trim() ? `${code.replace(/\s+/g, '').length} characters` : 'Codes expire fast — grab a fresh one if this fails.'}
+              {busy
+                ? 'Waiting for Google to confirm — up to 40 seconds.'
+                : code.trim()
+                  ? `${code.replace(/\s+/g, '').length} characters`
+                  : 'Codes expire fast — grab a fresh one if this fails.'}
             </span>
           </div>
           {error && <p className="text-xs text-red-400">{error}</p>}
