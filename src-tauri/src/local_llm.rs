@@ -746,24 +746,93 @@ const REVIEW_LENSES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Hands one engine's findings back to the engine that wrote the draft.
-fn build_apply_findings_prompt(draft: &str, findings: &str) -> String {
+/// One surgical edit to the document: replace an exact existing passage with a
+/// new one. An insertion is expressed by echoing an anchor and appending to it,
+/// so there is only ever one operation to reason about.
+#[derive(Deserialize)]
+struct DocEdit {
+    find: String,
+    replace: String,
+}
+
+/// Applies edits to `doc`, returning the result, how many landed, and why any
+/// were refused.
+///
+/// `find` must match EXACTLY ONCE. Zero matches means the model quoted the
+/// document wrongly; several means the edit is ambiguous about which passage it
+/// meant. Either way the honest move is to refuse that one edit and say so —
+/// applying a guess is how a patch silently corrupts a document.
+///
+/// The point of patching at all: everything not named here comes out
+/// byte-identical. A full-document rewrite has no such guarantee, and the
+/// measured failure this whole workflow started from was exactly that — a
+/// "revision" that quietly summarized 3546 chars down to 2141.
+fn apply_doc_edits(doc: &str, edits: &[DocEdit]) -> (String, usize, Vec<String>) {
+    let mut out = doc.to_string();
+    let mut applied = 0;
+    let mut refused = Vec::new();
+    for (i, e) in edits.iter().enumerate() {
+        if e.find.is_empty() {
+            refused.push(format!("edit {}: empty `find`", i + 1));
+            continue;
+        }
+        match out.matches(e.find.as_str()).count() {
+            1 => {
+                out = out.replacen(e.find.as_str(), &e.replace, 1);
+                applied += 1;
+            }
+            0 => refused.push(format!(
+                "edit {}: `find` text is not in the document — {:?}",
+                i + 1,
+                e.find.chars().take(60).collect::<String>()
+            )),
+            n => refused.push(format!(
+                "edit {}: `find` matches {n} places, too ambiguous to apply — {:?}",
+                i + 1,
+                e.find.chars().take(60).collect::<String>()
+            )),
+        }
+    }
+    (out, applied, refused)
+}
+
+/// Hands the reviewers' findings back to the engine that wrote the draft, asking
+/// for EDITS rather than a rewrite.
+fn build_patch_prompt(draft: &str, findings: &str) -> String {
     format!(
-        "Below is a document you wrote, followed by review notes on it from a second reader.\n\n\
-        Apply the notes that are CORRECT and worth acting on — fixing real omissions and \
+        "Below is a document you wrote, followed by review notes on it from other readers.\n\n\
+        Apply the notes that are CORRECT and worth acting on — fixing real omissions, vagueness and \
         contradictions — and ignore any that are wrong, are matters of taste, or would make the \
         document worse. This is your document; each reader saw it once and has less context than you.\n\n\
-        Where more than one reader is quoted below, treat a point RAISED INDEPENDENTLY BY BOTH as \
-        the strongest signal available and address it. Where they disagree with each other, use your \
-        own judgement — you have the full picture and they do not.\n\n\
-        Keep everything that already worked: the same structure, the same level of specific detail, \
-        and the same length. Do NOT summarize, condense, or genericize — the notes are there to fill \
-        gaps, not to trim. Concrete, evocative, playable detail is the point of this document.\n\n\
+        Where more than one reader is quoted, treat a point RAISED INDEPENDENTLY BY BOTH as the \
+        strongest signal available and address it. Where they disagree, use your own judgement.\n\n\
+        Reply with ONLY a JSON object listing the edits to make — do NOT reproduce the document:\n\n\
+        {{\"edits\":[{{\"find\":\"<exact text copied from the document>\",\"replace\":\"<what it becomes>\"}}]}}\n\n\
+        Rules for `find`, which are strict because each edit is applied mechanically:\n\
+        - Copy it VERBATIM from the document, character for character. It is matched literally, not fuzzily.\n\
+        - It must appear EXACTLY ONCE in the document. If a phrase repeats, include enough surrounding \
+        text to make it unique.\n\
+        - Keep it as short as possible while still unique — quote the sentence or bullet you are changing, \
+        not the whole section.\n\
+        To ADD new material, set `find` to the line you want it to follow and `replace` to that same line \
+        plus the new content after it. To DELETE, set `replace` to an empty string.\n\n\
+        Make each edit ADD substance where a note found it lacking: name the thing, give the number, \
+        state the fact. Do not use these edits to shorten, condense or genericize the document — \
+        concrete, playable detail is the entire point of it. Emit no edit at all for a note you are \
+        choosing to ignore, and return {{\"edits\":[]}} if none of them are worth acting on.\n\n\
         Your document:\n{draft}\n\n\
-        Review notes:\n{findings}\n\n\
-        Reply with ONLY the full revised document, no commentary, no code fences."
+        Review notes:\n{findings}"
     )
 }
+
+/// How many review-and-patch rounds a critique pass may run.
+///
+/// Two, not a loop until it goes quiet. Round two earns its cost because it
+/// reviews the PATCHED document — the first round's answers can raise real
+/// follow-on problems, and it also lets a third lens see the doc. Beyond that
+/// the reviewers start trading taste, and an open loop on a document with no
+/// objective finish line thrashes.
+const MAX_REVIEW_ROUNDS: usize = 2;
 
 /// Fraction of the draft's length a revision must retain to be trusted.
 ///
@@ -842,22 +911,37 @@ pub fn ask_ingest_critique(
     prompt: String, draft: &str, claude_model: Option<&str>, expect_json: bool,
 ) -> Result<String, String> {
     let reviewers = ingestion_reviewers();
-    let revised = if reviewers.is_empty() {
-        ask_ingest_once(prompt, claude_model, expect_json)?
-    } else {
-        // Each reviewer reads the draft independently and reports separately.
-        // They are NOT shown each other's notes: the value of a second opinion
-        // is that it was formed without the first one, and pooling them first
-        // would just let the loudest reading anchor the rest.
+    if reviewers.is_empty() {
+        // Same engine revising its own draft, exactly as before cross-checking
+        // existed. Still a full rewrite, still guarded.
+        let revised = ask_ingest_once(prompt, claude_model, expect_json)?;
+        return Ok(match revision_is_safe(draft, &revised) {
+            (true, _) => revised,
+            (false, why) => {
+                crate::maplog::log("CRITIQUE REJECTED", &format!("kept the draft: {why}"));
+                draft.to_string()
+            }
+        });
+    }
+
+    let mut current = draft.to_string();
+    for round in 0..MAX_REVIEW_ROUNDS {
+        // Each reviewer reads the CURRENT document independently and reports
+        // separately. They are NOT shown each other's notes: the value of a
+        // second opinion is that it was formed without the first one, and
+        // pooling them would just let the loudest reading anchor the rest.
         let mut collected = String::new();
         for (i, reviewer) in reviewers.iter().enumerate() {
-            // A distinct angle each, and reasoning turned UP: this is the most
-            // analytically demanding call in the pipeline and it was running at
-            // each engine's default, which for Codex meant none at all.
-            let (lens_name, lens) = REVIEW_LENSES[i % REVIEW_LENSES.len()];
+            // Lenses advance with the round, so a second pass looks somewhere
+            // new rather than re-litigating the first — with two reviewers and
+            // three lenses, two rounds cover all three.
+            let (lens_name, lens) = REVIEW_LENSES[(round * reviewers.len() + i) % REVIEW_LENSES.len()];
+            // Reasoning turned UP: this is the most analytically demanding call
+            // in the pipeline and it used to run at each engine's default,
+            // which for Codex meant none at all.
             let found = match ask_ingest_once_on(
                 *reviewer,
-                format!("{prompt}{FINDINGS_ONLY_OVERRIDE}\n\n{lens}"),
+                format!("{}{FINDINGS_ONLY_OVERRIDE}\n\n{lens}", with_document(&prompt, &current, round)),
                 claude_model,
                 false,
                 // "high" is common to all three engines' scales. Claude also has
@@ -869,23 +953,20 @@ pub fn ask_ingest_critique(
                 // One reviewer failing is not the pass failing — the others
                 // still have something to say.
                 Err(e) => {
-                    crate::maplog::log(
-                        "CROSS-CHECK reviewer failed",
-                        &format!("{}: {e}", reviewer.label()),
-                    );
+                    crate::maplog::log("CROSS-CHECK reviewer failed", &format!("{}: {e}", reviewer.label()));
                     continue;
                 }
             };
             if found.is_empty() || found.contains("NO-FINDINGS") {
                 crate::maplog::log(
                     "CROSS-CHECK found nothing",
-                    &format!("{} ({lens_name}) had no findings", reviewer.label()),
+                    &format!("round {} — {} ({lens_name}) had no findings", round + 1, reviewer.label()),
                 );
                 continue;
             }
             crate::maplog::log(
                 "CROSS-CHECK findings",
-                &format!("{} on {lens_name} reported:\n{found}", reviewer.label()),
+                &format!("round {} — {} on {lens_name} reported:\n{found}", round + 1, reviewer.label()),
             );
             // Attributed, because whose note it is carries information: two
             // reviewers independently flagging the same passage is a much
@@ -897,16 +978,82 @@ pub fn ask_ingest_critique(
             ));
         }
         if collected.trim().is_empty() {
-            return Ok(draft.to_string());
+            crate::maplog::log("CRITIQUE DONE", &format!("round {} found nothing; stopping", round + 1));
+            break;
         }
-        ask_ingest_once(build_apply_findings_prompt(draft, collected.trim()), claude_model, expect_json)?
-    };
-    match revision_is_safe(draft, &revised) {
-        (true, _) => Ok(revised),
-        (false, why) => {
-            crate::maplog::log("CRITIQUE REJECTED", &format!("kept the draft: {why}"));
-            Ok(draft.to_string())
+
+        // Ask for EDITS, not a rewrite: everything the author does not name
+        // survives byte-identical.
+        let reply = ask_ingest_once(build_patch_prompt(&current, collected.trim()), claude_model, true)?;
+        let edits: Vec<DocEdit> = serde_json::from_str::<serde_json::Value>(&extract_json_object(&reply))
+            .ok()
+            .and_then(|v| v.get("edits").cloned())
+            .and_then(|e| serde_json::from_value(e).ok())
+            .unwrap_or_default();
+        if edits.is_empty() {
+            crate::maplog::log(
+                "CRITIQUE DONE",
+                &format!("round {} — author judged no note worth acting on", round + 1),
+            );
+            break;
         }
+
+        let (patched, applied, refused) = apply_doc_edits(&current, &edits);
+        for r in &refused {
+            // Never silent: a refused edit means a finding went unaddressed, and
+            // that is invisible in the finished document.
+            crate::maplog::log("CRITIQUE EDIT REFUSED", r);
+        }
+        crate::maplog::log(
+            "CRITIQUE PATCHED",
+            &format!(
+                "round {}: {applied} of {} edit(s) applied, {} chars -> {} chars",
+                round + 1,
+                edits.len(),
+                current.chars().count(),
+                patched.chars().count()
+            ),
+        );
+        if applied == 0 {
+            break;
+        }
+        // The guard still runs, per round, against that round's input. With
+        // patching it should never fire — which is the point of patching.
+        match revision_is_safe(&current, &patched) {
+            (true, _) => current = patched,
+            (false, why) => {
+                crate::maplog::log("CRITIQUE REJECTED", &format!("round {}: {why}", round + 1));
+                break;
+            }
+        }
+    }
+    Ok(current)
+}
+
+/// Re-points a critique prompt at the document as it stands now.
+///
+/// The prompt was built around the original draft, so round two would otherwise
+/// review a document that has already been fixed and re-report everything that
+/// was just addressed. Appending the current text and saying which one counts is
+/// enough, and avoids threading a builder through all three call sites.
+fn with_document(prompt: &str, current: &str, round: usize) -> String {
+    if round == 0 {
+        return prompt.to_string();
+    }
+    format!(
+        "{prompt}\n\n---\n\nIMPORTANT: the draft quoted above has since been revised in response to an \
+        earlier review. Review THIS version instead — it is the current document, and the one your notes \
+        must refer to. Points already addressed here are settled; do not raise them again.\n\n\
+        Current document:\n{current}"
+    )
+}
+
+/// The JSON object substring of a possibly-chatty reply (first `{` to last `}`),
+/// so an answer still parses when the model wraps it in prose. Pure.
+fn extract_json_object(s: &str) -> String {
+    match (s.find('{'), s.rfind('}')) {
+        (Some(a), Some(b)) if b > a => s[a..=b].to_string(),
+        _ => s.to_string(),
     }
 }
 
@@ -1019,6 +1166,90 @@ mod tests {
         assert!(why.contains("Aldric Venn"), "{why}");
 
         assert!(!revision_is_safe(draft, "   ").0, "empty is never a revision");
+    }
+
+    /// Patching exists to give one guarantee a rewrite cannot: text nobody named
+    /// comes out byte-identical. These cases are the ways that guarantee could
+    /// be lost.
+    #[test]
+    fn a_patch_changes_only_what_it_names_and_refuses_anything_ambiguous() {
+        let doc = "# Frame\n- **Aldric Venn** keeps the ledgers.\n- Track the debt as a number.\n- The moor is cold.\n- The moor is cold.";
+
+        // A clean, unique edit lands and leaves everything else untouched.
+        let (out, applied, refused) = apply_doc_edits(
+            doc,
+            &[DocEdit {
+                find: "- Track the debt as a number.".into(),
+                replace: "- Track the debt as a number: they owe 800 gp, wages run 1 gp/day.".into(),
+            }],
+        );
+        assert_eq!((applied, refused.len()), (1, 0));
+        assert!(out.contains("800 gp"));
+        assert!(out.contains("**Aldric Venn** keeps the ledgers."), "untouched text must survive verbatim");
+
+        // A phrase appearing twice is ambiguous — guessing which one was meant is
+        // how a patch silently corrupts a document.
+        let (out, applied, refused) = apply_doc_edits(
+            doc,
+            &[DocEdit { find: "- The moor is cold.".into(), replace: "- The moor is wrong.".into() }],
+        );
+        assert_eq!(applied, 0);
+        assert!(refused[0].contains("matches 2 places"), "{:?}", refused);
+        assert_eq!(out, doc, "a refused edit must change nothing");
+
+        // Text the model hallucinated is refused, not fuzzily matched.
+        let (_, applied, refused) = apply_doc_edits(
+            doc,
+            &[DocEdit { find: "- Venn keeps the ledgers.".into(), replace: "x".into() }],
+        );
+        assert_eq!(applied, 0);
+        assert!(refused[0].contains("not in the document"), "{:?}", refused);
+
+        // Insertion is the same operation: echo an anchor, append after it.
+        let (out, applied, _) = apply_doc_edits(
+            doc,
+            &[DocEdit {
+                find: "# Frame".into(),
+                replace: "# Frame\n- **The party:** Thorin and Mira.".into(),
+            }],
+        );
+        assert_eq!(applied, 1);
+        assert!(out.contains("**The party:** Thorin and Mira."));
+
+        // Deletion, and a partial batch: good edits land, bad ones are reported.
+        let (out, applied, refused) = apply_doc_edits(
+            doc,
+            &[
+                DocEdit { find: "- **Aldric Venn** keeps the ledgers.\n".into(), replace: String::new() },
+                DocEdit { find: "nonexistent".into(), replace: "y".into() },
+                DocEdit { find: String::new(), replace: "z".into() },
+            ],
+        );
+        assert_eq!(applied, 1);
+        assert_eq!(refused.len(), 2);
+        assert!(!out.contains("Aldric Venn"));
+        assert!(refused[1].contains("empty `find`"), "{:?}", refused);
+    }
+
+    /// Two rounds, and only two. An open loop on a document with no objective
+    /// finish line thrashes; one round misses the follow-on problems that the
+    /// first round's own answers create.
+    #[test]
+    fn review_rounds_are_capped_and_rotate_the_lens() {
+        assert_eq!(MAX_REVIEW_ROUNDS, 2);
+        // With two reviewers, two rounds must cover all three lenses rather than
+        // asking the same two questions twice.
+        let used: Vec<&str> = (0..MAX_REVIEW_ROUNDS)
+            .flat_map(|round| (0..2).map(move |i| REVIEW_LENSES[(round * 2 + i) % REVIEW_LENSES.len()].0))
+            .collect();
+        assert_eq!(used, vec!["coverage", "usability at the table", "internal consistency", "coverage"]);
+
+        // Round 2 must re-point the reviewer at the PATCHED document, or it
+        // re-reports everything the first round just fixed.
+        let r0 = with_document("orig prompt", "patched doc", 0);
+        assert_eq!(r0, "orig prompt", "round 1 reviews the draft the prompt already quotes");
+        let r1 = with_document("orig prompt", "patched doc", 1);
+        assert!(r1.contains("patched doc") && r1.contains("Review THIS version"), "{r1}");
     }
 
     /// A lapsed sign-in has to be recognised from an engine's error text, so
