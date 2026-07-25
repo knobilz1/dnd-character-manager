@@ -1120,6 +1120,27 @@ pub async fn connect_engine(engine: String) -> Result<bool, String> {
             CliEngine::Claude => vec![],
         };
         let mut cmd = engine_command(engine, &login_args)?;
+
+        if engine == CliEngine::Gemini {
+            // Gemini asks "Opening authentication page in your browser. Do you
+            // want to continue? [Y/n]:" and blocks on STDIN for the answer.
+            // A console spawned by a GUI app has no usable stdin, so that
+            // question hung forever with nothing on screen and no browser — the
+            // observed "sitting on Waiting for sign-in" symptom. Answer it for
+            // the user: they already said yes by clicking Sign in.
+            let mut child = cmd
+                .stdin(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Couldn't start `{}`: {e}", engine.login_command()))?;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(b"y\n");
+                // Dropping stdin closes the pipe, so a later read sees EOF
+                // rather than blocking again.
+            }
+            child.wait().map_err(|e| format!("`{}` failed: {e}", engine.login_command()))?;
+            return Ok(());
+        }
+
         cmd.status()
             .map_err(|e| format!("Couldn't start `{}`: {e}", engine.login_command()))
             .map(|_| ())
