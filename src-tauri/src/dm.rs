@@ -914,6 +914,76 @@ pub fn check_claude_auth() -> Result<bool, String> {
     claude_logged_in()
 }
 
+/// Run one stateless completion on any engine and return its text.
+///
+/// The execution primitive the whole multi-engine feature stands on: arg
+/// building lives in cli_provider.rs (pure, tested), and this is the part that
+/// actually spawns. Prompt goes in on stdin — every engine accepts that, and it
+/// keeps arbitrarily long campaign prompts off a command line with a length
+/// limit.
+///
+/// `Delivery` decides where the answer comes from. Codex writes only its final
+/// message to a file, which beats reconstructing it from an event stream; the
+/// others print a parseable envelope to stdout.
+pub(crate) fn run_engine_oneshot(
+    engine: crate::cli_provider::CliEngine, prompt: &str, model: Option<&str>, effort: Option<&str>,
+) -> Result<String, String> {
+    use crate::cli_provider::{oneshot_args, Delivery};
+
+    // Unique per call so two concurrent ingestion calls can't read each other's
+    // answer — map generation fans several of these out at once.
+    let out_path = std::env::temp_dir().join(format!(
+        "tavern-sheet-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let inv = oneshot_args(engine, model, effort, &out_path.to_string_lossy());
+
+    let arg_refs: Vec<&str> = inv.args.iter().map(String::as_str).collect();
+    let mut cmd = engine_command(engine, &arg_refs)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // no flashing console per call
+    }
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
+    child
+        .stdin
+        .take()
+        .ok_or("no stdin pipe")?
+        .write_all(prompt.as_bytes())
+        .map_err(|e| format!("failed writing prompt to {}: {e}", engine.label()))?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("{} wait failed: {e}", engine.label()))?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let answer = match inv.delivery {
+        Delivery::LastMessageFile => std::fs::read_to_string(&out_path).ok(),
+        Delivery::Stdout => crate::cli_provider::extract_final_text(engine, &stdout),
+    };
+    let _ = std::fs::remove_file(&out_path);
+
+    match answer.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()) {
+        Some(a) => Ok(a),
+        None => Err(format!(
+            "{} returned nothing usable.\n{}",
+            engine.label(),
+            // Both streams: a tier refusal or an auth error can land on either,
+            // and that text is the only thing that explains the failure.
+            format!("{stdout}{}", String::from_utf8_lossy(&out.stderr)).trim().chars().take(600).collect::<String>()
+        )),
+    }
+}
+
 /// Is this engine's CLI signed in? `(installed, signed_in)` so the frontend can
 /// tell "install it" from "sign in" without parsing an error string.
 ///

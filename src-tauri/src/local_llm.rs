@@ -430,6 +430,14 @@ struct IngestConfig {
     use_local: bool,
     base_url: String,
     model: String,
+    /// Which subscription CLI answers when `use_local` is false. Defaults to
+    /// Claude, so nothing changes until the user picks another engine.
+    engine: Option<crate::cli_provider::CliEngine>,
+    /// The OTHER signed-in engine, when cross-checking is on. Used for the
+    /// critique leg of draft→critique ingestion flows: those already make two
+    /// calls, and a model reviewing its OWN draft shares that draft's blind
+    /// spots, so an independent reviewer is strictly better for the same cost.
+    cross_check: Option<crate::cli_provider::CliEngine>,
 }
 
 fn ingest_config() -> &'static Mutex<IngestConfig> {
@@ -443,7 +451,52 @@ fn ingest_config() -> &'static Mutex<IngestConfig> {
 /// when use_local is false.
 #[tauri::command]
 pub fn set_ingestion_provider(use_local: bool, base_url: String, model: String) {
-    *ingest_config().lock().unwrap() = IngestConfig { use_local, base_url, model };
+    let mut cfg = ingest_config().lock().unwrap();
+    cfg.use_local = use_local;
+    cfg.base_url = base_url;
+    cfg.model = model;
+}
+
+/// Which subscription CLI handles ingestion, and which one reviews it.
+///
+/// `engine` is the primary. `cross_check` is the second opinion for critique
+/// legs — None when the user hasn't enabled it, or when no second engine is
+/// signed in and working. Kept separate from `set_ingestion_provider` so the
+/// local-server settings and the CLI-engine settings don't have to be pushed
+/// down together.
+#[tauri::command]
+pub fn set_ingestion_engine(engine: String, cross_check: Option<String>) {
+    let mut cfg = ingest_config().lock().unwrap();
+    cfg.engine = Some(crate::cli_provider::CliEngine::from_setting(&engine));
+    cfg.cross_check = cross_check.map(|c| crate::cli_provider::CliEngine::from_setting(&c));
+}
+
+/// The engine that should REVIEW a draft this ingestion flow just produced, if
+/// cross-checking is on and a different engine is available. None means "review
+/// with the same engine", which is what always happened before.
+pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
+    let cfg = ingest_config().lock().unwrap();
+    if cfg.use_local {
+        return None;
+    }
+    let primary = cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude);
+    cfg.cross_check.filter(|c| *c != primary)
+}
+
+/// Run one ingestion prompt on a SPECIFIC engine, bypassing the configured
+/// primary — how a critique leg reaches the reviewer. Falls back to the normal
+/// path if that engine fails, because a second opinion is an improvement, not a
+/// dependency: losing the reviewer should degrade quality, never lose the work.
+pub fn ask_ingest_once_on(
+    engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>, expect_json: bool,
+) -> Result<String, String> {
+    match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, None) {
+        Ok(text) => Ok(text),
+        Err(e) => {
+            crate::maplog::log("CROSS-CHECK fell back to the primary engine", &e);
+            ask_ingest_once(prompt, claude_model, expect_json)
+        }
+    }
 }
 
 /// Whether `ask_ingest_once` is currently routing to a local model rather
@@ -514,7 +567,16 @@ pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: 
         }
         ask_local_once(&cfg.base_url, &cfg.model, &prompt, expect_json)
     } else {
-        crate::dm::ask_claude_once(prompt, claude_model, None)
+        match cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude) {
+            // Claude keeps its own long-standing path: `claude_model` is a tier
+            // hint (opus/sonnet) that only means something to that CLI, and
+            // ask_claude_once already handles it.
+            crate::cli_provider::CliEngine::Claude => crate::dm::ask_claude_once(prompt, claude_model, None),
+            // Other engines run whatever model their subscription gives them,
+            // so the tier hint is dropped rather than passed through as a name
+            // they'd reject.
+            other => crate::dm::run_engine_oneshot(other, &prompt, None, None),
+        }
     }
 }
 
