@@ -2229,7 +2229,58 @@ fn suggest_session_plan_at(root: &Path, id: &str, terrain_catalog: &str) -> Resu
     let flagged_facts = read_optional(&dir.join("memory").join("flagged_facts.md"));
     let combined_memory = [memory.trim(), flagged_facts.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
     let prompt = build_session_plan_prompt(&combined_plan, &current_chapter, &combined_memory, terrain_catalog);
-    crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)
+    let draft = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)?;
+    // Same guarded shape as the lore and module-plan critiques: a failed or empty
+    // review keeps the draft rather than losing the plan. This is the one the DM
+    // reads immediately before play, so a critique that errors must cost nothing.
+    Ok(crate::local_llm::ask_ingest_critique(
+        build_session_plan_critique_prompt(&draft, &combined_plan, &current_chapter, &combined_memory),
+        &draft,
+        Some("opus"),
+        false,
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or(draft))
+}
+
+/// Review prompt for a drafted "Plan Next Session".
+///
+/// The three sources are labelled as SOURCES for the same reason the lore
+/// critique labels the DM's intake: without it a reviewer flags material the
+/// plan is entitled to use as unsupported invention, and the patch pass then
+/// dutifully strips out the very content the plan exists to surface.
+///
+/// What's worth checking here is different from the module-import plan's
+/// critique. That one asks "does this fit the campaign"; this one is a plan for
+/// ONE evening at a real table, so the failure modes are staleness (re-running a
+/// beat the party already resolved — memory and flagged facts are what reveal
+/// that) and vagueness (a plan that reads well and gives a DM nothing to
+/// actually do at 8pm on a Tuesday).
+fn build_session_plan_critique_prompt(
+    draft: &str, combined_plan: &str, current_chapter: &str, combined_memory: &str,
+) -> String {
+    let section = |label: &str, body: &str| {
+        format!("{label}:\n{}\n\n", if body.trim().is_empty() { "(none)" } else { body.trim() })
+    };
+    format!(
+        "You drafted the plan below for the NEXT session of an ongoing Dungeons & Dragons campaign, for the DM to read before play.\n\n\
+        Draft plan:\n{draft}\n\n\
+        Everything that follows is SOURCE MATERIAL this plan is entitled to draw on. It is established fact, \
+        not invention, and nothing in the draft may be flagged as unsupported merely because it came from here:\n\n\
+        {}{}{}\
+        Check specifically: does the plan pick up from where the party ACTUALLY is, or does it re-run a beat the \
+        memory and flagged facts show is already resolved? Does it contradict anything in the sources — a dead NPC \
+        given lines, a location the party has already burned down? Is every beat something a DM could actually run \
+        at the table (a named NPC with a want, a specific place, a concrete complication), or is it the kind of \
+        summary that reads fine and gives them nothing to do? And are the loose threads it picks up the ones the \
+        flagged facts say are still open, rather than whichever were easiest to restate?\n\n\
+        Ignore length: a plan for one evening should be short, and padding it is a fault, not a fix.",
+        section("The campaign's standing plan and lore", combined_plan),
+        section("The chapter the party is currently in", current_chapter),
+        section("Campaign memory and open flagged facts", combined_memory),
+    )
 }
 
 fn session_plan_path(root: &Path, id: &str) -> PathBuf {
@@ -11118,6 +11169,39 @@ Tactics:
         assert!(prompt.contains("The party owes a debt to the Vistani."), "intake notes must reach the reviewer");
         assert!(prompt.contains("Curse of Strahd"));
         assert!(prompt.contains("Ireena, a noble"));
+    }
+
+    /// The session plan is the one document the DM reads immediately before
+    /// play, so its review has to carry all three sources AND mark them as
+    /// sources. Unlabelled, a reviewer reports the plan's own chapter content as
+    /// unsupported invention and the patch pass strips out the thing the plan
+    /// exists to surface — measured on the lore critique, which is why that one
+    /// labels the DM's intake the same way.
+    #[test]
+    fn build_session_plan_critique_prompt_carries_all_three_sources_and_marks_them_as_sources() {
+        let p = build_session_plan_critique_prompt(
+            "Open at the Fog Clock. Ireena wants out of Barovia.",
+            "The party operates out of Vallaki.",
+            "Chapter 4: The Fog Clock stops at dusk.",
+            "Flagged: the burgomaster's letter is still unread.",
+        );
+        assert!(p.contains("Open at the Fog Clock"), "the draft under review");
+        assert!(p.contains("The party operates out of Vallaki."), "standing plan/lore");
+        assert!(p.contains("Chapter 4: The Fog Clock stops at dusk."), "current chapter");
+        assert!(p.contains("burgomaster's letter"), "memory + flagged facts");
+        assert!(
+            p.contains("SOURCE MATERIAL") && p.contains("not invention"),
+            "sources must be immune from unsupported-invention findings"
+        );
+        // Staleness is the failure mode unique to a per-session plan.
+        assert!(p.to_lowercase().contains("already resolved"));
+        // A per-evening plan must never be padded by the reviewer.
+        assert!(p.to_lowercase().contains("padding it is a fault"));
+
+        // An empty campaign (no module, no memory yet) still produces a usable
+        // prompt rather than blank labelled sections.
+        let bare = build_session_plan_critique_prompt("Something happens.", "", "", "");
+        assert!(bare.contains("(none)"));
     }
 
     #[test]
