@@ -123,8 +123,13 @@ export function EngineAccounts() {
       try {
         const text = (await navigator.clipboard.readText()).trim();
         if (/^4\/[A-Za-z0-9_\-.]{20,}$/.test(text.replace(/\s+/g, ''))) {
-          setCode(text.replace(/\s+/g, ''));
-          return; // the effect re-runs and stops, since code is now set
+          const clean = text.replace(/\s+/g, '');
+          setCode(clean);
+          // Submit immediately rather than waiting for a click. The CLI's
+          // window is 60s from when it started, and by the time a code is on
+          // the clipboard most of that is gone — a click is not free.
+          void submitCode(pasteOpen, clean);
+          return;
         }
       } catch { /* no clipboard permission — the paste box still works */ }
       if (!stop) setTimeout(() => void tick(), 700);
@@ -316,8 +321,8 @@ export function EngineAccounts() {
                 <span className="text-slate-500">preparing…</span>
               )}
             </li>
-            <li>Google shows you a code. Hit <span className="text-slate-300">Copy to Clipboard</span> on that page.</li>
-            <li>Come back here — the code fills itself in. Then press Sign in.</li>
+            <li>Google shows you a code. Hit <span className="text-slate-300">Copy to Clipboard</span>.</li>
+            <li>That's it — come back here and it signs itself in.</li>
           </ol>
 
           <textarea
@@ -330,6 +335,14 @@ export function EngineAccounts() {
           />
 
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!!busy}
+              onClick={() => void openPasteDialog(pasteOpen!)}
+            >
+              Start over
+            </Button>
             <Button
               size="sm"
               disabled={!code.trim() || !!busy}
@@ -348,9 +361,9 @@ export function EngineAccounts() {
             <span className="text-[11px] text-slate-500">
               {busy
                 ? 'Waiting for Google to confirm…'
-                : secondsLeft > 0
-                  ? `${secondsLeft}s left — Google closes the window after a minute.`
-                  : 'This sign-in expired. Press Sign in to start a fresh one.'}
+                : code.trim()
+                  ? `${code.replace(/\s+/g, '').length} characters — press Sign in`
+                  : 'Approve in the browser, then press Copy on Google\'s page — be quick, the sign-in expires after about a minute.'}
             </span>
           </div>
           {error && (

@@ -1297,6 +1297,19 @@ fn begin_login_via_pty(engine: crate::cli_provider::CliEngine) -> Result<Option<
         .map_err(|e| format!("Couldn't open a terminal for sign-in: {e}"))?;
 
     let mut cmd = CommandBuilder::new(exe);
+    // --print is required, despite its 60-second authentication window.
+    //
+    // Both alternatives were measured and are worse. Launched BARE it runs a
+    // TUI: it never prints a findable URL through the pseudo-console (NULL after
+    // 45s) and exits anyway. With --print the URL arrives in 0s and a typed code
+    // is genuinely read — but authentication gets exactly 60 seconds before the
+    // process exits and takes this console with it, surfacing as "the pipe is
+    // being closed", which is a dead process rather than a broken pipe.
+    //
+    // So the window is unavoidable and the UI is built to fit inside it: the
+    // browser opens the instant the URL exists, the clipboard is watched, and
+    // the code auto-submits on arrival. That reduces the user's part to
+    // approving and pressing Copy.
     for a in ["--mode", "plan", "--print", "Reply with exactly: READY"] {
         cmd.arg(a);
     }
