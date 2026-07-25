@@ -1015,6 +1015,100 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
     .map_err(|e| format!("Login task failed: {e}"))?
 }
 
+/// Sign in inside a Tavern Sheet window, so the user never handles a code.
+///
+/// The problem this solves: Antigravity's OAuth redirect goes to a HOSTED page
+/// (antigravity.google/oauth-callback) rather than to loopback. That page tries
+/// to relay the code to the CLI's local listener and, when it can't, falls back
+/// to printing the code for the user to copy. Every attempt to make that
+/// pleasant failed, because the failure isn't ours to fix from outside.
+///
+/// But the code IS in the redirect URL at NAVIGATION time — the callback page
+/// only strips it afterwards with history.replaceState, which is why the address
+/// bar looks code-less by the time anyone reads it. Hosting the flow in our own
+/// webview means we see the raw navigation and can lift the code straight out of
+/// it, then hand it to the waiting CLI on stdin.
+///
+/// The window shows Google's real sign-in page — the user still authenticates
+/// with Google directly, and this app only ever sees the short-lived
+/// authorization code, which it passes through without storing.
+#[tauri::command]
+pub async fn login_in_app(app: AppHandle, engine: String, url: String) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    let parsed = url.parse().map_err(|_| "That sign-in URL didn't parse.".to_string())?;
+    let label = "engine-login";
+    if let Some(existing) = app.get_webview_window(label) {
+        let _ = existing.close();
+    }
+    *captured_code().lock().unwrap() = None;
+
+    let app_for_nav = app.clone();
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(parsed))
+        .title(format!("Sign in to {}", crate::cli_provider::CliEngine::from_setting(&engine).label()))
+        .inner_size(520.0, 700.0)
+        .on_navigation(move |u| {
+            // Fires for every navigation INCLUDING the redirect back, before any
+            // page script gets to tidy the URL.
+            if let Some(code) = code_from_callback(u.as_str()) {
+                *captured_code().lock().unwrap() = Some(code);
+                if let Some(w) = app_for_nav.get_webview_window("engine-login") {
+                    let _ = w.close();
+                }
+                return false; // don't bother loading the callback page itself
+            }
+            true
+        })
+        .build()
+        .map_err(|e| format!("Couldn't open the sign-in window: {e}"))?;
+    Ok(())
+}
+
+fn captured_code() -> &'static Mutex<Option<String>> {
+    static C: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(None))
+}
+
+/// The `code` query parameter from an OAuth callback URL, if this is one.
+/// Pure, so the parsing that the whole flow hinges on is testable.
+fn code_from_callback(url: &str) -> Option<String> {
+    if !url.contains("oauth-callback") && !url.contains("/callback") {
+        return None;
+    }
+    let query = url.split_once('?').map(|(_, q)| q)?;
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == "code" && !v.is_empty()).then(|| percent_decode(v))
+    })
+}
+
+/// Minimal percent-decoding — an authorization code arrives URL-encoded and a
+/// stray %2F would otherwise be handed to the CLI verbatim and rejected.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if b[i] == b'+' { b' ' } else { b[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// Whether the in-app sign-in window has captured a code yet — polled by the UI
+/// so it can finish the moment Google redirects, with nothing for the user to do.
+#[tauri::command]
+pub fn take_captured_login_code() -> Option<String> {
+    captured_code().lock().unwrap().take()
+}
+
 /// Pull the first http(s) URL out of a CLI's login output.
 fn find_login_url(text: &str) -> Option<String> {
     let start = text.find("https://")?;
@@ -1440,6 +1534,34 @@ pub async fn warmup_dm_session(app: AppHandle, campaign_id: String) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The in-app sign-in stands entirely on lifting `code` out of the redirect
+    /// at navigation time. The callback page strips it immediately afterwards
+    /// with history.replaceState, which is why a URL copied from the address bar
+    /// has no code in it — and why that stripped form must NOT read as success,
+    /// or the flow would silently "finish" with nothing.
+    #[test]
+    fn the_authorization_code_is_lifted_from_the_redirect_but_only_when_present() {
+        assert_eq!(
+            code_from_callback("https://antigravity.google/oauth-callback?state=abc&code=4%2F0AXYZ-tok&scope=email"),
+            Some("4/0AXYZ-tok".to_string()),
+            "must percent-decode: a raw %2F would be rejected by the CLI"
+        );
+        // Verbatim from a real failed run — post-strip, no code. Must be a miss.
+        assert_eq!(
+            code_from_callback("https://antigravity.google/oauth-callback?state=1wghyBAgO-bSPU8ljvP-0g&iss=https%3A%2F%2Faccounts.google.com&scope=email+profile&authuser=0&prompt=consent"),
+            None
+        );
+        // Google's own pages must pass through untouched, or sign-in can't start.
+        assert_eq!(code_from_callback("https://accounts.google.com/o/oauth2/auth?client_id=x&code_challenge=y"), None);
+        assert_eq!(code_from_callback("https://antigravity.google/oauth-callback"), None);
+        assert_eq!(code_from_callback("https://antigravity.google/oauth-callback?code="), None);
+        // A loopback-style callback works the same way, for other engines.
+        assert_eq!(
+            code_from_callback("http://localhost:52553/callback?code=xyz123&state=q"),
+            Some("xyz123".to_string())
+        );
+    }
 
 
     #[test]

@@ -108,16 +108,24 @@ export function EngineAccounts() {
       const url = await invoke<string | null>('begin_engine_login', { engine: id });
       if (url) {
         setLoginUrl(url);
-        try { await openUrl(url); } catch { /* they can click it here instead */ }
-
-        // The CLI is listening on loopback and the vendor's callback page
-        // relays the code straight back to it — the same mechanism that makes
-        // Claude and Codex seamless. So WAIT for that to land before asking the
-        // user for anything. In the common case they approve in the browser and
-        // this finishes on its own; they never see a code at all.
-        setStep('Waiting for you to approve it in the browser…');
-        for (let i = 0; i < 30; i++) {
-          await new Promise((r) => { setTimeout(r, 3000); });
+        // Sign in INSIDE the app. The vendor's callback page strips the
+        // authorization code out of the address bar the instant it loads, so a
+        // system browser can only ever show it to the user to copy. Our own
+        // window sees the raw redirect first and lifts the code out itself.
+        await invoke('login_in_app', { engine: id, url });
+        setStep('Waiting for you to approve it…');
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => { setTimeout(r, 2000); });
+          // Either the window caught the code for us...
+          const caught = await invoke<string | null>('take_captured_login_code');
+          if (caught) {
+            setStep('Finishing sign-in…');
+            const ok = await invoke<boolean>('submit_login_code', { engine: id, code: caught });
+            await refresh();
+            if (!ok) setError('Google accepted the sign-in but the CLI rejected the code. Try once more.');
+            return;
+          }
+          // ...or the CLI's own loopback listener got there first.
           const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id });
           if (signedIn) {
             await refresh();
