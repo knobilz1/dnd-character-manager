@@ -4601,8 +4601,15 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
     // "trophy armor display" -> Display_Pillow) are exactly the cases where
     // coverage and biome affinity conflict and no ranking rule has separated
     // them. Two models disagreeing is the signal a rule couldn't produce.
+    // A one-candidate shortlist cannot be disagreed with — there is nothing else
+    // to choose. Live: this map's liquid pick had exactly one candidate and still
+    // spent a full reviewer call to be told "1". Measured on the same run, that is
+    // ~3s of the 73s tile phase bought for information that was already certain.
+    if cands.len() < 2 {
+        return Some(picked);
+    }
     if let Some(reviewer) = crate::local_llm::ingestion_reviewer() {
-        if let Ok(second) = crate::dm::run_engine_oneshot(
+        let second = crate::dm::run_engine_oneshot(
             reviewer,
             &format!(
                 "{}\n\n(You are checking another model's choice. Answer independently.)",
@@ -4610,27 +4617,48 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
             ),
             None,
             None,
-        ) {
-            if let Some(other) = serde_json::from_str::<serde_json::Value>(&extract_json_object(&second))
+        );
+        let name = |i: usize| cands.get(i).map(|c| c.rel_path.as_str()).unwrap_or("?").to_string();
+        // Every outcome gets a line. Logging ONLY disagreement means silence covers
+        // "agreed", "replied with something unparseable" and "never ran at all" —
+        // the exact ambiguity that made the critique cross-check look healthy while
+        // it was returning empty for every leg.
+        match second {
+            Err(e) => crate::maplog::log(
+                "TILE PICK CROSS-CHECK FAILED",
+                &format!("{kind}: {} did not answer ({e}) — the primary's pick stands", reviewer.label()),
+            ),
+            Ok(reply) => match serde_json::from_str::<serde_json::Value>(&extract_json_object(&reply))
                 .ok()
                 .and_then(|v| v.get("choice").and_then(|c| c.as_u64()))
                 .filter(|c| (1..=cands.len() as u64).contains(c))
                 .map(|c| (c - 1) as usize)
             {
-                if other != picked {
-                    crate::maplog::log(
-                        "TILE PICK DISPUTED",
-                        &format!(
-                            "{kind}: primary chose #{} ({}), {} chose #{} ({}) — ambiguous query, worth a look",
-                            picked + 1,
-                            cands.get(picked).map(|c| c.rel_path.as_str()).unwrap_or("?"),
-                            reviewer.label(),
-                            other + 1,
-                            cands.get(other).map(|c| c.rel_path.as_str()).unwrap_or("?"),
-                        ),
-                    );
-                }
-            }
+                None => crate::maplog::log(
+                    "TILE PICK CROSS-CHECK UNREADABLE",
+                    &format!(
+                        "{kind}: {} answered with no usable choice in 1..={} — {}",
+                        reviewer.label(),
+                        cands.len(),
+                        reply.trim().chars().take(200).collect::<String>()
+                    ),
+                ),
+                Some(other) if other == picked => crate::maplog::log(
+                    "TILE PICK AGREED",
+                    &format!("{kind}: {} independently chose #{} ({}) too", reviewer.label(), picked + 1, name(picked)),
+                ),
+                Some(other) => crate::maplog::log(
+                    "TILE PICK DISPUTED",
+                    &format!(
+                        "{kind}: primary chose #{} ({}), {} chose #{} ({}) — ambiguous query, worth a look",
+                        picked + 1,
+                        name(picked),
+                        reviewer.label(),
+                        other + 1,
+                        name(other),
+                    ),
+                ),
+            },
         }
     }
     Some(picked)

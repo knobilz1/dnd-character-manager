@@ -16,6 +16,7 @@ import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
+import { disputedCells } from '../../utils/boardCrossCheck';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
 import { listTableCameras, captureTableFrame, coarsePhotoWarning, type TableCamera } from '../../utils/tableCamera';
 import { EngineAccounts } from '../../components/EngineAccounts';
@@ -949,6 +950,14 @@ export function DMConsolePage() {
   presentingSlugRef.current = presentingSlug;
   const tableCameraSourceRef = React.useRef(tableCameraSource);
   tableCameraSourceRef.current = tableCameraSource;
+  /** Cross-check settings reach the board read through a ref for the same reason
+   *  the cards above do: the dm-table-photo listener is mounted once, so reading
+   *  these as plain state would freeze them at whatever they were on first
+   *  render — a reviewer the DM ticked mid-session would be ignored on exactly
+   *  the photo source most tables use. (The primary engine already has
+   *  dmProviderRef, further down.) */
+  const crossCheckRef = React.useRef({ enabled: crossCheckEnabled, engines: crossCheckEngines });
+  crossCheckRef.current = { enabled: crossCheckEnabled, engines: crossCheckEngines };
   /** A finished board read waiting for the DM to confirm it. The read is a HINT,
    *  never authority: measured accuracy is ~4-6 of 6 with the misses landing one
    *  column out, so the DM assigns each piece to a combatant and fixes any square
@@ -1818,20 +1827,10 @@ export function DMConsolePage() {
       }
       const floor = parseBattleMapFloors(card.spec)[0];
       if (!floor) return;
-      setBoardBusy('Reading the board…');
-      const photo = event.payload.photo;
-      Promise.all([
-        invoke<BoardReadResult>('read_table_positions', {
-          photo, cols: floor.cols, rows: floor.rows,
-        }),
-        coarsePhotoWarning(photo, floor.cols),
-      ])
-        .then(([read, warning]) => setBoardRead({
-          name: `${card.name} — photo from ${event.payload.name}`,
-          photo, cols: floor.cols, rows: floor.rows,
-          minis: read.minis, seen: read.seen, warning,
-          assign: read.minis.map(() => ''), cells: read.minis.map((m) => m.cell),
-        }))
+      readPhotoIntoPanel(
+        `${card.name} — photo from ${event.payload.name}`,
+        event.payload.photo, floor.cols, floor.rows,
+      )
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setBoardBusy(null));
     });
@@ -3390,27 +3389,37 @@ export function DMConsolePage() {
     setBoardBusy('Taking the photo…');
     try {
       const photo = await captureTableFrame(tableCameraId || undefined);
-      setBoardBusy('Reading the board…');
-      const warning = await coarsePhotoWarning(photo, floor.cols);
-      const read = await invoke<BoardReadResult>('read_table_positions', {
-        photo, cols: floor.cols, rows: floor.rows,
-      });
-      setBoardRead({
-        name: card.name, photo, cols: floor.cols, rows: floor.rows,
-        minis: read.minis, seen: read.seen, warning,
-        assign: read.minis.map(() => ''),        // unassigned until the DM says who
-        cells: read.minis.map((m) => m.cell),    // editable, so a one-off drift is fixable
-      });
-      if (crossCheckEnabled) {
-        setBoardBusy('Second opinion…');
-        const cc = await crossCheckBoard(photo, floor.cols, floor.rows, read.minis);
-        if (cc) setBoardRead((b) => (b ? { ...b, disputed: cc.disputed, checkedBy: cc.checkedBy } : b));
-      }
+      await readPhotoIntoPanel(card.name, photo, floor.cols, floor.rows);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBoardBusy(null);
     }
+  }
+
+  /** Everything that happens once a photo exists, whoever took it: read it, warn
+   *  about a coarse shot, open the confirm panel, then ask a second engine.
+   *
+   *  Both photo sources go through here. The player-camera path used to carry its
+   *  own inlined copy of this and silently skipped the cross-check — so ticking a
+   *  reviewer did nothing for the source most tables actually use, given the DM's
+   *  machine is often in another room, which is the whole reason the LAN camera
+   *  exists. Two copies of a sequence where only one grows a step is how that
+   *  happened, so there is now one. */
+  async function readPhotoIntoPanel(name: string, photo: string, cols: number, rows: number) {
+    setBoardBusy('Reading the board…');
+    const warning = await coarsePhotoWarning(photo, cols);
+    const read = await invoke<BoardReadResult>('read_table_positions', { photo, cols, rows });
+    setBoardRead({
+      name, photo, cols, rows,
+      minis: read.minis, seen: read.seen, warning,
+      assign: read.minis.map(() => ''),        // unassigned until the DM says who
+      cells: read.minis.map((m) => m.cell),    // editable, so a one-off drift is fixable
+    });
+    if (!crossCheckRef.current.enabled) return;
+    setBoardBusy('Second opinion…');
+    const cc = await crossCheckBoard(photo, cols, rows, read.minis);
+    if (cc) setBoardRead((b) => (b ? { ...b, disputed: cc.disputed, checkedBy: cc.checkedBy } : b));
   }
 
   /** Ask a second engine to read the same photo and report which squares the
@@ -3433,36 +3442,16 @@ export function DMConsolePage() {
     // "anything that isn't Claude" meant a Codex-primary table with Claude as
     // its reviewer silently got no second opinion, because the only candidate
     // left was Gemini, which refuses vision and threw straight into the catch.
-    const reviewer = crossCheckEngines.find((e) => e !== dmProvider && (e === 'claude' || e === 'codex'));
-    if (!crossCheckEnabled || !reviewer || first.length === 0) return null;
+    const { enabled, engines } = crossCheckRef.current;
+    const reviewer = engines.find((e) => e !== dmProviderRef.current && (e === 'claude' || e === 'codex'));
+    if (!enabled || !reviewer || first.length === 0) return null;
     try {
       const second = await invoke<BoardReadResult>('read_table_positions', {
         photo, cols, rows, engine: reviewer,
       });
-      const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-      const disputed: number[] = [];
-      first.forEach((m, i) => {
-        const mine = norm(m.description).split(' ').filter(Boolean);
-        // Best match by shared words; descriptions won't be identical.
-        let best: { cell: string; score: number } | null = null;
-        let runnerUp = 0;
-        for (const o of second.minis) {
-          const words = new Set(norm(o.description).split(' ').filter(Boolean));
-          const score = mine.filter((w) => words.has(w)).length;
-          if (!best || score > best.score) { runnerUp = best?.score ?? 0; best = { cell: o.cell, score }; }
-          else if (score > runnerUp) runnerUp = score;
-        }
-        // A tie means we cannot tell WHICH piece the reviewer was describing, so
-        // any square difference is unattributable rather than a disagreement.
-        // Without this, three tokens described as "<colour> circular token" all
-        // overlap on two words, and one piece the reviewer simply didn't list
-        // makes its nearest neighbour light up amber — a warning about a row
-        // that was right, which is worse than no warning at all.
-        if (best && best.score > 0 && best.score > runnerUp && best.cell.toUpperCase() !== m.cell.toUpperCase()) {
-          disputed.push(i);
-        }
-      });
-      return { disputed, checkedBy: reviewer };
+      // Matching lives in boardCrossCheck.ts — see there for why a tie is not a
+      // dispute. It is out here so it can be run against real reads.
+      return { disputed: disputedCells(first, second.minis), checkedBy: reviewer };
     } catch {
       return null; // a second opinion is a bonus, never a dependency
     }
@@ -4012,9 +4001,14 @@ export function DMConsolePage() {
                     board with 4 pieces on it. Naming the gap is the whole point. */}
                 {boardRead.checkedBy && (
                   <p className="text-[11px] text-slate-400">
+                    {/* Measured on an angled 8-token shot: the two readers made
+                        the SAME mistake on 2 of 8 pieces, because the error comes
+                        from perspective and not from either model — so agreement
+                        is genuinely not evidence of correctness, and this line
+                        must not read as an all-clear. */}
                     {boardRead.disputed?.length
                       ? `${boardRead.checkedBy} read ${boardRead.disputed.length} of these differently — those rows are marked. Worth a look before you apply them.`
-                      : `${boardRead.checkedBy} agreed on every square.`}
+                      : `${boardRead.checkedBy} read every square the same way. That's not a guarantee — on an angled photo both readers drift the same direction — but nothing stood out.`}
                   </p>
                 )}
                 {boardRead.seen > boardRead.minis.length && (
