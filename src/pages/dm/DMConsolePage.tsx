@@ -1054,6 +1054,11 @@ export function DMConsolePage() {
   /** Fights past MAX_PLAN_MAPS that never got a map. Not an error — see the
    *  notice next to the map cards. */
   const [skippedMaps, setSkippedMaps] = React.useState<string[]>([]);
+  /** Hints for maps the DM asked for mid-scene (the makeMap action) that are
+   *  still generating. Shown so the table can see one is coming rather than
+   *  wondering whether the request landed — a map is minutes of work and there
+   *  is otherwise no sign of it until the card appears. */
+  const [pendingMaps, setPendingMaps] = React.useState<string[]>([]);
   const [packProfile, setPackProfile] = React.useState<PackProfileView | null>(null);
   const [profileEdits, setProfileEdits] = React.useState<ProfileOverrides>({ biomes: {} });
   const [profileBusy, setProfileBusy] = React.useState(false);
@@ -2177,6 +2182,33 @@ export function DMConsolePage() {
             return '';
           });
           if (spec) pendingRecalledMapRef.current = { slug: actions.recallMap, spec };
+        }
+        // Grid only, enforced here rather than trusted to the prompt — the same
+        // gate plan_next_session_at applies. Theater has no grid and Hex uses
+        // physical terrain with its own axial coordinates, so a lettered map
+        // fits neither, and the action list that advertises makeMap is not
+        // itself mode-specific. Minutes of model work is not something to spend
+        // on the DM misreading its own instructions.
+        if (campaignId && actions.makeMap?.trim() && battleModeRef.current === 'grid') {
+          // Deliberately NOT awaited. A map is minutes of model work and this is
+          // the middle of a live turn — the DM asks the moment the fiction turns
+          // toward a fight, keeps narrating, and the card lands when it lands.
+          // Awaiting here would stall the table on prep, which is the whole
+          // reason maps were a before-the-session job in the first place.
+          const hint = actions.makeMap.trim();
+          setPendingMaps((prev) => (prev.includes(hint) ? prev : [...prev, hint]));
+          invoke<BattleMapMeta[]>('generate_battle_map', { id: campaignId, hint })
+            .then(async (metas) => {
+              const cards = await Promise.all(metas.map(loadMapCard));
+              setAdHocMapCards((prev) => [...prev, ...cards]);
+            })
+            .catch((e) => {
+              // A map that didn't build must never interrupt play — the DM is
+              // mid-scene. It goes to the same error line everything else uses
+              // and the pending chip clears.
+              setError(`Couldn't build the "${hint}" map: ${e instanceof Error ? e.message : String(e)}`);
+            })
+            .finally(() => setPendingMaps((prev) => prev.filter((h) => h !== hint)));
         }
         // Active Battle Log: endBattle wins (save the outcome, then wipe);
         // otherwise merge any battleLog update + removeCombatant into the
@@ -4395,6 +4427,13 @@ export function DMConsolePage() {
                     the failure line above — but it still has to be said. A capped
                     set of cards looks exactly like a complete one, and the DM
                     would meet an unmapped fight assuming none was needed. */}
+                {pendingMaps.length > 0 && (
+                  <p className="text-xs text-sky-400 mb-2">
+                    The DM asked for {pendingMaps.length === 1 ? 'a map' : `${pendingMaps.length} maps`} mid-scene —
+                    building {pendingMaps.map((h) => `"${h}"`).join(', ')}. Keep playing; {pendingMaps.length === 1 ? 'it' : 'they'} take a few
+                    minutes and will appear here.
+                  </p>
+                )}
                 {skippedMaps.length > 0 && (
                   <p className="text-xs text-slate-400 mb-2">
                     {skippedMaps.length} later fight{skippedMaps.length > 1 ? 's' : ''} in this plan {skippedMaps.length > 1 ? 'have' : 'has'} no

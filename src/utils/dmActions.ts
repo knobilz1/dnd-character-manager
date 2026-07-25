@@ -204,6 +204,16 @@ export interface DmActionSet {
    *  and stashes it for the next buildTurnPrompt). A pure read, like
    *  recallSession — never changes campaign state. */
   recallMap?: string;
+  /** A one-line description of a fight the DM can see coming ("goblin ambush on
+   *  the rope bridge over the gorge"), asking for a battle map to be BUILT for
+   *  it now. Distinct from recallMap, which pulls up one that already exists.
+   *
+   *  A map takes minutes to generate, so this never blocks the turn: the console
+   *  starts it in the background and the card appears when it's ready. That is
+   *  the whole point of the DM asking rather than the DM's human — it can ask
+   *  the moment the fiction turns toward a fight, several beats before anyone
+   *  rolls initiative. */
+  makeMap?: string;
   /** A partial update to the Active Battle Log — any combatant listed is
    *  upserted by name, scalar fields (round/active/initiative/environment/
    *  notes) replace only when present. Merged into DMConsolePage's battleLog
@@ -408,6 +418,8 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   if (recallSession !== undefined) actions.recallSession = recallSession;
   const recallMap = sanitizeScalar(raw.recallMap, 'recallMap', isStr, warnings);
   if (recallMap !== undefined) actions.recallMap = recallMap;
+  const makeMap = sanitizeScalar(raw.makeMap, 'makeMap', isStr, warnings);
+  if (makeMap !== undefined) actions.makeMap = makeMap;
   const endBattle = sanitizeScalar(raw.endBattle, 'endBattle', isBool, warnings);
   if (endBattle !== undefined) actions.endBattle = endBattle;
   const battleResult = sanitizeScalar(raw.battleResult, 'battleResult', isStr, warnings);
