@@ -1256,13 +1256,32 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
             .write_all(format!("{}\n", code.trim()).as_bytes())
             .map_err(|e| format!("Couldn't hand the code over: {e}"))?;
         drop(stdin); // EOF, so the CLI stops waiting for more
-        let _ = p.child.wait();
-        *slot = None;
         Ok(())
     })
     .await
     .map_err(|e| format!("Sign-in task failed: {e}"))??;
-    Ok(engine_auth_state(setting).await?.1)
+
+    // Deliberately NOT waiting for the process to exit.
+    //
+    // Once the code is accepted the CLI carries on to run the throwaway prompt
+    // the login was dressed up as, and agy's --print-timeout defaults to FIVE
+    // MINUTES. Waiting on that left the button stuck on "Signing in…" long after
+    // the sign-in itself had succeeded — which is indistinguishable from a hang.
+    // Authentication is done the moment credentials are written, so poll for
+    // exactly that and stop caring about the rest of the process's life.
+    for _ in 0..24 {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        if engine_auth_state(setting.clone()).await?.1 {
+            if let Some(mut done) = pending_login().lock().unwrap().take() {
+                let _ = done.child.kill(); // its remaining work is of no interest
+            }
+            return Ok(true);
+        }
+    }
+    if let Some(mut stale) = pending_login().lock().unwrap().take() {
+        let _ = stale.child.kill();
+    }
+    Ok(false)
 }
 
 /// Run one stateless completion on any engine and return its text.
