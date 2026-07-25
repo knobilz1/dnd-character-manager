@@ -4678,6 +4678,11 @@ fn glossed_biome_ids(profile: &PackProfile) -> String {
 /// dockside tavern and a sewer junction as `dungeon`, discarding the correct
 /// `tavern`/`sewer` rows that were sitting in the profile, and nothing
 /// anywhere said so. A blip must never be indistinguishable from an answer.
+/// How many independent votes decide a map's biome. Odd, so a plain majority
+/// always exists; three because the measured failure was 1-in-6, which two votes
+/// could tie on and five would pay for without buying much.
+const BIOME_VOTES: usize = 3;
+
 fn classify_biome(profile: &PackProfile, spec: &str) -> String {
     let ids = biome_ids(profile);
     let prompt = format!(
@@ -4685,20 +4690,102 @@ fn classify_biome(profile: &PackProfile, spec: &str) -> String {
         glossed_biome_ids(profile),
         place_context(spec)
     );
-    let mut why = String::new();
-    for attempt in 1..=2 {
-        match crate::local_llm::ask_ingest_once_low_effort(prompt.clone(), Some("sonnet")) {
-            Ok(reply) => {
-                let lc = reply.to_lowercase();
-                if let Some(id) = ids.iter().find(|id| lc.contains(**id)) {
-                    return id.to_string();
-                }
-                why = format!("attempt {attempt}: reply named no scene in the list — {reply:?}");
+    // Vote, don't ask once.
+    //
+    // Measured 2026-07-25 on ONE unchanged spec (zz-gloam's hag lair), six runs:
+    // swamp x4, forest, horror. The odd answer is not a near-miss — every terrain
+    // query keys off this single word, so `horror` swapped the ground for flesh,
+    // the water for blood and the trees for tentacles, and the map was unusable.
+    // Nothing downstream can detect it, because within the horror pack that art
+    // is exactly right.
+    //
+    // This is the cheapest call in the whole pipeline (low effort, sonnet, ~4.6s)
+    // deciding the most far-reaching thing, so it is the obvious place to spend
+    // redundancy. The votes run concurrently: three cost the wall time of one,
+    // against a map that takes ~9 minutes.
+    let cast = |n: usize| -> Vec<Result<Option<String>, String>> {
+        std::thread::scope(|s| {
+            (0..n)
+                .map(|_| {
+                    let prompt = prompt.clone();
+                    let ids = &ids;
+                    s.spawn(move || match crate::local_llm::ask_ingest_once_low_effort(prompt, Some("sonnet")) {
+                        Ok(reply) => {
+                            let lc = reply.to_lowercase();
+                            match ids.iter().find(|id| lc.contains(**id)) {
+                                Some(id) => Ok(Some(id.to_string())),
+                                None => Ok(None), // answered, but named nothing in the list
+                            }
+                        }
+                        Err(e) => Err(e),
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect()
+        })
+    };
+
+    // Spawn order, not completion order, so a split resolves the same way every
+    // time rather than on whichever thread happened to finish first.
+    let tally_of = |votes: &[Result<Option<String>, String>]| -> Vec<(String, usize)> {
+        let mut tally: Vec<(String, usize)> = Vec::new();
+        for name in votes.iter().filter_map(|v| v.as_ref().ok()).flatten() {
+            match tally.iter_mut().find(|(n, _)| n == name) {
+                Some((_, count)) => *count += 1,
+                None => tally.push((name.clone(), 1)),
             }
-            Err(e) => why = format!("attempt {attempt}: {e}"),
         }
-        crate::maplog::log("BIOME CLASSIFY MISS", &why);
+        tally
+    };
+
+    let mut votes = cast(BIOME_VOTES);
+    let mut tally = tally_of(&votes);
+    // Nothing reached a majority — every vote named something different, so this
+    // spec genuinely sits on a boundary and picking one arbitrarily is just the
+    // single-call coin flip again with extra steps. Ask again rather than guess;
+    // it only costs anything on the specs that are actually ambiguous.
+    if tally.len() > 1 && tally.iter().all(|(_, c)| *c == 1) {
+        crate::maplog::log(
+            "BIOME CLASSIFY TIED",
+            &format!(
+                "{} — no majority, casting {BIOME_VOTES} more",
+                tally.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(" vs ")
+            ),
+        );
+        votes.extend(cast(BIOME_VOTES));
+        tally = tally_of(&votes);
     }
+
+    if let Some((winner, count)) = tally.iter().max_by_key(|(_, c)| *c) {
+        if tally.len() > 1 {
+            // A split is worth seeing: it means this spec sits on a boundary, and
+            // the losing answer is what a single call might have returned.
+            crate::maplog::log(
+                "BIOME CLASSIFY SPLIT",
+                &format!(
+                    "{} votes disagreed — {} (taking {winner}, {count}/{})",
+                    votes.len(),
+                    tally.iter().map(|(n, c)| format!("{n} x{c}")).collect::<Vec<_>>().join(", "),
+                    votes.len()
+                ),
+            );
+        }
+        return winner.clone();
+    }
+
+    let why = votes
+        .iter()
+        .enumerate()
+        .map(|(i, v)| match v {
+            Err(e) => format!("vote {}: {e}", i + 1),
+            Ok(None) => format!("vote {}: reply named no scene in the list", i + 1),
+            Ok(Some(_)) => unreachable!("a named vote would have been tallied"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::maplog::log("BIOME CLASSIFY MISS", &why);
     crate::maplog::log(
         "BIOME CLASSIFY FAILED",
         &format!(
