@@ -108,10 +108,27 @@ export function EngineAccounts() {
       const url = await invoke<string | null>('begin_engine_login', { engine: id });
       if (url) {
         setLoginUrl(url);
+        try { await openUrl(url); } catch { /* they can click it here instead */ }
+
+        // The CLI is listening on loopback and the vendor's callback page
+        // relays the code straight back to it — the same mechanism that makes
+        // Claude and Codex seamless. So WAIT for that to land before asking the
+        // user for anything. In the common case they approve in the browser and
+        // this finishes on its own; they never see a code at all.
+        setStep('Waiting for you to approve it in the browser…');
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => { setTimeout(r, 3000); });
+          const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id });
+          if (signedIn) {
+            await refresh();
+            return;
+          }
+        }
+        // Only now, 90s in, do we fall back to asking for the code by hand —
+        // for the case where the relay is blocked and the browser just shows it.
         setCodeFor(id);
         setStep('');
-        try { await openUrl(url); } catch { /* they can click it here instead */ }
-        return; // now waiting for the pasted code
+        return;
       }
       // Some engines finish on the browser callback alone and never ask.
       await refresh();
@@ -185,7 +202,7 @@ export function EngineAccounts() {
                 {codeFor === e.id && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-[11px] text-slate-400">
-                      Approve it in your browser, then paste the code it gives you here.{' '}
+                      Didn't finish automatically. If your browser showed you a code, paste it here.{' '}
                       <button onClick={() => void openUrl(loginUrl)} className="text-emerald-400 underline">
                         Reopen the sign-in page
                       </button>
