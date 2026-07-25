@@ -2140,8 +2140,9 @@ fn build_session_plan_prompt(module_plan: &str, current_chapter: &str, memory: &
         Reply in markdown with exactly three sections:\n\
         ## Encounters\n\
         A numbered list of what the party will likely reach in the upcoming content. Format EACH line exactly like ONE of these two patterns (pick whichever tag actually applies to that encounter — never write both tags on one line):\n\
-        \"N. [combat] Short Name — one-sentence description.\" for an encounter you expect to involve a fight.\n\
-        \"N. [non-combat] Short Name — one-sentence description.\" for anything else (social, exploration, puzzle).\n\
+        \"N. [combat] Short Name — one-sentence description.\" for any encounter where a fight CAN break out — including one the party can avoid, talk their way past, or trigger only by failing. A battle map is prepared for every [combat] encounter and for no others, so an optional fight still needs the tag.\n\
+        \"N. [non-combat] Short Name — one-sentence description.\" only when violence is not on the table at all (pure social, exploration, puzzle).\n\
+        When it could be either, choose [combat]: a map that goes unused costs nothing, and a fight with no map costs the table ten minutes.\n\
         Only list encounters that actually appear in the content above — don't invent filler. If genuinely nothing is coming up, write exactly \"No encounters expected yet.\" and nothing else in this section.\n\n\
         ## Set up from what you own\n\
         Which cataloged pieces to lay out for the upcoming content, and a rough arrangement. If nothing owned clearly fits, say so plainly instead of forcing a suggestion.\n\n\
@@ -2276,6 +2277,12 @@ fn build_session_plan_critique_prompt(
         at the table (a named NPC with a want, a specific place, a concrete complication), or is it the kind of \
         summary that reads fine and gives them nothing to do? And are the loose threads it picks up the ones the \
         flagged facts say are still open, rather than whichever were easiest to restate?\n\n\
+        One thing about the format is not cosmetic. Each encounter line is tagged [combat] or [non-combat], and a \
+        battle map is prepared for every [combat] encounter and for no others. So a beat whose description allows a \
+        fight — even an optional one, or one that only happens if the party fails — while its line says [non-combat] \
+        is a real defect: at the table that is a fight with no map. Report it as a finding, and if you would revise a \
+        beat in a way that puts a fight in it, say that its tag has to move with the text. Where it could be either, \
+        [combat] is correct; an unused map costs nothing.\n\n\
         Ignore length: a plan for one evening should be short, and padding it is a fault, not a fix.",
         section("The campaign's standing plan and lore", combined_plan),
         section("The chapter the party is currently in", current_chapter),
@@ -11042,6 +11049,17 @@ Tactics:
         assert!(prompt.contains("Rocky Hill"));
         assert!(prompt.contains("## Set up from what you own"));
         assert!(prompt.contains("## Consider printing"));
+        // The tag decides whether a battle map gets built at all, and "an
+        // encounter you expect to involve a fight" left optional fights
+        // ambiguous — live, a cult gathering the party could be spotted at was
+        // tagged [non-combat], so no map would have been prepared for a fight
+        // the plan itself offers. The tie-break has to match the one
+        // parse_plan_encounters already applies to an untagged line.
+        assert!(
+            prompt.contains("fight CAN break out"),
+            "an avoidable or failure-state fight still needs a map"
+        );
+        assert!(prompt.to_lowercase().contains("choose [combat]"), "ties resolve toward preparing a map");
     }
 
     #[test]
@@ -11197,6 +11215,19 @@ Tactics:
         assert!(p.to_lowercase().contains("already resolved"));
         // A per-evening plan must never be padded by the reviewer.
         assert!(p.to_lowercase().contains("padding it is a fault"));
+        // The reviewer must know the tag drives map generation. Live, it revised
+        // a [non-combat] beat to add "drop into combat against 4-6 cultists" and
+        // left the tag alone — a fight the map pipeline never prepares for,
+        // because parse_plan_encounters only builds maps for [combat] lines.
+        assert!(p.contains("[non-combat]") && p.contains("[combat]"), "tags must be named literally");
+        assert!(
+            p.to_lowercase().contains("battle map is prepared"),
+            "the reviewer has to know the tag has a downstream consequence"
+        );
+        assert!(
+            p.to_lowercase().contains("tag has to move with the text"),
+            "and that revising a beat into a fight means moving its tag"
+        );
 
         // An empty campaign (no module, no memory yet) still produces a usable
         // prompt rather than blank labelled sections.
