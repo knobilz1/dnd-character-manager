@@ -303,7 +303,6 @@ fn resolve_claude_exe() -> Option<std::path::PathBuf> {
 /// `PATH` is augmented on the child so the CLI's own internal lookups (e.g.
 /// the node runtime a `.cmd` shim invokes) resolve regardless of the stale
 /// PATH the GUI app inherited.
-#[cfg(windows)]
 /// Same PATH scan as `resolve_claude_exe`, for any engine's binary stem.
 ///
 /// Kept separate from that function rather than replacing it: the Claude path
@@ -362,6 +361,36 @@ fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Resu
     Ok(cmd)
 }
 
+/// Non-Windows counterparts for the four PATH-scanning helpers above.
+///
+/// All of that machinery exists for Windows only: `.exe` vs `.cmd` npm shims,
+/// `;` separators, and the stale PATH a GUI app inherits from Explorer. On Unix
+/// a bare stem resolves through PATH like any other command, which is exactly
+/// what `engine_command` below has always done there.
+///
+/// These are not decoration — without them the crate does not compile off
+/// Windows. v0.23.2's macOS builds BOTH failed with "cannot find function
+/// `resolve_engine_exe`" and the release never published, because the new
+/// engine plumbing called Windows-only helpers from unguarded code. (One of
+/// those unguarded functions was `claude_command`, which had been `#[cfg(windows)]`
+/// until an inserted function landed between its attribute and its `fn` and
+/// quietly took the attribute with it.) Nothing local catches this: cargo on
+/// this machine only ever compiles the Windows arm.
+#[cfg(not(windows))]
+fn augmented_path() -> String {
+    std::env::var("PATH").unwrap_or_default()
+}
+
+#[cfg(not(windows))]
+fn resolve_npm_exe() -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from("npm"))
+}
+
+#[cfg(not(windows))]
+fn resolve_engine_exe(engine: crate::cli_provider::CliEngine) -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from(engine.binary_stems()[0]))
+}
+
 #[cfg(not(windows))]
 fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Result<Command, String> {
     let mut c = Command::new(engine.binary_stems()[0]);
@@ -379,6 +408,12 @@ fn engine_not_installed_error(engine: crate::cli_provider::CliEngine) -> String 
     )
 }
 
+// Windows-only, and it must SAY so directly above the `fn`. This guard went
+// missing when `resolve_engine_exe` was inserted between the attribute and this
+// signature, which silently handed the attribute to the new function and left
+// this one compiling everywhere — calling Windows-only helpers. That is what
+// broke v0.23.2's macOS builds.
+#[cfg(windows)]
 fn claude_command(args: &[&str]) -> Result<Command, String> {
     let path = resolve_claude_exe().ok_or_else(claude_not_installed_error)?;
     let is_batch = path
