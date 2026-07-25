@@ -29,7 +29,7 @@ import { Button, Dialog } from './ui';
 type EngineId = 'claude' | 'codex' | 'gemini';
 type State = { installed: boolean; signedIn: boolean };
 
-const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string }> = [
+const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string; terminalOnly?: boolean }> = [
   {
     id: 'claude',
     name: 'Claude Code',
@@ -49,7 +49,17 @@ const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string }
     // Deliberately says "Gemini", not "Antigravity". Gemini is the MODEL doing
     // the work; Antigravity is just the CLI client Google replaced it with in
     // June 2026. Naming the client would only confuse someone choosing an LLM.
-    blurb: 'Signs in through Google Antigravity, which runs Gemini models. Closes itself when done.',
+    blurb: 'Runs on Google Antigravity (Gemini models). Needs a one-time sign-in in a terminal — see below.',
+    // MEASURED 2026-07-24, do not rebuild the in-app flow without reading this.
+    // agy's "paste the authorization code here" prompt is read from a real
+    // TERMINAL, not from piped stdin: the captured log shows the prompt printed
+    // and then nothing at all — no accept, no reject — for a code written down
+    // its stdin. Its other route is an HTTPS loopback listener speaking an
+    // undocumented protocol with Google's own callback page. Making Sign in work
+    // in-app therefore needs a pseudo-console (ConPTY), which is a dependency
+    // and a chunk of Windows plumbing, not a tweak. Credentials land in the
+    // Windows keyring, so the terminal sign-in is genuinely ONE TIME.
+    terminalOnly: true,
   },
 ];
 
@@ -246,6 +256,18 @@ export function EngineAccounts() {
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">{e.plan} — {e.blurb}</p>
                 {thisBusy && step && <p className="text-[11px] text-slate-400 mt-1">{step}</p>}
+                {e.terminalOnly && s?.installed && !s.signedIn && (
+                  <div className="mt-2 text-[11px] text-slate-400 space-y-1">
+                    <p>
+                      Google's CLI only accepts its sign-in code from a real terminal, so this one step can't happen
+                      in-app. Run this once, paste the code it asks for, and you're set — it's remembered afterwards.
+                    </p>
+                    <code className="block bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono break-all text-slate-300">
+                      %LOCALAPPDATA%gyingy.exe
+                    </code>
+                    <p className="text-slate-500">Then hit ↻ above to re-check.</p>
+                  </div>
+                )}
                 {codeFor === e.id && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-[11px] text-slate-400">
@@ -271,7 +293,7 @@ export function EngineAccounts() {
                   </div>
                 )}
               </div>
-              {s?.installed && !s.signedIn && (
+              {s?.installed && !s.signedIn && !e.terminalOnly && (
                 <button
                   onClick={() => void openPasteDialog(e.id)}
                   className="text-[11px] text-slate-400 hover:text-emerald-400 underline whitespace-nowrap self-center"
@@ -280,7 +302,10 @@ export function EngineAccounts() {
                   Paste a code
                 </button>
               )}
-              {s && !s.signedIn && (
+              {s?.installed && !s.signedIn && e.terminalOnly && (
+                <span className="text-[11px] text-slate-500 self-center whitespace-nowrap">one-time setup ↓</span>
+              )}
+              {s && !s.signedIn && !e.terminalOnly && (
                 <Button
                   size="sm"
                   variant={s.installed ? 'primary' : 'outline'}
