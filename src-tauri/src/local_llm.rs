@@ -132,6 +132,54 @@ fn build_system_prompt_at(dir: &Path) -> String {
     format!("{resolved}{LOCAL_CRITICAL_REMINDERS}{LOCAL_OUTPUT_FORMAT_ADDENDUM}")
 }
 
+/// Marks the standing brief handed to a non-Claude CLI. Named boundaries rather
+/// than a bare paste so the model can tell its persona from the turn it has to
+/// answer — this arrives as ordinary prompt text, not a system prompt.
+const CLI_CONTEXT_HEADER: &str = "# Standing instructions — your persona, house rules, and this campaign's world\n\nEverything up to the END marker below is your standing brief for this and every later turn in this conversation. Claude Code reads it automatically from the project's CLAUDE.md; you are being handed it directly because your CLI does not read that file.";
+const CLI_CONTEXT_FOOTER: &str = "# END of standing instructions\n\nEverything below is this turn only.";
+
+fn cli_context_sent() -> &'static Mutex<HashMap<std::path::PathBuf, u64>> {
+    static SENT: OnceLock<Mutex<HashMap<std::path::PathBuf, u64>>> = OnceLock::new();
+    SENT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The standing project context a non-Claude CLI needs, because it does not read
+/// CLAUDE.md.
+///
+/// Measured 2026-07-25 in a scratch directory holding all three convention files
+/// with a different pass-phrase in each: `agy --print` read NONE of CLAUDE.md /
+/// AGENTS.md / GEMINI.md, and `codex exec` read AGENTS.md only. Neither reads
+/// CLAUDE.md, which is the only one Tavern Sheet writes — so choosing Codex or
+/// Gemini as the DM engine used to hand the model nothing but the live party
+/// status: no persona, no house rules, no dm-actions contract, no NPC memory, no
+/// module chapter. A live Gemini turn confirmed it — competent narration, and no
+/// actions block at all, so nothing the app could act on.
+///
+/// `None` when this exact context already went out on this campaign's current
+/// thread. `--conversation` / `exec resume` replay the whole thread, so
+/// re-sending unconditionally would stack another ~39K chars per turn. Any
+/// change — a chapter advance, a new memory note — moves the hash and re-sends,
+/// which is the property Claude gets for free by re-reading CLAUDE.md each turn.
+pub(crate) fn cli_project_context(dir: &Path, resuming: bool) -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let claude_md = read_optional(&dir.join("CLAUDE.md"));
+    if claude_md.trim().is_empty() {
+        return None;
+    }
+    let resolved = resolve_claude_md_imports(dir, &claude_md);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    resolved.hash(&mut hasher);
+    let hash = hasher.finish();
+    let mut sent = cli_context_sent().lock().unwrap();
+    // A fresh thread has nothing, so it always gets the brief regardless of what
+    // some earlier thread on this campaign was told.
+    if resuming && sent.get(dir) == Some(&hash) {
+        return None;
+    }
+    sent.insert(dir.to_path_buf(), hash);
+    Some(format!("{CLI_CONTEXT_HEADER}\n\n{resolved}\n\n{CLI_CONTEXT_FOOTER}"))
+}
+
 /// Bounds a session's stored history to the most recent `limit_turns` user+
 /// assistant pairs, dropping the oldest first. Local models resend this
 /// history in full every turn (no lightweight --resume token the way Claude
@@ -1360,6 +1408,42 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// The brief is ~39K resolved and `exec resume`/`--conversation` replay the
+    /// whole thread, so re-sending it every turn would stack a copy per turn. But
+    /// skipping it when the campaign HAS changed loses the one property Claude
+    /// gets free by re-reading CLAUDE.md: a chapter advance reaching the DM on the
+    /// very next turn. Both halves are sabotage-checked below.
+    #[test]
+    fn the_cli_brief_is_sent_once_per_thread_and_again_whenever_the_campaign_changes() {
+        let root = Scratch::new("cli-ctx");
+        std::fs::write(root.0.join("memory.md"), "Chapter 1: the marsh.").unwrap();
+        std::fs::write(root.0.join("CLAUDE.md"), "You are the DM.\n@memory.md").unwrap();
+
+        // A fresh thread always gets it, and it really does carry the import.
+        let first = cli_project_context(&root.0, false).expect("a fresh thread gets the brief");
+        assert!(first.contains("You are the DM."));
+        assert!(first.contains("Chapter 1: the marsh."), "the @import must be inlined");
+        assert!(first.contains("END of standing instructions"), "needs a boundary the model can see");
+
+        // Same thread, nothing changed → not resent.
+        assert_eq!(cli_project_context(&root.0, true), None);
+
+        // A chapter advance rewrites an import; the next turn must see it.
+        std::fs::write(root.0.join("memory.md"), "Chapter 2: the barrow.").unwrap();
+        let after = cli_project_context(&root.0, true).expect("a changed campaign resends");
+        assert!(after.contains("Chapter 2: the barrow."));
+        assert_eq!(cli_project_context(&root.0, true), None, "and then settles again");
+
+        // A NEW thread on the same campaign gets it even though nothing changed —
+        // the new conversation has no history to have seen it in.
+        assert!(cli_project_context(&root.0, false).is_some());
+
+        // No CLAUDE.md at all (a campaign folder that predates it) → nothing to
+        // send, and no empty header block pretending to be a brief.
+        let bare = Scratch::new("cli-ctx-bare");
+        assert_eq!(cli_project_context(&bare.0, false), None);
     }
 
     #[test]

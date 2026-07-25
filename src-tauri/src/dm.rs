@@ -1802,9 +1802,120 @@ pub async fn ask_dm_engine(
         .map_err(|e| format!("Turn task failed: {e}"))?
 }
 
-/// Blocking half of `ask_dm_engine`: spawn, feed the prompt, collect the reply
-/// and whatever session id the engine minted for next turn.
+/// Most a prompt may be when the engine wants it as a command-line VALUE.
+///
+/// Measured, not guessed: a 40,015-character `agy --print <text>` never even
+/// spawns — "Argument list too long" — because Windows caps a whole command line
+/// at 32,767 characters. The margin below that covers the exe path, the lockdown
+/// flags and a `--conversation` id.
+const MAX_ARGV_PROMPT_CHARS: usize = 24_000;
+
+/// Split an oversized prompt into pieces that each fit on a command line, at line
+/// boundaries so no sentence is cut mid-word. Every piece but the last is marked
+/// as continuing, otherwise the engine answers half a brief as though it were the
+/// whole turn. Pure — see the tests.
+///
+/// A single line longer than the cap is emitted whole rather than chopped: it
+/// would still fail to spawn, but as an honest engine error rather than a silent
+/// half-message. Nothing in a campaign brief is one 24K line.
+fn split_prompt_for_argv(prompt: &str, cap: usize) -> Vec<String> {
+    const CONTINUES: &str = "\n\n[This brief continues in the next message. Reply with only: OK]";
+    if prompt.chars().count() <= cap {
+        return vec![prompt.to_string()];
+    }
+    let budget = cap.saturating_sub(CONTINUES.chars().count());
+    let mut pieces: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for line in prompt.split_inclusive('\n') {
+        if !current.is_empty() && current.chars().count() + line.chars().count() > budget {
+            pieces.push(std::mem::take(&mut current));
+        }
+        current.push_str(line);
+    }
+    if !current.is_empty() {
+        pieces.push(current);
+    }
+    let last = pieces.len().saturating_sub(1);
+    pieces
+        .iter()
+        .enumerate()
+        .map(|(i, p)| if i == last { p.clone() } else { format!("{p}{CONTINUES}") })
+        .collect()
+}
+
+/// Blocking half of `ask_dm_engine`.
+///
+/// Two things happen here that `run_engine_turn_once` deliberately doesn't know
+/// about: the campaign brief is prepended (no non-Claude CLI reads CLAUDE.md —
+/// see `cli_project_context`), and a prompt too big for a command line is fed in
+/// as several messages on one conversation, since the brief pushes a turn well
+/// past the argv cap. The last piece carries the real turn, so its reply is the
+/// answer and no extra round-trip is spent on a bare acknowledgement.
 fn run_engine_turn(
+    app: &AppHandle,
+    engine: crate::cli_provider::CliEngine,
+    prompt: &str,
+    session_id: Option<&str>,
+    cwd: Option<PathBuf>,
+) -> Result<DmReply, String> {
+    // Setting cwd is enough for Claude and for nobody else: measured, `agy` reads
+    // none of CLAUDE.md/AGENTS.md/GEMINI.md and `codex` reads AGENTS.md only, so
+    // these engines saw no persona, no house rules and no dm-actions contract.
+    // Hand them the same resolved brief the local-model path already builds.
+    let prompt = match cwd
+        .as_deref()
+        .and_then(|dir| crate::local_llm::cli_project_context(dir, session_id.is_some()))
+    {
+        Some(context) => format!("{context}\n\n{prompt}"),
+        None => prompt.to_string(),
+    };
+
+    // Stdin has no size limit, so only the argv engines need splitting.
+    let pieces = if crate::cli_provider::turn_args(engine, session_id, None, None, false, "o.txt")
+        .prompt_on_stdin
+    {
+        vec![prompt]
+    } else {
+        split_prompt_for_argv(&prompt, MAX_ARGV_PROMPT_CHARS)
+    };
+
+    let mut session = session_id.map(str::to_string);
+    let mut reply = DmReply { text: String::new(), session_id: None };
+    for (i, piece) in pieces.iter().enumerate() {
+        reply = run_engine_turn_once(app, engine, piece, session.as_deref(), cwd.clone())?;
+        // The barge-in contract: empty text AND no session id. Stop priming
+        // rather than spending the rest of the pieces on a cancelled turn.
+        if reply.text.is_empty() && reply.session_id.is_none() {
+            return Ok(reply);
+        }
+        // Each piece must land on the SAME conversation as the one before it, so
+        // the first piece's minted id has to carry forward — without this every
+        // piece would start a fresh thread and the brief would never accumulate.
+        if reply.session_id.is_some() {
+            session = reply.session_id.clone();
+        }
+        if pieces.len() > 1 {
+            crate::maplog::log(
+                "ENGINE TURN PIECE",
+                &format!(
+                    "{} piece {}/{} ({} chars) → {} chars back",
+                    engine.label(),
+                    i + 1,
+                    pieces.len(),
+                    piece.chars().count(),
+                    reply.text.chars().count()
+                ),
+            );
+        }
+    }
+    // `session` holds the live conversation even when the final piece's envelope
+    // omitted the id; the frontend needs it to resume next turn.
+    Ok(DmReply { text: reply.text, session_id: session.or(reply.session_id) })
+}
+
+/// One spawn: feed the prompt, collect the reply and whatever session id the
+/// engine minted for next turn.
+fn run_engine_turn_once(
     app: &AppHandle,
     engine: crate::cli_provider::CliEngine,
     prompt: &str,
@@ -2326,6 +2437,53 @@ pub async fn warmup_dm_session(app: AppHandle, campaign_id: String) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 40K `agy --print <text>` fails to spawn outright, so the campaign brief
+    /// (~39K on its own) has to arrive as several messages. The sabotage that
+    /// matters is the LAST piece: if it were marked "continues", the engine would
+    /// answer with "OK" instead of the turn, and the DM would go mute with every
+    /// subprocess exiting 0.
+    #[test]
+    fn an_oversized_argv_prompt_splits_at_line_boundaries_with_only_the_last_piece_answerable() {
+        let short = "one line\nsecond line";
+        assert_eq!(split_prompt_for_argv(short, 24_000), vec![short.to_string()]);
+
+        let big = "0123456789\n".repeat(400); // 4,400 chars
+        let pieces = split_prompt_for_argv(&big, 1_000);
+        assert!(pieces.len() >= 5, "4.4K at a 1K cap should be 5+ pieces, got {}", pieces.len());
+        for (i, p) in pieces.iter().enumerate() {
+            assert!(p.chars().count() <= 1_000, "piece {i} is {} chars, over cap", p.chars().count());
+            let is_last = i + 1 == pieces.len();
+            assert_eq!(
+                p.contains("continues in the next message"),
+                !is_last,
+                "piece {i} of {}: only non-final pieces may be marked as continuing",
+                pieces.len()
+            );
+        }
+        // Nothing may be dropped: strip the markers and the original must return.
+        let rejoined = pieces
+            .iter()
+            .map(|p| p.split("\n\n[This brief continues").next().unwrap_or(p))
+            .collect::<String>();
+        assert_eq!(rejoined, big, "splitting lost or reordered content");
+        // Lines are never cut mid-token.
+        for p in &pieces {
+            for line in p.lines().filter(|l| !l.starts_with('[') && !l.is_empty()) {
+                assert_eq!(line, "0123456789", "a line was chopped: {line:?}");
+            }
+        }
+    }
+
+    /// One 24K line can't be split at a boundary that doesn't exist. Emitting it
+    /// whole means the engine reports a real spawn error; silently chopping it
+    /// would hand the model half a sentence and look like a model failure.
+    #[test]
+    fn a_single_unsplittable_line_is_left_intact_rather_than_chopped() {
+        let one_line = "x".repeat(5_000);
+        let pieces = split_prompt_for_argv(&one_line, 1_000);
+        assert_eq!(pieces, vec![one_line]);
+    }
 
     /// A Claude tier name reaching another engine's `--model` is the bug that
     /// made every cross-check critique leg come back empty while the failover
