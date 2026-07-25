@@ -113,6 +113,13 @@ export function EngineAccounts() {
         // system browser can only ever show it to the user to copy. Our own
         // window sees the raw redirect first and lifts the code out itself.
         await invoke('login_in_app', { engine: id, url });
+        // Show the paste box IMMEDIATELY, not after a timeout. Antigravity's
+        // callback page shows the user a code in practice, every time — the
+        // loopback relay evidently doesn't survive a real browser hop here. So
+        // the manual route is the RELIABLE one and must be visible from the
+        // start; the automatic capture below simply beats them to it when it
+        // works, and clears the box on its own.
+        setCodeFor(id);
         setStep('Waiting for you to approve it…');
         for (let i = 0; i < 60; i++) {
           await new Promise((r) => { setTimeout(r, 2000); });
@@ -210,7 +217,8 @@ export function EngineAccounts() {
                 {codeFor === e.id && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-[11px] text-slate-400">
-                      Didn't finish automatically. If your browser showed you a code, paste it here.{' '}
+                      Approve it in the sign-in window. If you end up on a page showing a code, paste that code
+                      here — otherwise this finishes on its own.{' '}
                       <button onClick={() => void openUrl(loginUrl)} className="text-emerald-400 underline">
                         Reopen the sign-in page
                       </button>
