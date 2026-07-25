@@ -1485,9 +1485,30 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
             // an empty second line, which agy treats as a cancel and reports as
             // "authentication interrupted" (observed exactly that).
             let mut w = shared.lock().map_err(|_| "sign-in terminal is busy")?;
-            w.write_all(format!("{}\r", code.trim()).as_bytes())
-                .map_err(|e| format!("Couldn't type the code in: {e}"))?;
-            w.flush().map_err(|e| format!("Couldn't type the code in: {e}"))?;
+            let typed = w
+                .write_all(format!("{}\r", code.trim()).as_bytes())
+                .and_then(|_| w.flush());
+            if let Err(e) = typed {
+                // The console is gone, so the CLI already exited. WHY it exited
+                // is the only useful thing left and it's sitting in the
+                // transcript — a 60s timeout and an outright refusal look
+                // identical from out here without it.
+                let said = p.log.lock().map(|l| l.clone()).unwrap_or_default();
+                let tail = said
+                    .lines()
+                    .filter(|l| !l.trim().is_empty() && !l.contains("accounts.google.com"))
+                    .rev()
+                    .take(8)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return Err(format!(
+                    "The sign-in had already ended before the code arrived ({e}).\n\nWhat it said:\n{}",
+                    if tail.trim().is_empty() { "(it printed nothing)" } else { &tail }
+                ));
+            }
             return Ok(());
         }
         let mut stdin = p.stdin.take().ok_or("Nothing is waiting for a code.")?;
