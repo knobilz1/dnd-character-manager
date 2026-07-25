@@ -1,5 +1,6 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Check, Download, LogIn, RefreshCw } from 'lucide-react';
 import { Button } from './ui';
 
@@ -17,10 +18,12 @@ import { Button } from './ui';
  *   installed, no auth-> Sign in   (opens the vendor's own browser flow)
  *   signed in         -> a quiet tick, nothing to do
  *
- * Sign-in opens a real console window running the vendor's login command and
- * blocks until it closes; the app never sees or handles a credential. See
- * dm.rs's connect_engine, which re-checks auth afterwards rather than trusting
- * the exit code — closing the window is also a "successful" exit.
+ * Sign-in involves NO terminal. The CLI runs windowless with piped stdio, the
+ * app reads the OAuth URL out of its output and opens the browser, and when the
+ * vendor falls back to "paste the authorization code" that code goes into a text
+ * field here and straight down the CLI's stdin. It is passed through, never
+ * stored. Auth is then re-checked rather than trusting an exit code — a
+ * cancelled flow exits cleanly too.
  */
 
 type EngineId = 'claude' | 'codex' | 'gemini';
@@ -56,6 +59,11 @@ export function EngineAccounts() {
   const [step, setStep] = React.useState<string>('');
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  /** Set while an engine is waiting for the authorization code its browser
+   *  handed the user. This is the whole reason no terminal is involved. */
+  const [codeFor, setCodeFor] = React.useState<EngineId | null>(null);
+  const [loginUrl, setLoginUrl] = React.useState('');
+  const [code, setCode] = React.useState('');
 
   const refresh = React.useCallback(async () => {
     const next: Partial<Record<EngineId, State>> = {};
@@ -78,24 +86,35 @@ export function EngineAccounts() {
   React.useEffect(() => { void refresh(); }, [refresh]);
 
   /** Install (if needed) then sign in, as one motion — the same "don't make
-   *  them come back and click a second button" flow the Claude path uses. */
+   *  them come back and click a second button" flow the Claude path uses.
+   *
+   *  No console anywhere. The CLI runs windowless with piped stdio, the app
+   *  reads the OAuth URL out of its output and shows it here, and the code the
+   *  browser hands back is pasted into a normal text field. Every console-based
+   *  attempt at this failed differently — no window at all, then a window that
+   *  hung with nowhere to draw — and none of them ever gave the user somewhere
+   *  to actually put the code. */
   async function connect(id: EngineId, needsInstall: boolean) {
     setBusy(id);
     setError(null);
+    setCodeFor(null);
+    setCode('');
     try {
       if (needsInstall) {
         setStep('Installing…');
         await invoke('install_engine_cli', { engine: id });
       }
-      setStep('Waiting for sign-in — finish in the window that opened…');
-      const ok = await invoke<boolean>('connect_engine', { engine: id });
-      await refresh();
-      if (!ok) {
-        setError(
-          'That didn\'t finish signing in. The window opens a page in your browser — if it didn\'t appear, '
-          + 'check for a blocked pop-up, then try again. Leave the terminal window open until the browser says you\'re done.',
-        );
+      setStep('Opening your browser…');
+      const url = await invoke<string | null>('begin_engine_login', { engine: id });
+      if (url) {
+        setLoginUrl(url);
+        setCodeFor(id);
+        setStep('');
+        try { await openUrl(url); } catch { /* they can click it here instead */ }
+        return; // now waiting for the pasted code
       }
+      // Some engines finish on the browser callback alone and never ask.
+      await refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // The one thing the app genuinely can't fix for the user.
@@ -104,6 +123,24 @@ export function EngineAccounts() {
           ? "Node.js isn't installed, which these CLIs need. Install it from nodejs.org, then try again."
           : msg,
       );
+    } finally {
+      setBusy(null);
+      setStep('');
+    }
+  }
+
+  async function submitCode(id: EngineId) {
+    setBusy(id);
+    setError(null);
+    setStep('Finishing sign-in…');
+    try {
+      const ok = await invoke<boolean>('submit_login_code', { engine: id, code });
+      await refresh();
+      setCodeFor(null);
+      setCode('');
+      if (!ok) setError("That code wasn't accepted. Start the sign-in again for a fresh one — they expire quickly.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
       setStep('');
@@ -145,6 +182,29 @@ export function EngineAccounts() {
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">{e.plan} — {e.blurb}</p>
                 {thisBusy && step && <p className="text-[11px] text-slate-400 mt-1">{step}</p>}
+                {codeFor === e.id && (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-[11px] text-slate-400">
+                      Approve it in your browser, then paste the code it gives you here.{' '}
+                      <button onClick={() => void openUrl(loginUrl)} className="text-emerald-400 underline">
+                        Reopen the sign-in page
+                      </button>
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        autoFocus
+                        value={code}
+                        onChange={(ev) => setCode(ev.target.value)}
+                        onKeyDown={(ev) => { if (ev.key === 'Enter' && code.trim()) void submitCode(e.id); }}
+                        placeholder="Paste the authorization code"
+                        className="flex-1 min-w-0 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-xs text-slate-200"
+                      />
+                      <Button size="sm" disabled={!code.trim() || !!busy} onClick={() => void submitCode(e.id)}>
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
               {s && !s.signedIn && (
                 <Button

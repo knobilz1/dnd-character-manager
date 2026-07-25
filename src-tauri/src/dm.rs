@@ -922,6 +922,135 @@ pub fn check_claude_auth() -> Result<bool, String> {
     claude_logged_in()
 }
 
+// ── In-app sign-in, for engines that hand back a code ────────────────────────
+//
+// Some login flows can't be delegated to a console at all. Antigravity prints an
+// OAuth URL, and when the browser callback doesn't land it falls back to "paste
+// the authorization code here" — on ITS stdin. Every attempt to satisfy that
+// with a spawned console failed in a different way: no window at all, then a
+// window that hung with nowhere to draw. The console was never the right answer.
+//
+// So the app does it: spawn with pipes and no window, read the URL out of the
+// child's own output, show it in the UI, take the pasted code in a normal text
+// field, and write it back down the pipe. The credential goes from Google to the
+// user's clipboard to the CLI's stdin — Tavern Sheet passes it through without
+// storing it, and nobody has to find a terminal.
+
+use std::sync::OnceLock;
+use std::time::Duration;
+
+struct PendingLogin {
+    child: std::process::Child,
+    stdin: Option<std::process::ChildStdin>,
+}
+
+fn pending_login() -> &'static Mutex<Option<PendingLogin>> {
+    static P: OnceLock<Mutex<Option<PendingLogin>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(None))
+}
+
+/// Start a sign-in and return the URL the user must visit, or None if the engine
+/// authenticated without needing one.
+///
+/// Any previous attempt is killed first: a half-finished login holding a pipe
+/// open would otherwise make the next one look like it hung, which is exactly
+/// the failure this whole path exists to remove.
+#[tauri::command]
+pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String> {
+    let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    tokio::task::spawn_blocking(move || {
+        if let Some(mut old) = pending_login().lock().unwrap().take() {
+            let _ = old.child.kill();
+        }
+        let args: Vec<&str> = match engine {
+            crate::cli_provider::CliEngine::Gemini => {
+                vec!["--mode", "plan", "--print", "Reply with exactly: READY"]
+            }
+            crate::cli_provider::CliEngine::Codex => vec!["login"],
+            crate::cli_provider::CliEngine::Claude => vec!["auth", "login", "--claudeai"],
+        };
+        let mut cmd = engine_command(engine, &args)?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // no window — the UI is the window now
+        }
+        let mut child = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
+
+        // Read the child's own output until it shows us a URL. Bounded, so an
+        // engine that never prints one fails fast instead of hanging.
+        let stdout = child.stdout.take().ok_or("no stdout pipe")?;
+        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut buf = String::new();
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        buf.push_str(&line);
+                        if let Some(url) = find_login_url(&buf) {
+                            let _ = tx.send(Some(url));
+                            return;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = tx.send(None);
+        });
+
+        let found = rx.recv_timeout(Duration::from_secs(45)).unwrap_or(None);
+        let stdin = child.stdin.take();
+        *pending_login().lock().unwrap() = Some(PendingLogin { child, stdin });
+        Ok(found)
+    })
+    .await
+    .map_err(|e| format!("Login task failed: {e}"))?
+}
+
+/// Pull the first http(s) URL out of a CLI's login output.
+fn find_login_url(text: &str) -> Option<String> {
+    let start = text.find("https://")?;
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+        .unwrap_or(rest.len());
+    let url = rest[..end].trim_end_matches(['.', ',', ')']).to_string();
+    (url.len() > "https://".len()).then_some(url)
+}
+
+/// Hand the pasted authorization code to the waiting CLI, then report whether
+/// the engine is actually signed in — never trusting the exit code, since a
+/// cancelled flow also exits cleanly.
+#[tauri::command]
+pub async fn submit_login_code(engine: String, code: String) -> Result<bool, String> {
+    let setting = engine.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut slot = pending_login().lock().unwrap();
+        let Some(p) = slot.as_mut() else {
+            return Err("That sign-in is no longer waiting — start it again.".to_string());
+        };
+        let mut stdin = p.stdin.take().ok_or("Nothing is waiting for a code.")?;
+        stdin
+            .write_all(format!("{}\n", code.trim()).as_bytes())
+            .map_err(|e| format!("Couldn't hand the code over: {e}"))?;
+        drop(stdin); // EOF, so the CLI stops waiting for more
+        let _ = p.child.wait();
+        *slot = None;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Sign-in task failed: {e}"))??;
+    Ok(engine_auth_state(setting).await?.1)
+}
+
 /// Run one stateless completion on any engine and return its text.
 ///
 /// The execution primitive the whole multi-engine feature stands on: arg
