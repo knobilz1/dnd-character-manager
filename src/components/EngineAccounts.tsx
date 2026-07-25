@@ -116,52 +116,11 @@ export function EngineAccounts() {
         setStep('Installing…');
         await invoke('install_engine_cli', { engine: id });
       }
-      setStep('Opening your browser…');
-      const url = await invoke<string | null>('begin_engine_login', { engine: id });
-      if (url) {
-        setLoginUrl(url);
-        // Sign in INSIDE the app. The vendor's callback page strips the
-        // authorization code out of the address bar the instant it loads, so a
-        // system browser can only ever show it to the user to copy. Our own
-        // window sees the raw redirect first and lifts the code out itself.
-        await invoke('login_in_app', { engine: id, url });
-        // Show the paste box IMMEDIATELY, not after a timeout. Antigravity's
-        // callback page shows the user a code in practice, every time — the
-        // loopback relay evidently doesn't survive a real browser hop here. So
-        // the manual route is the RELIABLE one and must be visible from the
-        // start; the automatic capture below simply beats them to it when it
-        // works, and clears the box on its own.
-        setCodeFor(id);
-        setStep('Waiting for you to approve it…');
-        for (let i = 0; i < 60; i++) {
-          // The paste dialog takes ownership if the user opens it — two flows
-          // both calling begin_engine_login would kill each other's process.
-          if (pasteOpenRef.current) return;
-          await new Promise((r) => { setTimeout(r, 2000); });
-          // Either the window caught the code for us...
-          const caught = await invoke<string | null>('take_captured_login_code');
-          if (caught) {
-            setStep('Finishing sign-in…');
-            const ok = await invoke<boolean>('submit_login_code', { engine: id, code: caught });
-            await refresh();
-            if (!ok) setError('Google accepted the sign-in but the CLI rejected the code. Try once more.');
-            return;
-          }
-          // ...or the CLI's own loopback listener got there first.
-          const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id });
-          if (signedIn) {
-            await refresh();
-            return;
-          }
-        }
-        // Only now, 90s in, do we fall back to asking for the code by hand —
-        // for the case where the relay is blocked and the browser just shows it.
-        setCodeFor(id);
-        setStep('');
-        return;
-      }
-      // Some engines finish on the browser callback alone and never ask.
+      // Freshly installed: go straight on to the sign-in dialog.
       await refresh();
+      await openPasteDialog(id);
+      return;
+
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // The one thing the app genuinely can't fix for the user.
@@ -280,21 +239,12 @@ export function EngineAccounts() {
                   </div>
                 )}
               </div>
-              {s?.installed && !s.signedIn && (
-                <button
-                  onClick={() => void openPasteDialog(e.id)}
-                  className="text-[11px] text-slate-400 hover:text-emerald-400 underline whitespace-nowrap self-center"
-                  title="Sign in by pasting the code the browser gives you"
-                >
-                  Paste a code
-                </button>
-              )}
               {s && !s.signedIn && (
                 <Button
                   size="sm"
                   variant={s.installed ? 'primary' : 'outline'}
                   disabled={!!busy}
-                  onClick={() => void connect(e.id, !s.installed)}
+                  onClick={() => void (s.installed ? openPasteDialog(e.id) : connect(e.id, true))}
                   title={s.installed ? `Sign in with your ${e.plan.split(',')[0]}` : `Install the ${e.name} CLI, then sign in`}
                 >
                   {thisBusy ? '…' : s.installed ? (<><LogIn size={12} /> Sign in</>) : (<><Download size={12} /> Install</>)}

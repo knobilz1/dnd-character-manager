@@ -1076,6 +1076,14 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
     .map_err(|e| format!("Login task failed: {e}"))?
 }
 
+/// UNUSED, and deliberately not deleted — see the warning below.
+///
+/// DO NOT WIRE THIS BACK UP without fixing the blanking first. Driving Google's
+/// OAuth in an app-owned WebviewWindow took the WHOLE APP to a black screen
+/// partway through the flow (observed 2026-07-24). The sign-in dialog uses the
+/// system browser instead, which has never done that. The code-lifting logic
+/// here is sound and tested; the window hosting it is not.
+///
 /// Sign in inside a Tavern Sheet window, so the user never handles a code.
 ///
 /// The problem this solves: Antigravity's OAuth redirect goes to a HOSTED page
