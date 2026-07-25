@@ -74,6 +74,10 @@ export function EngineAccounts() {
   const [loginUrl, setLoginUrl] = React.useState('');
   const [code, setCode] = React.useState('');
   const [pasteOpen, setPasteOpen] = React.useState<EngineId | null>(null);
+  /** Seconds left in the CLI's own auth window. agy waits 60s and then EXITS,
+   *  taking its terminal with it — a code pasted after that fails with "the
+   *  pipe is being closed", which is a dead process, not a broken pipe. */
+  const [secondsLeft, setSecondsLeft] = React.useState(0);
   const pasteOpenRef = React.useRef<EngineId | null>(null);
   pasteOpenRef.current = pasteOpen;
 
@@ -96,6 +100,38 @@ export function EngineAccounts() {
   }, []);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
+
+  React.useEffect(() => {
+    if (secondsLeft <= 0) return;
+    const t = setTimeout(() => setSecondsLeft((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [secondsLeft]);
+
+  /** Watch the clipboard while a sign-in is waiting, and fill the box the moment
+   *  the user hits "Copy to Clipboard" on Google's page.
+   *
+   *  Worth the oddity because the window is only 60 SECONDS and every removed
+   *  step is a real chunk of it: without this the user copies, switches back,
+   *  clicks the field, pastes, then clicks Sign in. Matches only the Google
+   *  authorization-code shape, so nothing else on the clipboard is ever read
+   *  into the app, and it only runs while this dialog is open. */
+  React.useEffect(() => {
+    if (!pasteOpen || secondsLeft <= 0 || code.trim()) return;
+    let stop = false;
+    const tick = async () => {
+      if (stop) return;
+      try {
+        const text = (await navigator.clipboard.readText()).trim();
+        if (/^4\/[A-Za-z0-9_\-.]{20,}$/.test(text.replace(/\s+/g, ''))) {
+          setCode(text.replace(/\s+/g, ''));
+          return; // the effect re-runs and stops, since code is now set
+        }
+      } catch { /* no clipboard permission — the paste box still works */ }
+      if (!stop) setTimeout(() => void tick(), 700);
+    };
+    void tick();
+    return () => { stop = true; };
+  }, [pasteOpen, secondsLeft, code]);
 
   /** Install (if needed) then sign in, as one motion — the same "don't make
    *  them come back and click a second button" flow the Claude path uses.
@@ -172,8 +208,16 @@ export function EngineAccounts() {
     // like a sign-in that just sits there and eventually fails for no reason.
     try {
       const url = await invoke<string | null>('begin_engine_login', { engine: id });
-      if (url) setLoginUrl(url);
-      else setError("Couldn't start the sign-in — no URL came back. Try again.");
+      if (url) {
+        setLoginUrl(url);
+        setSecondsLeft(60);
+        // Straight to the browser. The CLI's 60s window starts when IT starts,
+        // not when the user finishes reading, so waiting for a second click
+        // spent most of the budget before the flow even began.
+        try { await openUrl(url); } catch { /* the button below still works */ }
+      } else {
+        setError("Couldn't start the sign-in — no URL came back. Try again.");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -263,7 +307,7 @@ export function EngineAccounts() {
         <div className="space-y-3">
           <ol className="text-xs text-slate-400 space-y-1.5 list-decimal list-inside">
             <li>
-              Open the sign-in page and approve it.{' '}
+              Your browser should have opened — approve it there.{' '}
               {loginUrl ? (
                 <button onClick={() => void openUrl(loginUrl)} className="text-emerald-400 underline">
                   Open sign-in page
@@ -273,7 +317,7 @@ export function EngineAccounts() {
               )}
             </li>
             <li>Google shows you a code. Hit <span className="text-slate-300">Copy to Clipboard</span> on that page.</li>
-            <li>Paste it below and press Sign in.</li>
+            <li>Come back here — the code fills itself in. Then press Sign in.</li>
           </ol>
 
           <textarea
@@ -303,10 +347,10 @@ export function EngineAccounts() {
             </Button>
             <span className="text-[11px] text-slate-500">
               {busy
-                ? 'Waiting for Google to confirm — up to 40 seconds.'
-                : code.trim()
-                  ? `${code.replace(/\s+/g, '').length} characters`
-                  : 'Codes expire fast — grab a fresh one if this fails.'}
+                ? 'Waiting for Google to confirm…'
+                : secondsLeft > 0
+                  ? `${secondsLeft}s left — Google closes the window after a minute.`
+                  : 'This sign-in expired. Press Sign in to start a fresh one.'}
             </span>
           </div>
           {error && (
