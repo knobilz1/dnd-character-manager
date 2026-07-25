@@ -1140,11 +1140,29 @@ fn extract_json_object(s: &str) -> String {
 /// Local path is identical to `ask_ingest_once` — effort is a Claude CLI
 /// concept, meaningless to a local server.
 pub fn ask_ingest_once_low_effort(prompt: String, claude_model: Option<&str>) -> Result<String, String> {
+    ask_ingest_once_at_effort(prompt, claude_model, "low")
+}
+
+/// Same routing, caller-chosen reasoning depth.
+///
+/// Exists because not every cheap-looking classification deserves the cheapest
+/// possible call. Biome classification reads like a one-word question and is
+/// nothing of the sort: its answer picks the floor query, the liquid query and
+/// the vegetation for an entire map, so it is worth a better model thinking
+/// harder — see classify_biome, where one sonnet call at low effort returned
+/// three different answers for the same spec across six runs.
+///
+/// A local-ingestion setup still goes to the local model. Someone who has
+/// deliberately pointed everything at their own server should not have one
+/// classification quietly reaching for a subscription instead.
+pub fn ask_ingest_once_at_effort(
+    prompt: String, claude_model: Option<&str>, effort: &str,
+) -> Result<String, String> {
     let cfg = ingest_config().lock().unwrap().clone();
     if cfg.use_local {
         ask_ingest_once(prompt, claude_model, false)
     } else {
-        crate::dm::ask_claude_once(prompt, claude_model, Some("low"))
+        crate::dm::ask_claude_once(prompt, claude_model, Some(effort))
     }
 }
 
