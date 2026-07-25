@@ -6422,6 +6422,12 @@ pub struct SessionPlanResult {
     /// partial rather than silently seeing fewer cards than encounters.
     /// Always empty on a cache hit.
     pub failed_maps: Vec<String>,
+    /// Names of combat encounters past `MAX_PLAN_MAPS` that were never
+    /// attempted. Distinct from `failed_maps`: nothing went wrong, the plan just
+    /// had more fights than one click builds for. Surfaced for the same reason —
+    /// a capped set of cards looks exactly like a complete one — and because the
+    /// DM can still make any of them on demand from the same dialog.
+    pub skipped_maps: Vec<String>,
 }
 
 /// Payload for the `"plan-progress"` event — `phase` is `"plan"` (the single
@@ -6444,10 +6450,19 @@ struct PlanProgress {
 /// derived from THIS SAME plan rather than independently re-guessed — asks
 /// Claude once per combat encounter (see generate_battle_maps_for_plan_at)
 /// for exactly the maps that plan calls for.
+/// Most battle maps one "Plan Next Session" click will build.
+///
+/// Not a wall-time limit — encounter maps generate concurrently, so five take
+/// about as long as one. It bounds how many candidate-fanning LLM jobs run at
+/// once and how much plan quota a single click spends, which is what actually
+/// scales with the encounter count. Anything past this is named in
+/// `skipped_maps` and can be built on demand.
+const MAX_PLAN_MAPS: usize = 3;
+
 fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: bool, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String], on_progress: ProgressFn) -> Result<SessionPlanResult, String> {
     if !force {
         if let Some(cached) = read_session_plan_at(root, id) {
-            return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id), failed_maps: Vec::new() });
+            return Ok(SessionPlanResult { plan_text: cached, maps: current_plan_owned_maps_at(root, id), failed_maps: Vec::new(), skipped_maps: Vec::new() });
         }
     }
 
@@ -6472,15 +6487,33 @@ fn plan_next_session_at(root: &Path, id: &str, terrain_catalog: &str, force: boo
         parse_plan_encounters(&plan_text).into_iter().filter(|e| e.combat).collect()
     };
 
+    // Cap how many maps one plan will build. Every encounter's map is its own
+    // concurrent LLM job that itself fans out candidates, so the cost of a long
+    // encounter list is not wall time (they overlap) but how much runs at once
+    // and how much plan quota one click spends. Tagging widened after a plan that
+    // offered two unmapped fights, which is right for the table and means a plan
+    // can now easily list five or six combat beats.
+    //
+    // The first N in plan order, because a session is played in order: the beats
+    // most likely to be reached tonight are the ones worth preparing. What's
+    // dropped is NAMED, never silently missing — a short list of cards is
+    // indistinguishable from a complete one.
+    let skipped_maps: Vec<String> =
+        encounters.iter().skip(MAX_PLAN_MAPS).map(|e| e.name.clone()).collect();
+    let encounters: Vec<PlanEncounter> = encounters.into_iter().take(MAX_PLAN_MAPS).collect();
+
     let (combined_plan, current_chapter, combined_memory) = battle_map_context_at(root, id);
     eprintln!("[plan-timing] {} combat encounter(s) need maps", encounters.len());
+    if !skipped_maps.is_empty() {
+        eprintln!("[plan-timing] {} beyond the cap, no map: {:?}", skipped_maps.len(), skipped_maps);
+    }
     if !encounters.is_empty() {
         on_progress("maps", 0, encounters.len());
     }
     let t1 = std::time::Instant::now();
     let (maps, failed_maps) = generate_battle_maps_for_plan_at(root, id, &combined_plan, &current_chapter, &combined_memory, &encounters, objects_enabled, vocabulary, footprint_guide, on_progress)?;
     eprintln!("[plan-timing] all maps: {:.1}s total", t1.elapsed().as_secs_f64());
-    Ok(SessionPlanResult { plan_text, maps, failed_maps })
+    Ok(SessionPlanResult { plan_text, maps, failed_maps, skipped_maps })
 }
 
 /// Regenerates exactly ONE map the session plan owns, using the same
@@ -8065,7 +8098,11 @@ fn read_cached_session_plan_at(root: &Path, id: &str) -> Option<SessionPlanResul
     read_session_plan_at(root, id).map(|plan_text| SessionPlanResult {
         plan_text,
         maps: current_plan_owned_maps_at(root, id),
+        // Both empty on a cache read: nothing was attempted this time, so
+        // reporting a failure or a cap would be describing a run that isn't
+        // happening. The cards on disk are what they are.
         failed_maps: Vec::new(),
+        skipped_maps: Vec::new(),
     })
 }
 
@@ -9827,6 +9864,48 @@ Tactics:
         let spec = "Grid: 10x10, 5 ft squares.\nMap:\n##\n##\n";
         let out = force_map_title(spec, "Bridge Ambush");
         assert!(out.starts_with("# Bridge Ambush\n"));
+    }
+
+    /// The cap has to keep plan ORDER (a session is played front to back, so the
+    /// beats reachable tonight are the ones worth preparing) and it has to NAME
+    /// what it dropped. A silently short list of map cards is indistinguishable
+    /// from a complete one, which is the failure this test exists to prevent —
+    /// the DM would walk into a fight believing there was no map for it because
+    /// none was needed.
+    #[test]
+    fn the_map_cap_keeps_the_first_encounters_in_order_and_names_every_one_it_drops() {
+        let plan = "## Encounters\n\
+            1. [combat] Bridge Ambush — goblins.\n\
+            2. [non-combat] Haggling — a merchant.\n\
+            3. [combat] Gatehouse — guards.\n\
+            4. [combat] Courtyard — hounds.\n\
+            5. [combat] Throne Room — the duke.\n\
+            6. [combat] Rooftop Chase — cultists.\n";
+        let combat: Vec<PlanEncounter> =
+            parse_plan_encounters(plan).into_iter().filter(|e| e.combat).collect();
+        assert_eq!(combat.len(), 5, "the non-combat beat is excluded before the cap applies");
+
+        let skipped: Vec<String> = combat.iter().skip(MAX_PLAN_MAPS).map(|e| e.name.clone()).collect();
+        let kept: Vec<PlanEncounter> = combat.into_iter().take(MAX_PLAN_MAPS).collect();
+
+        assert_eq!(kept.len(), MAX_PLAN_MAPS);
+        assert_eq!(
+            kept.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["Bridge Ambush", "Gatehouse", "Courtyard"],
+            "plan order, not whichever parsed first"
+        );
+        assert_eq!(skipped, vec!["Throne Room", "Rooftop Chase"], "everything dropped is named");
+        assert_eq!(kept.len() + skipped.len(), 5, "nothing may vanish between the two lists");
+    }
+
+    /// Under the cap nothing is skipped — the notice must not appear on a plan
+    /// that really did get a map for every fight.
+    #[test]
+    fn a_plan_with_fewer_fights_than_the_cap_skips_nothing() {
+        let plan = "## Encounters\n1. [combat] Only Fight — one.\n2. [non-combat] Talk — none.\n";
+        let combat: Vec<PlanEncounter> =
+            parse_plan_encounters(plan).into_iter().filter(|e| e.combat).collect();
+        assert!(combat.iter().skip(MAX_PLAN_MAPS).next().is_none());
     }
 
     #[test]

@@ -336,6 +336,7 @@ interface SessionPlanResult {
    *  generate_battle_maps_for_plan_at. Shown as a warning so a partial set
    *  is never mistaken for "that's all the maps there are." */
   failed_maps: string[];
+  skipped_maps: string[];
 }
 
 /** Pulls the `Deployment:` section's Enemies/Party lines out of a map spec so
@@ -1050,6 +1051,9 @@ export function DMConsolePage() {
     setAdHocMapCards((cards) => cards.map(rerender));
   }, [showZones]);
   const [failedMaps, setFailedMaps] = React.useState<string[]>([]);
+  /** Fights past MAX_PLAN_MAPS that never got a map. Not an error — see the
+   *  notice next to the map cards. */
+  const [skippedMaps, setSkippedMaps] = React.useState<string[]>([]);
   const [packProfile, setPackProfile] = React.useState<PackProfileView | null>(null);
   const [profileEdits, setProfileEdits] = React.useState<ProfileOverrides>({ biomes: {} });
   const [profileBusy, setProfileBusy] = React.useState(false);
@@ -3626,6 +3630,7 @@ export function DMConsolePage() {
       setPlanText(result.plan_text);
       setPlanMapCards(await Promise.all(result.maps.map(loadMapCard)));
       setFailedMaps(result.failed_maps ?? []);
+      setSkippedMaps(result.skipped_maps ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -4384,6 +4389,17 @@ export function DMConsolePage() {
                 {failedMaps.length > 0 && (
                   <p className="text-xs text-amber-400 mb-2">
                     {failedMaps.length} map{failedMaps.length > 1 ? 's' : ''} didn't generate ({failedMaps.join(', ')}) — this set is partial. Try Regenerate.
+                  </p>
+                )}
+                {/* Nothing went wrong here, so this is deliberately calmer than
+                    the failure line above — but it still has to be said. A capped
+                    set of cards looks exactly like a complete one, and the DM
+                    would meet an unmapped fight assuming none was needed. */}
+                {skippedMaps.length > 0 && (
+                  <p className="text-xs text-slate-400 mb-2">
+                    {skippedMaps.length} later fight{skippedMaps.length > 1 ? 's' : ''} in this plan {skippedMaps.length > 1 ? 'have' : 'has'} no
+                    map yet ({skippedMaps.join(', ')}) — one plan only builds maps for the fights you'll reach first. Describe{' '}
+                    {skippedMaps.length > 1 ? 'any of them' : 'it'} below to make one.
                   </p>
                 )}
                 <div className="flex flex-wrap items-center gap-1.5 mb-2">
