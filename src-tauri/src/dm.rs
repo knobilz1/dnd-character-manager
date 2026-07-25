@@ -1282,6 +1282,47 @@ pub fn take_captured_login_code() -> Option<String> {
     captured_code().lock().unwrap().take()
 }
 
+/// Open a real console window running the engine's sign-in, for the one engine
+/// that cannot be driven any other way.
+///
+/// WHY A WINDOW, given how much effort went into avoiding one:
+///
+/// Every route that keeps the user inside the app is closed, all measured.
+/// Piped stdin is ignored by agy's code prompt. A pseudo-console works only if
+/// we answer its ESC[6n cursor query, and that reply begins with ESC, which the
+/// prompt then reads as a cancel. Its loopback listener speaks an undocumented
+/// HTTPS protocol. And doing the OAuth ourselves is barred at the last step:
+/// Google's token endpoint answers "client_secret is missing", so completing it
+/// would mean lifting Antigravity's client id AND secret out of Google's binary
+/// and having this app present itself as Antigravity. That is client
+/// impersonation — against Google's terms, liable to get the user's account
+/// flagged, and broken the moment the secret rotates. Not worth a sign-in.
+///
+/// So the app opens the window, and the UI walks the user through it while
+/// watching for credentials to appear. The console is the only part that has to
+/// be theirs; everything around it is handled.
+#[tauri::command]
+pub async fn launch_engine_login_console(engine: String) -> Result<(), String> {
+    let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    tokio::task::spawn_blocking(move || {
+        // A stale attempt still holding the port would make this one look dead.
+        if let Some(old) = pending_login().lock().unwrap().take() {
+            end_login(old);
+        }
+        let exe = resolve_engine_exe(engine).ok_or_else(|| engine_not_installed_error(engine))?;
+        // `cmd /K` so the window STAYS OPEN: the user has to read a URL from it
+        // and paste a code back in, and a window that closes on exit would take
+        // any error message with it.
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg("start").arg("Sign in to Gemini").arg("cmd").arg("/K").arg(&exe);
+        cmd.env("PATH", augmented_path());
+        cmd.status().map_err(|e| format!("Couldn't open the sign-in window: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Login task failed: {e}"))?
+}
+
 /// Start a sign-in on a pseudo-console, returning the URL to visit.
 ///
 /// The child gets a genuine terminal: it prints its prompt, blocks on a terminal

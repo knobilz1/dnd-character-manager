@@ -29,7 +29,7 @@ import { Button, Dialog } from './ui';
 type EngineId = 'claude' | 'codex' | 'gemini';
 type State = { installed: boolean; signedIn: boolean };
 
-const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string }> = [
+const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string; consoleLogin?: boolean }> = [
   {
     id: 'claude',
     name: 'Claude Code',
@@ -49,7 +49,8 @@ const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string }
     // Deliberately says "Gemini", not "Antigravity". Gemini is the MODEL doing
     // the work; Antigravity is just the CLI client Google replaced it with in
     // June 2026. Naming the client would only confuse someone choosing an LLM.
-    blurb: 'Runs on Google Antigravity (Gemini models). The app drives a real terminal for you behind the scenes.',
+    blurb: 'Runs on Google Antigravity (Gemini models). Opens a sign-in window — the app waits and detects when you\'re done.',
+    consoleLogin: true,
     // MEASURED 2026-07-24, do not rebuild the in-app flow without reading this.
     // agy's "paste the authorization code here" prompt is read from a real
     // TERMINAL, not from piped stdin: the captured log shows the prompt printed
@@ -74,6 +75,7 @@ export function EngineAccounts() {
   const [loginUrl, setLoginUrl] = React.useState('');
   const [code, setCode] = React.useState('');
   const [pasteOpen, setPasteOpen] = React.useState<EngineId | null>(null);
+  const [consoleFor, setConsoleFor] = React.useState<EngineId | null>(null);
   /** Seconds left in the CLI's own auth window. agy waits 60s and then EXITS,
    *  taking its terminal with it — a code pasted after that fails with "the
    *  pipe is being closed", which is a dead process, not a broken pipe. */
@@ -198,6 +200,37 @@ export function EngineAccounts() {
    *  code. The code is bound by PKCE to the CLI run that produced the URL, so a
    *  code pasted with nothing waiting cannot work — starting one here is what
    *  makes this dialog usable on its own, from a cold start. */
+  /** Launch the vendor's own sign-in window and watch for it to succeed.
+   *
+   *  Used where no in-app route exists (see launch_engine_login_console for the
+   *  four that were tried and why each is closed). The console is the only part
+   *  the user touches; the app opens it, says exactly what to do in it, and
+   *  notices completion on its own so nobody has to come back and press ↻. */
+  async function consoleSignIn(id: EngineId) {
+    setBusy(id);
+    setError(null);
+    setConsoleFor(id);
+    try {
+      await invoke('launch_engine_login_console', { engine: id });
+      setStep('Sign-in window opened — follow the steps, this updates itself.');
+      for (let i = 0; i < 150; i++) {   // ~5 minutes, unhurried on purpose
+        await new Promise((r) => { setTimeout(r, 2000); });
+        const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id });
+        if (signedIn) {
+          await refresh();
+          setConsoleFor(null);
+          return;
+        }
+      }
+      setError("Still not signed in. Close that window and press Sign in to try again.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+      setStep('');
+    }
+  }
+
   async function openPasteDialog(id: EngineId) {
     setPasteOpen(id);
     setError(null);
@@ -263,6 +296,15 @@ export function EngineAccounts() {
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">{e.plan} — {e.blurb}</p>
                 {thisBusy && step && <p className="text-[11px] text-slate-400 mt-1">{step}</p>}
+                {consoleFor === e.id && (
+                  <ol className="mt-2 text-[11px] text-slate-400 space-y-1 list-decimal list-inside bg-slate-950/60 rounded p-2">
+                    <li>A black window opened — it shows a long link.</li>
+                    <li><span className="text-slate-300">Ctrl+click</span> the link (or copy it into your browser) and approve with Google.</li>
+                    <li>Google shows a code — press <span className="text-slate-300">Copy to Clipboard</span>.</li>
+                    <li>Click the black window, <span className="text-slate-300">right-click</span> to paste, press Enter.</li>
+                    <li>Done — this row turns green on its own. You can close the window.</li>
+                  </ol>
+                )}
                 {codeFor === e.id && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-[11px] text-slate-400">
@@ -293,7 +335,11 @@ export function EngineAccounts() {
                   size="sm"
                   variant={s.installed ? 'primary' : 'outline'}
                   disabled={!!busy}
-                  onClick={() => void (s.installed ? openPasteDialog(e.id) : connect(e.id, true))}
+                  onClick={() => void (!s.installed
+                    ? connect(e.id, true)
+                    : e.consoleLogin
+                      ? consoleSignIn(e.id)
+                      : openPasteDialog(e.id))}
                   title={s.installed ? `Sign in with your ${e.plan.split(',')[0]}` : `Install the ${e.name} CLI, then sign in`}
                 >
                   {thisBusy ? '…' : s.installed ? (<><LogIn size={12} /> Sign in</>) : (<><Download size={12} /> Install</>)}

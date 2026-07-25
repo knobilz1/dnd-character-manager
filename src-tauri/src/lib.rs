@@ -45,6 +45,7 @@ pub fn run() {
       dm::connect_engine,
       dm::begin_engine_login,
       dm::submit_login_code,
+      dm::launch_engine_login_console,
       dm::login_in_app,
       dm::take_captured_login_code,
       dm::cancel_dm_turn,
