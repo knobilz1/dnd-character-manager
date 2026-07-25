@@ -640,10 +640,132 @@ pub fn looks_rate_limited(err: &str) -> bool {
 /// Falls back to the normal path when cross-checking is off, when no reviewer
 /// is configured, or when the reviewer fails. A second opinion is an
 /// improvement, never a dependency.
-pub fn ask_ingest_critique(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
-    match ingestion_reviewer() {
-        Some(reviewer) => ask_ingest_once_on(reviewer, prompt, claude_model, expect_json),
-        None => ask_ingest_once(prompt, claude_model, expect_json),
+/// Turns any of the "check X, Y, Z — then rewrite the doc" critique prompts into
+/// a FINDINGS-ONLY pass.
+///
+/// The checks those prompts enumerate are good; the instruction to rewrite is
+/// the problem when a second engine is holding the pen. This suffix keeps the
+/// checks and drops the rewrite.
+const FINDINGS_ONLY_OVERRIDE: &str = "\n\n---\n\nIMPORTANT — this overrides the output instruction above. Do NOT rewrite or reproduce the document. You are reviewing someone else's draft, and they will make the edits themselves.\n\nReply with ONLY a short numbered list of concrete, specific problems you found — each one naming the exact passage at fault and what is wrong with it. Prefer factual omissions (something in the source material the draft failed to carry over) and contradictions over matters of taste. Do not suggest wholesale restructuring, do not restate what the draft already does well, and do not comment on length.\n\nIf the draft has no real problems, reply with exactly: NO-FINDINGS";
+
+/// Hands one engine's findings back to the engine that wrote the draft.
+fn build_apply_findings_prompt(draft: &str, findings: &str) -> String {
+    format!(
+        "Below is a document you wrote, followed by review notes on it from a second reader.\n\n\
+        Apply the notes that are CORRECT and worth acting on — fixing real omissions and \
+        contradictions — and ignore any that are wrong, are matters of taste, or would make the \
+        document worse. This is your document; the reader saw it once and has less context than you.\n\n\
+        Keep everything that already worked: the same structure, the same level of specific detail, \
+        and the same length. Do NOT summarize, condense, or genericize — the notes are there to fill \
+        gaps, not to trim. Concrete, evocative, playable detail is the point of this document.\n\n\
+        Your document:\n{draft}\n\n\
+        Review notes:\n{findings}\n\n\
+        Reply with ONLY the full revised document, no commentary, no code fences."
+    )
+}
+
+/// Fraction of the draft's length a revision must retain to be trusted.
+///
+/// The measured failure sat at 60% (3546 chars -> 2141), so 0.65 catches it with
+/// a little room. A genuine gap-fill should come back the same size or larger;
+/// a revision that lost a third of the document did not fix it, it summarized it.
+const MIN_REVISION_LENGTH_RATIO: f64 = 0.65;
+
+/// Names the draft called out in bold — the "who and where" a revision must not
+/// silently drop. Deliberately narrow: skips `**Label:**` field headers and
+/// anything long enough to be a sentence rather than a name.
+fn bold_names(doc: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = doc;
+    while let Some(start) = rest.find("**") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find("**") else { break };
+        let inner = rest[..end].trim();
+        rest = &rest[end + 2..];
+        let is_name = !inner.is_empty()
+            && !inner.ends_with(':')
+            && inner.split_whitespace().count() <= 5
+            && inner.starts_with(|c: char| c.is_uppercase());
+        if is_name && !out.iter().any(|n: &String| n == inner) {
+            out.push(inner.to_string());
+        }
+    }
+    out
+}
+
+/// Whether a revision may replace the draft it came from.
+///
+/// A critique pass is supposed to ADD — fill a gap, fix a contradiction. Measured
+/// against a live run, a second engine handed the pen instead returned a shorter,
+/// more generic summary that dropped a fact stated in the campaign intake, and
+/// that output replaced a good draft wholesale with nothing to stop it. This is
+/// the stop: a revision has to keep the document's substance to earn its place.
+pub fn revision_is_safe(draft: &str, revised: &str) -> (bool, String) {
+    let (d, r) = (draft.trim(), revised.trim());
+    if r.is_empty() {
+        return (false, "the revision came back empty".into());
+    }
+    if (r.chars().count() as f64) < d.chars().count() as f64 * MIN_REVISION_LENGTH_RATIO {
+        return (
+            false,
+            format!(
+                "the revision is {} chars against the draft's {} — that is a summary, not a fix",
+                r.chars().count(),
+                d.chars().count()
+            ),
+        );
+    }
+    let lower = r.to_lowercase();
+    if let Some(lost) = bold_names(d).into_iter().find(|n| !lower.contains(&n.to_lowercase())) {
+        return (false, format!("the revision dropped \"{lost}\", which the draft named"));
+    }
+    (true, String::new())
+}
+
+/// A critique pass over `draft`.
+///
+/// Two different shapes, because who holds the pen matters:
+///
+/// - **Same engine** (no cross-check): it revises its own draft, exactly as
+///   before. This path was never the problem.
+/// - **A DIFFERENT engine** (cross-check on): the reviewer only FINDS problems;
+///   the drafting engine FIXES them. Letting the reviewer rewrite meant the
+///   final document was simply whatever the reviewer wrote — so with Claude
+///   "primary" and Codex "reviewing", the lore was in fact written by Codex.
+///   Measured on identical input, that turned a 3546-char draft full of playable
+///   specifics into a 2141-char generic summary that dropped a fact stated in
+///   the intake — while the critique prompt's whole job was to catch omissions.
+///
+/// Either way the result must survive `revision_is_safe`, or the draft stands.
+pub fn ask_ingest_critique(
+    prompt: String, draft: &str, claude_model: Option<&str>, expect_json: bool,
+) -> Result<String, String> {
+    let revised = match ingestion_reviewer() {
+        None => ask_ingest_once(prompt, claude_model, expect_json)?,
+        Some(reviewer) => {
+            let findings =
+                ask_ingest_once_on(reviewer, format!("{prompt}{FINDINGS_ONLY_OVERRIDE}"), claude_model, false)?;
+            let findings = findings.trim();
+            if findings.is_empty() || findings.contains("NO-FINDINGS") {
+                crate::maplog::log(
+                    "CROSS-CHECK found nothing",
+                    &format!("{} had no findings; keeping the draft as written", reviewer.label()),
+                );
+                return Ok(draft.to_string());
+            }
+            crate::maplog::log(
+                "CROSS-CHECK findings",
+                &format!("{} reported:\n{findings}", reviewer.label()),
+            );
+            ask_ingest_once(build_apply_findings_prompt(draft, findings), claude_model, expect_json)?
+        }
+    };
+    match revision_is_safe(draft, &revised) {
+        (true, _) => Ok(revised),
+        (false, why) => {
+            crate::maplog::log("CRITIQUE REJECTED", &format!("kept the draft: {why}"));
+            Ok(draft.to_string())
+        }
     }
 }
 
@@ -722,6 +844,52 @@ pub fn end_local_dm_session(session_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The guard that stops a "critique" from replacing a good draft with a
+    /// worse one. Every case here is drawn from the live A/B that motivated it:
+    /// Claude drafted 3546 chars of specific, playable detail, Codex was handed
+    /// the pen, and what came back was a 2141-char generic summary that had
+    /// dropped a fact stated in the campaign intake — while the critique
+    /// prompt's entire job was catching omissions.
+    #[test]
+    fn a_revision_that_summarizes_instead_of_fixing_is_rejected() {
+        let draft = "# Frame\n- **Aldric Venn** keeps the ledgers and the secrets.\n\
+                     - The party **owes a debt** to the guild, worked off job by job.\n\
+                     - The mine flooded last winter and something came up with the water.\n\
+                     - A drowned body in guild issue that nobody reported missing.";
+
+        // Same substance, expanded — exactly what a gap-fill should look like.
+        let good = format!("{draft}\n- Venn keeps a second ledger, and the debt is tracked as a number.");
+        assert!(revision_is_safe(draft, &good).0);
+
+        // The measured failure: two thirds the length, nothing added.
+        let summary = "# Frame\n- The guild factor keeps records.\n- The mine flooded.";
+        let (ok, why) = revision_is_safe(draft, summary);
+        assert!(!ok, "a two-thirds-length rewrite must not replace the draft");
+        assert!(why.contains("summary"), "{why}");
+
+        // Long enough, but a named entity vanished.
+        let padded = "# Frame\n- The guild factor keeps the ledgers and the secrets of this place.\n\
+                      - The party owes money to the guild, worked off job by job over time.\n\
+                      - The mine flooded last winter and something came up with the water here.\n\
+                      - A drowned body in guild issue that nobody ever reported missing at all.";
+        let (ok, why) = revision_is_safe(draft, padded);
+        assert!(!ok, "dropping a named entity must not replace the draft");
+        assert!(why.contains("Aldric Venn"), "{why}");
+
+        assert!(!revision_is_safe(draft, "   ").0, "empty is never a revision");
+    }
+
+    /// Only actual NAMES count as must-keep — a rewrite is free to drop a
+    /// `**Setting:**` style field label or re-word a bolded sentence.
+    #[test]
+    fn bold_names_picks_out_names_and_ignores_field_labels() {
+        let names = bold_names(
+            "**Setting:** Harrowfen\n**Aldric Venn** is the factor.\n**the guild** runs it.\n\
+             **This is a whole bolded sentence that goes on well past being a name.**",
+        );
+        assert_eq!(names, vec!["Aldric Venn".to_string()]);
+    }
 
     /// This predicate decides whether a stalled session RECOVERS on another
     /// engine or just stops. Being broad is deliberate: a false positive costs

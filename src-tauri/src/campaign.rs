@@ -580,14 +580,22 @@ fn build_establish_campaign_prompt(intake: &CampaignIntake, inventory: &str) -> 
 /// prioritization (minor/one-off) or an oversight (something recurring that
 /// should be there), plus the usual genericness/contradiction/vague-hook
 /// checks, then asks for a full revised doc.
-fn build_campaign_lore_critique_prompt(draft: &str, inventory: &str) -> String {
+fn build_campaign_lore_critique_prompt(draft: &str, intake: &CampaignIntake, inventory: &str) -> String {
     format!(
         "You drafted the campaign-lore doc below from the inventory that follows it, for a Dungeons & Dragons campaign.\n\n\
         Draft:\n{draft}\n\n\
+        What the DM asked for when they created the campaign — this is a SOURCE, exactly as much as the inventory is. \
+        Anything here is established fact that belongs in the doc; it is not invention, and must not be flagged as unsupported:\n\
+        - Players: {}\n\
+        - Module/scenario: {}\n\
+        - Other notes: {}\n\n\
         Inventory it was drafted from:\n{}\n\n\
         Check specifically: which named entries from the inventory are missing from the draft, and for each, is that omission a defensible prioritization (minor, one-off, not worth permanent tracking) or an oversight (something recurring/important that should be there)? Also check for generic fantasy-trope phrasing, anything that contradicts the inventory, and hooks vague enough that they don't actually foreshadow anything specific. Then rewrite the doc to fix any real oversights and sharpen anything generic — keep whatever was already working. Keep the same concise, well-organized markdown-outline style, with length still scaled to how much the inventory actually contains (don't pad a thin inventory just to seem thorough).\n\n\
         {NARRATOR_VOICE_TRAILER_INSTRUCTION} If the draft already ended with a NARRATOR_VOICE line, reconsider it against the revised doc's tone rather than assuming it still fits.\n\n\
         Reply with ONLY the full, revised markdown doc followed by that one NARRATOR_VOICE line, no other commentary, no code fences.",
+        intake.players.trim(),
+        intake.module.trim(),
+        intake.notes.trim(),
         if inventory.trim().is_empty() { "(none)" } else { inventory.trim() },
     )
 }
@@ -638,7 +646,7 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
         return Err("Campaign-lore establishment returned empty content.".into());
     }
 
-    let final_lore = crate::local_llm::ask_ingest_critique(build_campaign_lore_critique_prompt(&draft, &inventory), Some("opus"), false)
+    let final_lore = crate::local_llm::ask_ingest_critique(build_campaign_lore_critique_prompt(&draft, intake, &inventory), &draft, Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -735,7 +743,7 @@ fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<Stri
         return Err("Campaign-lore update returned empty content; leaving campaign_lore.md untouched.".into());
     }
 
-    let lore = crate::local_llm::ask_ingest_critique(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"), false)
+    let lore = crate::local_llm::ask_ingest_critique(build_update_lore_critique_prompt(&draft, &existing, &inventory), &draft, Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -7401,7 +7409,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     on_progress("synthesizing", 0, 0);
     let draft_plan = crate::local_llm::ask_ingest_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"), false)?;
     on_progress("critiquing", 0, 0);
-    let plan = crate::local_llm::ask_ingest_critique(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"), false)
+    let plan = crate::local_llm::ask_ingest_critique(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), &draft_plan, Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -10925,14 +10933,32 @@ Tactics:
 
     #[test]
     fn build_campaign_lore_critique_prompt_asks_about_coverage_of_missing_inventory_entries() {
+        let intake = CampaignIntake {
+            name: "Barovia".into(),
+            edition: "2014".into(),
+            players: "Ireena, a noble".into(),
+            module: "Curse of Strahd".into(),
+            notes: "The party owes a debt to the Vistani.".into(),
+            lore: String::new(),
+        };
         let prompt = build_campaign_lore_critique_prompt(
             "## Hub\nThe party operates out of Vallaki.",
+            &intake,
             "- **Strahd von Zarovich** — the vampire lord who rules Barovia.",
         );
         assert!(prompt.contains("The party operates out of Vallaki."));
         assert!(prompt.contains("Strahd von Zarovich"));
         assert!(prompt.to_lowercase().contains("oversight"), "should ask whether a missing entry is a defensible cut or an oversight");
         assert!(full_prompt_has_narrator_voice_trailer_instruction(&prompt));
+
+        // The intake is a SOURCE. The inventory is built only from intake.lore,
+        // so a reviewer shown the inventory alone cannot tell a DM-stated
+        // requirement from invention — and will flag it as unsupported. Live,
+        // Codex did exactly that to "the party owes a debt to the mining guild",
+        // which the DM had typed into the notes field themselves.
+        assert!(prompt.contains("The party owes a debt to the Vistani."), "intake notes must reach the reviewer");
+        assert!(prompt.contains("Curse of Strahd"));
+        assert!(prompt.contains("Ireena, a noble"));
     }
 
     #[test]
