@@ -1193,12 +1193,27 @@ pub async fn connect_engine(engine: String) -> Result<bool, String> {
             // hatch. agy is a real .exe, so a direct spawn gets a genuinely
             // interactive console the user can type into — the same reason
             // Claude's login works and the old .cmd-shim path did not.
-            CliEngine::Gemini => vec![],
+            CliEngine::Gemini => vec!["--mode", "plan", "--print", "Reply with exactly: READY"],
             CliEngine::Claude => vec![],
         };
         let mut cmd = engine_command(engine, &login_args)?;
-
-
+        // CREATE_NEW_CONSOLE (0x10) — the reason a login spawn differs from
+        // every other one in this file.
+        //
+        // This app is a GUI-subsystem process with no console of its own, and
+        // the assumption that Windows therefore hands a console-subsystem child
+        // a fresh console AUTOMATICALLY turned out to be wrong: agy launched,
+        // had nowhere to draw, and hung indefinitely with nothing on screen —
+        // the observed "clicking Sign in does nothing, no window appears".
+        // Asking for the console explicitly is what actually puts a window in
+        // front of the user, which a login needs by definition: they have to
+        // read an OAuth URL and, when the browser callback misses, paste a code
+        // back into it.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x00000010);
+        }
         cmd.status()
             .map_err(|e| format!("Couldn't start `{}`: {e}", engine.login_command()))
             .map(|_| ())
