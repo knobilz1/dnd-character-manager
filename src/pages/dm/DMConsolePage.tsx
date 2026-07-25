@@ -969,6 +969,11 @@ export function DMConsolePage() {
 
   // Who holds the table camera, while we're expecting photos from a player.
   React.useEffect(() => {
+    // Push the setting down to the LAN listener first (mount and every change),
+    // so players are refused at the door rather than having a photo accepted and
+    // then dropped here. Players PULL, so this is what reaches their device —
+    // their camera control disappears within one poll. Off also frees the hold.
+    void invoke('set_table_photos', { enabled: tableCameraSource === 'player' }).catch(() => {});
     if (tableCameraSource !== 'player') { setCameraHolder(null); return; }
     let cancelled = false;
     const tick = () => { void invoke<string | null>('table_camera_holder').then((h) => { if (!cancelled) setCameraHolder(h); }).catch(() => {}); };

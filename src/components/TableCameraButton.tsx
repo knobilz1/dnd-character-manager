@@ -30,6 +30,9 @@ export function TableCameraButton({ characterName }: { characterName: string }) 
   const [cameras, setCameras] = React.useState<TableCamera[]>([]);
   const [cameraId, setCameraId] = React.useState('');
   const [holder, setHolder] = React.useState<string | null>(null);
+  /** Whether the DM is taking board photos at all. Starts false so a DM who has
+   *  the feature off never flashes the control at players on the first poll. */
+  const [enabled, setEnabled] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
   const [open, setOpen] = React.useState(false);
@@ -53,9 +56,11 @@ export function TableCameraButton({ characterName }: { characterName: string }) 
     let cancelled = false;
     const tick = async () => {
       try {
-        const { holder: h, requestSeq } = await fetchTableCameraState(dmIp);
+        const { holder: h, requestSeq, enabled: on } = await fetchTableCameraState(dmIp);
         if (cancelled) return;
         setHolder(h);
+        setEnabled(on);
+        if (!on) return;
         // First sighting just records where the counter is, so a request made
         // before we were even listening doesn't fire a surprise photo.
         if (servedRef.current === null) { servedRef.current = requestSeq; return; }
@@ -88,7 +93,10 @@ export function TableCameraButton({ characterName }: { characterName: string }) 
     }
   }
 
-  if (!connected || cameras.length === 0) return null;
+  // `enabled` is the DM's switch, polled above. Off → this renders nothing at
+  // all, exactly like a device with no camera: a control the DM will ignore is
+  // worse than no control, because sending appears to succeed.
+  if (!connected || cameras.length === 0 || !enabled) return null;
 
   const mine = !!holder && holder.toLowerCase() === characterName.trim().toLowerCase();
   const takenByOther = !!holder && !mine;
@@ -97,9 +105,12 @@ export function TableCameraButton({ characterName }: { characterName: string }) 
     setBusy(mine ? 'Handing back…' : 'Claiming…');
     setStatus(null);
     try {
-      const { granted, holder: now } = await claimTableCamera(characterName, dmIp, mine);
+      const { granted, holder: now, error } = await claimTableCamera(characterName, dmIp, mine);
       setHolder(now);
-      if (!granted && now) setStatus(`${now} is the table camera right now.`);
+      // `error` covers the one gap the poll can't: the DM switched board photos
+      // off in the last few seconds, so this control is still on screen but the
+      // claim is refused. Without it the button would just do nothing.
+      if (!granted) setStatus(error ?? (now ? `${now} is the table camera right now.` : null));
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
     } finally {

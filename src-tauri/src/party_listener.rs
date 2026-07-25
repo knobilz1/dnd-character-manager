@@ -17,6 +17,7 @@ use rand::Rng;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -164,6 +165,16 @@ fn camera_holder() -> &'static Mutex<Option<CameraHolder>> {
     HOLDER.get_or_init(|| Mutex::new(None))
 }
 
+/// Whether the DM is currently accepting board photos from players — mirrors the
+/// console's `tableCameraSource === 'player'` (see set_table_photos).
+///
+/// The setting lives in the DM's browser storage, but the refusal has to happen
+/// HERE: a player's device asks this listener for the camera, so a check that
+/// only ran in the DM's UI would let a player claim the role and be told "Sent"
+/// for a photo the console then silently drops. Defaults to false to match the
+/// frontend default — an unsynced listener refuses rather than accepts.
+static TABLE_PHOTOS: AtomicBool = AtomicBool::new(false);
+
 /// Bumped when the DM asks for a photo ("automatic" delivery). Players PULL from
 /// the DM, so there's no way to call out to a player's device — instead the
 /// holder polls `GET /camera`, notices the sequence advanced past the last one it
@@ -194,11 +205,19 @@ fn fresh_camera_holder(slot: &mut Option<CameraHolder>) -> Option<String> {
 /// hold), a claim by anyone else while it's held is REFUSED rather than stealing
 /// it, and releasing only works for the holder — so a player closing their sheet
 /// can't knock someone else off the camera.
-fn resolve_camera_claim(current: Option<&str>, requester: &str, release: bool) -> (Option<String>, bool) {
+/// `enabled` is the DM's board-photo setting: when it's off, nobody may TAKE the
+/// camera, but a release still works — a player holding it when the DM switched
+/// off can always hand it back, and can't be stuck owning a role that does
+/// nothing. Kept in this pure function rather than at the HTTP handler so the
+/// policy has one home and a new caller can't forget the check.
+fn resolve_camera_claim(
+    current: Option<&str>, requester: &str, release: bool, enabled: bool,
+) -> (Option<String>, bool) {
     let is_holder = current.is_some_and(|c| c.eq_ignore_ascii_case(requester));
     match (release, current) {
         (true, _) if is_holder => (None, true),
         (true, _) => (current.map(str::to_string), false),
+        (false, _) if !enabled => (current.map(str::to_string), false),
         (false, None) => (Some(requester.to_string()), true),
         // A re-claim keeps the name ALREADY on record rather than adopting the
         // requester's casing, so "ana" refreshing her hold doesn't rename the
@@ -290,7 +309,17 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let holder = fresh_camera_holder(&mut slot);
         drop(slot);
         let requested = *camera_request_seq().lock().unwrap();
-        let body = serde_json::json!({ "holder": holder, "requestSeq": requested }).to_string();
+        // `enabled` rides along on a poll the player is already making, which is
+        // how the DM's setting reaches their device at all — players PULL, so
+        // there is no push channel. Their camera control hides itself when it's
+        // false, so turning board photos off removes the button everywhere
+        // within one poll instead of only on the DM's own screen.
+        let body = serde_json::json!({
+            "holder": holder,
+            "requestSeq": requested,
+            "enabled": TABLE_PHOTOS.load(Ordering::Relaxed),
+        })
+        .to_string();
         return write_response(&mut stream, 200, &body, "application/json");
     }
     if request_line.starts_with("GET") {
@@ -409,11 +438,19 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         }
         let mut slot = camera_holder().lock().unwrap();
         let current = fresh_camera_holder(&mut slot);
-        let (holder, granted) = resolve_camera_claim(current.as_deref(), &name, release);
+        let enabled = TABLE_PHOTOS.load(Ordering::Relaxed);
+        let (holder, granted) = resolve_camera_claim(current.as_deref(), &name, release, enabled);
         *slot = holder.clone().map(|n| CameraHolder { name: n, at: std::time::Instant::now() });
         drop(slot);
         let _ = app.emit("dm-table-camera", serde_json::json!({ "holder": holder }));
-        let body = serde_json::json!({ "ok": true, "granted": granted, "holder": holder }).to_string();
+        let body = serde_json::json!({
+            "ok": true, "granted": granted, "holder": holder,
+            // Only a refused CLAIM is explained by the setting. A release that
+            // returns false is the unrelated no-op of handing back a camera you
+            // no longer hold, and saying "not taking photos" there is a lie.
+            "error": (!granted && !enabled && !release).then_some("The DM isn't taking board photos."),
+        })
+        .to_string();
         return write_response(&mut stream, 200, &body, "application/json");
     }
 
@@ -432,6 +469,13 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let photo = parsed.get("photo").and_then(|v| v.as_str()).unwrap_or("").to_string();
         if photo.trim().is_empty() {
             return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"no photo\"}", "application/json");
+        }
+        // Checked before the holder check so a player who held the camera when
+        // the DM switched off is told the truth ("not taking photos") rather
+        // than the holder check's misleading "turn on table camera first".
+        if !TABLE_PHOTOS.load(Ordering::Relaxed) {
+            let body = "{\"ok\":false,\"error\":\"The DM isn't taking board photos.\"}";
+            return write_response(&mut stream, 409, body, "application/json");
         }
         let mut slot = camera_holder().lock().unwrap();
         let current = fresh_camera_holder(&mut slot);
@@ -458,6 +502,21 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
 #[tauri::command]
 pub fn release_table_camera() {
     *camera_holder().lock().unwrap() = None;
+}
+
+/// Mirror the DM console's board-photo setting into the listener, so players are
+/// refused at the door instead of having their photo accepted and then dropped.
+/// Called on console mount and whenever the setting changes.
+///
+/// Turning it off also frees the camera: the role only exists to send photos, so
+/// leaving someone holding one that no longer works is just a stale light on
+/// their screen.
+#[tauri::command]
+pub fn set_table_photos(enabled: bool) {
+    TABLE_PHOTOS.store(enabled, Ordering::Relaxed);
+    if !enabled {
+        *camera_holder().lock().unwrap() = None;
+    }
 }
 
 /// Who holds the table camera right now, for the DM Console's own display.
@@ -693,27 +752,41 @@ mod tests {
     #[test]
     fn table_camera_is_first_come_and_cannot_be_stolen() {
         // Free → the first asker gets it.
-        assert_eq!(resolve_camera_claim(None, "Ana", false), (Some("Ana".into()), true));
+        assert_eq!(resolve_camera_claim(None, "Ana", false, true), (Some("Ana".into()), true));
         // Held → someone else is REFUSED, and the holder is unchanged. This is
         // the whole point: two players snapping at once would race two different
         // boards into one read.
-        assert_eq!(resolve_camera_claim(Some("Ana"), "Bo", false), (Some("Ana".into()), false));
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Bo", false, true), (Some("Ana".into()), false));
         // The holder re-claiming is fine (that's the heartbeat that keeps a hold
         // from going stale mid-session) and is case-insensitive — but it keeps
         // the name already on record, so refreshing as "ana" doesn't rename the
         // holder everyone else sees from "Ana".
-        assert_eq!(resolve_camera_claim(Some("Ana"), "ana", false), (Some("Ana".into()), true));
+        assert_eq!(resolve_camera_claim(Some("Ana"), "ana", false, true), (Some("Ana".into()), true));
+    }
+
+    #[test]
+    fn board_photos_off_refuses_the_camera_but_still_lets_a_holder_hand_it_back() {
+        // Off → a free camera still can't be taken. Without this the player's app
+        // shows a green "you're the camera" light and tells them a photo was
+        // sent, for a photo the DM's console drops on arrival.
+        assert_eq!(resolve_camera_claim(None, "Ana", false, false), (None, false));
+        // ...and the current holder can't refresh either, so a hold left over
+        // from before the DM switched off expires instead of living forever.
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Ana", false, false), (Some("Ana".into()), false));
+        // But releasing always works: the role does nothing now, so refusing to
+        // let go would strand them owning it.
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Ana", true, false), (None, true));
     }
 
     #[test]
     fn only_the_table_camera_holder_can_release_it() {
         // The holder hands it back → free for anyone.
-        assert_eq!(resolve_camera_claim(Some("Ana"), "Ana", true), (None, true));
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Ana", true, true), (None, true));
         // A non-holder releasing must NOT knock the holder off — otherwise any
         // player closing their sheet would steal the camera from whoever has it.
-        assert_eq!(resolve_camera_claim(Some("Ana"), "Bo", true), (Some("Ana".into()), false));
+        assert_eq!(resolve_camera_claim(Some("Ana"), "Bo", true, true), (Some("Ana".into()), false));
         // Releasing when nobody holds it is a harmless no-op.
-        assert_eq!(resolve_camera_claim(None, "Bo", true), (None, false));
+        assert_eq!(resolve_camera_claim(None, "Bo", true, true), (None, false));
     }
 
     #[test]

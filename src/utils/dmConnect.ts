@@ -126,12 +126,18 @@ export async function fetchBroadcastMap(since: number, ip: string): Promise<{ ve
  *  photo-request counter. Players PULL from the DM, so this counter is how a
  *  "the DM asked for a photo" request reaches the holder: when `requestSeq`
  *  advances past the last one this device served, it takes the photo itself.
- *  See party_listener.rs — exactly one player at a time may send table photos. */
-export async function fetchTableCameraState(ip: string): Promise<{ holder: string | null; requestSeq: number }> {
+ *  See party_listener.rs — exactly one player at a time may send table photos.
+ *
+ *  `enabled` is the DM's board-photo setting, riding along on this poll because
+ *  it's the only channel that reaches a player's device — see set_table_photos.
+ *  False means hide the camera control entirely. */
+export async function fetchTableCameraState(
+  ip: string,
+): Promise<{ holder: string | null; requestSeq: number; enabled: boolean }> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/camera`, { method: 'GET', connectTimeout: 5000 });
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
-  const j = (await res.json()) as { holder?: string | null; requestSeq?: number };
-  return { holder: j.holder ?? null, requestSeq: j.requestSeq ?? 0 };
+  const j = (await res.json()) as { holder?: string | null; requestSeq?: number; enabled?: boolean };
+  return { holder: j.holder ?? null, requestSeq: j.requestSeq ?? 0, enabled: !!j.enabled };
 }
 
 /** Claim (or with `release`, hand back) the table camera. `granted` is false
@@ -139,7 +145,7 @@ export async function fetchTableCameraState(ip: string): Promise<{ holder: strin
  *  silently stealing it. */
 export async function claimTableCamera(
   name: string, ip: string, release = false,
-): Promise<{ granted: boolean; holder: string | null }> {
+): Promise<{ granted: boolean; holder: string | null; error: string | null }> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/camera-claim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -147,8 +153,8 @@ export async function claimTableCamera(
     connectTimeout: 5000,
   });
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
-  const j = (await res.json()) as { granted?: boolean; holder?: string | null };
-  return { granted: !!j.granted, holder: j.holder ?? null };
+  const j = (await res.json()) as { granted?: boolean; holder?: string | null; error?: string | null };
+  return { granted: !!j.granted, holder: j.holder ?? null, error: j.error ?? null };
 }
 
 /** Push one photo of the physical table to the DM. Rejected (409) unless this

@@ -104,6 +104,7 @@ pub fn run() {
       campaign::reresolve_map_tiles,
       campaign::read_table_positions,
       party_listener::release_table_camera,
+      party_listener::set_table_photos,
       party_listener::table_camera_holder,
       party_listener::request_table_photo,
       terrain::read_terrain_catalog,
