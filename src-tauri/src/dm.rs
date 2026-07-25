@@ -1785,7 +1785,7 @@ pub async fn install_engine_cli(engine: String) -> Result<(), String> {
     }
     if engine == crate::cli_provider::CliEngine::Gemini {
         // Antigravity is not on npm — it ships an installer script that places
-        // agy.exe in %LOCALAPPDATA%gyin and registers it on the user PATH.
+        // agy.exe in %LOCALAPPDATA%\agy\bin and registers it on the user PATH.
         return tokio::task::spawn_blocking(|| {
             let dir = std::env::temp_dir().join("tavern-sheet-agy-install");
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
