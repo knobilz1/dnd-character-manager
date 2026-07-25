@@ -1322,6 +1322,86 @@ pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<
     Ok(summary)
 }
 
+/// What `repoint_tile_library` moved, for the toast that reports it.
+#[derive(Serialize, Clone, Debug)]
+pub struct RepointSummary {
+    pub old_root: String,
+    pub new_root: String,
+    /// Catalog entries moved to the new folder.
+    pub entries: usize,
+    pub maps: usize,
+    pub refs: usize,
+    pub missing: usize,
+}
+
+/// Which imported folder is the one that moved: the single root that is no
+/// longer a directory. The DM knows their art is somewhere new, not which of
+/// several imported roots stopped resolving, so this is worked out rather than
+/// asked — but only when the answer is unambiguous. Zero or several missing
+/// roots are reported instead of guessed at.
+fn pick_moved_root(roots: &[String]) -> Result<String, String> {
+    let gone: Vec<String> = roots.iter().map(|r| normalize_import_root(r)).filter(|r| !Path::new(r).is_dir()).collect();
+    match gone.len() {
+        0 => Err("Every imported folder is still where it was — nothing to re-point.".into()),
+        1 => Ok(gone.into_iter().next().unwrap()),
+        n => Err(format!(
+            "{n} imported folders are missing ({}). Re-point works on one moved folder; use \"Replace…\" to rebuild the catalog.",
+            gone.join(", ")
+        )),
+    }
+}
+
+/// The art folder moved; point the catalog AND every existing map at its new
+/// home. The pack itself is unchanged, so this is a pure path swap — instant,
+/// and every map keeps the exact art it was generated with.
+///
+/// Which folder moved is worked out rather than asked: the DM knows their art
+/// is in a new place, not which of several imported roots stopped resolving.
+/// Exactly one missing root is the case worth automating; zero or several are
+/// reported instead of guessed at.
+///
+/// Deliberately NOT a re-Import: a re-scan would rebuild the same entry list
+/// the long way AND (on Replace) discard what `audit_tile_library` measured,
+/// which is keyed by rel_path and stays perfectly valid across a move.
+#[tauri::command]
+pub fn repoint_tile_library(app: AppHandle, new_root: String) -> Result<RepointSummary, String> {
+    if !PathBuf::from(&new_root).is_dir() {
+        return Err(format!("\"{new_root}\" isn't a folder."));
+    }
+    let new_root = normalize_import_root(&new_root);
+    let mut manifest = match load_manifest_cached(&app)? {
+        Some(m) => (*m).clone(),
+        None => return Err("No tile library imported yet.".into()),
+    };
+    let old_root = pick_moved_root(&manifest.roots)?;
+    if new_root == old_root {
+        return Err("That's the same folder the catalog already points at.".into());
+    }
+    let mut entries = 0;
+    for e in manifest.entries.iter_mut() {
+        if normalize_import_root(&e.root) == old_root {
+            e.root = new_root.clone();
+            entries += 1;
+        }
+    }
+    for r in manifest.roots.iter_mut() {
+        if normalize_import_root(r) == old_root {
+            *r = new_root.clone();
+        }
+    }
+    save_manifest(&app, &manifest)?;
+    *app.state::<TileLibraryState>().manifest.lock().unwrap() = Some(std::sync::Arc::new(manifest));
+    let moved = crate::campaign::repoint_battle_map_roots(&app, &old_root, &new_root)?;
+    Ok(RepointSummary {
+        old_root,
+        new_root,
+        entries,
+        maps: moved.maps,
+        refs: moved.refs,
+        missing: moved.missing,
+    })
+}
+
 #[tauri::command]
 pub fn get_tile_library_summary(app: AppHandle) -> Result<Option<TileLibrarySummary>, String> {
     Ok(load_manifest_cached(&app)?.map(|m| summarize(&m)))
@@ -4784,6 +4864,27 @@ mod tests {
         assert_eq!(merged.roots, vec!["C:/packA".to_string()], "root must not be duplicated in the roots list");
         assert_eq!(merged.entries.len(), 1, "the old scan of this exact root must be fully replaced, not accumulated: {:?}", merged.entries);
         assert_eq!(merged.entries[0].rel_path, "new_table.webp");
+    }
+
+    /// Re-pointing may only auto-pick when there is exactly one candidate.
+    /// Picking "the missing one" out of two would silently send every map on the
+    /// wrong pack to the new folder, and nothing downstream could tell.
+    #[test]
+    fn pick_moved_root_only_auto_picks_when_exactly_one_folder_is_missing() {
+        let here = std::env::temp_dir();
+        let present = here.to_string_lossy().replace('\\', "/");
+        let gone_a = format!("{present}/definitely-not-here-a");
+        let gone_b = format!("{present}/definitely-not-here-b");
+        assert!(!Path::new(&gone_a).is_dir(), "test needs these to really be absent");
+
+        assert_eq!(pick_moved_root(&[present.clone(), gone_a.clone()]).unwrap(), gone_a);
+        // A Windows-spelled root still has to be recognised as missing/present.
+        assert_eq!(pick_moved_root(&[gone_a.replace('/', "\\")]).unwrap(), gone_a);
+
+        let none = pick_moved_root(&[present.clone()]).unwrap_err();
+        assert!(none.contains("still where it was"), "{none}");
+        let many = pick_moved_root(&[gone_a, gone_b]).unwrap_err();
+        assert!(many.contains("2 imported folders are missing"), "{many}");
     }
 
     /// The test above hands `merge_manifest` an already-forward-slashed root —

@@ -1005,6 +1005,7 @@ export function DMConsolePage() {
   const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
   const [tileLibraryRootCount, setTileLibraryRootCount] = React.useState(0);
   const [tileLibraryBusy, setTileLibraryBusy] = React.useState(false);
+  const [tileLibraryNotice, setTileLibraryNotice] = React.useState<string | null>(null);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
   const [modulePlan, setModulePlan] = React.useState('');
   // Lore dialog — view the established campaign_lore.md and fold in new
@@ -3085,6 +3086,46 @@ export function DMConsolePage() {
     }
   }
 
+  /** "Moved the folder?…" — the art is in a new place, so point the catalog AND
+   *  every saved map's resolved-tile sidecar at it (tile_library.rs's
+   *  repoint_tile_library).
+   *
+   *  Deliberately not a re-Import. The pack is unchanged, so this is a path
+   *  swap: instant, and every map keeps the exact art it was generated with. A
+   *  re-scan would rebuild the same entry list the slow way, and a "Replace…"
+   *  would additionally discard the audit measurements — which are keyed by
+   *  rel_path and stay valid across a move.
+   *
+   *  Worth knowing what it's fixing: a sidecar stores an absolute root, and a
+   *  reference whose file is gone is dropped SILENTLY at load, so a moved
+   *  folder doesn't error — every map just quietly renders with no catalog art
+   *  at all. */
+  async function repointTileLibrary() {
+    const root = await open({ directory: true, multiple: false });
+    if (!root || typeof root !== 'string') return;
+    setTileLibraryBusy(true);
+    setTileLibraryNotice(null);
+    try {
+      const s = await invoke<{ new_root: string; entries: number; maps: number; refs: number; missing: number }>(
+        'repoint_tile_library',
+        { newRoot: root },
+      );
+      setTileLibraryPath(s.new_root);
+      setTileLibraryNotice(
+        `Re-pointed ${s.entries.toLocaleString()} tiles and ${s.refs} reference${s.refs === 1 ? '' : 's'} across ${s.maps} map${s.maps === 1 ? '' : 's'}.` +
+          (s.missing > 0
+            ? ` ${s.missing} of them still ${s.missing === 1 ? 'has' : 'have'} no file at that path — that folder may hold a different pack.`
+            : ''),
+      );
+      // Cards hold the art they were opened with, so re-read them from disk.
+      if (planOpen) await openPlanMode();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTileLibraryBusy(false);
+    }
+  }
+
   /** Re-renders every currently-shown card's preview PNG from its own spec —
    *  battleMapToPngDataUrl reads whichever tile style is currently active
    *  (see setActiveTileStyle), so switching styles doesn't touch any map's
@@ -4222,14 +4263,18 @@ export function DMConsolePage() {
                       <Button size="sm" variant="outline" onClick={() => importTileLibrary(false)} disabled={tileLibraryBusy}>
                         {tileLibraryBusy ? 'Importing…' : 'Replace…'}
                       </Button>
+                      <Button size="sm" variant="outline" onClick={repointTileLibrary} disabled={tileLibraryBusy}>
+                        {tileLibraryBusy ? 'Working…' : 'Moved the folder?…'}
+                      </Button>
                     </>
                   )}
                 </div>
                 {tileLibraryTotal != null && (
                   <p className="text-xs text-slate-500 mb-2">
-                    "Add another folder…" keeps everything already imported; "Replace…" wipes it and starts over with only the new folder. Re-picking the same folder either way just refreshes it, never duplicates.
+                    "Add another folder…" keeps everything already imported; "Replace…" wipes it and starts over with only the new folder. Re-picking the same folder either way just refreshes it, never duplicates. If the art itself moved to a new drive or folder, use "Moved the folder?…" — it re-points existing maps at it instead of re-scanning, so they keep the exact art they were made with.
                   </p>
                 )}
+                {tileLibraryNotice && <p className="text-xs text-emerald-400 mb-2">{tileLibraryNotice}</p>}
 
                 {/* Detected biomes. Every failure this panel exists to catch is
                     SILENT — a pack whose folders aren't recognised still reports

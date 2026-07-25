@@ -3719,6 +3719,74 @@ struct TileRef {
     rel_path: String,
 }
 
+/// What one pass of `repoint_battle_map_roots` changed.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct RepointedMaps {
+    /// Sidecar files rewritten.
+    pub maps: usize,
+    /// Individual tile references moved to the new folder.
+    pub refs: usize,
+    /// …of which this many STILL don't resolve, because the new folder has no
+    /// file at that relative path. Surfaced rather than swallowed: it's the
+    /// difference between "the folder moved" and "the pack was replaced by a
+    /// different one", and only the DM can tell us which.
+    pub missing: usize,
+}
+
+/// Point every battle-map sidecar that references `old_root` at `new_root`
+/// instead — what a moved art folder actually needs.
+///
+/// A move is a PURE path swap: same pack, same relative paths, so every map
+/// keeps the exact art it was generated with, instantly and with no model
+/// calls. `reresolve_map_tiles` would also clear the symptom, but it re-runs
+/// the vision picker (~52s a map, measured) and re-rolls the floor, so it
+/// restores *a* map rather than the one the DM already printed.
+///
+/// The swap is done on the JSON TEXT, not by a serde round-trip: a root is a
+/// full absolute path, so it can only ever appear as a `root` value, and
+/// replacing the quoted string can't silently drop a field this struct doesn't
+/// know about the way a re-serialize would.
+pub(crate) fn repoint_battle_map_roots(app: &AppHandle, old_root: &str, new_root: &str) -> Result<RepointedMaps, String> {
+    repoint_battle_map_roots_at(&campaigns_root(app)?, old_root, new_root)
+}
+
+fn repoint_battle_map_roots_at(campaigns: &Path, old_root: &str, new_root: &str) -> Result<RepointedMaps, String> {
+    let mut out = RepointedMaps::default();
+    for c in list_campaigns_at(campaigns)? {
+        let dir = battle_maps_dir(campaigns, &c.id);
+        let Ok(read) = fs::read_dir(&dir) else { continue };
+        for entry in read.flatten() {
+            let path = entry.path();
+            if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".tiles.json")) {
+                continue;
+            }
+            let Ok(json) = fs::read_to_string(&path) else { continue };
+            // Parse only to count and to skip files that don't reference the old
+            // folder at all; the write below is the text swap.
+            let Ok(map) = serde_json::from_str::<ResolvedMap>(&json) else { continue };
+            let hits = map.objects.iter().filter(|o| o.root == old_root).count()
+                + [map.floor.as_ref(), map.liquid.as_ref()].into_iter().flatten().filter(|r| r.root == old_root).count();
+            if hits == 0 {
+                continue;
+            }
+            let swapped = json.replace(&format!("\"{old_root}\""), &format!("\"{new_root}\""));
+            fs::write(&path, &swapped).map_err(|e| format!("Couldn't rewrite {}: {e}", path.display()))?;
+            out.maps += 1;
+            out.refs += hits;
+            if let Ok(now) = serde_json::from_str::<ResolvedMap>(&swapped) {
+                let rels = now
+                    .objects
+                    .iter()
+                    .map(|o| (&o.root, &o.rel_path))
+                    .chain([now.floor.as_ref(), now.liquid.as_ref()].into_iter().flatten().map(|r| (&r.root, &r.rel_path)))
+                    .collect::<Vec<_>>();
+                out.missing += rels.iter().filter(|(r, rel)| *r == new_root && !Path::new(r).join(rel).exists()).count();
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// The whole resolved sidecar for one map (`<slug>.tiles.json`): the picked
 /// object tiles plus the biome ground texture (None = keep the built-in floor).
 #[derive(Serialize, Deserialize, Default)]
@@ -9770,6 +9838,55 @@ Tactics:
 
         let err = import_campaign_at(&root.0, &zip_path).unwrap_err();
         assert!(err.contains("doesn't look like a campaign backup"));
+    }
+
+    /// A moved art folder is a pure path swap: every map must come back with
+    /// the SAME art, and the swap must not touch a sidecar pointing at some
+    /// other still-present folder. `missing` is what tells a move apart from a
+    /// swapped-out pack, so it has to count real files on disk.
+    #[test]
+    fn repoint_battle_map_roots_moves_only_the_old_root_and_reports_what_no_longer_exists() {
+        let root = Scratch::new("repoint");
+        let art = Scratch::new("repoint-art");
+        let new_root = art.0.to_string_lossy().replace('\\', "/");
+        // One file really exists under the new folder, one doesn't.
+        fs::write(art.0.join("table.webp"), b"x").unwrap();
+
+        let c = create_campaign_at(&root.0, &intake("Moved")).unwrap();
+        let dir = battle_maps_dir(&root.0, &c.id);
+        fs::create_dir_all(&dir).unwrap();
+        let sidecar = |objs: &str, floor: &str| {
+            format!(r#"{{"objects":[{objs}],"floor":{floor},"liquid":null,"natural_walls":false}}"#)
+        };
+        let obj = |root: &str, rel: &str| {
+            format!(
+                r#"{{"cells":[[1,1]],"w":1,"h":1,"tw":1,"th":1,"root":"{root}","rel_path":"{rel}","sub":null,"rotated":false,"single":false}}"#
+            )
+        };
+        fs::write(
+            dir.join("moved.tiles.json"),
+            sidecar(
+                &format!("{},{}", obj("D:/old art", "table.webp"), obj("D:/old art", "gone.webp")),
+                r#"{"root":"D:/old art","rel_path":"table.webp"}"#,
+            ),
+        )
+        .unwrap();
+        // A second map on a DIFFERENT folder that hasn't moved — must be left alone.
+        fs::write(dir.join("elsewhere.tiles.json"), sidecar(&obj("E:/other pack", "keep.webp"), "null")).unwrap();
+
+        let out = repoint_battle_map_roots_at(&root.0, "D:/old art", &new_root).unwrap();
+        assert_eq!(out.maps, 1, "only the sidecar on the moved folder is rewritten");
+        assert_eq!(out.refs, 3, "two objects and the floor");
+        assert_eq!(out.missing, 1, "gone.webp has no file under the new folder; table.webp does");
+
+        let moved = fs::read_to_string(dir.join("moved.tiles.json")).unwrap();
+        assert!(moved.contains(&new_root) && !moved.contains("D:/old art"));
+        let untouched = fs::read_to_string(dir.join("elsewhere.tiles.json")).unwrap();
+        assert!(untouched.contains("E:/other pack"), "an unrelated pack's map must not be rewritten");
+
+        // Idempotent: nothing still points at the old folder, so a second pass is a no-op.
+        let again = repoint_battle_map_roots_at(&root.0, "D:/old art", &new_root).unwrap();
+        assert_eq!(again, RepointedMaps::default());
     }
 
     #[test]

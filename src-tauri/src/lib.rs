@@ -109,6 +109,7 @@ pub fn run() {
       terrain::read_terrain_catalog,
       terrain::save_terrain_catalog,
       tile_library::import_tile_library,
+      tile_library::repoint_tile_library,
       tile_library::get_tile_library_summary,
       tile_library::profile_tile_library,
       tile_library::get_pack_profile,
