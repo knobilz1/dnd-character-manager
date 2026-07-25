@@ -1048,14 +1048,47 @@ pub async fn login_in_app(app: AppHandle, engine: String, url: String) -> Result
         .title(format!("Sign in to {}", crate::cli_provider::CliEngine::from_setting(&engine).label()))
         .inner_size(520.0, 700.0)
         .on_navigation(move |u| {
-            // Fires for every navigation INCLUDING the redirect back, before any
-            // page script gets to tidy the URL.
-            if let Some(code) = code_from_callback(u.as_str()) {
+            let url = u.as_str().to_string();
+
+            // (1) The scraper below signals its find by navigating here. Caught
+            //     before it loads, so the bogus host is never resolved.
+            if let Some(code) = url.strip_prefix(CAPTURE_SENTINEL) {
+                *captured_code().lock().unwrap() = Some(percent_decode(code));
+                if let Some(w) = app_for_nav.get_webview_window("engine-login") {
+                    let _ = w.close();
+                }
+                return false;
+            }
+
+            // (2) Some flows do put the code in the redirect itself.
+            if let Some(code) = code_from_callback(&url) {
                 *captured_code().lock().unwrap() = Some(code);
                 if let Some(w) = app_for_nav.get_webview_window("engine-login") {
                     let _ = w.close();
                 }
-                return false; // don't bother loading the callback page itself
+                return false;
+            }
+
+            // (3) Antigravity's callback page does neither: it strips the code
+            //     from the URL and PRINTS IT IN THE PAGE for the user to copy.
+            //     That is the case that actually happens. Since this is our own
+            //     window we can just read it off the page — wait for the render,
+            //     then scrape and bounce it back through (1). Retried because
+            //     the code appears after the page's own fetch resolves.
+            if url.contains("oauth-callback") || url.contains("/callback") {
+                let app = app_for_nav.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..20 {
+                        std::thread::sleep(Duration::from_millis(500));
+                        let Some(w) = app.get_webview_window("engine-login") else { return };
+                        if w.eval(SCRAPE_CODE_JS).is_err() {
+                            return;
+                        }
+                        if captured_code().lock().unwrap().is_some() {
+                            return;
+                        }
+                    }
+                });
             }
             true
         })
@@ -1063,6 +1096,40 @@ pub async fn login_in_app(app: AppHandle, engine: String, url: String) -> Result
         .map_err(|e| format!("Couldn't open the sign-in window: {e}"))?;
     Ok(())
 }
+
+/// A URL the scraper navigates to in order to hand the code back. Never loaded —
+/// on_navigation cancels it — so the host doesn't need to exist. This sidesteps
+/// needing Tauri IPC inside a third-party page, which would mean granting a
+/// remote origin access to the app's command surface. A cancelled navigation is
+/// a much smaller thing to hand out.
+const CAPTURE_SENTINEL: &str = "https://tavern-sheet.invalid/captured?code=";
+
+/// Finds the authorization code printed in a callback page and bounces it back
+/// via CAPTURE_SENTINEL.
+///
+/// Google's codes start `4/` followed by a long opaque blob, which is specific
+/// enough to pick out of page text without knowing anything about the page's
+/// markup — and that markup is Google's to change, so not depending on it is the
+/// point. Checks input/textarea values too, since a code shown in a copy-box
+/// isn't in innerText.
+const SCRAPE_CODE_JS: &str = r#"(function () {
+  try {
+    var re = /4\/[A-Za-z0-9_\-\.]{20,}/;
+    var hay = document.body ? document.body.innerText : '';
+    var m = hay.match(re);
+    if (!m) {
+      var fields = document.querySelectorAll('input, textarea');
+      for (var i = 0; i < fields.length; i++) {
+        var v = fields[i].value || '';
+        var f = v.match(re);
+        if (f) { m = f; break; }
+      }
+    }
+    if (m && m[0]) {
+      location.href = 'https://tavern-sheet.invalid/captured?code=' + encodeURIComponent(m[0]);
+    }
+  } catch (e) { /* nothing to do; the manual paste box is still there */ }
+})();"#;
 
 fn captured_code() -> &'static Mutex<Option<String>> {
     static C: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -1534,6 +1601,36 @@ pub async fn warmup_dm_session(app: AppHandle, campaign_id: String) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sentinel round-trip is how a code found in PAGE TEXT gets back to
+    /// Rust without granting a third-party origin access to the app's commands.
+    /// If this parsing breaks, the scraper silently finds codes and loses them.
+    #[test]
+    fn a_code_scraped_from_the_page_survives_the_sentinel_round_trip() {
+        // What the injected JS produces, encodeURIComponent and all.
+        let round_tripped = format!("{CAPTURE_SENTINEL}4%2F0AXEQxIBiueOfKpwJ8C5MAV9Z3lPLV_HVUaXHgZjmpSXvBj9g");
+        let code = round_tripped.strip_prefix(CAPTURE_SENTINEL).map(percent_decode);
+        assert_eq!(code.as_deref(), Some("4/0AXEQxIBiueOfKpwJ8C5MAV9Z3lPLV_HVUaXHgZjmpSXvBj9g"));
+
+        // The regex the page is scraped with must match a real Google code...
+        let re = regex_lite_match("Your code is 4/0AXEQxIBiueOfKpwJ8C5MAV9Z3lPLV_HVUaXHgZjmpSXvBj9g — copy it");
+        assert_eq!(re.as_deref(), Some("4/0AXEQxIBiueOfKpwJ8C5MAV9Z3lPLV_HVUaXHgZjmpSXvBj9g"));
+        // ...and not fire on ordinary page furniture containing a slash.
+        assert_eq!(regex_lite_match("Signed in as a/b. Visit 4/5 pages."), None);
+    }
+
+    /// Mirror of SCRAPE_CODE_JS's regex, so the pattern is checked in CI rather
+    /// than only inside a webview nobody can assert against.
+    fn regex_lite_match(hay: &str) -> Option<String> {
+        let bytes = hay.as_bytes();
+        let start = hay.find("4/")?;
+        let tail = &hay[start + 2..];
+        let n = tail
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'))
+            .unwrap_or(tail.len());
+        let _ = bytes;
+        (n >= 20).then(|| format!("4/{}", &tail[..n]))
+    }
 
     /// The in-app sign-in stands entirely on lifting `code` out of the redirect
     /// at navigation time. The callback page strips it immediately afterwards
