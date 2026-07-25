@@ -78,11 +78,18 @@ interface SettingsState {
   tileLibraryPath: string | null;
   setTileLibraryPath: (v: string | null) => void;
   /** Where a "read the board" photo of the physical table comes from (#39):
+   *  'off' = nowhere, and the console says nothing about photos at all;
    *  'direct' = a camera on this (the DM's) machine; 'player' = the table is in
    *  the players' room, so whichever player holds the table-camera role takes it
-   *  and pushes it over the LAN. Only meaningful on the DM's device. */
-  tableCameraSource: 'direct' | 'player';
-  setTableCameraSource: (v: 'direct' | 'player') => void;
+   *  and pushes it over the LAN. Only meaningful on the DM's device.
+   *
+   *  'off' is the default and the whole feature is opt-in from there: a table
+   *  most groups play at has no camera pointed at it, and a console that offers
+   *  to photograph the board implies the DM is meant to. Nothing downstream
+   *  depends on this — dmPrompt.ts never mentions cameras, so the DM itself has
+   *  no idea the feature exists either way. */
+  tableCameraSource: 'off' | 'direct' | 'player';
+  setTableCameraSource: (v: 'off' | 'direct' | 'player') => void;
   /** Which local camera to use when tableCameraSource is 'direct'. Remembered so
    *  a DM with a webcam AND an overhead table cam doesn't re-pick every session.
    *  Empty = whatever the browser gives us first. */
@@ -118,11 +125,20 @@ export const useSettingsStore = create<SettingsState>()(
       setBattleTileStyle: (v) => set({ battleTileStyle: v }),
       tileLibraryPath: null,
       setTileLibraryPath: (v) => set({ tileLibraryPath: v }),
-      tableCameraSource: 'direct',
+      tableCameraSource: 'off',
       setTableCameraSource: (v) => set({ tableCameraSource: v }),
       tableCameraDeviceId: '',
       setTableCameraDeviceId: (v) => set({ tableCameraDeviceId: v }),
     }),
-    { name: 'tavern-sheet-settings' }
+    {
+      name: 'tavern-sheet-settings',
+      /** v1 made board photos opt-in. A default only applies to a fresh install,
+       *  so without this every console that had ever been opened would keep the
+       *  stored 'direct' and go on advertising a camera — which is the thing
+       *  turning it off was for. Touches that one key and nothing else. */
+      version: 1,
+      migrate: (persisted, from) =>
+        (from < 1 ? { ...(persisted as SettingsState), tableCameraSource: 'off' } : persisted) as SettingsState,
+    }
   )
 );

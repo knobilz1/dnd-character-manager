@@ -940,6 +940,8 @@ export function DMConsolePage() {
   adHocMapCardsRef.current = adHocMapCards;
   const presentingSlugRef = React.useRef(presentingSlug);
   presentingSlugRef.current = presentingSlug;
+  const tableCameraSourceRef = React.useRef(tableCameraSource);
+  tableCameraSourceRef.current = tableCameraSource;
   /** A finished board read waiting for the DM to confirm it. The read is a HINT,
    *  never authority: measured accuracy is ~4-6 of 6 with the misses landing one
    *  column out, so the DM assigns each piece to a combatant and fixes any square
@@ -1762,6 +1764,11 @@ export function DMConsolePage() {
   // can't know which map card the DM means.
   React.useEffect(() => {
     const unlisten = listen<{ name: string; photo: string }>('dm-table-photo', (event) => {
+      // A push only counts when this console actually asked for player photos.
+      // Whoever holds the camera role can send one at any moment, and with
+      // photos off (the default) or pointed at this machine, acting on it would
+      // spend a vision call and pop a confirm panel the DM never asked for.
+      if (tableCameraSourceRef.current !== 'player') return;
       const cards = [...planMapCardsRef.current, ...adHocMapCardsRef.current];
       const card = cards.find((c) => c.slug === presentingSlugRef.current) ?? (cards.length === 1 ? cards[0] : undefined);
       if (!card) {
@@ -3293,14 +3300,16 @@ export function DMConsolePage() {
   }
 
   /** Photograph the physical table and ask the vision model which square each
-   *  miniature is on (#39). Opt-in per click; needs a camera, and the button
-   *  that calls this only renders when one exists.
+   *  miniature is on (#39). Opt-in twice over: board photos are off until the DM
+   *  turns them on, and then it's still a per-click action — the button only
+   *  renders once a source is chosen and can actually supply a photo.
    *
    *  The map may be on the TV, printed and taped down, or anything else — the
    *  model reads the grid labels printed in the map's own ruler frame, so the
    *  surface doesn't matter. Nothing is applied here: the result opens a confirm
    *  panel first (see applyBoardRead). */
   async function readTheBoard(card: MapCard) {
+    if (tableCameraSource === 'off') return; // the button is hidden; this is the belt to its braces
     // Multi-story maps read one floor at a time; the ground floor is the one
     // the minis are standing on unless/until we add a floor picker.
     const floor = parseBattleMapFloors(card.spec)[0];
@@ -4392,17 +4401,21 @@ export function DMConsolePage() {
                 {[...planMapCards, ...adHocMapCards].length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-slate-400">
                     <Camera size={13} className="text-slate-500" />
-                    <span>Board photos from</span>
+                    <span>Board photos</span>
                     <select
                       value={tableCameraSource}
-                      onChange={(e) => setTableCameraSource(e.target.value as 'direct' | 'player')}
+                      onChange={(e) => setTableCameraSource(e.target.value as 'off' | 'direct' | 'player')}
                       className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-200"
-                      title="Direct = a camera on this machine. From a player = the table is in the players' room and someone there sends the photo."
+                      title="Off = no photos, and no Read-the-board button. This machine = a camera on the DM's box. A player = the table is in the players' room and someone there sends the photo."
                     >
-                      <option value="direct">this machine</option>
-                      <option value="player">a player</option>
+                      <option value="off">off</option>
+                      <option value="direct">from this machine</option>
+                      <option value="player">from a player</option>
                     </select>
-                    {tableCameraSource === 'direct' ? (
+                    {/* Off says nothing further — no missing-camera warning, no
+                        holder status. The row is one muted line whose only job is
+                        being the way back on. */}
+                    {tableCameraSource === 'off' ? null : tableCameraSource === 'direct' ? (
                       tableCameras.length > 1 ? (
                         <select
                           value={tableCameraId}
@@ -4478,7 +4491,10 @@ export function DMConsolePage() {
                               <Tv size={14} /> Present to TV
                             </Button>
                           )}
-                          {(tableCameras.length > 0 || tableCameraSource === 'player') && (
+                          {/* 'off' hides this outright — the point of the setting
+                              is that a console nobody has enabled photos on
+                              shouldn't offer to take one. */}
+                          {tableCameraSource !== 'off' && (tableCameras.length > 0 || tableCameraSource === 'player') && (
                             <Button
                               size="sm" variant="outline"
                               onClick={() => readTheBoard(card)}
