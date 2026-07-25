@@ -1606,6 +1606,232 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
     }
 }
 
+/// A board read on a non-Claude engine.
+///
+/// The engines disagree on how an image arrives: Claude takes base64 blocks on
+/// stdin, Codex takes FILE PATHS via `--image`. So the photo is spilled to a
+/// temp file and handed over by path, then deleted. Gemini/agy has no verified
+/// image flag, so it is refused rather than silently reading nothing and
+/// returning a confident answer about a photo it never saw.
+pub(crate) fn run_engine_vision(
+    engine: crate::cli_provider::CliEngine, photo_data_url: &str, cols: usize, rows: usize,
+) -> Result<String, String> {
+    use crate::cli_provider::{vision_args, CliEngine, Delivery};
+
+    if engine != CliEngine::Codex {
+        return Err(format!(
+            "{} can't read board photos yet — only Claude and Codex can.",
+            engine.label()
+        ));
+    }
+    let (media, b64) = crate::campaign::split_data_url(photo_data_url);
+    let ext = if media.contains("png") { "png" } else { "jpg" };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let img_path = std::env::temp_dir().join(format!("tavern-board-{}-{}.{ext}", std::process::id(), stamp));
+    let bytes = base64_decode(b64).ok_or("That board photo wasn't valid base64.")?;
+    std::fs::write(&img_path, &bytes).map_err(|e| format!("Couldn't stage the photo: {e}"))?;
+
+    let out_path = std::env::temp_dir().join(format!("tavern-board-out-{}-{stamp}.txt", std::process::id()));
+    let inv = vision_args(
+        engine,
+        None,
+        &[img_path.to_string_lossy().to_string()],
+        &out_path.to_string_lossy(),
+    );
+    let arg_refs: Vec<&str> = inv.args.iter().map(String::as_str).collect();
+    let mut cmd = engine_command(engine, &arg_refs)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let prompt = board_read_text_prompt(cols, rows);
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(prompt.as_bytes());
+    }
+    let out = child.wait_with_output().map_err(|e| format!("{} wait failed: {e}", engine.label()))?;
+    let _ = std::fs::remove_file(&img_path);
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let answer = match inv.delivery {
+        Delivery::LastMessageFile => std::fs::read_to_string(&out_path).ok(),
+        Delivery::Stdout => crate::cli_provider::extract_final_text(engine, &stdout),
+    };
+    let _ = std::fs::remove_file(&out_path);
+    answer
+        .filter(|a| !a.trim().is_empty())
+        .ok_or_else(|| format!("{} returned nothing for the board photo.", engine.label()))
+}
+
+/// The board-read instructions as plain text, for engines that take the image
+/// separately rather than inside a structured message.
+fn board_read_text_prompt(cols: usize, rows: usize) -> String {
+    let last_col = crate::campaign::column_label_pub(cols.saturating_sub(1));
+    format!(
+        "The attached photograph shows a tabletop battle map with physical miniatures on it. The map is printed with \
+         a ruler frame: column letters left-to-right along the top (A through {last_col}), row numbers top-to-bottom \
+         down the left (1 through {rows}). A square is its column letter then its row number, e.g. \"F7\".\n\n\
+         The photo is usually taken by hand from the side of the table, so squares further away look smaller and the \
+         far rows appear compressed. Count along the printed frame, or from the map's own walls and furniture — do \
+         NOT judge by how far across the picture something looks.\n\n\
+         For EVERY playing piece — upright figures AND flat tokens — give the ONE square it occupies and a short \
+         description. Only squares inside A1..{last_col}{rows}. If you cannot confidently place a figure, LEAVE IT \
+         OUT. Ignore dice, hands and scenery. Also give `seen`: how many pieces are visible IN TOTAL including any \
+         you left out.\n\nReply with ONLY this JSON: \
+         {{\"seen\":6,\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
+    )
+}
+
+/// Minimal base64 decode — a data URL's payload, nothing more.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut idx = [255u8; 256];
+    for (i, c) in T.iter().enumerate() {
+        idx[*c as usize] = i as u8;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut acc: u32 = 0;
+    let mut bits = 0;
+    for b in s.bytes() {
+        if b == b'=' || b.is_ascii_whitespace() {
+            continue;
+        }
+        let v = idx[b as usize];
+        if v == 255 {
+            return None;
+        }
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// One live DM turn on a non-Claude subscription CLI.
+///
+/// Claude keeps `ask_dm`/`run_claude_streaming`: it streams partial text so the
+/// DM starts speaking before the turn finishes, and that latency win is the
+/// whole reason the voice console feels live. The other engines have no
+/// equivalent we have verified, so a turn arrives whole. That is a real
+/// downgrade and the UI says so rather than hiding it.
+///
+/// Session continuity is per-engine and NOT portable: Codex resumes with
+/// `exec resume <id>`, agy with `--conversation <id>`, Claude with `--resume`.
+/// The console already clears the session id when the provider changes.
+#[tauri::command]
+pub async fn ask_dm_engine(
+    app: AppHandle,
+    engine: String,
+    prompt: String,
+    session_id: Option<String>,
+    campaign_id: Option<String>,
+) -> Result<DmReply, String> {
+    let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    if engine == crate::cli_provider::CliEngine::Claude {
+        return Err("Claude turns go through ask_dm, which streams.".into());
+    }
+    // Same working directory Claude turns use, so CLAUDE.md-style recall
+    // reaches the model — and the same reason every engine is locked read-only.
+    let cwd = match campaign_id {
+        Some(id) => Some(crate::campaign::campaign_dir(&app, &id)?),
+        None => None,
+    };
+    tokio::task::spawn_blocking(move || run_engine_turn(engine, &prompt, session_id.as_deref(), cwd))
+        .await
+        .map_err(|e| format!("Turn task failed: {e}"))?
+}
+
+/// Blocking half of `ask_dm_engine`: spawn, feed the prompt, collect the reply
+/// and whatever session id the engine minted for next turn.
+fn run_engine_turn(
+    engine: crate::cli_provider::CliEngine,
+    prompt: &str,
+    session_id: Option<&str>,
+    cwd: Option<PathBuf>,
+) -> Result<DmReply, String> {
+    use crate::cli_provider::{turn_args, Delivery};
+
+    let out_path = std::env::temp_dir().join(format!(
+        "tavern-turn-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let inv = turn_args(engine, session_id, None, None, false, &out_path.to_string_lossy());
+
+    let mut args = inv.args.clone();
+    if !inv.prompt_on_stdin {
+        args.push(prompt.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut cmd = engine_command(engine, &arg_refs)?;
+    // cwd is the campaign folder — that is how CLAUDE.md-style recall reaches
+    // the model, and exactly why every builder in cli_provider.rs welds in a
+    // read-only lockdown. Proven with a real write attempt; see that module.
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
+    if inv.prompt_on_stdin {
+        child
+            .stdin
+            .take()
+            .ok_or("no stdin pipe")?
+            .write_all(prompt.as_bytes())
+            .map_err(|e| format!("failed writing prompt to {}: {e}", engine.label()))?;
+    } else {
+        drop(child.stdin.take());
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("{} wait failed: {e}", engine.label()))?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let text = match inv.delivery {
+        Delivery::LastMessageFile => std::fs::read_to_string(&out_path).ok(),
+        Delivery::Stdout => crate::cli_provider::extract_final_text(engine, &stdout),
+    };
+    let _ = std::fs::remove_file(&out_path);
+    let session_id = crate::cli_provider::extract_session_id(engine, &stdout);
+
+    match text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        Some(text) => Ok(DmReply { text, session_id }),
+        None => Err(format!(
+            "{} returned nothing.\n{}",
+            engine.label(),
+            format!("{stdout}{}", String::from_utf8_lossy(&out.stderr))
+                .trim()
+                .chars()
+                .take(500)
+                .collect::<String>()
+        )),
+    }
+}
+
 /// Run one stateless completion on any engine and return its text.
 ///
 /// The execution primitive the whole multi-engine feature stands on: arg

@@ -55,6 +55,21 @@ interface SettingsState {
    *  less than not spending Claude budget. */
   ingestionProvider: 'claude' | 'local' | 'codex' | 'gemini';
   setIngestionProvider: (v: 'claude' | 'local' | 'codex' | 'gemini') => void;
+  /** Use more than one engine to check the work of the primary one.
+   *
+   *  OFF by default and deliberately opt-in: it spends a second engine's quota
+   *  on every checked operation, and rate limits — not money — are the real
+   *  constraint on a subscription plan. What it buys is DISAGREEMENT: a board
+   *  read that two engines place differently is flagged instead of silently
+   *  wrong, and a campaign-lore draft is critiqued by a model that didn't write
+   *  it. See cli_provider.rs and the multi-llm-plan memory. */
+  crossCheckEnabled: boolean;
+  setCrossCheckEnabled: (v: boolean) => void;
+  /** Which engines review the primary's work. Never includes the primary — a
+   *  model checking itself shares its own blind spots, which is the entire
+   *  thing this exists to avoid. */
+  crossCheckEngines: Array<'claude' | 'codex' | 'gemini'>;
+  setCrossCheckEngines: (v: Array<'claude' | 'codex' | 'gemini'>) => void;
   /** Which engine synthesizes the DM/NPC voices. 'kokoro' (default) is the
    *  fast, CPU, always-available preset-voice engine; 'f5' is the optional
    *  high-fidelity GPU voice-cloning engine (see src-tauri/src/tts.rs). ONE-WAY
@@ -124,6 +139,10 @@ export const useSettingsStore = create<SettingsState>()(
       setLocalLlmHistoryTurns: (v) => set({ localLlmHistoryTurns: v }),
       ingestionProvider: 'claude',
       setIngestionProvider: (v) => set({ ingestionProvider: v }),
+      crossCheckEnabled: false,
+      setCrossCheckEnabled: (v) => set({ crossCheckEnabled: v }),
+      crossCheckEngines: [],
+      setCrossCheckEngines: (v) => set({ crossCheckEngines: v }),
       ttsEngine: 'kokoro',
       setTtsEngine: (v) => set({ ttsEngine: v }),
       battleTileStyle: 'default',

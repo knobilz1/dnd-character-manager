@@ -638,7 +638,7 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
         return Err("Campaign-lore establishment returned empty content.".into());
     }
 
-    let final_lore = crate::local_llm::ask_ingest_once(build_campaign_lore_critique_prompt(&draft, &inventory), Some("opus"), false)
+    let final_lore = crate::local_llm::ask_ingest_critique(build_campaign_lore_critique_prompt(&draft, &inventory), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -735,7 +735,7 @@ fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<Stri
         return Err("Campaign-lore update returned empty content; leaving campaign_lore.md untouched.".into());
     }
 
-    let lore = crate::local_llm::ask_ingest_once(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"), false)
+    let lore = crate::local_llm::ask_ingest_critique(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -2859,6 +2859,8 @@ fn split_spec_grid(spec: &str) -> Option<(Vec<String>, Vec<String>, Vec<String>)
 /// Spreadsheet-style column label: 0→A, 25→Z, 26→AA. Mirrors
 /// battleMapRender.ts's columnLabel so cell refs mean the same thing in the
 /// spec, the print, and the DM's own planning.
+pub(crate) fn column_label_pub(index: usize) -> String { column_label(index) }
+
 fn column_label(index: usize) -> String {
     let mut n = index;
     let mut s = String::new();
@@ -3807,7 +3809,7 @@ struct ResolvedMap {
 
 /// Splits a `data:<media>;base64,<b64>` URL into (media_type, base64). Falls
 /// back to webp if it's not shaped as expected. Pure.
-fn split_data_url(u: &str) -> (&str, &str) {
+pub(crate) fn split_data_url(u: &str) -> (&str, &str) {
     let rest = u.strip_prefix("data:").unwrap_or(u);
     let (media, tail) = rest.split_once(';').unwrap_or(("image/webp", rest));
     let b64 = tail.split_once(',').map(|(_, b)| b).unwrap_or(tail);
@@ -4147,7 +4149,7 @@ fn parse_board_read(reply: &str, cols: usize, rows: usize) -> BoardRead {
 /// for the DM to confirm — never authority, and never drawn on the map.
 #[tauri::command]
 pub fn read_table_positions(
-    photo: String, cols: usize, rows: usize, model: Option<String>,
+    photo: String, cols: usize, rows: usize, model: Option<String>, engine: Option<String>,
 ) -> Result<BoardRead, String> {
     if cols == 0 || rows == 0 {
         return Err("That map has no grid to read positions against.".into());
@@ -4157,10 +4159,19 @@ pub fn read_table_positions(
         return Err("The board photo was empty.".into());
     }
     let model = model.filter(|m| !m.trim().is_empty());
-    let reply = crate::dm::run_claude_vision(
-        &build_board_read_message(media, b64, cols, rows),
-        Some(model.as_deref().unwrap_or(BOARD_READ_MODEL)),
-    )?;
+    // A second engine can read the SAME photo, so the console can flag squares
+    // the two disagree on. Measured motivation: a single reader gets 4/8 exact
+    // on an angled shot with ~1 cell of run-to-run variance, and a wrong square
+    // is indistinguishable from a right one. Disagreement makes it visible.
+    let engine = engine
+        .map(|e| crate::cli_provider::CliEngine::from_setting(&e))
+        .unwrap_or(crate::cli_provider::CliEngine::Claude);
+    let message = build_board_read_message(media, b64, cols, rows);
+    let reply = if engine == crate::cli_provider::CliEngine::Claude {
+        crate::dm::run_claude_vision(&message, Some(model.as_deref().unwrap_or(BOARD_READ_MODEL)))?
+    } else {
+        crate::dm::run_engine_vision(engine, &photo, cols, rows)?
+    };
     crate::maplog::log("BOARD READ (raw reply)", &reply);
     Ok(parse_board_read(&reply, cols, rows))
 }
@@ -7322,7 +7333,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     on_progress("synthesizing", 0, 0);
     let draft_plan = crate::local_llm::ask_ingest_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"), false)?;
     on_progress("critiquing", 0, 0);
-    let plan = crate::local_llm::ask_ingest_once(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"), false)
+    let plan = crate::local_llm::ask_ingest_critique(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())

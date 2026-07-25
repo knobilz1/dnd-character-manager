@@ -36,6 +36,7 @@ pub fn run() {
       oauth::get_fresh_access_token,
       oauth::clear_google_token,
       dm::ask_dm,
+      dm::ask_dm_engine,
       dm::warmup_dm_session,
       dm::check_claude_auth,
       dm::connect_claude,

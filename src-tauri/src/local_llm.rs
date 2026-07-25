@@ -580,6 +580,25 @@ pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: 
     }
 }
 
+/// A CRITIQUE pass: the same prompt, but answered by a DIFFERENT engine than
+/// the one that wrote the draft, when the user has enabled cross-checking.
+///
+/// campaign lore, lore updates and plan synthesis all already run draft ->
+/// critique as two calls. Until now the same model reviewed its own draft,
+/// which is the weakest possible review: it shares every blind spot the draft
+/// has. Pointing just this leg at another engine costs nothing extra — the call
+/// was already being made — and makes the review actually independent.
+///
+/// Falls back to the normal path when cross-checking is off, when no reviewer
+/// is configured, or when the reviewer fails. A second opinion is an
+/// improvement, never a dependency.
+pub fn ask_ingest_critique(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
+    match ingestion_reviewer() {
+        Some(reviewer) => ask_ingest_once_on(reviewer, prompt, claude_model, expect_json),
+        None => ask_ingest_once(prompt, claude_model, expect_json),
+    }
+}
+
 /// Same dispatch as `ask_ingest_once`, but forces `low` extended-thinking
 /// effort on the Claude path — see build_claude_args's doc comment (dm.rs):
 /// the live DM turn loop already forces `low` for ordinary turns, measured

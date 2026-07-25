@@ -677,7 +677,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, setTileLibraryPath } = useSettingsStore();
+  const { dmProvider, setDmProvider, localLlmBaseUrl, setLocalLlmBaseUrl, localLlmModel, setLocalLlmModel, localLlmHistoryTurns, setLocalLlmHistoryTurns, ingestionProvider, setIngestionProvider, crossCheckEnabled, setCrossCheckEnabled, crossCheckEngines, setCrossCheckEngines, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, setTileLibraryPath } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -964,6 +964,12 @@ export function DMConsolePage() {
       /** Set when the photo is too coarse to read labels off, so a bad read
        *  reads as "the photo was unusable" rather than "the model is poor". */
       warning: string | null;
+      /** Indices a second engine placed on a DIFFERENT square. Not an
+       *  overrule — the point is that a wrong square otherwise looks exactly
+       *  like a right one, and this makes the uncertain ones visible. */
+      disputed?: number[];
+      /** Which engine provided the second opinion, for the panel to name. */
+      checkedBy?: string;
       assign: string[]; cells: string[] } | null
   >(null);
 
@@ -980,6 +986,20 @@ export function DMConsolePage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Push the ingestion engine + reviewer down to Rust. Without this the
+  // "Ingestion & memory" dropdown was purely decorative: local_llm.rs kept its
+  // default and every one of the 25 ingestion call sites went to Claude no
+  // matter what the user picked.
+  React.useEffect(() => {
+    const primary = ingestionProvider === 'local' ? 'claude' : ingestionProvider;
+    // A reviewer must never be the engine that wrote the draft — self-critique
+    // shares the draft's blind spots, which is the whole point of a second one.
+    const reviewer = crossCheckEnabled
+      ? crossCheckEngines.find((e) => e !== primary) ?? null
+      : null;
+    void invoke('set_ingestion_engine', { engine: primary, crossCheck: reviewer }).catch(() => {});
+  }, [ingestionProvider, crossCheckEnabled, crossCheckEngines]);
 
   // Who holds the table camera, while we're expecting photos from a player.
   React.useEffect(() => {
@@ -1866,6 +1886,15 @@ export function DMConsolePage() {
         baseUrl: localLlmBaseUrl,
         model: localLlmModel,
         historyLimitTurns: localLlmHistoryTurns,
+      });
+    }
+    // Claude keeps the streaming path — partial text is why the voice console
+    // feels live. The other subscription engines have no verified equivalent, so
+    // their turns arrive whole; that's a real downgrade, said plainly in the UI
+    // rather than hidden.
+    if (dmProvider === 'codex' || dmProvider === 'gemini') {
+      return invoke<{ text: string; session_id?: string }>('ask_dm_engine', {
+        engine: dmProvider, prompt, sessionId, campaignId,
       });
     }
     return invoke<{ text: string; session_id?: string }>('ask_dm', { prompt, sessionId, campaignId, effort });
@@ -3370,10 +3399,56 @@ export function DMConsolePage() {
         assign: read.minis.map(() => ''),        // unassigned until the DM says who
         cells: read.minis.map((m) => m.cell),    // editable, so a one-off drift is fixable
       });
+      if (crossCheckEnabled) {
+        setBoardBusy('Second opinion…');
+        const cc = await crossCheckBoard(photo, floor.cols, floor.rows, read.minis);
+        if (cc) setBoardRead((b) => (b ? { ...b, disputed: cc.disputed, checkedBy: cc.checkedBy } : b));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBoardBusy(null);
+    }
+  }
+
+  /** Ask a second engine to read the same photo and report which squares the
+   *  two disagree on.
+   *
+   *  Never overrules the first read. A single reader measured 4/8 exact on an
+   *  angled shot with about a cell of run-to-run variance, and the failure mode
+   *  is silent: a wrong square is indistinguishable from a right one. Two
+   *  readers can't fix that, but they can say WHICH squares to look at.
+   *
+   *  Matched by description rather than position, since the two engines list
+   *  pieces in whatever order they like. Failure is swallowed: a missing second
+   *  opinion degrades this to the single-reader behaviour, which is what
+   *  everyone had until now. */
+  async function crossCheckBoard(
+    photo: string, cols: number, rows: number, first: Array<{ cell: string; description: string }>,
+  ): Promise<{ disputed: number[]; checkedBy: string } | null> {
+    const reviewer = crossCheckEngines.find((e) => e !== 'claude');
+    if (!crossCheckEnabled || !reviewer || first.length === 0) return null;
+    try {
+      const second = await invoke<BoardReadResult>('read_table_positions', {
+        photo, cols, rows, engine: reviewer,
+      });
+      const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      const disputed: number[] = [];
+      first.forEach((m, i) => {
+        const mine = norm(m.description);
+        // Best match by shared words; descriptions won't be identical.
+        let best: { cell: string; score: number } | null = null;
+        for (const o of second.minis) {
+          const theirs = norm(o.description);
+          const words = new Set(theirs.split(' ').filter(Boolean));
+          const score = mine.split(' ').filter((w) => w && words.has(w)).length;
+          if (!best || score > best.score) best = { cell: o.cell, score };
+        }
+        if (best && best.score > 0 && best.cell.toUpperCase() !== m.cell.toUpperCase()) disputed.push(i);
+      });
+      return { disputed, checkedBy: reviewer };
+    } catch {
+      return null; // a second opinion is a bonus, never a dependency
     }
   }
 
@@ -3919,6 +3994,13 @@ export function DMConsolePage() {
                 </p>
                 {/* Abstention used to be silent, so a 4-of-6 read looked like a
                     board with 4 pieces on it. Naming the gap is the whole point. */}
+                {boardRead.checkedBy && (
+                  <p className="text-[11px] text-slate-400">
+                    {boardRead.disputed?.length
+                      ? `${boardRead.checkedBy} read ${boardRead.disputed.length} of these differently — those rows are marked. Worth a look before you apply them.`
+                      : `${boardRead.checkedBy} agreed on every square.`}
+                  </p>
+                )}
                 {boardRead.seen > boardRead.minis.length && (
                   <p className="text-xs text-amber-400">
                     {boardRead.seen - boardRead.minis.length} more piece
@@ -3934,14 +4016,23 @@ export function DMConsolePage() {
                     const cell = (boardRead.cells[i] ?? '').trim().toUpperCase();
                     const parsed = parseCellRefToken(cell);
                     const bad = !parsed || parsed[0] >= boardRead.cols || parsed[1] >= boardRead.rows;
+                    const contested = boardRead.disputed?.includes(i);
                     return (
                       <div key={i} className="flex items-center gap-2">
                         <span className="flex-1 text-xs text-slate-400 truncate" title={m.description}>{m.description || 'unidentified piece'}</span>
                         <input
                           value={boardRead.cells[i] ?? ''}
                           onChange={(e) => setBoardRead((b) => b && { ...b, cells: b.cells.map((c, j) => (j === i ? e.target.value : c)) })}
-                          className={`w-16 px-2 py-1 rounded bg-slate-900 border text-sm text-center ${bad ? 'border-red-600 text-red-400' : 'border-slate-700 text-slate-200'}`}
-                          title={bad ? 'Not a square on this map' : `Square (model read ${m.cell})`}
+                          className={`w-16 px-2 py-1 rounded bg-slate-900 border text-sm text-center ${
+                            bad ? 'border-red-600 text-red-400'
+                              : contested ? 'border-amber-500 text-amber-300'
+                              : 'border-slate-700 text-slate-200'
+                          }`}
+                          title={
+                            bad ? 'Not a square on this map'
+                              : contested ? `${boardRead.checkedBy} placed this piece on a different square — worth checking`
+                              : `Square (model read ${m.cell})`
+                          }
                         />
                         <input
                           list="board-read-names"
@@ -4696,6 +4787,67 @@ export function DMConsolePage() {
               Which engine handles module import, campaign lore, and the end-of-session memory digest — separate from the live-turn engine above. Local keeps these off your Claude budget, but a smaller model is less reliable on big imports; best for small one-shot content.
             </p>
           </div>
+          {/* Cross-checking. Opt-in because it spends a second engine's quota
+              on every checked operation — on a subscription, rate limits rather
+              than money are the real constraint. */}
+          <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={crossCheckEnabled}
+                onChange={(e) => setCrossCheckEnabled(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="text-sm text-slate-200">Check the DM&rsquo;s work with other engines</span>
+                <span className="block text-[11px] text-slate-500 mt-0.5">
+                  A second model reviews what the first produced. It never overrules it &mdash; it flags where they
+                  disagree, which is what turns a quietly wrong answer into a visible one.
+                </span>
+              </span>
+            </label>
+
+            {crossCheckEnabled && (
+              <div className="mt-3 pl-6 space-y-2">
+                <p className="text-[11px] text-slate-400">
+                  Reviewers &mdash; the primary above ({dmProvider}) is excluded, since a model checking its own work
+                  shares its own blind spots.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {(['claude', 'codex', 'gemini'] as const)
+                    .filter((id) => id !== dmProvider)
+                    .map((id) => (
+                      <label key={id} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={crossCheckEngines.includes(id)}
+                          onChange={(e) =>
+                            setCrossCheckEngines(
+                              e.target.checked
+                                ? [...crossCheckEngines.filter((x) => x !== id), id]
+                                : crossCheckEngines.filter((x) => x !== id),
+                            )
+                          }
+                        />
+                        {id}
+                      </label>
+                    ))}
+                </div>
+                {crossCheckEngines.filter((e) => e !== dmProvider).length === 0 && (
+                  <p className="text-[11px] text-amber-400">
+                    Pick at least one reviewer, or nothing gets checked.
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-500">
+                  Applies to board reads (disagreeing squares get flagged) and to campaign lore and session plans,
+                  which already run a draft-then-critique pass &mdash; the critique just goes to a different model.
+                  Live DM narration is never cross-checked: it would double every turn&rsquo;s wait, and there is no
+                  right answer to vote on.
+                </p>
+              </div>
+            )}
+          </div>
+
           {(dmProvider === 'local' || ingestionProvider === 'local') && (
             <>
               <div>
