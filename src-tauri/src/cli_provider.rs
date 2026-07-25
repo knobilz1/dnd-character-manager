@@ -262,6 +262,15 @@ pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>
             // behind for every ingestion call.
             args.push("--ephemeral".into());
             push_model(&mut args, "--model", model);
+            // Reasoning is OFF by default — a live run's own banner read
+            // "reasoning effort: none" while Codex was being asked to review
+            // someone else's campaign lore, which is the most analytically
+            // demanding call in the whole pipeline. There is no flag for it;
+            // it goes through the config override.
+            if let Some(e) = effort {
+                args.push("-c".into());
+                args.push(format!("model_reasoning_effort=\"{e}\""));
+            }
             args.push("--output-last-message".into());
             args.push(last_message_file.to_string());
             Invocation { args, delivery: Delivery::LastMessageFile, prompt_on_stdin: true }
@@ -270,6 +279,11 @@ pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>
             let mut args: Vec<String> = vec![];
             args.extend(lockdown_flags(engine));
             push_model(&mut args, "--model", model);
+            // Same reasoning gap as Codex above; agy spells it as a flag.
+            if let Some(e) = effort {
+                args.push("--effort".into());
+                args.push(e.to_string());
+            }
             // agy prints the answer as plain text with no envelope, and takes
             // the prompt as this flag's value — appended by the caller.
             args.push("--print".into());
@@ -653,6 +667,38 @@ mod tests {
         assert!(!e.auth_probe_says_signed_in(""), "no output is not a sign-in");
         assert!(e.auth_probe_says_signed_in("Logged in using ChatGPT\n"));
         assert!(e.auth_probe_says_signed_in("Logged in using an API key\n"));
+    }
+
+    /// Reasoning effort has to reach EVERY engine, not just Claude.
+    ///
+    /// It was wired only into the Claude arm, so the other two ran the critique
+    /// pass — the most analytically demanding call in the pipeline — at their own
+    /// defaults. A live Codex run's banner read "reasoning effort: none" while it
+    /// was reviewing campaign lore. Each engine spells it differently, which is
+    /// exactly how it went unnoticed.
+    #[test]
+    fn reasoning_effort_reaches_every_engine_in_its_own_spelling() {
+        let claude = oneshot_args(CliEngine::Claude, None, Some("high"), "o.txt").args;
+        let i = claude.iter().position(|a| a == "--effort").expect("claude --effort");
+        assert_eq!(claude[i + 1], "high");
+
+        // Codex has no flag for it; only the config override works.
+        let codex = oneshot_args(CliEngine::Codex, None, Some("high"), "o.txt").args;
+        let i = codex.iter().position(|a| a == "-c").expect("codex -c override");
+        assert_eq!(codex[i + 1], "model_reasoning_effort=\"high\"");
+
+        let gemini = oneshot_args(CliEngine::Gemini, None, Some("high"), "o.txt").args;
+        let i = gemini.iter().position(|a| a == "--effort").expect("agy --effort");
+        assert_eq!(gemini[i + 1], "high");
+
+        // And none of them may invent one when the caller passed nothing.
+        for engine in [CliEngine::Claude, CliEngine::Codex, CliEngine::Gemini] {
+            let args = oneshot_args(engine, None, None, "o.txt").args;
+            assert!(
+                !args.iter().any(|a| a == "--effort" || a.starts_with("model_reasoning_effort")),
+                "{engine:?} invented an effort: {args:?}"
+            );
+        }
     }
 
     /// Gemini's sign-in state can only be read from a REAL completed call.

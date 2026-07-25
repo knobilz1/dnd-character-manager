@@ -514,8 +514,9 @@ pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
 /// dependency: losing the reviewer should degrade quality, never lose the work.
 pub fn ask_ingest_once_on(
     engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>, expect_json: bool,
+    effort: Option<&str>,
 ) -> Result<String, String> {
-    match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, None) {
+    match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, effort) {
         Ok(text) => {
             // Logged on SUCCESS, not just on failure. Because this degrades
             // silently, a quiet log was indistinguishable from the reviewer
@@ -718,7 +719,32 @@ pub fn looks_rate_limited(err: &str) -> bool {
 /// The checks those prompts enumerate are good; the instruction to rewrite is
 /// the problem when a second engine is holding the pen. This suffix keeps the
 /// checks and drops the rewrite.
-const FINDINGS_ONLY_OVERRIDE: &str = "\n\n---\n\nIMPORTANT — this overrides the output instruction above. Do NOT rewrite or reproduce the document. You are reviewing someone else's draft, and they will make the edits themselves.\n\nReply with ONLY a short numbered list of concrete, specific problems you found — each one naming the exact passage at fault and what is wrong with it. Prefer factual omissions (something in the source material the draft failed to carry over) and contradictions over matters of taste. Do not suggest wholesale restructuring, do not restate what the draft already does well, and do not comment on length.\n\nIf the draft has no real problems, reply with exactly: NO-FINDINGS";
+const FINDINGS_ONLY_OVERRIDE: &str = "\n\n---\n\nIMPORTANT — this overrides the output instruction above. Do NOT rewrite or reproduce the document. You are reviewing someone else's draft, and they will make the edits themselves.\n\nReply with ONLY a short numbered list of concrete, specific problems you found — each one naming the exact passage at fault and what is wrong with it. Do not suggest wholesale restructuring, do not restate what the draft already does well, and do not comment on length.\n\nOne thing that is NOT a defect: inventing concrete colour, texture and incident that the source material did not spell out. This is a Dungeons & Dragons prep document and that invention is the entire job — a DM types two sentences and expects a usable world back. Only call invented material a problem when it CONTRADICTS the source, contradicts itself, or paints the DM into a corner. \"The source doesn't say this\" is not by itself a finding, and a review consisting of those is a wasted pass.\n\nIf the draft has no real problems, reply with exactly: NO-FINDINGS";
+
+/// Distinct review angles, handed out one per reviewer.
+///
+/// Reviewers used to get an identical prompt, and the result looked exactly like
+/// that: on a live three-way run, Codex returned four findings and Gemini one,
+/// and nearly all of them were the same kind of objection ("the source doesn't
+/// establish this"). Two models asked the same question give correlated answers;
+/// the second opinion only earns its call if it is looking somewhere else.
+///
+/// Ordered by what a bad document most often gets wrong, since a two-reviewer
+/// setup only ever sees the first two.
+const REVIEW_LENSES: &[(&str, &str)] = &[
+    (
+        "coverage",
+        "Your angle is COVERAGE. Go through the source material and the DM's stated setup line by line and find what the draft failed to carry over — named people, places, factions, relationships, the players' own characters, anything the DM explicitly asked for. Something the DM typed themselves and the draft dropped is the single most valuable thing you can report.",
+    ),
+    (
+        "usability at the table",
+        "Your angle is USABILITY AT THE TABLE. Assume a DM is reading this mid-session with players waiting. Find anything too vague to act on — a hook that foreshadows nothing specific, an NPC with no way to play them, a thread with no first move, guidance that restates a genre instead of describing this world. Quote the passage and say what the DM still would not know how to do.",
+    ),
+    (
+        "internal consistency",
+        "Your angle is INTERNAL CONSISTENCY. Find places where the document argues with itself or with the source: a fact stated two ways, a timeline that cannot hold, a motivation that contradicts an earlier one, a detail that quietly makes an established fact impossible.",
+    ),
+];
 
 /// Hands one engine's findings back to the engine that wrote the draft.
 fn build_apply_findings_prompt(draft: &str, findings: &str) -> String {
@@ -824,12 +850,20 @@ pub fn ask_ingest_critique(
         // is that it was formed without the first one, and pooling them first
         // would just let the loudest reading anchor the rest.
         let mut collected = String::new();
-        for reviewer in &reviewers {
+        for (i, reviewer) in reviewers.iter().enumerate() {
+            // A distinct angle each, and reasoning turned UP: this is the most
+            // analytically demanding call in the pipeline and it was running at
+            // each engine's default, which for Codex meant none at all.
+            let (lens_name, lens) = REVIEW_LENSES[i % REVIEW_LENSES.len()];
             let found = match ask_ingest_once_on(
                 *reviewer,
-                format!("{prompt}{FINDINGS_ONLY_OVERRIDE}"),
+                format!("{prompt}{FINDINGS_ONLY_OVERRIDE}\n\n{lens}"),
                 claude_model,
                 false,
+                // "high" is common to all three engines' scales. Claude also has
+                // xhigh/max, but a review is a bounded read of one document, not
+                // open-ended exploration.
+                Some("high"),
             ) {
                 Ok(f) => f.trim().to_string(),
                 // One reviewer failing is not the pass failing — the others
@@ -843,15 +877,24 @@ pub fn ask_ingest_critique(
                 }
             };
             if found.is_empty() || found.contains("NO-FINDINGS") {
-                crate::maplog::log("CROSS-CHECK found nothing", &format!("{} had no findings", reviewer.label()));
+                crate::maplog::log(
+                    "CROSS-CHECK found nothing",
+                    &format!("{} ({lens_name}) had no findings", reviewer.label()),
+                );
                 continue;
             }
-            crate::maplog::log("CROSS-CHECK findings", &format!("{} reported:\n{found}", reviewer.label()));
+            crate::maplog::log(
+                "CROSS-CHECK findings",
+                &format!("{} on {lens_name} reported:\n{found}", reviewer.label()),
+            );
             // Attributed, because whose note it is carries information: two
             // reviewers independently flagging the same passage is a much
             // stronger signal than either one alone, and the author can only
             // see that if the notes stay separated.
-            collected.push_str(&format!("\n\n### Notes from {}\n{found}", reviewer.label()));
+            collected.push_str(&format!(
+                "\n\n### Notes from {} (reviewing for {lens_name})\n{found}",
+                reviewer.label()
+            ));
         }
         if collected.trim().is_empty() {
             return Ok(draft.to_string());
