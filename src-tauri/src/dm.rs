@@ -1114,19 +1114,46 @@ const CAPTURE_SENTINEL: &str = "https://tavern-sheet.invalid/captured?code=";
 /// isn't in innerText.
 const SCRAPE_CODE_JS: &str = r#"(function () {
   try {
-    var re = /4\/[A-Za-z0-9_\-\.]{20,}/;
-    var hay = document.body ? document.body.innerText : '';
-    var m = hay.match(re);
-    if (!m) {
+    var whole = /^4\/[A-Za-z0-9_\-\.]{20,}$/;
+    var found = null;
+
+    // Find the ELEMENT that holds only the code, and read it whitespace-free.
+    //
+    // This is the part that matters. The page renders the code in a narrow box
+    // where it WRAPS across two lines, and innerText reproduces rendered line
+    // breaks — so scanning page text for a run of code characters stops at the
+    // wrap and yields a truncated code, which fails authentication while
+    // looking exactly like a scrape that found nothing. Matching a whole
+    // element's textContent (which ignores CSS wrapping) and stripping
+    // whitespace inside it reassembles the real thing.
+    //
+    // Deepest-first, because outer containers also contain the surrounding
+    // prose and would not match on their own.
+    var els = document.querySelectorAll('div, span, code, pre, p, td');
+    for (var i = els.length - 1; i >= 0; i--) {
+      var t = (els[i].textContent || '').replace(/\s+/g, '');
+      if (whole.test(t)) { found = t; break; }
+    }
+
+    // A copy-box keeps its value off textContent entirely.
+    if (!found) {
       var fields = document.querySelectorAll('input, textarea');
-      for (var i = 0; i < fields.length; i++) {
-        var v = fields[i].value || '';
-        var f = v.match(re);
-        if (f) { m = f; break; }
+      for (var j = 0; j < fields.length; j++) {
+        var v = (fields[j].value || '').replace(/\s+/g, '');
+        if (whole.test(v)) { found = v; break; }
       }
     }
-    if (m && m[0]) {
-      location.href = 'https://tavern-sheet.invalid/captured?code=' + encodeURIComponent(m[0]);
+
+    // Last resort: a loose scan, deliberately NOT whitespace-stripped across the
+    // whole page — gluing the document together would weld the trailing button
+    // label onto the end of the code.
+    if (!found) {
+      var loose = (document.body ? document.body.innerText : '').match(/4\/[A-Za-z0-9_\-\.]{30,}/);
+      if (loose) { found = loose[0]; }
+    }
+
+    if (found) {
+      location.href = 'https://tavern-sheet.invalid/captured?code=' + encodeURIComponent(found);
     }
   } catch (e) { /* nothing to do; the manual paste box is still there */ }
 })();"#;
@@ -1617,6 +1644,19 @@ mod tests {
         assert_eq!(re.as_deref(), Some("4/0AXEQxIBiueOfKpwJ8C5MAV9Z3lPLV_HVUaXHgZjmpSXvBj9g"));
         // ...and not fire on ordinary page furniture containing a slash.
         assert_eq!(regex_lite_match("Signed in as a/b. Visit 4/5 pages."), None);
+
+        // The real page WRAPS the code across two lines inside a narrow box, so
+        // the element's text arrives with whitespace in the middle. Stripping it
+        // must reassemble the original, not a truncated prefix — a short code is
+        // rejected by the CLI and is indistinguishable from a failed scrape.
+        let wrapped = "4/0AXEQxIA50_aTbtsIjX6bQGr5pdrhldUNUrAXUeBZJ
+        Gvpuaw5x9FDuIgDiCgSsRa76Bnuuw";
+        let joined: String = wrapped.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(joined, "4/0AXEQxIA50_aTbtsIjX6bQGr5pdrhldUNUrAXUeBZJGvpuaw5x9FDuIgDiCgSsRa76Bnuuw");
+        assert_eq!(regex_lite_match(&joined).as_deref(), Some(joined.as_str()));
+        // The naive scan the wrap defeats: it stops dead at the line break.
+        let truncated = regex_lite_match(wrapped).unwrap();
+        assert!(truncated.len() < joined.len(), "this is the bug the element-scan avoids");
     }
 
     /// Mirror of SCRAPE_CODE_JS's regex, so the pattern is checked in CI rather
