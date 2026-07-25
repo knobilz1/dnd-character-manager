@@ -491,7 +491,17 @@ pub fn ask_ingest_once_on(
     engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>, expect_json: bool,
 ) -> Result<String, String> {
     match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, None) {
-        Ok(text) => Ok(text),
+        Ok(text) => {
+            // Logged on SUCCESS, not just on failure. Because this degrades
+            // silently, a quiet log was indistinguishable from the reviewer
+            // never having been consulted at all — so there was no way to tell
+            // whether the second opinion anyone paid for actually happened.
+            crate::maplog::log(
+                "CROSS-CHECK reviewed",
+                &format!("{} returned {} chars", engine.label(), text.len()),
+            );
+            Ok(text)
+        }
         Err(e) => {
             crate::maplog::log("CROSS-CHECK fell back to the primary engine", &e);
             ask_ingest_once(prompt, claude_model, expect_json)

@@ -3426,7 +3426,12 @@ export function DMConsolePage() {
   async function crossCheckBoard(
     photo: string, cols: number, rows: number, first: Array<{ cell: string; description: string }>,
   ): Promise<{ disputed: number[]; checkedBy: string } | null> {
-    const reviewer = crossCheckEngines.find((e) => e !== 'claude');
+    // Only Claude and Codex can read a photo at all (see run_engine_vision),
+    // and the reviewer has to differ from whoever just read it — picking
+    // "anything that isn't Claude" meant a Codex-primary table with Claude as
+    // its reviewer silently got no second opinion, because the only candidate
+    // left was Gemini, which refuses vision and threw straight into the catch.
+    const reviewer = crossCheckEngines.find((e) => e !== dmProvider && (e === 'claude' || e === 'codex'));
     if (!crossCheckEnabled || !reviewer || first.length === 0) return null;
     try {
       const second = await invoke<BoardReadResult>('read_table_positions', {
@@ -3435,16 +3440,25 @@ export function DMConsolePage() {
       const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
       const disputed: number[] = [];
       first.forEach((m, i) => {
-        const mine = norm(m.description);
+        const mine = norm(m.description).split(' ').filter(Boolean);
         // Best match by shared words; descriptions won't be identical.
         let best: { cell: string; score: number } | null = null;
+        let runnerUp = 0;
         for (const o of second.minis) {
-          const theirs = norm(o.description);
-          const words = new Set(theirs.split(' ').filter(Boolean));
-          const score = mine.split(' ').filter((w) => w && words.has(w)).length;
-          if (!best || score > best.score) best = { cell: o.cell, score };
+          const words = new Set(norm(o.description).split(' ').filter(Boolean));
+          const score = mine.filter((w) => words.has(w)).length;
+          if (!best || score > best.score) { runnerUp = best?.score ?? 0; best = { cell: o.cell, score }; }
+          else if (score > runnerUp) runnerUp = score;
         }
-        if (best && best.score > 0 && best.cell.toUpperCase() !== m.cell.toUpperCase()) disputed.push(i);
+        // A tie means we cannot tell WHICH piece the reviewer was describing, so
+        // any square difference is unattributable rather than a disagreement.
+        // Without this, three tokens described as "<colour> circular token" all
+        // overlap on two words, and one piece the reviewer simply didn't list
+        // makes its nearest neighbour light up amber — a warning about a row
+        // that was right, which is worse than no warning at all.
+        if (best && best.score > 0 && best.score > runnerUp && best.cell.toUpperCase() !== m.cell.toUpperCase()) {
+          disputed.push(i);
+        }
       });
       return { disputed, checkedBy: reviewer };
     } catch {
@@ -4768,6 +4782,18 @@ export function DMConsolePage() {
               <option value="local">Local LLM (Ollama / LM Studio / llama.cpp server…)</option>
             </select>
           </div>
+          {/* Only the Claude path streams (dm.rs's run_claude_streaming); the
+              others return the finished turn in one piece. That is a real
+              downgrade at a live table — the pause before anyone hears anything
+              is the whole turn instead of a first sentence — and it is invisible
+              until you are mid-session wondering whether it has hung. */}
+          {(dmProvider === 'codex' || dmProvider === 'gemini') && (
+            <p className="text-xs text-amber-400/90">
+              Heads up: {dmProvider === 'codex' ? 'Codex' : 'Gemini'} replies arrive all at once rather than
+              streaming in as they&rsquo;re written, so there&rsquo;s a longer silence before the DM starts
+              speaking. Claude is the only engine that streams.
+            </p>
+          )}
           {/* Sign-in lives right under the picker, because choosing an engine
               you haven't signed into is the moment you need it. */}
           <EngineAccounts />

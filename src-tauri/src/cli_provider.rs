@@ -122,10 +122,17 @@ impl CliEngine {
         match self {
             Self::Claude => None, // dm::claude_logged_in already does this
             Self::Codex => Some(&["login", "status"]),
-            // `models` needs auth, so it doubles as the probe -- far better than
-            // guessing a credential file path, which is exactly what went wrong
-            // with the old Gemini CLI.
-            Self::Gemini => Some(&["models"]),
+            // None: agy has NO subcommand that touches auth, so the caller falls
+            // back to checking for its credential files.
+            //
+            // This used to be `Some(&["models"])` on the assumption that listing
+            // models required being signed in. It does not. Measured 2026-07-25
+            // with both credential stores empty and `agy --print` refusing with
+            // "Authentication required": `agy models` still printed the full
+            // catalogue and exited 0, so the Accounts panel showed a cheerful
+            // "signed in" for an account that could not take a single turn.
+            // `agents` and `changelog` are the same -- none of them need auth.
+            Self::Gemini => None,
         }
     }
 
@@ -141,12 +148,11 @@ impl CliEngine {
                 let t = stdout.to_ascii_lowercase();
                 !t.contains("not logged in") && (t.contains("logged in") || t.contains("chatgpt") || t.contains("api key"))
             }
-            // Exits 0 either way, same trap as Codex: only the text is a signal.
-            // Signed out it says "Please sign in to view available models."
-            Self::Gemini => {
-                let t = stdout.to_ascii_lowercase();
-                !t.trim().is_empty() && !t.contains("sign in") && !t.contains("sign-in")
-            }
+            // Unreachable: `auth_probe_args` is None for Gemini because agy has
+            // no auth-aware subcommand, so nothing is ever probed to feed this.
+            // Kept explicit rather than deleted so that anyone who gives Gemini
+            // a probe again has to come here and confront the measurement.
+            Self::Gemini => false,
         }
     }
 }
@@ -300,13 +306,18 @@ pub fn turn_args(
         }
         CliEngine::Codex => {
             // `exec resume <id>` is a subcommand, so the verb changes shape
-            // rather than gaining a flag.
-            let mut args: Vec<String> = match session_id {
-                Some(s) => vec!["exec".into(), "resume".into(), s.to_string()],
-                None => vec!["exec".into()],
-            };
+            // rather than gaining a flag — and the LOCKDOWN BELONGS TO `exec`,
+            // not to `resume`. `codex exec resume <id> --sandbox read-only`
+            // exits 2 with "unexpected argument '--sandbox' found"; `resume`
+            // has no --sandbox flag at all. Measured against the real CLI
+            // 2026-07-25, where it killed every second turn outright.
+            let mut args: Vec<String> = vec!["exec".into()];
             args.extend(lockdown_flags(engine));
             args.push("--skip-git-repo-check".into());
+            if let Some(s) = session_id {
+                args.push("resume".into());
+                args.push(s.to_string());
+            }
             push_model(&mut args, "--model", model);
             // --json carries the session id we need for the NEXT turn; the
             // answer itself comes from the file, which is far less brittle.
@@ -318,20 +329,26 @@ pub fn turn_args(
         CliEngine::Gemini => {
             let mut args: Vec<String> = vec![];
             args.extend(lockdown_flags(engine));
+            // Undocumented in `agy --help`, but real: without it an answer
+            // comes back as bare prose with no envelope and no conversation id.
             args.push("--output-format".into());
-            // stream-json exists, but the incremental shape is unverified; a
-            // turn that arrives whole is still a turn. Revisit once measured.
             args.push("json".into());
-            // Gemini lets the CALLER choose the session id, so unlike the other
-            // two there is nothing to scrape out of the output.
+            // Resuming is `--conversation <id>`, and the id is agy's to mint —
+            // it comes back as `conversation_id` in the JSON envelope. There is
+            // no `--session-id`; passing one exits 2, "flags provided but not
+            // defined". Measured 2026-07-25.
             if let Some(s) = session_id {
-                args.push("--session-id".into());
+                args.push("--conversation".into());
                 args.push(s.to_string());
             }
             push_model(&mut args, "--model", model);
-            args.push("--prompt".into());
-            args.push(String::new());
-            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
+            // `--prompt` is an ALIAS FOR `--print` — it takes the prompt as its
+            // VALUE and never reads stdin. This used to push an empty string and
+            // send the real prompt to stdin, so every Gemini turn died with
+            // "Error: empty prompt". The caller appends the prompt as the next
+            // argument, which is why prompt_on_stdin is false.
+            args.push("--print".into());
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: false }
         }
     }
 }
@@ -378,9 +395,12 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             args.push("--output-format".into());
             args.push("json".into());
             push_model(&mut args, "--model", model);
-            args.push("--prompt".into());
-            args.push(String::new());
-            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
+            // Same alias trap as turn_args: --prompt IS --print, and it wants
+            // the prompt as its value. (run_engine_vision refuses Gemini today,
+            // so this shape is unexercised — but a wrong builder left in place
+            // is the next person's afternoon.)
+            args.push("--print".into());
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: false }
         }
     }
 }
@@ -392,19 +412,23 @@ fn push_model(args: &mut Vec<String>, flag: &str, model: Option<&str>) {
     }
 }
 
-/// Pulls a session id out of an engine's event output, for engines that mint it
-/// themselves. Gemini is absent on purpose — the caller supplies its id.
+/// Pulls a session id out of an engine's output, so the NEXT turn can resume it.
+///
+/// Every key here was read off a real run on 2026-07-25, because guessing them
+/// fails silently: a missed id is not an error, it is a brand-new conversation,
+/// and at the table that reads as the DM having forgotten the scene rather than
+/// as anything being broken. Codex in particular calls it `thread_id` on its
+/// `thread.started` event — this function used to look only for `session_id`,
+/// so no Codex turn had ever carried continuity.
 pub fn extract_session_id(engine: CliEngine, stdout: &str) -> Option<String> {
-    let key = match engine {
-        CliEngine::Claude => "session_id",
-        // Codex's JSONL events label it differently depending on event type, so
-        // accept either spelling rather than pinning one.
-        CliEngine::Codex => "session_id",
-        CliEngine::Gemini => return None,
+    let keys: &[&str] = match engine {
+        CliEngine::Claude => &["session_id", "sessionId"],
+        CliEngine::Codex => &["thread_id", "threadId", "session_id", "sessionId"],
+        // agy hands back `conversation_id`, which `--conversation` takes again.
+        CliEngine::Gemini => &["conversation_id", "conversationId"],
     };
-    stdout.lines().rev().find_map(|l| {
-        let v: serde_json::Value = serde_json::from_str(l).ok()?;
-        for k in [key, "sessionId", "conversation_id", "conversationId"] {
+    let pick = |v: &serde_json::Value| -> Option<String> {
+        for k in keys {
             if let Some(s) = v.get(k).and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
                 return Some(s.to_string());
             }
@@ -414,7 +438,14 @@ pub fn extract_session_id(engine: CliEngine, stdout: &str) -> Option<String> {
             }
         }
         None
-    })
+    };
+    // Claude and Codex stream JSONL, so the id is on one of many lines; agy
+    // emits a single object that may be pretty-printed across all of them.
+    stdout
+        .lines()
+        .rev()
+        .find_map(|l| pick(&serde_json::from_str::<serde_json::Value>(l).ok()?))
+        .or_else(|| pick(&serde_json::from_str::<serde_json::Value>(stdout.trim()).ok()?))
 }
 
 /// Final answer text from an engine whose answer comes back on stdout.
@@ -435,6 +466,13 @@ pub fn extract_final_text(engine: CliEngine, stdout: &str) -> Option<String> {
         CliEngine::Gemini => {
             let trimmed = stdout.trim();
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                // agy reports failures IN BAND: an ERROR envelope has an empty
+                // `response` and the reason in `error`. Without this the raw
+                // fallback below hands the whole JSON blob back as the DM's
+                // line, and it gets read aloud at the table as narration.
+                if v.get("status").and_then(|s| s.as_str()) == Some("ERROR") {
+                    return None;
+                }
                 for k in ["response", "text", "output", "content", "result"] {
                     if let Some(s) = v.get(k).and_then(|x| x.as_str()).filter(|s| !s.trim().is_empty()) {
                         return Some(s.to_string());
@@ -532,24 +570,59 @@ mod tests {
     }
 
     /// Resuming is shaped differently per engine: Codex changes VERB
-    /// (`exec resume <id>`), Gemini is handed an id it did not mint, Claude
-    /// takes `--resume`. Getting any of them wrong silently starts a fresh
-    /// conversation, which reads as the DM forgetting the scene.
+    /// (`exec resume <id>`), Gemini takes `--conversation`, Claude `--resume`.
+    /// Getting any of them wrong silently starts a fresh conversation, which
+    /// reads as the DM forgetting the scene.
+    ///
+    /// Every assertion here is transcribed from a real invocation, because the
+    /// version of this test that preceded it asserted the shapes the code
+    /// already produced — so it stayed green while `codex exec resume <id>
+    /// --sandbox read-only` exited 2 and `--session-id` was not a flag agy has.
+    /// A test written from the same guess as the code proves only that the
+    /// guess is self-consistent.
     #[test]
     fn each_engine_resumes_in_its_own_shape() {
         let c = turn_args(CliEngine::Claude, Some("abc"), None, None, false, "o.txt").args;
         let i = c.iter().position(|a| a == "--resume").expect("claude --resume");
         assert_eq!(c[i + 1], "abc");
 
+        // `resume` is a subcommand of `exec`, so exec's own flags -- the
+        // lockdown among them -- must come BEFORE it.
         let x = turn_args(CliEngine::Codex, Some("abc"), None, None, false, "o.txt").args;
-        assert_eq!(&x[0..3], &["exec".to_string(), "resume".to_string(), "abc".to_string()]);
+        assert_eq!(x[0], "exec");
+        let r = x.iter().position(|a| a == "resume").expect("codex resume");
+        assert_eq!(x[r + 1], "abc");
+        let s = x.iter().position(|a| a == "--sandbox").expect("codex --sandbox");
+        assert!(s < r, "the lockdown must precede `resume` or codex exits 2: {x:?}");
         // ...and with no id it must NOT say resume, or every first turn errors.
         let fresh = turn_args(CliEngine::Codex, None, None, None, false, "o.txt").args;
         assert!(!fresh.iter().any(|a| a == "resume"), "{fresh:?}");
 
         let g = turn_args(CliEngine::Gemini, Some("abc"), None, None, false, "o.txt").args;
-        let i = g.iter().position(|a| a == "--session-id").expect("gemini --session-id");
+        let i = g.iter().position(|a| a == "--conversation").expect("gemini --conversation");
         assert_eq!(g[i + 1], "abc");
+        assert!(!g.iter().any(|a| a == "--session-id"), "agy has no such flag: {g:?}");
+    }
+
+    /// agy's `--prompt` is an alias for `--print`: it takes the prompt as its
+    /// VALUE. Pushing an empty one and writing the real prompt to stdin made
+    /// every single Gemini turn fail with "Error: empty prompt" -- so the
+    /// builder must leave the prompt to the caller, and say so.
+    #[test]
+    fn gemini_takes_its_prompt_as_an_argument_not_on_stdin() {
+        for inv in [
+            turn_args(CliEngine::Gemini, None, None, None, false, "o.txt"),
+            oneshot_args(CliEngine::Gemini, None, None, "o.txt"),
+            vision_args(CliEngine::Gemini, None, &[], "o.txt"),
+        ] {
+            assert!(!inv.prompt_on_stdin, "agy never reads stdin: {:?}", inv.args);
+            assert_eq!(
+                inv.args.last().map(String::as_str),
+                Some("--print"),
+                "the prompt is appended after --print, so nothing may follow it: {:?}",
+                inv.args
+            );
+        }
     }
 
     /// Codex's answer comes from a file, not stdout — the whole reason
@@ -576,6 +649,23 @@ mod tests {
         assert!(e.auth_probe_says_signed_in("Logged in using an API key\n"));
     }
 
+    /// agy has no subcommand that requires being signed in, so there is nothing
+    /// to probe and the caller must fall back to looking for credential files.
+    ///
+    /// This was `Some(&["models"])`, on the reasonable-sounding assumption that
+    /// listing models needs an account. Measured with both credential stores
+    /// empty and `agy --print` refusing outright, `agy models` still printed the
+    /// whole catalogue and exited 0 — so the Accounts panel reported "signed in"
+    /// for an account that could not take a single turn. The lesson is the same
+    /// one Codex's `login status` taught: a probe is only a probe once it has
+    /// been run in the SIGNED-OUT state.
+    #[test]
+    fn gemini_has_no_auth_probe_because_none_of_its_subcommands_need_auth() {
+        assert_eq!(CliEngine::Gemini.auth_probe_args(), None);
+        // ...so even output that looks healthy can never be read as a sign-in.
+        assert!(!CliEngine::Gemini.auth_probe_says_signed_in("gemini-3.6-flash-high\ngemini-3.1-pro-low"));
+    }
+
     #[test]
     fn an_unknown_engine_setting_falls_back_to_claude_rather_than_failing() {
         assert_eq!(CliEngine::from_setting("codex"), CliEngine::Codex);
@@ -586,9 +676,27 @@ mod tests {
         assert_eq!(CliEngine::from_setting(""), CliEngine::Claude);
     }
 
+    /// The inputs below are VERBATIM first lines from real runs on 2026-07-25.
+    /// This matters more than it looks: the previous version of this test fed
+    /// Codex a hand-written `{"session_id":...}` that Codex has never emitted,
+    /// passed, and left the scrape returning None on every real turn.
     #[test]
-    fn gemini_session_ids_are_ours_so_nothing_is_scraped_for_them() {
-        assert_eq!(extract_session_id(CliEngine::Gemini, r#"{"session_id":"x"}"#), None);
+    fn session_ids_are_scraped_from_what_the_engines_actually_print() {
+        // Codex, first line of `codex exec --json`:
+        assert_eq!(
+            extract_session_id(
+                CliEngine::Codex,
+                "{\"type\":\"thread.started\",\"thread_id\":\"019f9832-1e0f-7e40-9c67-63d7439fb1cc\"}\n{\"type\":\"turn.started\"}",
+            ),
+            Some("019f9832-1e0f-7e40-9c67-63d7439fb1cc".into())
+        );
+        // agy, its whole `--output-format json` envelope:
+        assert_eq!(
+            extract_session_id(CliEngine::Gemini, r#"{"conversation_id":"conv-7","status":"OK","response":"hi"}"#),
+            Some("conv-7".into())
+        );
+        // ...but an empty one is not an id, it is agy failing before it started.
+        assert_eq!(extract_session_id(CliEngine::Gemini, r#"{"conversation_id":"","status":"ERROR"}"#), None);
         assert_eq!(
             extract_session_id(CliEngine::Claude, "noise\n{\"type\":\"result\",\"session_id\":\"s-9\"}"),
             Some("s-9".into())
@@ -613,5 +721,14 @@ mod tests {
         // ...and if none do, plain text beats losing the turn.
         assert_eq!(extract_final_text(CliEngine::Gemini, "just words"), Some("just words".into()));
         assert_eq!(extract_final_text(CliEngine::Gemini, "   "), None);
+        // A real failure envelope, verbatim. It must NOT come back as the DM's
+        // line -- returning None makes the caller raise it as the error it is.
+        assert_eq!(
+            extract_final_text(
+                CliEngine::Gemini,
+                r#"{"conversation_id":"","status":"ERROR","response":"","error":"Error: empty prompt. Usage: agy --print \"your prompt here\""}"#,
+            ),
+            None
+        );
     }
 }

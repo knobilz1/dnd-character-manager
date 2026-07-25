@@ -1748,7 +1748,7 @@ pub async fn ask_dm_engine(
         Some(id) => Some(crate::campaign::campaign_dir(&app, &id)?),
         None => None,
     };
-    tokio::task::spawn_blocking(move || run_engine_turn(engine, &prompt, session_id.as_deref(), cwd))
+    tokio::task::spawn_blocking(move || run_engine_turn(&app, engine, &prompt, session_id.as_deref(), cwd))
         .await
         .map_err(|e| format!("Turn task failed: {e}"))?
 }
@@ -1756,6 +1756,7 @@ pub async fn ask_dm_engine(
 /// Blocking half of `ask_dm_engine`: spawn, feed the prompt, collect the reply
 /// and whatever session id the engine minted for next turn.
 fn run_engine_turn(
+    app: &AppHandle,
     engine: crate::cli_provider::CliEngine,
     prompt: &str,
     session_id: Option<&str>,
@@ -1796,6 +1797,17 @@ fn run_engine_turn(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
+
+    // Register the pid so barge-in actually kills this turn. Claude's streaming
+    // path has always done this; the engine path did not, so hitting Stop on a
+    // Codex turn only discarded the reply locally while the subprocess ran on to
+    // completion, still spending the user's plan quota.
+    {
+        let control = app.state::<DmTurnControl>();
+        control.cancelled.store(false, Ordering::SeqCst);
+        *control.pid.lock().unwrap() = Some(child.id());
+    }
+
     if inv.prompt_on_stdin {
         child
             .stdin
@@ -1809,6 +1821,24 @@ fn run_engine_turn(
     let out = child
         .wait_with_output()
         .map_err(|e| format!("{} wait failed: {e}", engine.label()))?;
+
+    // Clear the registration before reading the reply, so a Stop pressed after
+    // the turn already finished can't kill an unrelated later process that has
+    // been handed the same pid.
+    let cancelled = {
+        let control = app.state::<DmTurnControl>();
+        *control.pid.lock().unwrap() = None;
+        control.cancelled.swap(false, Ordering::SeqCst)
+    };
+    if cancelled {
+        // Same contract as the Claude path above: a barge-in is not a failure,
+        // so resolve with an empty reply rather than rejecting with an error the
+        // player would read as something having gone wrong. `session_id: None`
+        // is deliberate — the frontend only overwrites its stored id when one
+        // comes back, so the thread survives the interruption.
+        let _ = std::fs::remove_file(&out_path);
+        return Ok(DmReply { text: String::new(), session_id: None });
+    }
 
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let text = match inv.delivery {
@@ -1843,10 +1873,33 @@ fn run_engine_turn(
 /// `Delivery` decides where the answer comes from. Codex writes only its final
 /// message to a file, which beats reconstructing it from an event stream; the
 /// others print a parseable envelope to stdout.
+/// Drops a Claude tier hint before it reaches an engine that has never heard of
+/// it.
+///
+/// Ingestion callers pass `Some("opus")`/`Some("sonnet")` to choose cost vs
+/// quality, and that string used to go straight into `--model` for whichever
+/// engine was configured. `codex exec --model opus` names a model Codex does
+/// not have, so the call came back empty — which surfaced as "Codex returned
+/// nothing usable" on every cross-check critique leg, while the rate-limit
+/// failover path (which happens to pass None) worked perfectly. The same engine
+/// looked broken and healthy at the same time, depending which leg you watched.
+/// Measured against a live run 2026-07-25.
+///
+/// If per-engine model choice is ever offered, this is the function to revisit —
+/// the invariant is "a CLAUDE model name is Claude's alone", not "other engines
+/// never get a model".
+fn claude_tier_only(
+    engine: crate::cli_provider::CliEngine, model: Option<&str>,
+) -> Option<&str> {
+    model.filter(|_| engine == crate::cli_provider::CliEngine::Claude)
+}
+
 pub(crate) fn run_engine_oneshot(
     engine: crate::cli_provider::CliEngine, prompt: &str, model: Option<&str>, effort: Option<&str>,
 ) -> Result<String, String> {
     use crate::cli_provider::{oneshot_args, Delivery};
+
+    let model = claude_tier_only(engine, model);
 
     // Unique per call so two concurrent ingestion calls can't read each other's
     // answer — map generation fans several of these out at once.
@@ -2221,6 +2274,21 @@ pub async fn warmup_dm_session(app: AppHandle, campaign_id: String) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Claude tier name reaching another engine's `--model` is the bug that
+    /// made every cross-check critique leg come back empty while the failover
+    /// leg — same engine, same prompt, model None — worked. Nothing errored;
+    /// the reviewer just silently produced nothing, so the draft was kept
+    /// unreviewed and the feature looked like it was running.
+    #[test]
+    fn a_claude_tier_hint_never_reaches_another_engines_model_flag() {
+        use crate::cli_provider::CliEngine;
+        assert_eq!(claude_tier_only(CliEngine::Claude, Some("opus")), Some("opus"));
+        assert_eq!(claude_tier_only(CliEngine::Codex, Some("opus")), None);
+        assert_eq!(claude_tier_only(CliEngine::Codex, Some("sonnet")), None);
+        assert_eq!(claude_tier_only(CliEngine::Gemini, Some("opus")), None);
+        assert_eq!(claude_tier_only(CliEngine::Claude, None), None);
+    }
 
     /// The sentinel round-trip is how a code found in PAGE TEXT gets back to
     /// Rust without granting a third-party origin access to the app's commands.
