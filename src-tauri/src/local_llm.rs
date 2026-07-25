@@ -433,11 +433,17 @@ struct IngestConfig {
     /// Which subscription CLI answers when `use_local` is false. Defaults to
     /// Claude, so nothing changes until the user picks another engine.
     engine: Option<crate::cli_provider::CliEngine>,
-    /// The OTHER signed-in engine, when cross-checking is on. Used for the
-    /// critique leg of draft→critique ingestion flows: those already make two
-    /// calls, and a model reviewing its OWN draft shares that draft's blind
-    /// spots, so an independent reviewer is strictly better for the same cost.
-    cross_check: Option<crate::cli_provider::CliEngine>,
+    /// Every OTHER signed-in engine to consult when cross-checking is on. Used
+    /// for the critique leg of draft→critique ingestion flows: a model reviewing
+    /// its OWN draft shares that draft's blind spots, so independent reviewers
+    /// are strictly better.
+    ///
+    /// A LIST, not one: the settings panel has always let you tick more than one
+    /// reviewer, but this held a single engine and the frontend quietly sent
+    /// only the first — so asking for Codex AND Gemini silently got you one of
+    /// them. Different models also catch different things, which is the entire
+    /// argument for asking more than one.
+    cross_check: Vec<crate::cli_provider::CliEngine>,
 }
 
 fn ingest_config() -> &'static Mutex<IngestConfig> {
@@ -465,22 +471,41 @@ pub fn set_ingestion_provider(use_local: bool, base_url: String, model: String) 
 /// local-server settings and the CLI-engine settings don't have to be pushed
 /// down together.
 #[tauri::command]
-pub fn set_ingestion_engine(engine: String, cross_check: Option<String>) {
+pub fn set_ingestion_engine(engine: String, cross_check: Option<Vec<String>>) {
     let mut cfg = ingest_config().lock().unwrap();
     cfg.engine = Some(crate::cli_provider::CliEngine::from_setting(&engine));
-    cfg.cross_check = cross_check.map(|c| crate::cli_provider::CliEngine::from_setting(&c));
+    let mut seen: Vec<crate::cli_provider::CliEngine> = Vec::new();
+    for name in cross_check.unwrap_or_default() {
+        let e = crate::cli_provider::CliEngine::from_setting(&name);
+        // from_setting falls back to Claude on anything unrecognised, so a typo
+        // would otherwise silently add Claude as a reviewer.
+        if !seen.contains(&e) {
+            seen.push(e);
+        }
+    }
+    cfg.cross_check = seen;
 }
 
-/// The engine that should REVIEW a draft this ingestion flow just produced, if
-/// cross-checking is on and a different engine is available. None means "review
-/// with the same engine", which is what always happened before.
-pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
+/// Every engine that should REVIEW a draft this ingestion flow just produced.
+///
+/// Empty means "review with the same engine", which is what always happened
+/// before cross-checking existed. The primary is filtered out here rather than
+/// at the call sites: a model reviewing its own draft shares that draft's blind
+/// spots, which is the entire reason for a second opinion.
+pub fn ingestion_reviewers() -> Vec<crate::cli_provider::CliEngine> {
     let cfg = ingest_config().lock().unwrap();
     if cfg.use_local {
-        return None;
+        return Vec::new();
     }
     let primary = cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude);
-    cfg.cross_check.filter(|c| *c != primary)
+    cfg.cross_check.iter().copied().filter(|c| *c != primary).collect()
+}
+
+/// The single reviewer for the paths that can only use one — rate-limit
+/// failover, and the battle-map tile-pick check that fires per texture and
+/// cannot afford a fan-out.
+pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
+    ingestion_reviewers().into_iter().next()
 }
 
 /// Run one ingestion prompt on a SPECIFIC engine, bypassing the configured
@@ -654,7 +679,10 @@ fn build_apply_findings_prompt(draft: &str, findings: &str) -> String {
         "Below is a document you wrote, followed by review notes on it from a second reader.\n\n\
         Apply the notes that are CORRECT and worth acting on — fixing real omissions and \
         contradictions — and ignore any that are wrong, are matters of taste, or would make the \
-        document worse. This is your document; the reader saw it once and has less context than you.\n\n\
+        document worse. This is your document; each reader saw it once and has less context than you.\n\n\
+        Where more than one reader is quoted below, treat a point RAISED INDEPENDENTLY BY BOTH as \
+        the strongest signal available and address it. Where they disagree with each other, use your \
+        own judgement — you have the full picture and they do not.\n\n\
         Keep everything that already worked: the same structure, the same level of specific detail, \
         and the same length. Do NOT summarize, condense, or genericize — the notes are there to fill \
         gaps, not to trim. Concrete, evocative, playable detail is the point of this document.\n\n\
@@ -740,25 +768,48 @@ pub fn revision_is_safe(draft: &str, revised: &str) -> (bool, String) {
 pub fn ask_ingest_critique(
     prompt: String, draft: &str, claude_model: Option<&str>, expect_json: bool,
 ) -> Result<String, String> {
-    let revised = match ingestion_reviewer() {
-        None => ask_ingest_once(prompt, claude_model, expect_json)?,
-        Some(reviewer) => {
-            let findings =
-                ask_ingest_once_on(reviewer, format!("{prompt}{FINDINGS_ONLY_OVERRIDE}"), claude_model, false)?;
-            let findings = findings.trim();
-            if findings.is_empty() || findings.contains("NO-FINDINGS") {
-                crate::maplog::log(
-                    "CROSS-CHECK found nothing",
-                    &format!("{} had no findings; keeping the draft as written", reviewer.label()),
-                );
-                return Ok(draft.to_string());
+    let reviewers = ingestion_reviewers();
+    let revised = if reviewers.is_empty() {
+        ask_ingest_once(prompt, claude_model, expect_json)?
+    } else {
+        // Each reviewer reads the draft independently and reports separately.
+        // They are NOT shown each other's notes: the value of a second opinion
+        // is that it was formed without the first one, and pooling them first
+        // would just let the loudest reading anchor the rest.
+        let mut collected = String::new();
+        for reviewer in &reviewers {
+            let found = match ask_ingest_once_on(
+                *reviewer,
+                format!("{prompt}{FINDINGS_ONLY_OVERRIDE}"),
+                claude_model,
+                false,
+            ) {
+                Ok(f) => f.trim().to_string(),
+                // One reviewer failing is not the pass failing — the others
+                // still have something to say.
+                Err(e) => {
+                    crate::maplog::log(
+                        "CROSS-CHECK reviewer failed",
+                        &format!("{}: {e}", reviewer.label()),
+                    );
+                    continue;
+                }
+            };
+            if found.is_empty() || found.contains("NO-FINDINGS") {
+                crate::maplog::log("CROSS-CHECK found nothing", &format!("{} had no findings", reviewer.label()));
+                continue;
             }
-            crate::maplog::log(
-                "CROSS-CHECK findings",
-                &format!("{} reported:\n{findings}", reviewer.label()),
-            );
-            ask_ingest_once(build_apply_findings_prompt(draft, findings), claude_model, expect_json)?
+            crate::maplog::log("CROSS-CHECK findings", &format!("{} reported:\n{found}", reviewer.label()));
+            // Attributed, because whose note it is carries information: two
+            // reviewers independently flagging the same passage is a much
+            // stronger signal than either one alone, and the author can only
+            // see that if the notes stay separated.
+            collected.push_str(&format!("\n\n### Notes from {}\n{found}", reviewer.label()));
         }
+        if collected.trim().is_empty() {
+            return Ok(draft.to_string());
+        }
+        ask_ingest_once(build_apply_findings_prompt(draft, collected.trim()), claude_model, expect_json)?
     };
     match revision_is_safe(draft, &revised) {
         (true, _) => Ok(revised),
@@ -878,6 +929,30 @@ mod tests {
         assert!(why.contains("Aldric Venn"), "{why}");
 
         assert!(!revision_is_safe(draft, "   ").0, "empty is never a revision");
+    }
+
+    /// The settings panel has always offered several reviewers; the backend
+    /// held one and the frontend sent `.find(...)`, so ticking Codex AND Gemini
+    /// consulted exactly one of them. Whatever is ticked must arrive intact,
+    /// minus the primary — a model reviewing its own draft is not a check.
+    #[test]
+    fn every_ticked_reviewer_is_kept_except_the_one_that_wrote_the_draft() {
+        use crate::cli_provider::CliEngine;
+
+        set_ingestion_engine("claude".into(), Some(vec!["codex".into(), "gemini".into()]));
+        assert_eq!(ingestion_reviewers(), vec![CliEngine::Codex, CliEngine::Gemini]);
+        // The single-reviewer paths (failover, tile picks) take the first.
+        assert_eq!(ingestion_reviewer(), Some(CliEngine::Codex));
+
+        // The primary is dropped even when ticked, and duplicates collapse.
+        set_ingestion_engine("codex".into(), Some(vec!["codex".into(), "claude".into(), "claude".into()]));
+        assert_eq!(ingestion_reviewers(), vec![CliEngine::Claude]);
+
+        // Nothing ticked means the drafting engine revises its own work, which
+        // is what happened before cross-checking existed.
+        set_ingestion_engine("claude".into(), None);
+        assert!(ingestion_reviewers().is_empty());
+        assert_eq!(ingestion_reviewer(), None);
     }
 
     /// Only actual NAMES count as must-keep — a rewrite is free to drop a

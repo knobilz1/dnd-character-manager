@@ -995,10 +995,12 @@ export function DMConsolePage() {
     const primary = ingestionProvider === 'local' ? 'claude' : ingestionProvider;
     // A reviewer must never be the engine that wrote the draft — self-critique
     // shares the draft's blind spots, which is the whole point of a second one.
-    const reviewer = crossCheckEnabled
-      ? crossCheckEngines.find((e) => e !== primary) ?? null
-      : null;
-    void invoke('set_ingestion_engine', { engine: primary, crossCheck: reviewer }).catch(() => {});
+    //
+    // ALL of them, not the first. This used to be `.find(...)`, so ticking both
+    // Codex and Gemini silently consulted exactly one of them — the panel
+    // offered a fan-out the backend never received.
+    const reviewers = crossCheckEnabled ? crossCheckEngines.filter((e) => e !== primary) : [];
+    void invoke('set_ingestion_engine', { engine: primary, crossCheck: reviewers }).catch(() => {});
   }, [ingestionProvider, crossCheckEnabled, crossCheckEngines]);
 
   // Who holds the table camera, while we're expecting photos from a player.
