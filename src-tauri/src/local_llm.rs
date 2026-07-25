@@ -594,17 +594,64 @@ fn ask_local_once(base_url: &str, model: &str, prompt: &str, expect_json: bool) 
 /// model it was started with). campaign.rs calls this everywhere it used to
 /// call dm::ask_claude_once directly. `expect_json` only affects the local
 /// path (Claude follows the prompt's own format instruction either way).
+/// Does this error mean the engine's sign-in has lapsed, rather than the call
+/// having genuinely failed?
+///
+/// A subscription CLI's OAuth token expires on its own schedule, so this can
+/// happen in the middle of a session that was working ten minutes earlier — and
+/// it is exactly as recoverable as running out of quota. Treated separately from
+/// `looks_rate_limited` because it additionally means the cached "signed in"
+/// answer is now a lie and has to be thrown away.
+pub fn looks_signed_out(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    [
+        "authentication required",
+        "authentication interrupted",
+        "authentication failed",
+        "not logged in",
+        "not authenticated",
+        "please sign in",
+        "please log in",
+        "reauthenticate",
+        "invalid_grant",
+        "token expired",
+        "credentials",
+        "unauthorized",
+        "401",
+    ]
+    .iter()
+    .any(|needle| e.contains(needle))
+}
+
 pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
     match ask_ingest_inner(prompt.clone(), claude_model, expect_json) {
         Ok(text) => Ok(text),
-        Err(e) if looks_rate_limited(&e) => {
-            // Out of quota, not broken. Any OTHER signed-in engine will do —
-            // finishing the import on a different model beats stopping, and
-            // ingestion has no conversational continuity to lose.
+        Err(e) if looks_rate_limited(&e) || looks_signed_out(&e) => {
+            // Out of quota, or signed out mid-session — not broken. Any OTHER
+            // signed-in engine will do: finishing the import on a different
+            // model beats stopping, and ingestion has no conversational
+            // continuity to lose.
+            //
+            // Signed-out belongs here because of where ingestion actually runs.
+            // The end-of-session digest walks the transcript chunk by chunk and
+            // SKIPS any chunk whose call fails, so a lapsed token used to mean
+            // entities.md, locations.md and flagged_facts.md silently received
+            // nothing for the whole night — the raw transcript survived (it is
+            // written before any model call), but next session the DM would
+            // greet everyone met tonight as a stranger, with no error shown.
+            if looks_signed_out(&e) {
+                // The Accounts panel caches a positive answer for the process,
+                // so it would keep claiming this engine is fine. Drop that.
+                crate::dm::forget_cached_sign_in();
+            }
             let Some(other) = ingestion_reviewer() else { return Err(e) };
             crate::maplog::log(
                 "INGESTION FAILED OVER",
-                &format!("primary rate-limited, retrying on {}: {e}", other.label()),
+                &format!(
+                    "primary {}, retrying on {}: {e}",
+                    if looks_signed_out(&e) { "signed out" } else { "rate-limited" },
+                    other.label()
+                ),
             );
             crate::dm::run_engine_oneshot(other, &prompt, None, None).map_err(|second| {
                 format!("{e}\n\nAlso tried {}: {second}", other.label())
@@ -929,6 +976,32 @@ mod tests {
         assert!(why.contains("Aldric Venn"), "{why}");
 
         assert!(!revision_is_safe(draft, "   ").0, "empty is never a revision");
+    }
+
+    /// A lapsed sign-in has to be recognised from an engine's error text, so
+    /// ingestion can finish the work somewhere else instead of silently dropping
+    /// it. Inputs are verbatim: agy's banner, and Codex's `login status` line.
+    #[test]
+    fn a_lapsed_sign_in_is_recognised_and_kept_apart_from_a_real_failure() {
+        assert!(looks_signed_out(
+            "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?..."
+        ));
+        assert!(looks_signed_out("Error: authentication interrupted"));
+        assert!(looks_signed_out("Not logged in"));
+        assert!(looks_signed_out("HTTP 401 Unauthorized"));
+        assert!(looks_signed_out("invalid_grant: Token has been expired or revoked."));
+
+        // Real failures must NOT be read as a sign-in problem — failing over on
+        // these would just repeat a genuine error on a second engine and burn
+        // quota doing it.
+        assert!(!looks_signed_out("Codex returned nothing usable."));
+        assert!(!looks_signed_out("error: unexpected argument '--sandbox' found"));
+        assert!(!looks_signed_out("Error: empty prompt. Usage: agy --print \"your prompt here\""));
+        assert!(!looks_signed_out(""));
+
+        // Quota and sign-in are different conditions; only one of them means the
+        // cached "signed in" answer has to be thrown away.
+        assert!(looks_rate_limited("429 rate limit exceeded") && !looks_signed_out("429 rate limit exceeded"));
     }
 
     /// The settings panel has always offered several reviewers; the backend

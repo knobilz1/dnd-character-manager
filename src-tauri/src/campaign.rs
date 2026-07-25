@@ -1115,9 +1115,23 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
     write_atomic(&records_dir.join(format!("{session_id}.md")), &format!("# {session_id} ({date})\n\n{}\n", transcript.trim()))?;
 
     let mut summaries = Vec::new();
+    let mut failed_chunks = 0usize;
     for chunk in split_into_chunks(transcript, EXTRACTION_CHUNK_MAX_CHARS) {
-        let Ok(reply) = crate::local_llm::ask_ingest_once(build_session_digest_prompt(&chunk), Some("opus"), true) else {
-            continue;
+        let reply = match crate::local_llm::ask_ingest_once(build_session_digest_prompt(&chunk), Some("opus"), true) {
+            Ok(r) => r,
+            // Skipping a chunk loses everything that happened in it: the NPCs
+            // met, the places visited, the promises made. The raw transcript
+            // above survives, so nothing is unrecoverable — but this used to
+            // skip in total silence, so a whole night could produce no memory
+            // updates at all and look like a clean finish. Say so.
+            Err(e) => {
+                crate::maplog::log(
+                    "SESSION DIGEST CHUNK FAILED",
+                    &format!("this chunk contributed no memory entries: {e}"),
+                );
+                failed_chunks += 1;
+                continue;
+            }
         };
         let digest = parse_session_digest(&reply);
         for e in &digest.entities {
@@ -1140,7 +1154,21 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
         }
     }
 
-    let summary = if summaries.is_empty() { "(session recorded — no summary produced)".to_string() } else { summaries.join(" ") };
+    // A partial digest must SAY it is partial. The raw transcript is safe either
+    // way, but "no summary produced" reads like a quiet night rather than like
+    // the memory pass having failed — and the difference matters when you come
+    // back next week wondering why the DM forgot everyone.
+    let summary = match (summaries.is_empty(), failed_chunks) {
+        (true, 0) => "(session recorded — no summary produced)".to_string(),
+        (true, n) => format!(
+            "(session recorded, but the memory pass FAILED on all {n} part(s) — the full transcript is saved under session records, and re-running the digest after checking your engine sign-in will recover the details)"
+        ),
+        (false, 0) => summaries.join(" "),
+        (false, n) => format!(
+            "{} [Note: {n} part(s) of this session could not be processed — some NPCs, places or promises from it are missing from memory. The full transcript is saved under session records.]",
+            summaries.join(" ")
+        ),
+    };
     append_session_index_line_at(root, id, &session_id, date, &summary)?;
     // Keep the active module's arc plan honest about what actually happened —
     // see reconcile_module_plan_at. Best-effort: this must never fail the

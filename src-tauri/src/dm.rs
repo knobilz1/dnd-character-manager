@@ -55,6 +55,16 @@ pub struct DmTurnControl {
 /// for why only the positive is remembered.
 static GEMINI_CONFIRMED: AtomicBool = AtomicBool::new(false);
 
+/// Throw away the cached "this engine is signed in" answer.
+///
+/// Called when a real call comes back saying otherwise. Without this, a token
+/// that expires mid-session leaves the Accounts panel insisting everything is
+/// fine for as long as the app stays open — which is precisely the window in
+/// which someone would be relying on it.
+pub(crate) fn forget_cached_sign_in() {
+    GEMINI_CONFIRMED.store(false, Ordering::Relaxed);
+}
+
 #[derive(serde::Serialize)]
 pub struct DmReply {
     pub text: String,
@@ -1889,15 +1899,25 @@ fn run_engine_turn(
 
     match text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
         Some(text) => Ok(DmReply { text, session_id }),
-        None => Err(format!(
-            "{} returned nothing.\n{}",
-            engine.label(),
-            format!("{stdout}{}", String::from_utf8_lossy(&out.stderr))
-                .trim()
-                .chars()
-                .take(500)
-                .collect::<String>()
-        )),
+        None => {
+            let raw = format!("{stdout}{}", String::from_utf8_lossy(&out.stderr));
+            // A token that lapses mid-session comes back here as a wall of CLI
+            // output with an OAuth URL buried in it. Name the actual problem,
+            // and stop the Accounts panel insisting this engine is fine.
+            if crate::local_llm::looks_signed_out(&raw) {
+                forget_cached_sign_in();
+                return Err(format!(
+                    "{} is signed out — its sign-in expired. Open DM Model → Accounts and sign in again, \
+                     or switch engines to keep playing.",
+                    engine.label()
+                ));
+            }
+            Err(format!(
+                "{} returned nothing.\n{}",
+                engine.label(),
+                raw.trim().chars().take(500).collect::<String>()
+            ))
+        }
     }
 }
 
