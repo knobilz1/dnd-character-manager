@@ -350,7 +350,11 @@ export function EngineAccounts() {
                   : 'Codes expire fast — grab a fresh one if this fails.'}
             </span>
           </div>
-          {error && <p className="text-xs text-red-400">{error}</p>}
+          {error && (
+            <pre className="text-[11px] text-red-400 whitespace-pre-wrap break-words bg-slate-950/60 rounded p-2 max-h-40 overflow-auto">
+              {error}
+            </pre>
+          )}
         </div>
       </Dialog>
 

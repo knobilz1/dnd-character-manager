@@ -942,6 +942,10 @@ use std::time::Duration;
 struct PendingLogin {
     child: std::process::Child,
     stdin: Option<std::process::ChildStdin>,
+    /// Everything the CLI has said, kept AFTER the URL is found. Without this a
+    /// rejected sign-in could only be reported as a generic "that didn't work",
+    /// discarding the one thing that explains why — the tool's own error text.
+    log: std::sync::Arc<Mutex<String>>,
 }
 
 fn pending_login() -> &'static Mutex<Option<PendingLogin>> {
@@ -990,6 +994,7 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
         // "preparing…" forever with nothing to click, which is exactly what it
         // looked like from the outside. Claude and Codex use stdout, so both are
         // watched and whichever produces a URL first wins.
+        let log = std::sync::Arc::new(Mutex::new(String::new()));
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
         for stream in [
             child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
@@ -999,24 +1004,42 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
         .flatten()
         {
             let tx = tx.clone();
+            let log = log.clone();
             std::thread::spawn(move || {
                 let mut reader = BufReader::new(stream);
                 let mut buf = String::new();
+                let mut announced = false;
                 loop {
                     let mut line = String::new();
                     match reader.read_line(&mut line) {
                         Ok(0) => break,
                         Ok(_) => {
                             buf.push_str(&line);
-                            if let Some(url) = find_login_url(&buf) {
-                                let _ = tx.send(Some(url));
-                                return;
+                            {
+                                let mut l = log.lock().unwrap();
+                                l.push_str(&line);
+                                // Bound it; only the tail ever gets reported.
+                                if l.len() > 8000 {
+                                    let cut = l.len() - 4000;
+                                    *l = l[cut..].to_string();
+                                }
+                            }
+                            // Report the URL once, then KEEP READING — the
+                            // interesting output (why a code was refused) all
+                            // arrives after this point.
+                            if !announced {
+                                if let Some(url) = find_login_url(&buf) {
+                                    announced = true;
+                                    let _ = tx.send(Some(url));
+                                }
                             }
                         }
                         Err(_) => break,
                     }
                 }
-                let _ = tx.send(None);
+                if !announced {
+                    let _ = tx.send(None);
+                }
             });
         }
         drop(tx); // so recv ends once every reader is done
@@ -1034,7 +1057,7 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
             }
         }
         let stdin = child.stdin.take();
-        *pending_login().lock().unwrap() = Some(PendingLogin { child, stdin });
+        *pending_login().lock().unwrap() = Some(PendingLogin { child, stdin, log });
         Ok(found)
     })
     .await
@@ -1278,10 +1301,31 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
             return Ok(true);
         }
     }
+    // Failed. Hand back the CLI's OWN words rather than a guess — this is where
+    // an ineligible-account or expired-code message finally becomes visible.
+    let mut detail = String::new();
     if let Some(mut stale) = pending_login().lock().unwrap().take() {
+        detail = stale.log.lock().unwrap().clone();
         let _ = stale.child.kill();
     }
-    Ok(false)
+    let detail = detail
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.contains("https://accounts.google.com"))
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("
+");
+    if detail.trim().is_empty() {
+        Ok(false)
+    } else {
+        Err(format!("Sign-in didn't complete. {} said:
+{detail}", 
+            crate::cli_provider::CliEngine::from_setting(&setting).label()))
+    }
 }
 
 /// Run one stateless completion on any engine and return its text.
