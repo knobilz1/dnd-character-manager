@@ -1,4 +1,5 @@
 mod campaign;
+mod cli_provider;
 mod dm;
 mod local_llm;
 mod maplog;
@@ -39,6 +40,9 @@ pub fn run() {
       dm::check_claude_auth,
       dm::connect_claude,
       dm::install_claude_cli,
+      dm::engine_auth_state,
+      dm::install_engine_cli,
+      dm::connect_engine,
       dm::cancel_dm_turn,
       local_llm::ask_dm_local,
       local_llm::end_local_dm_session,

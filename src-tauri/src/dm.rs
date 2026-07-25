@@ -304,6 +304,73 @@ fn resolve_claude_exe() -> Option<std::path::PathBuf> {
 /// the node runtime a `.cmd` shim invokes) resolve regardless of the stale
 /// PATH the GUI app inherited.
 #[cfg(windows)]
+/// Same PATH scan as `resolve_claude_exe`, for any engine's binary stem.
+///
+/// Kept separate from that function rather than replacing it: the Claude path
+/// carries hard-won Windows behaviour (prefer `.exe` over the `.cmd` npm shim,
+/// plus the native-installer's `%USERPROFILE%\.local\bin`) that is worth not
+/// disturbing. Codex and Gemini install via npm only, so a `.cmd` shim is the
+/// normal case for them and there is no second install location to check.
+#[cfg(windows)]
+fn resolve_engine_exe(engine: crate::cli_provider::CliEngine) -> Option<std::path::PathBuf> {
+    use crate::cli_provider::CliEngine;
+    if engine == CliEngine::Claude {
+        return resolve_claude_exe();
+    }
+    let dirs: Vec<String> = augmented_path().split(';').map(str::to_string).collect();
+    for dir in dirs.iter().filter(|d| !d.is_empty()) {
+        for stem in engine.binary_stems() {
+            for ext in ["exe", "cmd", "bat"] {
+                let candidate = std::path::Path::new(dir).join(format!("{stem}.{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `claude_command` generalised. A `.cmd`/`.bat` shim still needs `cmd /C` with
+/// the path and args as separate `.arg()` calls; a real `.exe` is launched
+/// directly so there is no shell quoting to get wrong.
+#[cfg(windows)]
+fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Result<Command, String> {
+    let path = resolve_engine_exe(engine).ok_or_else(|| engine_not_installed_error(engine))?;
+    let is_batch = path
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+        .unwrap_or(false);
+    let mut cmd = if is_batch {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(&path).args(args);
+        c
+    } else {
+        let mut c = Command::new(&path);
+        c.args(args);
+        c
+    };
+    cmd.env("PATH", augmented_path());
+    Ok(cmd)
+}
+
+#[cfg(not(windows))]
+fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Result<Command, String> {
+    let mut c = Command::new(engine.binary_stems()[0]);
+    c.args(args);
+    Ok(c)
+}
+
+/// Carries the same marker the frontend already keys on, so an engine that
+/// isn't installed lands in the "offer to install it" branch rather than the
+/// "you're not logged in" one — those need completely different messaging.
+fn engine_not_installed_error(engine: crate::cli_provider::CliEngine) -> String {
+    format!(
+        "{CLAUDE_NOT_INSTALLED_MARKER}: {} isn't installed yet. Tavern Sheet can install it for you.",
+        engine.label()
+    )
+}
+
 fn claude_command(args: &[&str]) -> Result<Command, String> {
     let path = resolve_claude_exe().ok_or_else(claude_not_installed_error)?;
     let is_batch = path
@@ -845,6 +912,144 @@ fn write_claude_debug_log(context: &str, path_used: &str, out: Option<&std::proc
 #[tauri::command]
 pub fn check_claude_auth() -> Result<bool, String> {
     claude_logged_in()
+}
+
+/// Is this engine's CLI signed in? `(installed, signed_in)` so the frontend can
+/// tell "install it" from "sign in" without parsing an error string.
+///
+/// Deliberately never errors on "not installed" — a settings panel showing the
+/// state of three engines wants three answers, not one exception.
+#[tauri::command]
+pub async fn engine_auth_state(engine: String) -> Result<(bool, bool), String> {
+    let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    tokio::task::spawn_blocking(move || {
+        use crate::cli_provider::CliEngine;
+        if engine == CliEngine::Claude {
+            // Reuse the existing, proven check rather than a second opinion.
+            return (true, claude_logged_in().unwrap_or(false));
+        }
+        let Some(probe) = engine.auth_probe_args() else {
+            // Gemini has no status subcommand. Presence of its credential file
+            // is the only offline signal; a wrong guess here is cheap because
+            // the first real call reports the truth anyway.
+            let installed = engine_command(engine, &["--version"]).is_ok();
+            let signed_in = dirs_next_home()
+                .map(|h| h.join(".gemini").join("oauth_creds.json").is_file())
+                .unwrap_or(false);
+            return (installed, signed_in);
+        };
+        let mut cmd = match engine_command(engine, probe) {
+            Ok(c) => c,
+            Err(_) => return (false, false),
+        };
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        match cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).output() {
+            // `codex login status` EXITS 0 whether or not anyone is signed in,
+            // so only the text is load-bearing here.
+            Ok(out) => {
+                let text = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                (true, engine.auth_probe_says_signed_in(&text))
+            }
+            Err(_) => (false, false),
+        }
+    })
+    .await
+    .map_err(|e| format!("Auth check task failed: {e}"))
+}
+
+/// Home directory, for the one engine whose sign-in state can only be inferred
+/// from a credential file on disk.
+fn dirs_next_home() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+}
+
+/// Installs any engine's CLI with one click — the same `npm install -g` the
+/// Claude installer does, with the same hidden console and the same Node.js
+/// prerequisite (the only thing the app still can't do for the user).
+#[tauri::command]
+pub async fn install_engine_cli(engine: String) -> Result<(), String> {
+    let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    if engine == crate::cli_provider::CliEngine::Claude {
+        return install_claude_cli().await;
+    }
+    let package = engine.npm_package();
+    tokio::task::spawn_blocking(move || {
+        let npm = resolve_npm_exe().ok_or_else(node_not_installed_error)?;
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(&npm).arg("install").arg("-g").arg(package);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let out = cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("Couldn't run npm: {e}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Installing {package} failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))
+        }
+    })
+    .await
+    .map_err(|e| format!("Install task failed: {e}"))?
+}
+
+/// Walks the user through signing in to any engine, using the same trick
+/// `connect_claude` uses: spawn the vendor's own login flow in a REAL, VISIBLE
+/// console window and block until it closes, then re-check auth rather than
+/// trusting the exit code (closing the window is also a "successful" exit).
+///
+/// This is what makes the feature usable without an API key: every one of these
+/// is a browser OAuth flow against the user's own subscription. The app never
+/// sees or handles a credential — it just opens the vendor's door and waits.
+///
+/// `codex login` prints a URL and waits. `gemini` authenticates on first
+/// interactive launch, so it opens the TUI; the user signs in and quits.
+#[tauri::command]
+pub async fn connect_engine(engine: String) -> Result<bool, String> {
+    let setting = engine.clone();
+    let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    if engine == crate::cli_provider::CliEngine::Claude {
+        return connect_claude().await;
+    }
+    tokio::task::spawn_blocking(move || {
+        // No CREATE_NO_WINDOW here, deliberately: a GUI-subsystem parent with no
+        // console of its own gets a brand-new visible console allocated for a
+        // console-subsystem child, which is exactly what a login flow needs.
+        let login_args: Vec<&str> = match engine {
+            crate::cli_provider::CliEngine::Codex => vec!["login"],
+            // Gemini has no `login` subcommand — launching it interactively IS
+            // the sign-in flow.
+            _ => vec![],
+        };
+        let mut cmd = engine_command(engine, &login_args)?;
+        cmd.status()
+            .map_err(|e| format!("Couldn't start `{}`: {e}", engine.login_command()))
+            .map(|_| ())
+    })
+    .await
+    .map_err(|e| format!("Login task failed: {e}"))??;
+    // Closing the window is also a "successful" exit, so the exit code proves
+    // nothing — re-check through the same path the settings panel uses, so
+    // "connected" means one thing everywhere.
+    Ok(engine_auth_state(setting).await?.1)
 }
 
 /// Runs `claude auth login --claudeai` in a REAL, VISIBLE console window —
