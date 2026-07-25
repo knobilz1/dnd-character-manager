@@ -940,8 +940,14 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 struct PendingLogin {
-    child: std::process::Child,
+    child: Option<std::process::Child>,
     stdin: Option<std::process::ChildStdin>,
+    /// Set when the engine is driven through a pseudo-console instead of pipes.
+    /// Writing here is typing at a terminal as far as the child can tell, which
+    /// is the only way agy's code prompt can be answered - it ignores piped
+    /// stdin completely (measured: prompt printed, then silence).
+    pty_writer: Option<std::sync::Arc<Mutex<Box<dyn std::io::Write + Send>>>>,
+    pty_child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
     /// Everything the CLI has said, kept AFTER the URL is found. Without this a
     /// rejected sign-in could only be reported as a generic "that didn't work",
     /// discarding the one thing that explains why — the tool's own error text.
@@ -963,8 +969,13 @@ fn pending_login() -> &'static Mutex<Option<PendingLogin>> {
 pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String> {
     let engine = crate::cli_provider::CliEngine::from_setting(&engine);
     tokio::task::spawn_blocking(move || {
-        if let Some(mut old) = pending_login().lock().unwrap().take() {
-            let _ = old.child.kill();
+        if let Some(old) = pending_login().lock().unwrap().take() {
+            end_login(old);
+        }
+        // Engines whose sign-in prompt reads from a terminal get a real
+        // pseudo-console; everything else keeps the simpler pipe path.
+        if engine == crate::cli_provider::CliEngine::Gemini {
+            return begin_login_via_pty(engine);
         }
         let args: Vec<&str> = match engine {
             crate::cli_provider::CliEngine::Gemini => {
@@ -1057,7 +1068,8 @@ pub async fn begin_engine_login(engine: String) -> Result<Option<String>, String
             }
         }
         let stdin = child.stdin.take();
-        *pending_login().lock().unwrap() = Some(PendingLogin { child, stdin, log });
+        *pending_login().lock().unwrap() =
+            Some(PendingLogin { child: Some(child), stdin, pty_writer: None, pty_child: None, log });
         Ok(found)
     })
     .await
@@ -1207,6 +1219,16 @@ const SCRAPE_CODE_JS: &str = r#"(function () {
   } catch (e) { /* nothing to do; the manual paste box is still there */ }
 })();"#;
 
+/// Stop a sign-in attempt, whichever way it was started.
+fn end_login(mut p: PendingLogin) {
+    if let Some(c) = p.child.as_mut() {
+        let _ = c.kill();
+    }
+    if let Some(c) = p.pty_child.as_mut() {
+        let _ = c.kill();
+    }
+}
+
 fn captured_code() -> &'static Mutex<Option<String>> {
     static C: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     C.get_or_init(|| Mutex::new(None))
@@ -1252,6 +1274,168 @@ pub fn take_captured_login_code() -> Option<String> {
     captured_code().lock().unwrap().take()
 }
 
+/// Start a sign-in on a pseudo-console, returning the URL to visit.
+///
+/// The child gets a genuine terminal: it prints its prompt, blocks on a terminal
+/// read, and `submit_login_code` answers by WRITING TO THAT TERMINAL. From the
+/// CLI's side that is indistinguishable from a person typing, which is the whole
+/// point - piped stdin was accepted and then silently ignored.
+fn begin_login_via_pty(engine: crate::cli_provider::CliEngine) -> Result<Option<String>, String> {
+    use portable_pty::{CommandBuilder, PtySize};
+
+    let exe = resolve_engine_exe(engine).ok_or_else(|| engine_not_installed_error(engine))?;
+    let pty = portable_pty::native_pty_system()
+        .openpty(PtySize { rows: 50, cols: 200, pixel_width: 0, pixel_height: 0 })
+        .map_err(|e| format!("Couldn't open a terminal for sign-in: {e}"))?;
+
+    let mut cmd = CommandBuilder::new(exe);
+    for a in ["--mode", "plan", "--print", "Reply with exactly: READY"] {
+        cmd.arg(a);
+    }
+    cmd.env("PATH", augmented_path());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("FORCE_COLOR", "1");
+    let child = pty
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("Couldn't start {} for sign-in: {e}", engine.label()))?;
+    drop(pty.slave); // so the reader sees EOF once the child exits
+
+    let mut reader = pty
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Couldn't read the sign-in terminal: {e}"))?;
+    // ONE writer, shared between the reader thread (which must ANSWER terminal
+    // queries) and submit_login_code (which types the user's code). take_writer
+    // only succeeds once, so a second handle for the responder silently came
+    // back None and ESC[6n went unanswered — agy probed the terminal, cleared
+    // the screen, and blocked forever waiting for a cursor-position report.
+    let writer = std::sync::Arc::new(Mutex::new(
+        pty.master
+            .take_writer()
+            .map_err(|e| format!("Couldn't write to the sign-in terminal: {e}"))?,
+    ));
+    let responder = writer.clone();
+
+    let log = std::sync::Arc::new(Mutex::new(String::new()));
+    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+    {
+        let log = log.clone();
+        std::thread::spawn(move || {
+            // Byte-wise, not line-wise: a terminal prompt ends WITHOUT a newline
+            // ("...press Enter: "), so waiting for one would hide it forever.
+            let mut buf: Vec<u8> = Vec::new();
+            let mut chunk = [0u8; 2048];
+            let mut announced = false;
+            let mut answered_dsr = false;
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk[..n]);
+                        let raw = String::from_utf8_lossy(&buf).to_string();
+
+                        // Handed a real terminal, agy talks terminal protocol:
+                        // it emits ESC[6n (report cursor position) and BLOCKS
+                        // until something answers. Nothing did, so it printed
+                        // nothing at all and the URL never arrived. Answer it.
+                        // Answer the cursor-position query once, as a real
+                        // terminal would: ESC[<row>;<col>R.
+                        if !answered_dsr && raw.contains("\u{1b}[6n") {
+                            answered_dsr = true;
+                            if let Ok(mut w) = responder.lock() {
+                                let _ = w.write_all(b"\x1b[1;1R");
+                                let _ = w.flush();
+                            }
+                        }
+
+                        // Strip ANSI so a URL split by colour codes or redrawn
+                        // in place is still recognisable as one string.
+                        let text = strip_ansi(&raw);
+                        {
+                            let mut l = log.lock().unwrap();
+                            *l = text.clone();
+                            if l.len() > 8000 {
+                                let cut = l.len() - 4000;
+                                *l = l[cut..].to_string();
+                            }
+                        }
+                        if !announced {
+                            // A terminal hard-wraps long lines, so undo the
+                            // wrapping before looking for the URL.
+                            let unwrapped: String =
+                                text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+                            if let Some(url) = find_login_url(&unwrapped) {
+                                announced = true;
+                                let _ = tx.send(Some(url));
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            if !announced {
+                let _ = tx.send(None);
+            }
+        });
+    }
+
+    let found = rx.recv_timeout(Duration::from_secs(45)).unwrap_or(None);
+    *pending_login().lock().unwrap() = Some(PendingLogin {
+        child: None,
+        stdin: None,
+        pty_writer: Some(writer),
+        pty_child: Some(child),
+        log,
+    });
+    Ok(found)
+}
+
+/// Remove ANSI escape sequences from terminal output.
+///
+/// Needed because a CLI given a real terminal decorates and repositions its
+/// output; a URL can arrive wrapped in colour codes, which defeats a plain
+/// substring search for "https://".
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            // CSI: ESC [ ... final byte in @-~
+            Some('[') => {
+                chars.next();
+                for c2 in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&c2) {
+                        break;
+                    }
+                }
+            }
+            // OSC: ESC ] ... BEL or ESC \
+            Some(']') => {
+                chars.next();
+                while let Some(c2) = chars.next() {
+                    if c2 == '\u{7}' {
+                        break;
+                    }
+                    if c2 == '\u{1b}' {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {
+                chars.next();
+            }
+        }
+    }
+    out
+}
+
 /// Pull the first http(s) URL out of a CLI's login output.
 fn find_login_url(text: &str) -> Option<String> {
     let start = text.find("https://")?;
@@ -1274,6 +1458,17 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
         let Some(p) = slot.as_mut() else {
             return Err("That sign-in is no longer waiting — start it again.".to_string());
         };
+        if let Some(shared) = p.pty_writer.as_ref() {
+            // Typing at the terminal. A console sends a bare CR on Enter — NOT
+            // CRLF. Sending both submits the code and then immediately submits
+            // an empty second line, which agy treats as a cancel and reports as
+            // "authentication interrupted" (observed exactly that).
+            let mut w = shared.lock().map_err(|_| "sign-in terminal is busy")?;
+            w.write_all(format!("{}\r", code.trim()).as_bytes())
+                .map_err(|e| format!("Couldn't type the code in: {e}"))?;
+            w.flush().map_err(|e| format!("Couldn't type the code in: {e}"))?;
+            return Ok(());
+        }
         let mut stdin = p.stdin.take().ok_or("Nothing is waiting for a code.")?;
         stdin
             .write_all(format!("{}\n", code.trim()).as_bytes())
@@ -1295,8 +1490,8 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
     for _ in 0..24 {
         tokio::time::sleep(Duration::from_millis(1500)).await;
         if engine_auth_state(setting.clone()).await?.1 {
-            if let Some(mut done) = pending_login().lock().unwrap().take() {
-                let _ = done.child.kill(); // its remaining work is of no interest
+            if let Some(done) = pending_login().lock().unwrap().take() {
+                end_login(done); // its remaining work is of no interest
             }
             return Ok(true);
         }
@@ -1304,9 +1499,9 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
     // Failed. Hand back the CLI's OWN words rather than a guess — this is where
     // an ineligible-account or expired-code message finally becomes visible.
     let mut detail = String::new();
-    if let Some(mut stale) = pending_login().lock().unwrap().take() {
+    if let Some(stale) = pending_login().lock().unwrap().take() {
         detail = stale.log.lock().unwrap().clone();
-        let _ = stale.child.kill();
+        end_login(stale);
     }
     let detail = detail
         .lines()
