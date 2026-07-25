@@ -122,17 +122,22 @@ impl CliEngine {
         match self {
             Self::Claude => None, // dm::claude_logged_in already does this
             Self::Codex => Some(&["login", "status"]),
-            // None: agy has NO subcommand that touches auth, so the caller falls
-            // back to checking for its credential files.
+            // A real, tiny call — the ONLY thing that answers this honestly.
             //
-            // This used to be `Some(&["models"])` on the assumption that listing
-            // models required being signed in. It does not. Measured 2026-07-25
-            // with both credential stores empty and `agy --print` refusing with
-            // "Authentication required": `agy models` still printed the full
-            // catalogue and exited 0, so the Accounts panel showed a cheerful
-            // "signed in" for an account that could not take a single turn.
-            // `agents` and `changelog` are the same -- none of them need auth.
-            Self::Gemini => None,
+            // Two wrong answers preceded it, in both directions. `agy models`
+            // exits 0 with the full catalogue while signed OUT, so it reported
+            // everyone signed in. Checking for `~/.gemini/oauth_creds.json`
+            // then reported a genuinely signed-in user as signed OUT: that path
+            // belonged to the retired gemini-cli, and Antigravity keeps its
+            // token somewhere else entirely (not in ~/.gemini, not in
+            // %LOCALAPPDATA%\agy, not in Windows Credential Manager).
+            //
+            // No agy subcommand touches auth — `models`, `agents`, `changelog`
+            // and `plugins` were all checked — and `--print ""` fails on the
+            // empty prompt BEFORE auth is consulted. So the probe has to be a
+            // real prompt. It costs ~5s, which is why the caller caches a
+            // signed-in answer for the life of the process.
+            Self::Gemini => Some(&["--mode", "plan", "--sandbox", "--output-format", "json", "--print", "ok"]),
         }
     }
 
@@ -148,11 +153,12 @@ impl CliEngine {
                 let t = stdout.to_ascii_lowercase();
                 !t.contains("not logged in") && (t.contains("logged in") || t.contains("chatgpt") || t.contains("api key"))
             }
-            // Unreachable: `auth_probe_args` is None for Gemini because agy has
-            // no auth-aware subcommand, so nothing is ever probed to feed this.
-            // Kept explicit rather than deleted so that anyone who gives Gemini
-            // a probe again has to come here and confront the measurement.
-            Self::Gemini => false,
+            // The probe is a real prompt, so a completed turn is the proof.
+            // Signed out, agy writes an "Authentication required" banner and an
+            // OAuth URL to stderr and produces no envelope at all — so requiring
+            // the envelope's SUCCESS is both necessary and sufficient, and can't
+            // be faked by a catalogue listing the way `agy models` was.
+            Self::Gemini => stdout.contains("\"status\":\"SUCCESS\""),
         }
     }
 }
@@ -649,21 +655,41 @@ mod tests {
         assert!(e.auth_probe_says_signed_in("Logged in using an API key\n"));
     }
 
-    /// agy has no subcommand that requires being signed in, so there is nothing
-    /// to probe and the caller must fall back to looking for credential files.
+    /// Gemini's sign-in state can only be read from a REAL completed call.
     ///
-    /// This was `Some(&["models"])`, on the reasonable-sounding assumption that
-    /// listing models needs an account. Measured with both credential stores
-    /// empty and `agy --print` refusing outright, `agy models` still printed the
-    /// whole catalogue and exited 0 — so the Accounts panel reported "signed in"
-    /// for an account that could not take a single turn. The lesson is the same
-    /// one Codex's `login status` taught: a probe is only a probe once it has
-    /// been run in the SIGNED-OUT state.
+    /// Two cheaper answers were tried and both were wrong, in opposite
+    /// directions — which is why this test pins verbatim output from each case:
+    ///
+    /// - `agy models` exits 0 and prints the whole catalogue while signed OUT,
+    ///   so it reported everyone as signed in.
+    /// - `~/.gemini/oauth_creds.json` reported a genuinely signed-in user as
+    ///   signed OUT. That path belonged to the retired gemini-cli; Antigravity
+    ///   stores its token somewhere else entirely.
+    ///
+    /// Same lesson as Codex's `login status`: a probe is only a probe once it has
+    /// been run in BOTH states.
     #[test]
-    fn gemini_has_no_auth_probe_because_none_of_its_subcommands_need_auth() {
-        assert_eq!(CliEngine::Gemini.auth_probe_args(), None);
-        // ...so even output that looks healthy can never be read as a sign-in.
-        assert!(!CliEngine::Gemini.auth_probe_says_signed_in("gemini-3.6-flash-high\ngemini-3.1-pro-low"));
+    fn gemini_sign_in_can_only_be_read_from_a_real_completed_call() {
+        let probe = CliEngine::Gemini.auth_probe_args().expect("gemini needs a probe");
+        assert!(probe.contains(&"--print"), "the probe must be a real prompt: {probe:?}");
+        assert!(probe.contains(&"--output-format"), "and must ask for the envelope: {probe:?}");
+        // The lockdown applies even to the probe — it is a live model call.
+        assert!(probe.contains(&"--mode") && probe.contains(&"plan"), "{probe:?}");
+
+        let e = CliEngine::Gemini;
+        // A real success envelope, verbatim.
+        assert!(e.auth_probe_says_signed_in(
+            r#"{"conversation_id":"57c3ce5a","status":"SUCCESS","response":"ok\n","num_turns":1}"#
+        ));
+        // The catalogue that fooled the previous probe. Signed out, this is
+        // EXACTLY what `agy models` prints — it must never read as a sign-in.
+        assert!(!e.auth_probe_says_signed_in("gemini-3.6-flash-high\ngemini-3.1-pro-low\nclaude-sonnet-4-6"));
+        // What signed-out actually looks like: a banner on stderr, no envelope.
+        assert!(!e.auth_probe_says_signed_in(
+            "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?..."
+        ));
+        assert!(!e.auth_probe_says_signed_in(r#"{"status":"ERROR","error":"Error: empty prompt"}"#));
+        assert!(!e.auth_probe_says_signed_in(""));
     }
 
     #[test]

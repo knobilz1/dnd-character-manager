@@ -51,6 +51,10 @@ pub struct DmTurnControl {
     cancelled: AtomicBool,
 }
 
+/// Set once Gemini's auth probe has actually succeeded — see `engine_auth_state`
+/// for why only the positive is remembered.
+static GEMINI_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
 #[derive(serde::Serialize)]
 pub struct DmReply {
     pub text: String,
@@ -2014,22 +2018,19 @@ pub async fn engine_auth_state(engine: String) -> Result<(bool, bool), String> {
             // Reuse the existing, proven check rather than a second opinion.
             return (true, claude_logged_in().unwrap_or(false));
         }
+        // Gemini's probe is a real model call (~5s), and this command runs every
+        // time the Accounts panel mounts. Once it has said yes, believe it for
+        // the rest of the process. Only the POSITIVE is cached: a "no" must stay
+        // re-checkable, or signing in mid-session would never be noticed. If the
+        // token expires later the next real turn reports it plainly, which is a
+        // far better failure than making every panel open cost a generation.
+        if engine == CliEngine::Gemini && GEMINI_CONFIRMED.load(Ordering::Relaxed) {
+            return (true, true);
+        }
         let Some(probe) = engine.auth_probe_args() else {
-            // Gemini has no status subcommand. Presence of its credential file
-            // is the only offline signal; a wrong guess here is cheap because
-            // the first real call reports the truth anyway.
-            let installed = engine_command(engine, &["--version"]).is_ok();
-            // Verified against the installed CLI's own bundle: these are the two
-            // files it writes on a successful Google sign-in. Checked rather
-            // than guessed because the first cut of this looked for the right
-            // file but the sign-in had never actually produced one.
-            let signed_in = dirs_next_home()
-                .map(|h| {
-                    let g = h.join(".gemini");
-                    g.join("oauth_creds.json").is_file() || g.join("google_accounts.json").is_file()
-                })
-                .unwrap_or(false);
-            return (installed, signed_in);
+            // Every engine has a probe now; this arm exists only so adding a
+            // fourth without one fails closed rather than claiming a sign-in.
+            return (engine_command(engine, &["--version"]).is_ok(), false);
         };
         let mut cmd = match engine_command(engine, probe) {
             Ok(c) => c,
@@ -2049,21 +2050,17 @@ pub async fn engine_auth_state(engine: String) -> Result<(bool, bool), String> {
                     String::from_utf8_lossy(&out.stdout),
                     String::from_utf8_lossy(&out.stderr)
                 );
-                (true, engine.auth_probe_says_signed_in(&text))
+                let signed_in = engine.auth_probe_says_signed_in(&text);
+                if signed_in && engine == CliEngine::Gemini {
+                    GEMINI_CONFIRMED.store(true, Ordering::Relaxed);
+                }
+                (true, signed_in)
             }
             Err(_) => (false, false),
         }
     })
     .await
     .map_err(|e| format!("Auth check task failed: {e}"))
-}
-
-/// Home directory, for the one engine whose sign-in state can only be inferred
-/// from a credential file on disk.
-fn dirs_next_home() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
 }
 
 /// Gemini's "Login with Google" auth type — the subscription/free-tier option.
