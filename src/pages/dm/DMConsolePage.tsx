@@ -3064,6 +3064,9 @@ export function DMConsolePage() {
    *  the first; without it, the picked folder REPLACES the whole catalog
    *  (see import_tile_library's doc comment — re-picking the SAME folder
    *  either way just refreshes that folder's own entries, never dupes).
+   *  Prefer merge when re-picking a folder already in the catalog: a REPLACE
+   *  also drops what `audit_tile_library` measured, and re-auditing the pixels
+   *  of a full pack was timed at 17.6 minutes.
    *  Nothing here ever touches git or the app bundle: the art stays exactly
    *  where the DM put it, only a small filename manifest is cached locally. */
   async function importTileLibrary(merge: boolean) {

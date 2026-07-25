@@ -1264,12 +1264,32 @@ fn to_data_url(bytes: &[u8], ext: &str) -> String {
 /// the catalog, leaves every OTHER root's entries untouched, and records
 /// `root` in the roots list if it's new.
 fn merge_manifest(mut existing: TileLibraryManifest, root: &str, scanned: Vec<TileLibraryEntry>) -> TileLibraryManifest {
+    // Normalized HERE rather than trusted from the caller: matching this root
+    // against the stored ones is the whole job of this function, and a raw
+    // picker path silently matches nothing (see `normalize_import_root`).
+    let root = normalize_import_root(root);
     existing.entries.retain(|e| e.root != root);
     existing.entries.extend(scanned);
-    if !existing.roots.iter().any(|r| r == root) {
-        existing.roots.push(root.to_string());
+    // Manifests written before `normalize_import_root` recorded the picker's raw
+    // path here while their entries were already forward-slashed, so an old
+    // roots list can hold the other spelling of a root we're now re-importing.
+    // Without this the list grows a second entry for the same folder.
+    for r in existing.roots.iter_mut() {
+        *r = normalize_import_root(r);
+    }
+    if !existing.roots.iter().any(|r| *r == root) {
+        existing.roots.push(root);
     }
     existing
+}
+
+/// Every path the manifest stores is forward-slashed, because that's the shape
+/// `scan_dir` writes into each entry's `root`. An imported path arrives from the
+/// OS folder picker instead, so on Windows it comes back with backslashes —
+/// normalizing it here is what lets `merge_manifest` recognise a folder the
+/// catalog already holds.
+fn normalize_import_root(root: &str) -> String {
+    root.replace('\\', "/")
 }
 
 /// Scans `root` and either replaces the whole catalog with just this folder
@@ -1287,6 +1307,10 @@ pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<
     if scanned.is_empty() {
         return Err(format!("No image files found under \"{root}\"."));
     }
+    // From here on `root` has to match what the scan wrote into every entry, or
+    // merge can't tell this folder from one it has never seen. See
+    // `normalize_import_root`.
+    let root = normalize_import_root(&root);
     let manifest = if merge {
         merge_manifest(load_manifest_cached(&app)?.map(|m| (*m).clone()).unwrap_or_default(), &root, scanned)
     } else {
@@ -4760,5 +4784,37 @@ mod tests {
         assert_eq!(merged.roots, vec!["C:/packA".to_string()], "root must not be duplicated in the roots list");
         assert_eq!(merged.entries.len(), 1, "the old scan of this exact root must be fully replaced, not accumulated: {:?}", merged.entries);
         assert_eq!(merged.entries[0].rel_path, "new_table.webp");
+    }
+
+    /// The test above hands `merge_manifest` an already-forward-slashed root —
+    /// the one shape the OS folder picker never produces on Windows. The picker
+    /// returns `J:\My Drive\dnd tilesets` while `scan_dir` writes
+    /// `J:/My Drive/dnd tilesets` into every entry, so a re-Import compared two
+    /// spellings of the same path, matched nothing, and APPENDED a second copy
+    /// of the whole catalog. The shipped manifest shows the split plainly: its
+    /// roots list reads `J:\My Drive\dnd tilesets` and all 183,190 of its
+    /// entries read `J:/My Drive/dnd tilesets`.
+    #[test]
+    fn re_importing_a_windows_path_replaces_its_entries_instead_of_doubling_the_catalog() {
+        let existing = TileLibraryManifest {
+            // Spelled the way a real manifest on disk records it.
+            roots: vec!["J:\\My Drive\\tiles".into()],
+            entries: vec![entry_at("J:/My Drive/tiles", "old_table.webp")],
+            measured: HashMap::new(),
+        };
+        // Passed raw, exactly as the picker hands it over.
+        let merged = merge_manifest(existing, "J:\\My Drive\\tiles", vec![entry_at("J:/My Drive/tiles", "new_table.webp")]);
+        assert_eq!(
+            merged.entries.len(),
+            1,
+            "re-importing the same folder must replace its entries, not double the catalog: {:?}",
+            merged.entries
+        );
+        assert_eq!(merged.entries[0].rel_path, "new_table.webp");
+        assert_eq!(
+            merged.roots,
+            vec!["J:/My Drive/tiles".to_string()],
+            "the same folder in two spellings is still one root"
+        );
     }
 }
