@@ -42,8 +42,11 @@ const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string }
   {
     id: 'gemini',
     name: 'Gemini',
-    plan: 'Google account (free tier, or AI Pro/Ultra)',
-    blurb: 'Has a free tier, so it costs nothing to try — tightest rate limits.',
+    plan: 'Google account',
+    // Deliberately says "Gemini", not "Antigravity". Gemini is the MODEL doing
+    // the work; Antigravity is just the CLI client Google replaced it with in
+    // June 2026. Naming the client would only confuse someone choosing an LLM.
+    blurb: 'Signs in through Google Antigravity, which runs Gemini models. Closes itself when done.',
   },
 ];
 

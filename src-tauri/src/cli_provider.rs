@@ -82,7 +82,12 @@ impl CliEngine {
         match self {
             Self::Claude => &["claude"],
             Self::Codex => &["codex"],
-            Self::Gemini => &["gemini"],
+            // Gemini's own CLI was cut off from every consumer Google account on
+            // 2026-06-18 ("Login with Google" no longer works for free, AI Pro
+            // OR Ultra). Antigravity CLI (`agy`) is Google's own replacement and
+            // runs the same Gemini models -- it is a client swap, not a model
+            // swap, which is why this stays user-visible as "Gemini".
+            Self::Gemini => &["agy"],
         }
     }
 
@@ -91,7 +96,9 @@ impl CliEngine {
         match self {
             Self::Claude => "@anthropic-ai/claude-code",
             Self::Codex => "@openai/codex",
-            Self::Gemini => "@google/gemini-cli",
+            // NOT an npm package: Antigravity ships its own installer script.
+            // See dm.rs's install_engine_cli, which special-cases this.
+            Self::Gemini => "",
         }
     }
 
@@ -103,8 +110,9 @@ impl CliEngine {
             // `claude` has an in-app flow already (see dm::connect_claude).
             Self::Claude => "claude",
             Self::Codex => "codex login",
-            // Gemini authenticates on first interactive launch.
-            Self::Gemini => "gemini",
+            // `agy models` says it outright: "Launch the CLI without arguments
+            // to sign in." There is no login subcommand.
+            Self::Gemini => "agy",
         }
     }
 
@@ -114,7 +122,10 @@ impl CliEngine {
         match self {
             Self::Claude => None, // dm::claude_logged_in already does this
             Self::Codex => Some(&["login", "status"]),
-            Self::Gemini => None,
+            // `models` needs auth, so it doubles as the probe -- far better than
+            // guessing a credential file path, which is exactly what went wrong
+            // with the old Gemini CLI.
+            Self::Gemini => Some(&["models"]),
         }
     }
 
@@ -130,7 +141,12 @@ impl CliEngine {
                 let t = stdout.to_ascii_lowercase();
                 !t.contains("not logged in") && (t.contains("logged in") || t.contains("chatgpt") || t.contains("api key"))
             }
-            Self::Gemini => !stdout.trim().is_empty(),
+            // Exits 0 either way, same trap as Codex: only the text is a signal.
+            // Signed out it says "Please sign in to view available models."
+            Self::Gemini => {
+                let t = stdout.to_ascii_lowercase();
+                !t.trim().is_empty() && !t.contains("sign in") && !t.contains("sign-in")
+            }
         }
     }
 }
@@ -150,7 +166,15 @@ fn lockdown_flags(engine: CliEngine) -> Vec<String> {
             // A user config could otherwise widen the sandbox behind our back.
             "--ignore-user-config".into(),
         ],
-        CliEngine::Gemini => vec!["--approval-mode".into(), "plan".into()],
+        // `--mode plan` is Antigravity's read-only mode; `accept-edits` is the
+        // one that writes. `--sandbox` adds terminal restrictions on top.
+        //
+        // NOTE the old Gemini CLI silently overrode its equivalent flag with
+        // "Approval mode overridden to default because the current folder is not
+        // trusted" -- a flag being ACCEPTED is not a flag being OBEYED, and no
+        // unit test here can tell those apart. This one is only trusted once it
+        // passes the same md5 write test Codex passed.
+        CliEngine::Gemini => vec!["--mode".into(), "plan".into(), "--sandbox".into()],
     }
 }
 
@@ -166,7 +190,14 @@ pub(crate) fn forbidden_flags(engine: CliEngine) -> &'static [&'static str] {
             "--dangerously-bypass-hook-trust",
             "--add-dir",
         ],
-        CliEngine::Gemini => &["-y", "--yolo", "auto_edit"],
+        CliEngine::Gemini => &[
+            "--dangerously-skip-permissions",
+            "accept-edits",
+            // Would widen the workspace beyond the cwd we chose.
+            "--add-dir",
+            "-y",
+            "--yolo",
+        ],
     }
 }
 
@@ -186,6 +217,13 @@ pub enum Delivery {
 pub struct Invocation {
     pub args: Vec<String>,
     pub delivery: Delivery,
+    /// False when the engine wants the prompt as a command-line VALUE rather
+    /// than on stdin — Antigravity's `--print <text>` works that way. The caller
+    /// appends it as the final arg instead of writing to the pipe.
+    ///
+    /// Stdin is preferred wherever possible: a Windows command line caps out
+    /// around 32k characters, and campaign ingestion prompts get large.
+    pub prompt_on_stdin: bool,
 }
 
 /// A stateless one-shot completion — the ingestion/memory workload. No session,
@@ -200,7 +238,7 @@ pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>
                 args.push(e.to_string());
             }
             args.extend(lockdown_flags(engine));
-            Invocation { args, delivery: Delivery::Stdout }
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
         }
         CliEngine::Codex => {
             let mut args: Vec<String> = vec!["exec".into()];
@@ -214,19 +252,16 @@ pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>
             push_model(&mut args, "--model", model);
             args.push("--output-last-message".into());
             args.push(last_message_file.to_string());
-            Invocation { args, delivery: Delivery::LastMessageFile }
+            Invocation { args, delivery: Delivery::LastMessageFile, prompt_on_stdin: true }
         }
         CliEngine::Gemini => {
             let mut args: Vec<String> = vec![];
             args.extend(lockdown_flags(engine));
-            args.push("--output-format".into());
-            args.push("json".into());
             push_model(&mut args, "--model", model);
-            // Prompt arrives on stdin; -p with an empty string tells Gemini to
-            // run headless and read it from there.
-            args.push("--prompt".into());
-            args.push(String::new());
-            Invocation { args, delivery: Delivery::Stdout }
+            // agy prints the answer as plain text with no envelope, and takes
+            // the prompt as this flag's value — appended by the caller.
+            args.push("--print".into());
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: false }
         }
     }
 }
@@ -261,7 +296,7 @@ pub fn turn_args(
                 args.push(e.to_string());
             }
             args.extend(lockdown_flags(engine));
-            Invocation { args, delivery: Delivery::Stdout }
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
         }
         CliEngine::Codex => {
             // `exec resume <id>` is a subcommand, so the verb changes shape
@@ -278,7 +313,7 @@ pub fn turn_args(
             args.push("--json".into());
             args.push("--output-last-message".into());
             args.push(last_message_file.to_string());
-            Invocation { args, delivery: Delivery::LastMessageFile }
+            Invocation { args, delivery: Delivery::LastMessageFile, prompt_on_stdin: true }
         }
         CliEngine::Gemini => {
             let mut args: Vec<String> = vec![];
@@ -296,7 +331,7 @@ pub fn turn_args(
             push_model(&mut args, "--model", model);
             args.push("--prompt".into());
             args.push(String::new());
-            Invocation { args, delivery: Delivery::Stdout }
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
         }
     }
 }
@@ -321,7 +356,7 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             ];
             args.extend(lockdown_flags(engine));
             push_model(&mut args, "--model", model);
-            Invocation { args, delivery: Delivery::Stdout }
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
         }
         CliEngine::Codex => {
             let mut args: Vec<String> = vec!["exec".into()];
@@ -335,7 +370,7 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             }
             args.push("--output-last-message".into());
             args.push(last_message_file.to_string());
-            Invocation { args, delivery: Delivery::LastMessageFile }
+            Invocation { args, delivery: Delivery::LastMessageFile, prompt_on_stdin: true }
         }
         CliEngine::Gemini => {
             let mut args: Vec<String> = vec![];
@@ -345,7 +380,7 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             push_model(&mut args, "--model", model);
             args.push("--prompt".into());
             args.push(String::new());
-            Invocation { args, delivery: Delivery::Stdout }
+            Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
         }
     }
 }
@@ -429,7 +464,15 @@ mod tests {
         match engine {
             CliEngine::Claude => vec!["--tools".into(), String::new()],
             CliEngine::Codex => vec!["--sandbox".into(), "read-only".into()],
-            CliEngine::Gemini => vec!["--approval-mode".into(), "plan".into()],
+            // `--mode plan` is Antigravity's read-only mode; `accept-edits` is the
+        // one that writes. `--sandbox` adds terminal restrictions on top.
+        //
+        // NOTE the old Gemini CLI silently overrode its equivalent flag with
+        // "Approval mode overridden to default because the current folder is not
+        // trusted" -- a flag being ACCEPTED is not a flag being OBEYED, and no
+        // unit test here can tell those apart. This one is only trusted once it
+        // passes the same md5 write test Codex passed.
+        CliEngine::Gemini => vec!["--mode".into(), "plan".into(), "--sandbox".into()],
         }
     }
 

@@ -317,7 +317,15 @@ fn resolve_engine_exe(engine: crate::cli_provider::CliEngine) -> Option<std::pat
     if engine == CliEngine::Claude {
         return resolve_claude_exe();
     }
-    let dirs: Vec<String> = augmented_path().split(';').map(str::to_string).collect();
+    let mut dirs: Vec<String> = augmented_path().split(';').map(str::to_string).collect();
+    // Antigravity's installer drops agy.exe in %LOCALAPPDATA%\agy\bin and adds
+    // it to the USER PATH registry — which a already-running GUI process does
+    // not see, and its own installer warns about ("not present in your active
+    // Environment PATH"). Same class of problem as Claude's native-installer
+    // location, handled the same way: look there explicitly.
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        dirs.push(format!("{local}\\agy\\bin"));
+    }
     for dir in dirs.iter().filter(|d| !d.is_empty()) {
         for stem in engine.binary_stems() {
             for ext in ["exe", "cmd", "bat"] {
@@ -942,7 +950,13 @@ pub(crate) fn run_engine_oneshot(
     ));
     let inv = oneshot_args(engine, model, effort, &out_path.to_string_lossy());
 
-    let arg_refs: Vec<&str> = inv.args.iter().map(String::as_str).collect();
+    // Engines that want the prompt as a command-line VALUE (agy's `--print
+    // <text>`) get it appended here; the rest receive it on stdin below.
+    let mut args = inv.args.clone();
+    if !inv.prompt_on_stdin {
+        args.push(prompt.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = engine_command(engine, &arg_refs)?;
     #[cfg(windows)]
     {
@@ -955,12 +969,16 @@ pub(crate) fn run_engine_oneshot(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Couldn't start {}: {e}", engine.label()))?;
-    child
-        .stdin
-        .take()
-        .ok_or("no stdin pipe")?
-        .write_all(prompt.as_bytes())
-        .map_err(|e| format!("failed writing prompt to {}: {e}", engine.label()))?;
+    if inv.prompt_on_stdin {
+        child
+            .stdin
+            .take()
+            .ok_or("no stdin pipe")?
+            .write_all(prompt.as_bytes())
+            .map_err(|e| format!("failed writing prompt to {}: {e}", engine.label()))?;
+    } else {
+        drop(child.stdin.take()); // closed, so nothing waits on it
+    }
     let out = child
         .wait_with_output()
         .map_err(|e| format!("{} wait failed: {e}", engine.label()))?;
@@ -1053,7 +1071,6 @@ fn dirs_next_home() -> Option<PathBuf> {
 /// Gemini's "Login with Google" auth type — the subscription/free-tier option.
 /// Its siblings are `gemini-api-key` and `vertex-ai`, both of which are the
 /// pay-per-token routes this feature exists to avoid.
-const GEMINI_OAUTH_AUTH_TYPE: &str = "oauth-personal";
 
 /// Pre-selects "Login with Google" in the user's Gemini settings so the sign-in
 /// can actually run unattended.
@@ -1069,42 +1086,9 @@ const GEMINI_OAUTH_AUTH_TYPE: &str = "oauth-personal";
 /// keeps it — this app has no business rewriting another tool's config — and the
 /// sign-in error explains what to do instead. Every other key is preserved by
 /// merging into the parsed object rather than writing a fresh file.
-fn ensure_gemini_oauth_selected() -> Result<(), String> {
-    let home = dirs_next_home().ok_or("Couldn't locate your home folder.")?;
-    ensure_gemini_oauth_selected_at(&home.join(".gemini"))
-}
 
-fn ensure_gemini_oauth_selected_at(dir: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
-    let path = dir.join("settings.json");
-
-    let mut root: serde_json::Value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-    if !root.is_object() {
-        root = serde_json::json!({});
-    }
-
-    let existing = root.get("security").and_then(|s| s.get("auth")).and_then(|a| a.get("selectedType"));
-    if existing.and_then(|v| v.as_str()).is_some_and(|s| !s.trim().is_empty()) {
-        return Ok(()); // their choice, not ours
-    }
-    root["security"]["auth"]["selectedType"] = serde_json::json!(GEMINI_OAUTH_AUTH_TYPE);
-    let body = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-    std::fs::write(&path, body).map_err(|e| format!("Couldn't write {}: {e}", path.display()))
-}
 
 /// Whichever auth type the user's Gemini settings currently name, if any.
-fn gemini_selected_auth_type() -> Option<String> {
-    let path = dirs_next_home()?.join(".gemini").join("settings.json");
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-    v.get("security")?
-        .get("auth")?
-        .get("selectedType")?
-        .as_str()
-        .map(str::to_string)
-}
 
 /// Installs any engine's CLI with one click — the same `npm install -g` the
 /// Claude installer does, with the same hidden console and the same Node.js
@@ -1114,6 +1098,35 @@ pub async fn install_engine_cli(engine: String) -> Result<(), String> {
     let engine = crate::cli_provider::CliEngine::from_setting(&engine);
     if engine == crate::cli_provider::CliEngine::Claude {
         return install_claude_cli().await;
+    }
+    if engine == crate::cli_provider::CliEngine::Gemini {
+        // Antigravity is not on npm — it ships an installer script that places
+        // agy.exe in %LOCALAPPDATA%gyin and registers it on the user PATH.
+        return tokio::task::spawn_blocking(|| {
+            let dir = std::env::temp_dir().join("tavern-sheet-agy-install");
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let script = dir.join("install.cmd");
+            let mut c = Command::new("curl");
+            c.args(["-fsSL", "https://antigravity.google/cli/install.cmd", "-o"]).arg(&script);
+            #[cfg(windows)]
+            { use std::os::windows::process::CommandExt; c.creation_flags(0x08000000); }
+            let out = c.output().map_err(|e| format!("Couldn't download the installer: {e}"))?;
+            if !out.status.success() || !script.is_file() {
+                return Err("Couldn't download the Antigravity installer from antigravity.google.".to_string());
+            }
+            let mut r = Command::new("cmd");
+            r.arg("/C").arg(&script).current_dir(&dir);
+            #[cfg(windows)]
+            { use std::os::windows::process::CommandExt; r.creation_flags(0x08000000); }
+            let out = r.output().map_err(|e| format!("Installer failed to run: {e}"))?;
+            if out.status.success() {
+                Ok(())
+            } else {
+                Err(format!("Installing Antigravity failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+            }
+        })
+        .await
+        .map_err(|e| format!("Install task failed: {e}"))?;
     }
     let package = engine.npm_package();
     tokio::task::spawn_blocking(move || {
@@ -1169,47 +1182,22 @@ pub async fn connect_engine(engine: String) -> Result<bool, String> {
         // console-subsystem child, which is exactly what a login flow needs.
         let login_args: Vec<&str> = match engine {
             CliEngine::Codex => vec!["login"],
-            CliEngine::Gemini => {
-                // Skip the interactive auth-method menu (see
-                // ensure_gemini_oauth_selected — a spawned console can't drive
-                // it, which is why the first attempt wrote no credentials).
-                ensure_gemini_oauth_selected()?;
-                if let Some(t) = gemini_selected_auth_type().filter(|t| t != GEMINI_OAUTH_AUTH_TYPE) {
-                    return Err(format!(
-                        "Your Gemini CLI is set to use `{t}`, not a Google account sign-in. \
-                         Run `gemini` yourself and pick \"Login with Google\" if you'd rather use your \
-                         Google account here — Tavern Sheet won't change a setting you chose deliberately."
-                    ));
-                }
-                // Headless with a real prompt rather than the bare TUI: with the
-                // auth type already chosen, this triggers the browser OAuth,
-                // answers, and EXITS — so the window closes itself instead of
-                // leaving the user to work out that they should quit a TUI.
-                vec!["--approval-mode", "plan", "--prompt", "Reply with exactly: READY"]
-            }
+            // Antigravity says it plainly when signed out: "Launch the CLI
+            // without arguments to sign in." There is no login subcommand, and
+            // no flags — bare launch IS the flow.
+            //
+            // Stdin is deliberately NOT piped here (unlike Codex/Gemini-CLI):
+            // agy prints an OAuth URL, waits ~60s for the browser callback, and
+            // offers "paste the authorization code here" as the fallback when
+            // the callback doesn't land. Piping stdin would close that escape
+            // hatch. agy is a real .exe, so a direct spawn gets a genuinely
+            // interactive console the user can type into — the same reason
+            // Claude's login works and the old .cmd-shim path did not.
+            CliEngine::Gemini => vec![],
             CliEngine::Claude => vec![],
         };
         let mut cmd = engine_command(engine, &login_args)?;
 
-        if engine == CliEngine::Gemini {
-            // Gemini asks "Opening authentication page in your browser. Do you
-            // want to continue? [Y/n]:" and blocks on STDIN for the answer.
-            // A console spawned by a GUI app has no usable stdin, so that
-            // question hung forever with nothing on screen and no browser — the
-            // observed "sitting on Waiting for sign-in" symptom. Answer it for
-            // the user: they already said yes by clicking Sign in.
-            let mut child = cmd
-                .stdin(Stdio::piped())
-                .spawn()
-                .map_err(|e| format!("Couldn't start `{}`: {e}", engine.login_command()))?;
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(b"y\n");
-                // Dropping stdin closes the pipe, so a later read sees EOF
-                // rather than blocking again.
-            }
-            child.wait().map_err(|e| format!("`{}` failed: {e}", engine.login_command()))?;
-            return Ok(());
-        }
 
         cmd.status()
             .map_err(|e| format!("Couldn't start `{}`: {e}", engine.login_command()))
@@ -1309,43 +1297,6 @@ pub async fn warmup_dm_session(app: AppHandle, campaign_id: String) -> Result<()
 mod tests {
     use super::*;
 
-    /// This function edits ANOTHER TOOL'S config file, so its manners matter more
-    /// than its happy path: it must fill in the auth type when absent, keep every
-    /// unrelated key, and never overwrite a choice the user made deliberately.
-    #[test]
-    fn selecting_gemini_google_login_fills_a_gap_without_trampling_anything() {
-        let dir = std::env::temp_dir().join(format!("ts-gemini-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join("settings.json");
-        let read = |p: &std::path::Path| -> serde_json::Value {
-            serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
-        };
-
-        // No file at all — the observed real case, which is what left the first
-        // sign-in attempt stuck on an interactive menu.
-        ensure_gemini_oauth_selected_at(&dir).unwrap();
-        assert_eq!(read(&path)["security"]["auth"]["selectedType"], GEMINI_OAUTH_AUTH_TYPE);
-
-        // Existing unrelated settings must survive untouched.
-        std::fs::write(&path, r#"{"theme":"Dracula","ui":{"hideTips":true}}"#).unwrap();
-        ensure_gemini_oauth_selected_at(&dir).unwrap();
-        let v = read(&path);
-        assert_eq!(v["theme"], "Dracula", "clobbered an unrelated setting");
-        assert_eq!(v["ui"]["hideTips"], true, "clobbered a nested setting");
-        assert_eq!(v["security"]["auth"]["selectedType"], GEMINI_OAUTH_AUTH_TYPE);
-
-        // A deliberate choice is NOT ours to change, even to the one we'd prefer.
-        std::fs::write(&path, r#"{"security":{"auth":{"selectedType":"vertex-ai"}}}"#).unwrap();
-        ensure_gemini_oauth_selected_at(&dir).unwrap();
-        assert_eq!(read(&path)["security"]["auth"]["selectedType"], "vertex-ai");
-
-        // Corrupt file: don't propagate the damage, just establish the one key.
-        std::fs::write(&path, "{ not json at all").unwrap();
-        ensure_gemini_oauth_selected_at(&dir).unwrap();
-        assert_eq!(read(&path)["security"]["auth"]["selectedType"], GEMINI_OAUTH_AUTH_TYPE);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
     #[test]
     fn build_claude_args_base_case_has_no_resume_model_or_effort() {
