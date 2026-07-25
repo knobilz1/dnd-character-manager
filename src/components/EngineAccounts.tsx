@@ -87,7 +87,12 @@ export function EngineAccounts() {
       setStep('Waiting for sign-in — finish in the window that opened…');
       const ok = await invoke<boolean>('connect_engine', { engine: id });
       await refresh();
-      if (!ok) setError("That didn't complete — the sign-in window closed before finishing. Try again.");
+      if (!ok) {
+        setError(
+          'That didn\'t finish signing in. The window opens a page in your browser — if it didn\'t appear, '
+          + 'check for a blocked pop-up, then try again. Leave the terminal window open until the browser says you\'re done.',
+        );
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // The one thing the app genuinely can't fix for the user.
