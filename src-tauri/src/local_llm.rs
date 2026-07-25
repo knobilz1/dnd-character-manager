@@ -560,6 +560,26 @@ fn ask_local_once(base_url: &str, model: &str, prompt: &str, expect_json: bool) 
 /// call dm::ask_claude_once directly. `expect_json` only affects the local
 /// path (Claude follows the prompt's own format instruction either way).
 pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
+    match ask_ingest_inner(prompt.clone(), claude_model, expect_json) {
+        Ok(text) => Ok(text),
+        Err(e) if looks_rate_limited(&e) => {
+            // Out of quota, not broken. Any OTHER signed-in engine will do —
+            // finishing the import on a different model beats stopping, and
+            // ingestion has no conversational continuity to lose.
+            let Some(other) = ingestion_reviewer() else { return Err(e) };
+            crate::maplog::log(
+                "INGESTION FAILED OVER",
+                &format!("primary rate-limited, retrying on {}: {e}", other.label()),
+            );
+            crate::dm::run_engine_oneshot(other, &prompt, None, None).map_err(|second| {
+                format!("{e}\n\nAlso tried {}: {second}", other.label())
+            })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn ask_ingest_inner(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
     let cfg = ingest_config().lock().unwrap().clone();
     if cfg.use_local {
         if cfg.base_url.trim().is_empty() || cfg.model.trim().is_empty() {
@@ -578,6 +598,24 @@ pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: 
             other => crate::dm::run_engine_oneshot(other, &prompt, None, None),
         }
     }
+}
+
+/// Does this error read like a rate limit rather than a real failure?
+///
+/// The whole point of running on subscriptions is that quota, not money, is the
+/// constraint — so hitting a wall mid-session is the EXPECTED failure, and the
+/// one worth surviving. Deliberately broad: the engines word this differently
+/// and a false positive costs one wasted retry on another engine, while a false
+/// negative stops the game.
+pub fn looks_rate_limited(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    [
+        "rate limit", "rate-limit", "ratelimit", "quota", "429",
+        "usage limit", "too many requests", "try again later", "temporarily unavailable",
+        "resource_exhausted", "overloaded",
+    ]
+    .iter()
+    .any(|needle| e.contains(needle))
 }
 
 /// A CRITIQUE pass: the same prompt, but answered by a DIFFERENT engine than
@@ -674,6 +712,35 @@ pub fn end_local_dm_session(session_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// This predicate decides whether a stalled session RECOVERS on another
+    /// engine or just stops. Being broad is deliberate: a false positive costs
+    /// one wasted retry, a false negative ends the game night.
+    #[test]
+    fn rate_limit_detection_covers_how_each_vendor_words_it() {
+        for hit in [
+            "Error: rate limit exceeded, try again later",
+            "429 Too Many Requests",
+            "You have exceeded your quota for this model",
+            "RESOURCE_EXHAUSTED: usage limit reached",
+            "The service is temporarily unavailable",
+            "Model overloaded, please retry",
+            "Rate-Limit reached",
+        ] {
+            assert!(looks_rate_limited(hit), "should have matched: {hit}");
+        }
+        // Real failures must NOT look like quota, or a genuine bug gets
+        // silently retried on a second engine and reported as that one's fault.
+        for miss in [
+            "Couldn't start Codex: program not found",
+            "That map has no grid to read positions against.",
+            "authentication failed or timed out",
+            "invalid JSON in reply",
+            "",
+        ] {
+            assert!(!looks_rate_limited(miss), "should NOT have matched: {miss}");
+        }
+    }
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 

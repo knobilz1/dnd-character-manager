@@ -4513,6 +4513,33 @@ fn classify_biome(profile: &PackProfile, spec: &str) -> String {
     crate::pack_profile::BUILTIN_SCENE.to_string()
 }
 
+/// The same shortlist described in WORDS, for a reviewer that can't see images.
+///
+/// Deliberately a different axis from the vision pick rather than a copy of it.
+/// The reviewer judges whether a candidate's NAME matches what was asked for,
+/// and the known bad picks are precisely name-level errors — "dais side board"
+/// resolving to Spirit_Board, "trophy armor display" to Display_Pillow. Those
+/// are obvious from the filename alone and invisible to a model looking only at
+/// pixels, so a text reviewer catches a class the image picker structurally
+/// cannot.
+fn describe_texture_options(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandidate]) -> String {
+    let list = cands
+        .iter()
+        .enumerate()
+        .map(|(j, c)| format!("[{}] {}", j + 1, c.rel_path))
+        .collect::<Vec<_>>()
+        .join("
+");
+    format!(
+        "A {biome} battle map needs a tile that reads as: {kind}
+
+Candidate files:
+{list}
+
+         Judge ONLY by whether each filename plausibly names that thing. Reply with ONLY this JSON:          {{\"choice\":N}} where N is the best option's number."
+    )
+}
+
 /// Vision-pick the best-looking ground texture for `biome` from its candidate
 /// tiles. `None` on any transport/parse failure (keep the built-in floor).
 fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandidate]) -> Option<usize> {
@@ -4529,7 +4556,48 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
     crate::maplog::log("VISION TEXTURE PICK (raw reply)", &format!("{kind}: {reply}"));
     let v: serde_json::Value = serde_json::from_str(&extract_json_object(&reply)).ok()?;
     let choice = v.get("choice")?.as_u64()?;
-    (1..=cands.len() as u64).contains(&choice).then(|| (choice - 1) as usize)
+    let picked = (1..=cands.len() as u64).contains(&choice).then(|| (choice - 1) as usize)?;
+
+    // Cross-check: a SECOND engine picks from the same shortlist, and a
+    // disagreement is logged. Nobody is watching at generation time, so this
+    // doesn't change the pick — it names the ambiguous queries. That matters
+    // because the known bad picks ("dais side board" -> Spirit_Board,
+    // "trophy armor display" -> Display_Pillow) are exactly the cases where
+    // coverage and biome affinity conflict and no ranking rule has separated
+    // them. Two models disagreeing is the signal a rule couldn't produce.
+    if let Some(reviewer) = crate::local_llm::ingestion_reviewer() {
+        if let Ok(second) = crate::dm::run_engine_oneshot(
+            reviewer,
+            &format!(
+                "{}\n\n(You are checking another model's choice. Answer independently.)",
+                describe_texture_options(biome, kind, cands)
+            ),
+            None,
+            None,
+        ) {
+            if let Some(other) = serde_json::from_str::<serde_json::Value>(&extract_json_object(&second))
+                .ok()
+                .and_then(|v| v.get("choice").and_then(|c| c.as_u64()))
+                .filter(|c| (1..=cands.len() as u64).contains(c))
+                .map(|c| (c - 1) as usize)
+            {
+                if other != picked {
+                    crate::maplog::log(
+                        "TILE PICK DISPUTED",
+                        &format!(
+                            "{kind}: primary chose #{} ({}), {} chose #{} ({}) — ambiguous query, worth a look",
+                            picked + 1,
+                            cands.get(picked).map(|c| c.rel_path.as_str()).unwrap_or("?"),
+                            reviewer.label(),
+                            other + 1,
+                            cands.get(other).map(|c| c.rel_path.as_str()).unwrap_or("?"),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    Some(picked)
 }
 
 /// Resolve the biome ground texture for a finished spec: classify the biome,
