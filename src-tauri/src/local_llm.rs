@@ -672,10 +672,17 @@ pub fn looks_signed_out(err: &str) -> bool {
     .any(|needle| e.contains(needle))
 }
 
+/// The engine's CLI takes its prompt on the command line and this one didn't
+/// fit. Not a fault and not transient — a different engine is the only fix, so
+/// it belongs alongside rate-limited and signed-out as a failover trigger.
+pub fn looks_too_long(err: &str) -> bool {
+    err.contains(crate::dm::PROMPT_TOO_LONG_MARKER)
+}
+
 pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
     match ask_ingest_inner(prompt.clone(), claude_model, expect_json) {
         Ok(text) => Ok(text),
-        Err(e) if looks_rate_limited(&e) || looks_signed_out(&e) => {
+        Err(e) if looks_rate_limited(&e) || looks_signed_out(&e) || looks_too_long(&e) => {
             // Out of quota, or signed out mid-session — not broken. Any OTHER
             // signed-in engine will do: finishing the import on a different
             // model beats stopping, and ingestion has no conversational
@@ -693,12 +700,26 @@ pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: 
                 // so it would keep claiming this engine is fine. Drop that.
                 crate::dm::forget_cached_sign_in();
             }
-            let Some(other) = ingestion_reviewer() else { return Err(e) };
+            // The target has to be able to HOLD this prompt. An argv-only engine
+            // refuses an 80K extraction chunk no matter whose turn it is, so
+            // retrying there turns one clear failure into two.
+            let Some(other) = ingestion_reviewers()
+                .into_iter()
+                .find(|c| crate::dm::engine_can_carry(*c, prompt.chars().count()))
+            else {
+                return Err(e);
+            };
             crate::maplog::log(
                 "INGESTION FAILED OVER",
                 &format!(
                     "primary {}, retrying on {}: {e}",
-                    if looks_signed_out(&e) { "signed out" } else { "rate-limited" },
+                    if looks_signed_out(&e) {
+                        "signed out"
+                    } else if looks_too_long(&e) {
+                        "cannot carry a prompt this long"
+                    } else {
+                        "rate-limited"
+                    },
                     other.label()
                 ),
             );

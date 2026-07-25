@@ -1359,14 +1359,62 @@ pub async fn launch_engine_login_console(engine: String) -> Result<(), String> {
             end_login(old);
         }
         let exe = resolve_engine_exe(engine).ok_or_else(|| engine_not_installed_error(engine))?;
-        // `cmd /K` so the window STAYS OPEN: the user has to read a URL from it
-        // and paste a code back in, and a window that closes on exit would take
-        // any error message with it.
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg("start").arg("Sign in to Gemini").arg("cmd").arg("/K").arg(&exe);
-        cmd.env("PATH", augmented_path());
-        cmd.status().map_err(|e| format!("Couldn't open the sign-in window: {e}"))?;
-        Ok(())
+        // Opening a terminal window is per-OS, and this used to be `cmd /C start`
+        // with no cfg guard at all: it compiled everywhere and failed at runtime
+        // the moment a mac user clicked Sign in. Same family as the bug that cost
+        // v0.23.2 its macOS builds, except this one gets all the way to a user.
+        #[cfg(windows)]
+        {
+            // `cmd /K` so the window STAYS OPEN: the user has to read a URL from
+            // it and paste a code back in, and a window that closes on exit would
+            // take any error message with it.
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C").arg("start").arg("Sign in to Gemini").arg("cmd").arg("/K").arg(&exe);
+            cmd.env("PATH", augmented_path());
+            cmd.status().map_err(|e| format!("Couldn't open the sign-in window: {e}"))?;
+            Ok(())
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // osascript rather than writing a .command file: that route needs
+            // `std::os::unix::fs::PermissionsExt` to chmod +x, and anything under
+            // `std::os::unix` cannot be compile-checked from the Windows dev box
+            // — which is the only way the mac arms get checked at all before a
+            // release (see the cfg-inversion note in the release runbook). A
+            // platform arm nobody can build is how v0.23.2 shipped broken.
+            let script = format!(
+                "tell application \"Terminal\"\n activate\n do script {:?}\nend tell",
+                exe.display().to_string()
+            );
+            Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .status()
+                .map_err(|e| format!("Couldn't open the sign-in window: {e}"))?;
+            Ok(())
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            // No single terminal is guaranteed on Linux. Try the common ones and,
+            // if none is present, say exactly what to run by hand rather than
+            // failing with a bare "not found" for a binary the user never named.
+            for (term, args) in [
+                ("x-terminal-emulator", vec!["-e"]),
+                ("gnome-terminal", vec!["--"]),
+                ("konsole", vec!["-e"]),
+                ("xterm", vec!["-e"]),
+            ] {
+                let mut cmd = Command::new(term);
+                cmd.args(&args).arg(&exe).env("PATH", augmented_path());
+                if cmd.status().is_ok() {
+                    return Ok(());
+                }
+            }
+            Err(format!(
+                "Couldn't find a terminal to open. Run this in your own terminal to sign in:\n  {}",
+                exe.display()
+            ))
+        }
     })
     .await
     .map_err(|e| format!("Login task failed: {e}"))?
@@ -1802,6 +1850,89 @@ pub async fn ask_dm_engine(
         .map_err(|e| format!("Turn task failed: {e}"))?
 }
 
+/// Gemini models worth having, best first — chosen PER WORKLOAD, because "best"
+/// is not one thing.
+///
+/// Nothing passed `--model` for Gemini at all, so every call ran on whatever agy
+/// defaults to (a flash model) while this FREE account can in fact run
+/// `gemini-3.1-pro-high` (measured 2026-07-25).
+///
+/// But measuring the DM turn is what settled the split: the same 39K two-piece
+/// turn took **14.0s on the default and 141.9s on `gemini-3.1-pro-high`**. The DM
+/// console is a live voice interface — a ten-times-slower first turn is a worse
+/// product, not a better one, whatever the model scores. So turns take the
+/// low-latency Pro variant and ingestion, where nobody is waiting, takes the
+/// high-effort one. Exactly the trade the Claude side already makes with
+/// BOARD_READ_MODEL (opus, 6/6) versus VISION_PICK_MODEL (sonnet).
+///
+/// Claude and Codex are deliberately left alone: their tiers are already chosen
+/// per workload on measured grounds, and auto-overriding would silently
+/// invalidate those measurements.
+const GEMINI_TURN_MODELS: &[&str] = &["gemini-3.1-pro-low", "gemini-3.6-flash-high"];
+const GEMINI_INGEST_MODELS: &[&str] = &["gemini-3.1-pro-high", "gemini-3.6-flash-high"];
+
+/// The best Gemini model this account can actually run, probed once per process.
+///
+/// `agy models` is used ONLY to rule models out. It cannot be trusted to rule one
+/// in: it exits 0 and prints the whole catalogue while signed out — that is
+/// exactly how the sign-in probe came to report a signed-out account as healthy.
+/// So membership in that list means "this exists", and only a real call means
+/// "you may use it". `None` falls back to agy's own default, which is what
+/// shipped before.
+fn best_gemini_model(preference: &'static [&'static str], workload: &'static str) -> Option<&'static str> {
+    static BEST: OnceLock<Mutex<std::collections::HashMap<&'static str, Option<&'static str>>>> = OnceLock::new();
+    let cache = BEST.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some(hit) = cache.lock().unwrap().get(workload) {
+        return *hit;
+    }
+    let engine = crate::cli_provider::CliEngine::Gemini;
+    let catalogue = engine_command(engine, &["models"])
+        .ok()
+        .and_then(|mut c| c.output().ok())
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    let mut chosen = None;
+    for candidate in preference {
+        if !catalogue.is_empty() && !catalogue.contains(candidate) {
+            continue; // not in the catalogue at all — no point spending a call
+        }
+        match run_engine_oneshot(engine, "Reply with only: OK", Some(candidate), None) {
+            Ok(reply) if !reply.trim().is_empty() => {
+                chosen = Some(*candidate);
+                break;
+            }
+            _ => continue,
+        }
+    }
+    crate::maplog::log(
+        "GEMINI MODEL",
+        &match chosen {
+            Some(m) => format!("{workload}: using {m}"),
+            None => format!("{workload}: no preferred model answered — using agy's default"),
+        },
+    );
+    // Written AFTER the probe, never held across it: the probe calls back into
+    // run_engine_oneshot, and holding this lock there would deadlock the moment
+    // ingestion and a turn resolve their models at once.
+    cache.lock().unwrap().insert(workload, chosen);
+    chosen
+}
+
+/// Tags the one failure that a different engine is guaranteed to survive: the
+/// prompt didn't fit on a command line. Matched by `looks_too_long`, so the
+/// wording above it can change freely.
+pub(crate) const PROMPT_TOO_LONG_MARKER: &str = "PROMPT_TOO_LONG_FOR_ENGINE";
+
+/// Whether `engine` could carry a prompt this long in ONE stateless call.
+///
+/// True for anything that takes the prompt on stdin, which has no size limit.
+/// Used to pick a failover target: handing an 80K extraction chunk to the engine
+/// that just refused it for being 80K is not a retry.
+pub(crate) fn engine_can_carry(engine: crate::cli_provider::CliEngine, prompt_chars: usize) -> bool {
+    crate::cli_provider::oneshot_args(engine, None, None, "o.txt").prompt_on_stdin
+        || prompt_chars <= MAX_ARGV_PROMPT_CHARS
+}
+
 /// Most a prompt may be when the engine wants it as a command-line VALUE.
 ///
 /// Measured, not guessed: a 40,015-character `agy --print <text>` never even
@@ -1932,7 +2063,16 @@ fn run_engine_turn_once(
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    let inv = turn_args(engine, session_id, None, None, false, &out_path.to_string_lossy());
+    // DM turns passed no model at all, so Gemini ran on agy's flash default even
+    // where the account has Pro. model_for supplies it; Codex still gets None.
+    let inv = turn_args(
+        engine,
+        session_id,
+        model_for(engine, None, GEMINI_TURN_MODELS, "turn"),
+        None,
+        false,
+        &out_path.to_string_lossy(),
+    );
 
     let mut args = inv.args.clone();
     if !inv.prompt_on_stdin {
@@ -2064,12 +2204,51 @@ fn claude_tier_only(
     model.filter(|_| engine == crate::cli_provider::CliEngine::Claude)
 }
 
+/// A caller-supplied model name that is genuinely Gemini's.
+///
+/// Split out so it can be tested without a subprocess: every other route into
+/// `model_for` for Gemini ends in the live probe. Callers only ever pass Claude
+/// tier names ("opus"/"sonnet"), so rejecting anything not prefixed `gemini-`
+/// keeps those out of agy — `--model opus` there returns nothing at all, which is
+/// what silently emptied every cross-check leg once already.
+fn explicit_gemini_model(model: Option<&str>) -> Option<&str> {
+    model.filter(|m| m.starts_with("gemini-"))
+}
+
+/// Which model actually reaches an engine's `--model`.
+///
+/// This is the "per-engine model choice" the comment above anticipated. Claude
+/// keeps its caller-chosen tier. Codex keeps its own default. Gemini takes a real
+/// Gemini model name — from the caller if it gave one, otherwise the best its
+/// account can run.
+///
+/// The `gemini-` prefix test does two jobs: it keeps a Claude tier hint out of
+/// agy exactly as before (callers only ever pass tier names like "opus"), and it
+/// stops `best_gemini_model`'s own probe calls from recursing into the probe,
+/// since those pass a real model name and return here immediately.
+fn model_for<'a>(
+    engine: crate::cli_provider::CliEngine,
+    model: Option<&'a str>,
+    preference: &'static [&'static str],
+    workload: &'static str,
+) -> Option<&'a str> {
+    if engine == crate::cli_provider::CliEngine::Gemini {
+        if let Some(explicit) = explicit_gemini_model(model) {
+            return Some(explicit);
+        }
+        // Separate return so the probe's &'static answer coerces to 'a, rather
+        // than unifying the whole expression to 'static and outliving `model`.
+        return best_gemini_model(preference, workload);
+    }
+    claude_tier_only(engine, model)
+}
+
 pub(crate) fn run_engine_oneshot(
     engine: crate::cli_provider::CliEngine, prompt: &str, model: Option<&str>, effort: Option<&str>,
 ) -> Result<String, String> {
     use crate::cli_provider::{oneshot_args, Delivery};
 
-    let model = claude_tier_only(engine, model);
+    let model = model_for(engine, model, GEMINI_INGEST_MODELS, "ingestion");
 
     // Unique per call so two concurrent ingestion calls can't read each other's
     // answer — map generation fans several of these out at once.
@@ -2082,6 +2261,22 @@ pub(crate) fn run_engine_oneshot(
             .unwrap_or(0)
     ));
     let inv = oneshot_args(engine, model, effort, &out_path.to_string_lossy());
+
+    // A oneshot has no conversation to spread a long prompt across the way a DM
+    // turn does, so an argv engine simply cannot carry one this big. Say so here
+    // rather than letting the spawn fail: ingestion's biggest prompts are 60-80K
+    // (MAX_CHAPTER_CHARS, EXTRACTION_CHUNK_MAX_CHARS), well past the ~32K a
+    // Windows command line holds, so importing any real module on Gemini died on
+    // an OS-level "Argument list too long" that named neither the engine nor the
+    // cause. ask_ingest_once treats this as a reason to fail over.
+    if !inv.prompt_on_stdin && prompt.chars().count() > MAX_ARGV_PROMPT_CHARS {
+        return Err(format!(
+            "{PROMPT_TOO_LONG_MARKER}: this job needs {} characters and {} can only accept about {MAX_ARGV_PROMPT_CHARS} in one call, \
+             because its CLI takes the prompt on the command line instead of stdin. Nothing to do with the plan you're on.",
+            prompt.chars().count(),
+            engine.label()
+        ));
+    }
 
     // Engines that want the prompt as a command-line VALUE (agy's `--print
     // <text>`) get it appended here; the rest receive it on stdin below.
@@ -2483,6 +2678,57 @@ mod tests {
         let one_line = "x".repeat(5_000);
         let pieces = split_prompt_for_argv(&one_line, 1_000);
         assert_eq!(pieces, vec![one_line]);
+    }
+
+    /// `model_for` has to keep the old guarantee (no Claude tier name reaches
+    /// another engine) while letting a real Gemini model through — and the
+    /// pass-through is load-bearing beyond correctness: `best_gemini_model`
+    /// probes BY CALLING run_engine_oneshot with a candidate, so if that name
+    /// were filtered out this would re-enter the probe and deadlock its OnceLock.
+    ///
+    /// Asserts only what needs no subprocess: on Gemini, any route that ISN'T a
+    /// real model name ends in the live probe, and a unit test that shells out to
+    /// a CLI is one that rots the first time it runs somewhere agy isn't
+    /// installed. The prefix rule itself is pure, so that is what gets tested.
+    #[test]
+    fn model_for_passes_a_real_gemini_name_through_and_still_blocks_claude_tiers() {
+        use crate::cli_provider::CliEngine;
+        assert_eq!(model_for(CliEngine::Claude, Some("opus"), GEMINI_TURN_MODELS, "test"), Some("opus"));
+        assert_eq!(model_for(CliEngine::Codex, Some("opus"), GEMINI_TURN_MODELS, "test"), None);
+        assert_eq!(model_for(CliEngine::Codex, None, GEMINI_TURN_MODELS, "test"), None);
+        // The probe's own call shape: returns immediately, never recursing into
+        // the OnceLock it is currently initialising.
+        assert_eq!(
+            model_for(CliEngine::Gemini, Some("gemini-3.1-pro-high"), GEMINI_TURN_MODELS, "test"),
+            Some("gemini-3.1-pro-high")
+        );
+        // A Claude tier aimed at Gemini must never become `--model opus`.
+        assert_eq!(explicit_gemini_model(Some("opus")), None);
+        assert_eq!(explicit_gemini_model(Some("sonnet")), None);
+        assert_eq!(explicit_gemini_model(None), None);
+        assert_eq!(explicit_gemini_model(Some("gemini-3.6-flash-high")), Some("gemini-3.6-flash-high"));
+    }
+
+    /// An argv engine is refused BEFORE spawning, because the OS failure it would
+    /// otherwise hit ("Argument list too long") names neither the engine nor the
+    /// cause — and ingestion's real prompts are 60-80K, so this is every module
+    /// import, not an edge case.
+    #[test]
+    fn an_oversized_oneshot_is_refused_up_front_and_can_fail_over() {
+        use crate::cli_provider::CliEngine;
+        let huge = "x".repeat(MAX_ARGV_PROMPT_CHARS + 1);
+        let err = run_engine_oneshot(CliEngine::Gemini, &huge, Some("gemini-3.1-pro-high"), None)
+            .expect_err("an argv engine cannot carry this");
+        assert!(err.contains(PROMPT_TOO_LONG_MARKER), "must be taggable for failover: {err}");
+        assert!(crate::local_llm::looks_too_long(&err));
+        // ...and it must not read as the user's fault or their plan's.
+        assert!(err.contains("stdin"), "should say WHY this engine can't: {err}");
+
+        // Stdin engines have no such ceiling, so failover has somewhere to go.
+        assert!(engine_can_carry(CliEngine::Claude, 5_000_000));
+        assert!(engine_can_carry(CliEngine::Codex, 5_000_000));
+        assert!(!engine_can_carry(CliEngine::Gemini, MAX_ARGV_PROMPT_CHARS + 1));
+        assert!(engine_can_carry(CliEngine::Gemini, MAX_ARGV_PROMPT_CHARS));
     }
 
     /// A Claude tier name reaching another engine's `--model` is the bug that

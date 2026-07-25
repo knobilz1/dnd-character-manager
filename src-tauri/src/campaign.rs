@@ -3923,6 +3923,107 @@ fn build_vision_message(slots: &[(&Placement, Vec<crate::tile_library::TileCandi
     json!({"type":"user","message":{"role":"user","content":content}}).to_string()
 }
 
+/// The same slot/candidate shortlist as `build_vision_message`, written out as
+/// FILENAMES for an engine that is only reading text. Deliberately a different
+/// lens, not a redundant one: the primary judges the picture, this judges what
+/// the artist called the file. Pure.
+///
+/// Reply shape is identical to the vision call's, so `parse_vision_picks` reads
+/// both and there is one format to get wrong instead of two.
+fn describe_object_options(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> String {
+    let mut out = format!(
+        "A {biome} battle map needs one tile per slot below. You can only see the FILENAMES — judge each option purely on whether its name plausibly describes that slot's thing, and on nothing else.\n"
+    );
+    for (i, (p, cands)) in slots.iter().enumerate() {
+        out.push_str(&format!("\n[slot {}] \"{}\" ({}x{} cells):\n", i + 1, p.label, p.w, p.h));
+        for (j, c) in cands.iter().enumerate() {
+            out.push_str(&format!("  [{}.{}] {}\n", i + 1, j + 1, c.rel_path));
+        }
+    }
+    out.push_str(
+        "\nFor EACH slot pick the option number whose FILENAME best names that slot's thing. If no filename plausibly names it, choose 0 for that slot. \
+         Reply with ONLY this JSON, one entry per slot, nothing else: {\"picks\":[{\"slot\":1,\"choice\":2},{\"slot\":2,\"choice\":0}]}",
+    );
+    out
+}
+
+/// Ask a second engine to choose from the same object shortlists by filename,
+/// and log every slot the two disagree on.
+///
+/// This is where the cross-check actually earns its place. The known bad picks
+/// are all OBJECTS — "dais side board" landing on `Spirit_Board`, "trophy armor
+/// display" on `Display_Pillow` — cases where English buries the identity word
+/// mid-label and the head noun is generic. A model reading the filename fails
+/// differently from one reading the picture, which is exactly what makes the
+/// disagreement informative. Never changes the pick: nobody is watching at
+/// generation time, so this names ambiguous slots for later rather than
+/// overruling a judgment made from the actual art.
+fn cross_check_object_picks(
+    slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)],
+    biome: &str,
+    picked: &[Option<usize>],
+) {
+    let Some(reviewer) = crate::local_llm::ingestion_reviewer() else { return };
+    // Only slots with a real choice to make. A one-candidate slot cannot be
+    // disagreed with, and a slot the primary declined outright (0) is a
+    // different conversation from picking the wrong one.
+    let worth_asking: Vec<usize> =
+        (0..slots.len()).filter(|&i| slots[i].1.len() > 1 && picked.get(i).copied().flatten().is_some()).collect();
+    if worth_asking.is_empty() {
+        return;
+    }
+    let reply = match crate::dm::run_engine_oneshot(
+        reviewer,
+        &format!(
+            "{}\n\n(You are checking another model's choices. Answer independently.)",
+            describe_object_options(slots, biome)
+        ),
+        None,
+        None,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            crate::maplog::log(
+                "OBJECT PICK CROSS-CHECK FAILED",
+                &format!("{} did not answer ({e}) — the primary's picks stand", reviewer.label()),
+            );
+            return;
+        }
+    };
+    let theirs = parse_vision_picks(&reply, slots.len());
+    let name = |slot: usize, idx: Option<usize>| match idx {
+        Some(i) => slots[slot].1.get(i).map(|c| c.rel_path.as_str()).unwrap_or("?").to_string(),
+        None => "(declined)".to_string(),
+    };
+    let mut disputed = 0;
+    for i in worth_asking {
+        let (mine, other) = (picked.get(i).copied().flatten(), theirs.get(i).copied().flatten());
+        // A reviewer that declines where the primary chose is not a disagreement
+        // about WHICH tile — it saw no filename it liked, which is the expected
+        // outcome whenever the art is named for its pack rather than its subject.
+        if other.is_none() || other == mine {
+            continue;
+        }
+        disputed += 1;
+        crate::maplog::log(
+            "OBJECT PICK DISPUTED",
+            &format!(
+                "\"{}\": primary chose {} — {} chose {} by filename — worth a look",
+                slots[i].0.label,
+                name(i, mine),
+                reviewer.label(),
+                name(i, other),
+            ),
+        );
+    }
+    if disputed == 0 {
+        crate::maplog::log(
+            "OBJECT PICKS AGREED",
+            &format!("{} matched the primary on every slot it had an opinion about", reviewer.label()),
+        );
+    }
+}
+
 /// Max candidate images in a single vision request. One call for a whole map
 /// (12 slots x 8 = 96 images) is rejected as "Prompt is too long" — each image
 /// costs ~1.5k tokens and the CLI also loads the project's CLAUDE.md/plugin
@@ -3998,7 +4099,9 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
     match crate::dm::run_claude_vision(&build_vision_message(chunk, biome), Some(VISION_PICK_MODEL)) {
         Ok(reply) => {
             crate::maplog::log("VISION TILE PICK (raw reply)", &reply);
-            parse_vision_picks(&reply, chunk.len())
+            let picks = parse_vision_picks(&reply, chunk.len());
+            cross_check_object_picks(chunk, biome, &picks);
+            picks
         }
         Err(e) => {
             crate::maplog::log(
