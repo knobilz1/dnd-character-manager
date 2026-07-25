@@ -159,9 +159,14 @@ export function EngineAccounts() {
         setStep('Installing…');
         await invoke('install_engine_cli', { engine: id });
       }
-      // Freshly installed: go straight on to the sign-in dialog.
+      // Freshly installed: go straight on to sign-in, by whichever route that
+      // engine uses. Sending Gemini to the paste dialog would strand a brand
+      // new user — its code prompt can only be answered in the console window,
+      // so the dialog would sit there with nothing able to complete it.
       await refresh();
-      await openPasteDialog(id);
+      const engine = ENGINES.find((x) => x.id === id);
+      if (engine?.consoleLogin) await consoleSignIn(id);
+      else await openPasteDialog(id);
       return;
 
     } catch (e) {
