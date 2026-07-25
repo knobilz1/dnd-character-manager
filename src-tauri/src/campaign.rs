@@ -4001,6 +4001,21 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
 /// and the model tier is where that shows.
 const BOARD_READ_MODEL: &str = "opus";
 
+/// One board read: the pieces that got placed, and how many the model says it
+/// could actually SEE.
+///
+/// The two differ on purpose. The prompt tells the model to leave out any figure
+/// it can't confidently place, which is the right call — a missing figure beats a
+/// wrong square — but it made abstention silent, so a read that found 4 of 6
+/// looked exactly like a board with 4 pieces on it. `seen` is what lets the
+/// confirm panel say "2 pieces couldn't be placed" instead of quietly showing
+/// four rows.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+pub struct BoardRead {
+    pub minis: Vec<BoardMini>,
+    pub seen: usize,
+}
+
 /// One miniature the model located on the board.
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
 pub struct BoardMini {
@@ -4017,27 +4032,60 @@ pub struct BoardMini {
 /// the grid's real bounds, and an instruction to answer with ONLY JSON. Stating
 /// the bounds lets the model sanity-check its own reading (and lets
 /// `parse_board_read` drop anything outside them). Pure.
+// MEASURED, 2026-07-25 — two findings, and the second one cost a wrong turn.
+//
+// (1) PERSPECTIVE IS THE WHOLE ERROR BUDGET. Synthetic table photos of a real
+//     16x13 map, tokens on known squares, read straight down vs. trapezoid-
+//     warped to look like a hand-held shot from the near edge:
+//         flat    3/3 exact
+//         angled  4/8 exact, 3 more off by exactly one column
+//     Nothing about the prompt or the model closes that gap; how the photo is
+//     taken does. Hence the perspective paragraph below, and the note in the
+//     confirm panel telling the DM where drift comes from.
+//
+// (2) DO NOT send the rendered map alongside the photo as an alignment
+//     reference. It looks obviously right — "one column out" is a registration
+//     error, so give it something to register against — and it does nothing:
+//         angled, no reference   4/8 exact, 3 off-by-one   27s
+//         angled, with reference 4/8 exact, 3 off-by-one  128s
+//     Identical score, 4.7x the latency. The reference was pixel-identical to
+//     the photo's own source, i.e. a better reference than any real printed map
+//     could be, and it still didn't help. Built, measured, reverted.
+//
+// A warning about the measuring, too: the read has ~1 cell of run-to-run
+// variance, so the first pass at this (3 tokens per call) produced a confident
+// "the reference makes it WORSE" that was pure noise — two identical calls then
+// scored 3/3 and 2/3. Anything measured here needs enough tokens per photo to
+// see past that. See scratchpad board-accuracy.mjs, 2026-07-25.
 fn build_board_read_message(media: &str, b64: &str, cols: usize, rows: usize) -> String {
     use serde_json::json;
     let last_col = column_label(cols.saturating_sub(1));
-    let content = vec![
-        json!({"type":"text","text": format!(
-            "This photograph shows a tabletop battle map with physical miniatures standing on it. The map is printed \
-             with a ruler frame: column letters run left-to-right along the top edge (A through {last_col}), and row \
-             numbers run top-to-bottom down the left edge (1 through {rows}). Each square is named by its column letter \
-             followed by its row number, e.g. \"F7\"."
-        )}),
-        json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}),
-        json!({"type":"text","text": format!(
-            "For EVERY playing piece on the map — BOTH upright figures in stands AND small flat tokens lying on the map \
-             count as pieces — read the printed labels to work out the ONE square it occupies, \
-             and give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\"). \
-             Only report squares inside A1..{last_col}{rows}. If you cannot confidently tell which square a figure is on, \
-             LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands and scenery. \
-             Reply with ONLY this JSON and nothing else: \
-             {{\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
-        )}),
-    ];
+    let mut content = Vec::new();
+
+    content.push(json!({"type":"text","text": format!(
+        "This photograph shows a tabletop battle map with physical miniatures standing on it. The map is printed \
+         with a ruler frame: column letters run left-to-right along the top edge (A through {last_col}), and row \
+         numbers run top-to-bottom down the left edge (1 through {rows}). Each square is named by its column letter \
+         followed by its row number, e.g. \"F7\"."
+    )}));
+    content.push(json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}));
+
+    content.push(json!({"type":"text","text": format!(
+        "The photograph is usually taken by hand from the side of the table rather than straight down, so squares \
+         further from the camera look smaller and the rows nearest the far edge appear compressed. Do NOT judge a \
+         square by how far across the picture something looks — count along the printed frame, or from the map's own \
+         walls and furniture, to the piece itself.\n\n\
+         For EVERY playing piece on the map — BOTH upright figures in stands AND small flat tokens lying on the map \
+         count as pieces — read the printed labels to work out the ONE square it occupies, \
+         and give a short description so they can be told apart (\"tall knight in silver\", \"small green goblin\"). \
+         Only report squares inside A1..{last_col}{rows}. If you cannot confidently tell which square a figure is on, \
+         LEAVE IT OUT — a missing figure is far better than a wrong square. Ignore dice, hands and scenery.\n\n\
+         Also give `seen`: how many playing pieces are visible in the photograph IN TOTAL, counting the ones you left \
+         out. That tells the DM something was missed rather than letting a partial read look complete.\n\n\
+         Reply with ONLY this JSON and nothing else: \
+         {{\"seen\":6,\"minis\":[{{\"cell\":\"F7\",\"description\":\"tall knight in silver\"}}]}}"
+    )}));
+
     json!({"type":"user","message":{"role":"user","content":content}}).to_string()
 }
 
@@ -4046,11 +4094,12 @@ fn build_board_read_message(media: &str, b64: &str, cols: usize, rows: usize) ->
 /// missing description. DROPS anything that isn't a real cell reference or that
 /// falls outside this map's own grid, so a hallucinated "Z99" can never reach
 /// the DM's battle log. Pure.
-fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
+fn parse_board_read(reply: &str, cols: usize, rows: usize) -> BoardRead {
     // The asked-for shape is {"minis":[…]}, but a model that answers with a
     // bare […] array shouldn't cost us the entire read.
-    let items: Vec<serde_json::Value> = serde_json::from_str::<serde_json::Value>(&extract_json_object(reply))
-        .ok()
+    let root = serde_json::from_str::<serde_json::Value>(&extract_json_object(reply)).ok();
+    let items: Vec<serde_json::Value> = root
+        .as_ref()
         .and_then(|v| v.get("minis").and_then(|m| m.as_array()).cloned())
         .or_else(|| {
             serde_json::from_str::<serde_json::Value>(reply.trim())
@@ -4058,7 +4107,7 @@ fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
                 .and_then(|v| v.as_array().cloned())
         })
         .unwrap_or_default();
-    items
+    let minis: Vec<BoardMini> = items
         .iter()
         .filter_map(|item| {
             let cell = item.get("cell")?.as_str()?.trim().to_ascii_uppercase();
@@ -4074,7 +4123,17 @@ fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
                 .to_string();
             Some(BoardMini { cell, description, col, row })
         })
-        .collect()
+        .collect();
+    // Never let `seen` undercount what we actually placed: a model that reports
+    // seen:2 alongside four placed pieces would otherwise make the panel claim a
+    // NEGATIVE number went missing. Absent or nonsense → assume it saw exactly
+    // what it placed, i.e. claim nothing was missed rather than inventing a gap.
+    let seen = root
+        .as_ref()
+        .and_then(|v| v.get("seen"))
+        .and_then(|s| s.as_u64().or_else(|| s.as_str().and_then(|t| t.trim().parse().ok())))
+        .unwrap_or(0) as usize;
+    BoardRead { seen: seen.max(minis.len()), minis }
 }
 
 /// Read the physical table: one photo (a data URL) → the cell each miniature is
@@ -4087,7 +4146,9 @@ fn parse_board_read(reply: &str, cols: usize, rows: usize) -> Vec<BoardMini> {
 /// table with no camera behaves exactly as it always has. The answer is a HINT
 /// for the DM to confirm — never authority, and never drawn on the map.
 #[tauri::command]
-pub fn read_table_positions(photo: String, cols: usize, rows: usize, model: Option<String>) -> Result<Vec<BoardMini>, String> {
+pub fn read_table_positions(
+    photo: String, cols: usize, rows: usize, model: Option<String>,
+) -> Result<BoardRead, String> {
     if cols == 0 || rows == 0 {
         return Err("That map has no grid to read positions against.".into());
     }
@@ -9222,7 +9283,7 @@ Tactics:
         ]}"#;
         let got = parse_board_read(reply, 10, 10);
         assert_eq!(
-            got,
+            got.minis,
             vec![
                 BoardMini { cell: "F7".into(), description: "tall knight".into(), col: 5, row: 6 },
                 BoardMini { cell: "A1".into(), description: "lowercase goblin".into(), col: 0, row: 0 },
@@ -9230,18 +9291,58 @@ Tactics:
         );
     }
 
+    /// `seen` is what turns a silent abstention into "2 pieces couldn't be
+    /// placed". It must never claim FEWER pieces than were actually placed,
+    /// which would make the panel report a negative number missing.
+    #[test]
+    fn board_read_reports_how_many_pieces_went_unplaced() {
+        // Saw six, could only place two → the DM is told four are missing.
+        let r = parse_board_read(r#"{"seen":6,"minis":[{"cell":"A1"},{"cell":"B2"}]}"#, 8, 8);
+        assert_eq!((r.minis.len(), r.seen), (2, 6));
+
+        // No `seen` at all (an older/terser answer) means "assume nothing was
+        // missed" rather than inventing a gap out of a missing field.
+        let r = parse_board_read(r#"{"minis":[{"cell":"A1"},{"cell":"B2"}]}"#, 8, 8);
+        assert_eq!((r.minis.len(), r.seen), (2, 2));
+
+        // seen < placed is incoherent; clamp up so the difference can't go
+        // negative. Here two cells survive the grid filter but seen says 1.
+        let r = parse_board_read(r#"{"seen":1,"minis":[{"cell":"A1"},{"cell":"B2"}]}"#, 8, 8);
+        assert_eq!((r.minis.len(), r.seen), (2, 2));
+
+        // A cell dropped for being off-grid still counts as seen-but-unplaced,
+        // which is exactly the case worth telling the DM about.
+        let r = parse_board_read(r#"{"seen":2,"minis":[{"cell":"A1"},{"cell":"Z99"}]}"#, 8, 8);
+        assert_eq!((r.minis.len(), r.seen), (1, 2));
+    }
+
+    /// Perspective is the WHOLE measured error budget for a board read (3/3
+    /// exact shot flat, 1/3 at an angle — see the note on
+    /// build_board_read_message), so the warning about it has to survive any
+    /// future edit of that prompt. Same for the total-count request, which is
+    /// what lets the panel say a piece went unplaced.
+    #[test]
+    fn build_board_read_message_warns_about_perspective_and_asks_for_a_total() {
+        let m = build_board_read_message("image/jpeg", "UEhPVE8", 8, 12);
+        assert!(m.contains("straight down"), "no perspective warning: {m}");
+        assert!(m.contains("seen"), "no total-count request: {m}");
+        assert!(m.contains("UEhPVE8"), "photo missing: {m}");
+        // Exactly ONE image: sending the rendered map too was measured useless.
+        assert_eq!(m.matches(r#""type":"image""#).count(), 1, "{m}");
+    }
+
     #[test]
     fn parse_board_read_survives_prose_a_bare_array_and_a_missing_description() {
         // Chatty model, object shape, no description field.
         let prose = "Sure! Here's what I see:\n{\"minis\":[{\"cell\":\"B2\"}]}\nHope that helps.";
         assert_eq!(
-            parse_board_read(prose, 5, 5),
+            parse_board_read(prose, 5, 5).minis,
             vec![BoardMini { cell: "B2".into(), description: String::new(), col: 1, row: 1 }]
         );
         // A bare array instead of {"minis":[…]} shouldn't cost us the whole read.
-        assert_eq!(parse_board_read(r#"[{"cell":"C3","description":"ogre"}]"#, 5, 5).len(), 1);
+        assert_eq!(parse_board_read(r#"[{"cell":"C3","description":"ogre"}]"#, 5, 5).minis.len(), 1);
         // Junk answers read as "no minis found", never a panic.
-        assert!(parse_board_read("I can't tell from this photo.", 10, 10).is_empty());
+        assert!(parse_board_read("I can't tell from this photo.", 10, 10).minis.is_empty());
     }
 
     #[test]

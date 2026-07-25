@@ -62,6 +62,41 @@ const SENSOR_SETTLE_MS = 800;
 /** Give up rather than hang if the camera opens but never produces a frame. */
 const FIRST_FRAME_TIMEOUT_MS = 6000;
 
+/** Pixel size of an image data URL, or null if it can't be decoded. */
+export function imageDimensions(dataUrl: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+/** Below roughly this many photo pixels per map square, printed column letters
+ *  stop being legible and the read degrades no matter how good the model is. */
+const MIN_PX_PER_CELL = 30;
+
+/** A warning if this photo is too coarse to read `cols` squares off, else null.
+ *
+ *  `width: {ideal: 1920}` in getUserMedia is a HINT, not a constraint — a laptop
+ *  webcam can hand back 640x480 and nothing says so, which then looks like the
+ *  model being bad at its job rather than the photo being unreadable.
+ *
+ *  Measured against the map's own width rather than an absolute resolution,
+ *  because that's what actually matters: 1280px is plenty for a 12-wide map and
+ *  thin for a 40-wide one. This assumes the map fills the frame, so it's a
+ *  FLOOR — a photo that fails here is definitely too coarse; one that passes
+ *  may still be if the map only occupies part of the shot. */
+export async function coarsePhotoWarning(photo: string, cols: number): Promise<string | null> {
+  if (cols <= 0) return null;
+  const dim = await imageDimensions(photo);
+  if (!dim || !dim.w) return null;
+  const pxPerCell = dim.w / cols;
+  if (pxPerCell >= MIN_PX_PER_CELL) return null;
+  return `That photo is ${dim.w}×${dim.h}, about ${Math.round(pxPerCell)} pixels per square across a ${cols}-wide map — `
+    + 'likely too coarse to read the printed labels. Move the camera closer or use a higher-resolution one.';
+}
+
 /** Grabs ONE still frame and returns it as a JPEG data URL.
  *
  *  Opens the camera, waits for a real frame, draws it to a canvas and shuts the

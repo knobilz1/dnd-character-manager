@@ -17,7 +17,7 @@ import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
-import { listTableCameras, captureTableFrame, type TableCamera } from '../../utils/tableCamera';
+import { listTableCameras, captureTableFrame, coarsePhotoWarning, type TableCamera } from '../../utils/tableCamera';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -433,6 +433,12 @@ interface MapCard {
    *  the DM flips them when the party climbs. Empty only if the grid didn't
    *  parse (then `png` is null too). */
   floors: { name: string; png: string; revealed: boolean }[];
+}
+
+/** What `read_table_positions` returns — mirrors campaign.rs's BoardRead. */
+interface BoardReadResult {
+  minis: Array<{ cell: string; description: string }>;
+  seen: number;
 }
 
 /** One imported module's headline info — mirrors campaign.rs's ModuleSummary.
@@ -950,6 +956,13 @@ export function DMConsolePage() {
   const [boardRead, setBoardRead] = React.useState<
     { name: string; photo: string; cols: number; rows: number;
       minis: Array<{ cell: string; description: string }>;
+      /** Pieces the model says it could SEE. Larger than `minis.length` when it
+       *  abstained on some — it's told to leave out anything it can't place, and
+       *  without this that silence made a partial read look complete. */
+      seen: number;
+      /** Set when the photo is too coarse to read labels off, so a bad read
+       *  reads as "the photo was unusable" rather than "the model is poor". */
+      warning: string | null;
       assign: string[]; cells: string[] } | null
   >(null);
 
@@ -1783,13 +1796,18 @@ export function DMConsolePage() {
       const floor = parseBattleMapFloors(card.spec)[0];
       if (!floor) return;
       setBoardBusy('Reading the board…');
-      invoke<Array<{ cell: string; description: string }>>('read_table_positions', {
-        photo: event.payload.photo, cols: floor.cols, rows: floor.rows,
-      })
-        .then((minis) => setBoardRead({
+      const photo = event.payload.photo;
+      Promise.all([
+        invoke<BoardReadResult>('read_table_positions', {
+          photo, cols: floor.cols, rows: floor.rows,
+        }),
+        coarsePhotoWarning(photo, floor.cols),
+      ])
+        .then(([read, warning]) => setBoardRead({
           name: `${card.name} — photo from ${event.payload.name}`,
-          photo: event.payload.photo, cols: floor.cols, rows: floor.rows, minis,
-          assign: minis.map(() => ''), cells: minis.map((m) => m.cell),
+          photo, cols: floor.cols, rows: floor.rows,
+          minis: read.minis, seen: read.seen, warning,
+          assign: read.minis.map(() => ''), cells: read.minis.map((m) => m.cell),
         }))
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setBoardBusy(null));
@@ -3341,13 +3359,15 @@ export function DMConsolePage() {
     try {
       const photo = await captureTableFrame(tableCameraId || undefined);
       setBoardBusy('Reading the board…');
-      const minis = await invoke<Array<{ cell: string; description: string }>>('read_table_positions', {
+      const warning = await coarsePhotoWarning(photo, floor.cols);
+      const read = await invoke<BoardReadResult>('read_table_positions', {
         photo, cols: floor.cols, rows: floor.rows,
       });
       setBoardRead({
-        name: card.name, photo, cols: floor.cols, rows: floor.rows, minis,
-        assign: minis.map(() => ''),           // unassigned until the DM says who
-        cells: minis.map((m) => m.cell),       // editable, so a one-off drift is fixable
+        name: card.name, photo, cols: floor.cols, rows: floor.rows,
+        minis: read.minis, seen: read.seen, warning,
+        assign: read.minis.map(() => ''),        // unassigned until the DM says who
+        cells: read.minis.map((m) => m.cell),    // editable, so a one-off drift is fixable
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -3872,9 +3892,15 @@ export function DMConsolePage() {
         {boardRead && (
           <div className="space-y-3">
             <img src={boardRead.photo} alt="The table as the camera saw it" className="w-full rounded-lg border border-slate-700" />
+            {/* The photo was too coarse to read labels off. Shown whatever the
+                result, because it explains a bad read that would otherwise look
+                like the model simply being wrong. */}
+            {boardRead.warning && <p className="text-xs text-amber-400">⚠️ {boardRead.warning}</p>}
             {boardRead.minis.length === 0 ? (
               <p className="text-sm text-amber-400">
-                No pieces were read. Shoot straight down over the map, and make sure the printed row/column labels are in frame.
+                No pieces were read
+                {boardRead.seen > 0 && ` — though ${boardRead.seen} ${boardRead.seen === 1 ? 'was' : 'were'} visible, none could be placed`}.
+                Shoot straight down over the map, and make sure the printed row/column labels are in frame.
               </p>
             ) : (
               <>
@@ -3882,6 +3908,23 @@ export function DMConsolePage() {
                   Read {boardRead.minis.length} piece{boardRead.minis.length === 1 ? '' : 's'}. Say who each one is — blank rows are
                   ignored — and correct any square that's off. Only what you name here reaches the battle log.
                 </p>
+                {/* Measured: shot straight down every square came back exact;
+                    shot from the side of the table only a third did, and the
+                    misses still LOOK like a clean read. Worth saying on the
+                    success path, not just when nothing was found. */}
+                <p className="text-[11px] text-slate-500">
+                  Squares come back exact when the camera is straight over the map. Shooting from the side of the table
+                  is where drift comes from — the read still looks fine, it's just wrong by a column.
+                </p>
+                {/* Abstention used to be silent, so a 4-of-6 read looked like a
+                    board with 4 pieces on it. Naming the gap is the whole point. */}
+                {boardRead.seen > boardRead.minis.length && (
+                  <p className="text-xs text-amber-400">
+                    {boardRead.seen - boardRead.minis.length} more piece
+                    {boardRead.seen - boardRead.minis.length === 1 ? ' was' : 's were'} visible but couldn't be placed on a
+                    square — add {boardRead.seen - boardRead.minis.length === 1 ? 'it' : 'them'} by hand, or retake the photo.
+                  </p>
+                )}
                 <datalist id="board-read-names">
                   {(battleLog?.combatants ?? []).map((c) => <option key={c.name} value={c.name} />)}
                 </datalist>
