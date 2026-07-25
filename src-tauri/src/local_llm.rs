@@ -132,6 +132,54 @@ fn build_system_prompt_at(dir: &Path) -> String {
     format!("{resolved}{LOCAL_CRITICAL_REMINDERS}{LOCAL_OUTPUT_FORMAT_ADDENDUM}")
 }
 
+/// Marks the standing brief handed to a non-Claude CLI. Named boundaries rather
+/// than a bare paste so the model can tell its persona from the turn it has to
+/// answer — this arrives as ordinary prompt text, not a system prompt.
+const CLI_CONTEXT_HEADER: &str = "# Standing instructions — your persona, house rules, and this campaign's world\n\nEverything up to the END marker below is your standing brief for this and every later turn in this conversation. Claude Code reads it automatically from the project's CLAUDE.md; you are being handed it directly because your CLI does not read that file.";
+const CLI_CONTEXT_FOOTER: &str = "# END of standing instructions\n\nEverything below is this turn only.";
+
+fn cli_context_sent() -> &'static Mutex<HashMap<std::path::PathBuf, u64>> {
+    static SENT: OnceLock<Mutex<HashMap<std::path::PathBuf, u64>>> = OnceLock::new();
+    SENT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The standing project context a non-Claude CLI needs, because it does not read
+/// CLAUDE.md.
+///
+/// Measured 2026-07-25 in a scratch directory holding all three convention files
+/// with a different pass-phrase in each: `agy --print` read NONE of CLAUDE.md /
+/// AGENTS.md / GEMINI.md, and `codex exec` read AGENTS.md only. Neither reads
+/// CLAUDE.md, which is the only one Tavern Sheet writes — so choosing Codex or
+/// Gemini as the DM engine used to hand the model nothing but the live party
+/// status: no persona, no house rules, no dm-actions contract, no NPC memory, no
+/// module chapter. A live Gemini turn confirmed it — competent narration, and no
+/// actions block at all, so nothing the app could act on.
+///
+/// `None` when this exact context already went out on this campaign's current
+/// thread. `--conversation` / `exec resume` replay the whole thread, so
+/// re-sending unconditionally would stack another ~39K chars per turn. Any
+/// change — a chapter advance, a new memory note — moves the hash and re-sends,
+/// which is the property Claude gets for free by re-reading CLAUDE.md each turn.
+pub(crate) fn cli_project_context(dir: &Path, resuming: bool) -> Option<String> {
+    use std::hash::{Hash, Hasher};
+    let claude_md = read_optional(&dir.join("CLAUDE.md"));
+    if claude_md.trim().is_empty() {
+        return None;
+    }
+    let resolved = resolve_claude_md_imports(dir, &claude_md);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    resolved.hash(&mut hasher);
+    let hash = hasher.finish();
+    let mut sent = cli_context_sent().lock().unwrap();
+    // A fresh thread has nothing, so it always gets the brief regardless of what
+    // some earlier thread on this campaign was told.
+    if resuming && sent.get(dir) == Some(&hash) {
+        return None;
+    }
+    sent.insert(dir.to_path_buf(), hash);
+    Some(format!("{CLI_CONTEXT_HEADER}\n\n{resolved}\n\n{CLI_CONTEXT_FOOTER}"))
+}
+
 /// Bounds a session's stored history to the most recent `limit_turns` user+
 /// assistant pairs, dropping the oldest first. Local models resend this
 /// history in full every turn (no lightweight --resume token the way Claude
@@ -433,11 +481,17 @@ struct IngestConfig {
     /// Which subscription CLI answers when `use_local` is false. Defaults to
     /// Claude, so nothing changes until the user picks another engine.
     engine: Option<crate::cli_provider::CliEngine>,
-    /// The OTHER signed-in engine, when cross-checking is on. Used for the
-    /// critique leg of draft→critique ingestion flows: those already make two
-    /// calls, and a model reviewing its OWN draft shares that draft's blind
-    /// spots, so an independent reviewer is strictly better for the same cost.
-    cross_check: Option<crate::cli_provider::CliEngine>,
+    /// Every OTHER signed-in engine to consult when cross-checking is on. Used
+    /// for the critique leg of draft→critique ingestion flows: a model reviewing
+    /// its OWN draft shares that draft's blind spots, so independent reviewers
+    /// are strictly better.
+    ///
+    /// A LIST, not one: the settings panel has always let you tick more than one
+    /// reviewer, but this held a single engine and the frontend quietly sent
+    /// only the first — so asking for Codex AND Gemini silently got you one of
+    /// them. Different models also catch different things, which is the entire
+    /// argument for asking more than one.
+    cross_check: Vec<crate::cli_provider::CliEngine>,
 }
 
 fn ingest_config() -> &'static Mutex<IngestConfig> {
@@ -465,22 +519,41 @@ pub fn set_ingestion_provider(use_local: bool, base_url: String, model: String) 
 /// local-server settings and the CLI-engine settings don't have to be pushed
 /// down together.
 #[tauri::command]
-pub fn set_ingestion_engine(engine: String, cross_check: Option<String>) {
+pub fn set_ingestion_engine(engine: String, cross_check: Option<Vec<String>>) {
     let mut cfg = ingest_config().lock().unwrap();
     cfg.engine = Some(crate::cli_provider::CliEngine::from_setting(&engine));
-    cfg.cross_check = cross_check.map(|c| crate::cli_provider::CliEngine::from_setting(&c));
+    let mut seen: Vec<crate::cli_provider::CliEngine> = Vec::new();
+    for name in cross_check.unwrap_or_default() {
+        let e = crate::cli_provider::CliEngine::from_setting(&name);
+        // from_setting falls back to Claude on anything unrecognised, so a typo
+        // would otherwise silently add Claude as a reviewer.
+        if !seen.contains(&e) {
+            seen.push(e);
+        }
+    }
+    cfg.cross_check = seen;
 }
 
-/// The engine that should REVIEW a draft this ingestion flow just produced, if
-/// cross-checking is on and a different engine is available. None means "review
-/// with the same engine", which is what always happened before.
-pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
+/// Every engine that should REVIEW a draft this ingestion flow just produced.
+///
+/// Empty means "review with the same engine", which is what always happened
+/// before cross-checking existed. The primary is filtered out here rather than
+/// at the call sites: a model reviewing its own draft shares that draft's blind
+/// spots, which is the entire reason for a second opinion.
+pub fn ingestion_reviewers() -> Vec<crate::cli_provider::CliEngine> {
     let cfg = ingest_config().lock().unwrap();
     if cfg.use_local {
-        return None;
+        return Vec::new();
     }
     let primary = cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude);
-    cfg.cross_check.filter(|c| *c != primary)
+    cfg.cross_check.iter().copied().filter(|c| *c != primary).collect()
+}
+
+/// The single reviewer for the paths that can only use one — rate-limit
+/// failover, and the battle-map tile-pick check that fires per texture and
+/// cannot afford a fan-out.
+pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
+    ingestion_reviewers().into_iter().next()
 }
 
 /// Run one ingestion prompt on a SPECIFIC engine, bypassing the configured
@@ -489,8 +562,9 @@ pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
 /// dependency: losing the reviewer should degrade quality, never lose the work.
 pub fn ask_ingest_once_on(
     engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>, expect_json: bool,
+    effort: Option<&str>,
 ) -> Result<String, String> {
-    match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, None) {
+    match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, effort) {
         Ok(text) => {
             // Logged on SUCCESS, not just on failure. Because this degrades
             // silently, a quiet log was indistinguishable from the reviewer
@@ -569,17 +643,85 @@ fn ask_local_once(base_url: &str, model: &str, prompt: &str, expect_json: bool) 
 /// model it was started with). campaign.rs calls this everywhere it used to
 /// call dm::ask_claude_once directly. `expect_json` only affects the local
 /// path (Claude follows the prompt's own format instruction either way).
+/// Does this error mean the engine's sign-in has lapsed, rather than the call
+/// having genuinely failed?
+///
+/// A subscription CLI's OAuth token expires on its own schedule, so this can
+/// happen in the middle of a session that was working ten minutes earlier — and
+/// it is exactly as recoverable as running out of quota. Treated separately from
+/// `looks_rate_limited` because it additionally means the cached "signed in"
+/// answer is now a lie and has to be thrown away.
+pub fn looks_signed_out(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    [
+        "authentication required",
+        "authentication interrupted",
+        "authentication failed",
+        "not logged in",
+        "not authenticated",
+        "please sign in",
+        "please log in",
+        "reauthenticate",
+        "invalid_grant",
+        "token expired",
+        "credentials",
+        "unauthorized",
+        "401",
+    ]
+    .iter()
+    .any(|needle| e.contains(needle))
+}
+
+/// The engine's CLI takes its prompt on the command line and this one didn't
+/// fit. Not a fault and not transient — a different engine is the only fix, so
+/// it belongs alongside rate-limited and signed-out as a failover trigger.
+pub fn looks_too_long(err: &str) -> bool {
+    err.contains(crate::dm::PROMPT_TOO_LONG_MARKER)
+}
+
 pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
     match ask_ingest_inner(prompt.clone(), claude_model, expect_json) {
         Ok(text) => Ok(text),
-        Err(e) if looks_rate_limited(&e) => {
-            // Out of quota, not broken. Any OTHER signed-in engine will do —
-            // finishing the import on a different model beats stopping, and
-            // ingestion has no conversational continuity to lose.
-            let Some(other) = ingestion_reviewer() else { return Err(e) };
+        Err(e) if looks_rate_limited(&e) || looks_signed_out(&e) || looks_too_long(&e) => {
+            // Out of quota, or signed out mid-session — not broken. Any OTHER
+            // signed-in engine will do: finishing the import on a different
+            // model beats stopping, and ingestion has no conversational
+            // continuity to lose.
+            //
+            // Signed-out belongs here because of where ingestion actually runs.
+            // The end-of-session digest walks the transcript chunk by chunk and
+            // SKIPS any chunk whose call fails, so a lapsed token used to mean
+            // entities.md, locations.md and flagged_facts.md silently received
+            // nothing for the whole night — the raw transcript survived (it is
+            // written before any model call), but next session the DM would
+            // greet everyone met tonight as a stranger, with no error shown.
+            if looks_signed_out(&e) {
+                // The Accounts panel caches a positive answer for the process,
+                // so it would keep claiming this engine is fine. Drop that.
+                crate::dm::forget_cached_sign_in();
+            }
+            // The target has to be able to HOLD this prompt. An argv-only engine
+            // refuses an 80K extraction chunk no matter whose turn it is, so
+            // retrying there turns one clear failure into two.
+            let Some(other) = ingestion_reviewers()
+                .into_iter()
+                .find(|c| crate::dm::engine_can_carry(*c, prompt.chars().count()))
+            else {
+                return Err(e);
+            };
             crate::maplog::log(
                 "INGESTION FAILED OVER",
-                &format!("primary rate-limited, retrying on {}: {e}", other.label()),
+                &format!(
+                    "primary {}, retrying on {}: {e}",
+                    if looks_signed_out(&e) {
+                        "signed out"
+                    } else if looks_too_long(&e) {
+                        "cannot carry a prompt this long"
+                    } else {
+                        "rate-limited"
+                    },
+                    other.label()
+                ),
             );
             crate::dm::run_engine_oneshot(other, &prompt, None, None).map_err(|second| {
                 format!("{e}\n\nAlso tried {}: {second}", other.label())
@@ -640,10 +782,347 @@ pub fn looks_rate_limited(err: &str) -> bool {
 /// Falls back to the normal path when cross-checking is off, when no reviewer
 /// is configured, or when the reviewer fails. A second opinion is an
 /// improvement, never a dependency.
-pub fn ask_ingest_critique(prompt: String, claude_model: Option<&str>, expect_json: bool) -> Result<String, String> {
-    match ingestion_reviewer() {
-        Some(reviewer) => ask_ingest_once_on(reviewer, prompt, claude_model, expect_json),
-        None => ask_ingest_once(prompt, claude_model, expect_json),
+/// Turns any of the "check X, Y, Z — then rewrite the doc" critique prompts into
+/// a FINDINGS-ONLY pass.
+///
+/// The checks those prompts enumerate are good; the instruction to rewrite is
+/// the problem when a second engine is holding the pen. This suffix keeps the
+/// checks and drops the rewrite.
+const FINDINGS_ONLY_OVERRIDE: &str = "\n\n---\n\nIMPORTANT — this overrides the output instruction above. Do NOT rewrite or reproduce the document. You are reviewing someone else's draft, and they will make the edits themselves.\n\nReply with ONLY a short numbered list of concrete, specific problems you found — each one naming the exact passage at fault and what is wrong with it. Do not suggest wholesale restructuring, do not restate what the draft already does well, and do not comment on length.\n\nOne thing that is NOT a defect: inventing concrete colour, texture and incident that the source material did not spell out. This is a Dungeons & Dragons prep document and that invention is the entire job — a DM types two sentences and expects a usable world back. Only call invented material a problem when it CONTRADICTS the source, contradicts itself, or paints the DM into a corner. \"The source doesn't say this\" is not by itself a finding, and a review consisting of those is a wasted pass.\n\nIf the draft has no real problems, reply with exactly: NO-FINDINGS";
+
+/// Distinct review angles, handed out one per reviewer.
+///
+/// Reviewers used to get an identical prompt, and the result looked exactly like
+/// that: on a live three-way run, Codex returned four findings and Gemini one,
+/// and nearly all of them were the same kind of objection ("the source doesn't
+/// establish this"). Two models asked the same question give correlated answers;
+/// the second opinion only earns its call if it is looking somewhere else.
+///
+/// Ordered by what a bad document most often gets wrong, since a two-reviewer
+/// setup only ever sees the first two.
+const REVIEW_LENSES: &[(&str, &str)] = &[
+    (
+        "coverage",
+        "Your angle is COVERAGE. Go through the source material and the DM's stated setup line by line and find what the draft failed to carry over — named people, places, factions, relationships, the players' own characters, anything the DM explicitly asked for. Something the DM typed themselves and the draft dropped is the single most valuable thing you can report.",
+    ),
+    (
+        "usability at the table",
+        "Your angle is USABILITY AT THE TABLE. Assume a DM is reading this mid-session with players waiting. Find anything too vague to act on — a hook that foreshadows nothing specific, an NPC with no way to play them, a thread with no first move, guidance that restates a genre instead of describing this world. Quote the passage and say what the DM still would not know how to do.",
+    ),
+    (
+        "internal consistency",
+        "Your angle is INTERNAL CONSISTENCY. Find places where the document argues with itself or with the source: a fact stated two ways, a timeline that cannot hold, a motivation that contradicts an earlier one, a detail that quietly makes an established fact impossible.",
+    ),
+];
+
+/// One surgical edit to the document: replace an exact existing passage with a
+/// new one. An insertion is expressed by echoing an anchor and appending to it,
+/// so there is only ever one operation to reason about.
+#[derive(Deserialize)]
+struct DocEdit {
+    find: String,
+    replace: String,
+}
+
+/// Applies edits to `doc`, returning the result, how many landed, and why any
+/// were refused.
+///
+/// `find` must match EXACTLY ONCE. Zero matches means the model quoted the
+/// document wrongly; several means the edit is ambiguous about which passage it
+/// meant. Either way the honest move is to refuse that one edit and say so —
+/// applying a guess is how a patch silently corrupts a document.
+///
+/// The point of patching at all: everything not named here comes out
+/// byte-identical. A full-document rewrite has no such guarantee, and the
+/// measured failure this whole workflow started from was exactly that — a
+/// "revision" that quietly summarized 3546 chars down to 2141.
+fn apply_doc_edits(doc: &str, edits: &[DocEdit]) -> (String, usize, Vec<String>) {
+    let mut out = doc.to_string();
+    let mut applied = 0;
+    let mut refused = Vec::new();
+    for (i, e) in edits.iter().enumerate() {
+        if e.find.is_empty() {
+            refused.push(format!("edit {}: empty `find`", i + 1));
+            continue;
+        }
+        match out.matches(e.find.as_str()).count() {
+            1 => {
+                out = out.replacen(e.find.as_str(), &e.replace, 1);
+                applied += 1;
+            }
+            0 => refused.push(format!(
+                "edit {}: `find` text is not in the document — {:?}",
+                i + 1,
+                e.find.chars().take(60).collect::<String>()
+            )),
+            n => refused.push(format!(
+                "edit {}: `find` matches {n} places, too ambiguous to apply — {:?}",
+                i + 1,
+                e.find.chars().take(60).collect::<String>()
+            )),
+        }
+    }
+    (out, applied, refused)
+}
+
+/// Hands the reviewers' findings back to the engine that wrote the draft, asking
+/// for EDITS rather than a rewrite.
+fn build_patch_prompt(draft: &str, findings: &str) -> String {
+    format!(
+        "Below is a document you wrote, followed by review notes on it from other readers.\n\n\
+        Apply the notes that are CORRECT and worth acting on — fixing real omissions, vagueness and \
+        contradictions — and ignore any that are wrong, are matters of taste, or would make the \
+        document worse. This is your document; each reader saw it once and has less context than you.\n\n\
+        Where more than one reader is quoted, treat a point RAISED INDEPENDENTLY BY BOTH as the \
+        strongest signal available and address it. Where they disagree, use your own judgement.\n\n\
+        Reply with ONLY a JSON object listing the edits to make — do NOT reproduce the document:\n\n\
+        {{\"edits\":[{{\"find\":\"<exact text copied from the document>\",\"replace\":\"<what it becomes>\"}}]}}\n\n\
+        Rules for `find`, which are strict because each edit is applied mechanically:\n\
+        - Copy it VERBATIM from the document, character for character. It is matched literally, not fuzzily.\n\
+        - It must appear EXACTLY ONCE in the document. If a phrase repeats, include enough surrounding \
+        text to make it unique.\n\
+        - Keep it as short as possible while still unique — quote the sentence or bullet you are changing, \
+        not the whole section.\n\
+        To ADD new material, set `find` to the line you want it to follow and `replace` to that same line \
+        plus the new content after it. To DELETE, set `replace` to an empty string.\n\n\
+        Make each edit ADD substance where a note found it lacking: name the thing, give the number, \
+        state the fact. Do not use these edits to shorten, condense or genericize the document — \
+        concrete, playable detail is the entire point of it. Emit no edit at all for a note you are \
+        choosing to ignore, and return {{\"edits\":[]}} if none of them are worth acting on.\n\n\
+        Your document:\n{draft}\n\n\
+        Review notes:\n{findings}"
+    )
+}
+
+/// How many review-and-patch rounds a critique pass may run.
+///
+/// Two, not a loop until it goes quiet. Round two earns its cost because it
+/// reviews the PATCHED document — the first round's answers can raise real
+/// follow-on problems, and it also lets a third lens see the doc. Beyond that
+/// the reviewers start trading taste, and an open loop on a document with no
+/// objective finish line thrashes.
+const MAX_REVIEW_ROUNDS: usize = 2;
+
+/// Fraction of the draft's length a revision must retain to be trusted.
+///
+/// The measured failure sat at 60% (3546 chars -> 2141), so 0.65 catches it with
+/// a little room. A genuine gap-fill should come back the same size or larger;
+/// a revision that lost a third of the document did not fix it, it summarized it.
+const MIN_REVISION_LENGTH_RATIO: f64 = 0.65;
+
+/// Names the draft called out in bold — the "who and where" a revision must not
+/// silently drop. Deliberately narrow: skips `**Label:**` field headers and
+/// anything long enough to be a sentence rather than a name.
+fn bold_names(doc: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = doc;
+    while let Some(start) = rest.find("**") {
+        rest = &rest[start + 2..];
+        let Some(end) = rest.find("**") else { break };
+        let inner = rest[..end].trim();
+        rest = &rest[end + 2..];
+        let is_name = !inner.is_empty()
+            && !inner.ends_with(':')
+            && inner.split_whitespace().count() <= 5
+            && inner.starts_with(|c: char| c.is_uppercase());
+        if is_name && !out.iter().any(|n: &String| n == inner) {
+            out.push(inner.to_string());
+        }
+    }
+    out
+}
+
+/// Whether a revision may replace the draft it came from.
+///
+/// A critique pass is supposed to ADD — fill a gap, fix a contradiction. Measured
+/// against a live run, a second engine handed the pen instead returned a shorter,
+/// more generic summary that dropped a fact stated in the campaign intake, and
+/// that output replaced a good draft wholesale with nothing to stop it. This is
+/// the stop: a revision has to keep the document's substance to earn its place.
+pub fn revision_is_safe(draft: &str, revised: &str) -> (bool, String) {
+    let (d, r) = (draft.trim(), revised.trim());
+    if r.is_empty() {
+        return (false, "the revision came back empty".into());
+    }
+    if (r.chars().count() as f64) < d.chars().count() as f64 * MIN_REVISION_LENGTH_RATIO {
+        return (
+            false,
+            format!(
+                "the revision is {} chars against the draft's {} — that is a summary, not a fix",
+                r.chars().count(),
+                d.chars().count()
+            ),
+        );
+    }
+    let lower = r.to_lowercase();
+    if let Some(lost) = bold_names(d).into_iter().find(|n| !lower.contains(&n.to_lowercase())) {
+        return (false, format!("the revision dropped \"{lost}\", which the draft named"));
+    }
+    (true, String::new())
+}
+
+/// A critique pass over `draft`.
+///
+/// Two different shapes, because who holds the pen matters:
+///
+/// - **Same engine** (no cross-check): it revises its own draft, exactly as
+///   before. This path was never the problem.
+/// - **A DIFFERENT engine** (cross-check on): the reviewer only FINDS problems;
+///   the drafting engine FIXES them. Letting the reviewer rewrite meant the
+///   final document was simply whatever the reviewer wrote — so with Claude
+///   "primary" and Codex "reviewing", the lore was in fact written by Codex.
+///   Measured on identical input, that turned a 3546-char draft full of playable
+///   specifics into a 2141-char generic summary that dropped a fact stated in
+///   the intake — while the critique prompt's whole job was to catch omissions.
+///
+/// Either way the result must survive `revision_is_safe`, or the draft stands.
+pub fn ask_ingest_critique(
+    prompt: String, draft: &str, claude_model: Option<&str>, expect_json: bool,
+) -> Result<String, String> {
+    let reviewers = ingestion_reviewers();
+    if reviewers.is_empty() {
+        // Same engine revising its own draft, exactly as before cross-checking
+        // existed. Still a full rewrite, still guarded.
+        let revised = ask_ingest_once(prompt, claude_model, expect_json)?;
+        return Ok(match revision_is_safe(draft, &revised) {
+            (true, _) => revised,
+            (false, why) => {
+                crate::maplog::log("CRITIQUE REJECTED", &format!("kept the draft: {why}"));
+                draft.to_string()
+            }
+        });
+    }
+
+    let mut current = draft.to_string();
+    for round in 0..MAX_REVIEW_ROUNDS {
+        // Each reviewer reads the CURRENT document independently and reports
+        // separately. They are NOT shown each other's notes: the value of a
+        // second opinion is that it was formed without the first one, and
+        // pooling them would just let the loudest reading anchor the rest.
+        let mut collected = String::new();
+        for (i, reviewer) in reviewers.iter().enumerate() {
+            // Lenses advance with the round, so a second pass looks somewhere
+            // new rather than re-litigating the first — with two reviewers and
+            // three lenses, two rounds cover all three.
+            let (lens_name, lens) = REVIEW_LENSES[(round * reviewers.len() + i) % REVIEW_LENSES.len()];
+            // Reasoning turned UP: this is the most analytically demanding call
+            // in the pipeline and it used to run at each engine's default,
+            // which for Codex meant none at all.
+            let found = match ask_ingest_once_on(
+                *reviewer,
+                format!("{}{FINDINGS_ONLY_OVERRIDE}\n\n{lens}", with_document(&prompt, &current, round)),
+                claude_model,
+                false,
+                // "high" is common to all three engines' scales. Claude also has
+                // xhigh/max, but a review is a bounded read of one document, not
+                // open-ended exploration.
+                Some("high"),
+            ) {
+                Ok(f) => f.trim().to_string(),
+                // One reviewer failing is not the pass failing — the others
+                // still have something to say.
+                Err(e) => {
+                    crate::maplog::log("CROSS-CHECK reviewer failed", &format!("{}: {e}", reviewer.label()));
+                    continue;
+                }
+            };
+            if found.is_empty() || found.contains("NO-FINDINGS") {
+                crate::maplog::log(
+                    "CROSS-CHECK found nothing",
+                    &format!("round {} — {} ({lens_name}) had no findings", round + 1, reviewer.label()),
+                );
+                continue;
+            }
+            crate::maplog::log(
+                "CROSS-CHECK findings",
+                &format!("round {} — {} on {lens_name} reported:\n{found}", round + 1, reviewer.label()),
+            );
+            // Attributed, because whose note it is carries information: two
+            // reviewers independently flagging the same passage is a much
+            // stronger signal than either one alone, and the author can only
+            // see that if the notes stay separated.
+            collected.push_str(&format!(
+                "\n\n### Notes from {} (reviewing for {lens_name})\n{found}",
+                reviewer.label()
+            ));
+        }
+        if collected.trim().is_empty() {
+            crate::maplog::log("CRITIQUE DONE", &format!("round {} found nothing; stopping", round + 1));
+            break;
+        }
+
+        // Ask for EDITS, not a rewrite: everything the author does not name
+        // survives byte-identical.
+        let reply = ask_ingest_once(build_patch_prompt(&current, collected.trim()), claude_model, true)?;
+        let edits: Vec<DocEdit> = serde_json::from_str::<serde_json::Value>(&extract_json_object(&reply))
+            .ok()
+            .and_then(|v| v.get("edits").cloned())
+            .and_then(|e| serde_json::from_value(e).ok())
+            .unwrap_or_default();
+        if edits.is_empty() {
+            crate::maplog::log(
+                "CRITIQUE DONE",
+                &format!("round {} — author judged no note worth acting on", round + 1),
+            );
+            break;
+        }
+
+        let (patched, applied, refused) = apply_doc_edits(&current, &edits);
+        for r in &refused {
+            // Never silent: a refused edit means a finding went unaddressed, and
+            // that is invisible in the finished document.
+            crate::maplog::log("CRITIQUE EDIT REFUSED", r);
+        }
+        crate::maplog::log(
+            "CRITIQUE PATCHED",
+            &format!(
+                "round {}: {applied} of {} edit(s) applied, {} chars -> {} chars",
+                round + 1,
+                edits.len(),
+                current.chars().count(),
+                patched.chars().count()
+            ),
+        );
+        if applied == 0 {
+            break;
+        }
+        // The guard still runs, per round, against that round's input. With
+        // patching it should never fire — which is the point of patching.
+        match revision_is_safe(&current, &patched) {
+            (true, _) => current = patched,
+            (false, why) => {
+                crate::maplog::log("CRITIQUE REJECTED", &format!("round {}: {why}", round + 1));
+                break;
+            }
+        }
+    }
+    Ok(current)
+}
+
+/// Re-points a critique prompt at the document as it stands now.
+///
+/// The prompt was built around the original draft, so round two would otherwise
+/// review a document that has already been fixed and re-report everything that
+/// was just addressed. Appending the current text and saying which one counts is
+/// enough, and avoids threading a builder through all three call sites.
+fn with_document(prompt: &str, current: &str, round: usize) -> String {
+    if round == 0 {
+        return prompt.to_string();
+    }
+    format!(
+        "{prompt}\n\n---\n\nIMPORTANT: the draft quoted above has since been revised in response to an \
+        earlier review. Review THIS version instead — it is the current document, and the one your notes \
+        must refer to. Points already addressed here are settled; do not raise them again.\n\n\
+        Current document:\n{current}"
+    )
+}
+
+/// The JSON object substring of a possibly-chatty reply (first `{` to last `}`),
+/// so an answer still parses when the model wraps it in prose. Pure.
+fn extract_json_object(s: &str) -> String {
+    match (s.find('{'), s.rfind('}')) {
+        (Some(a), Some(b)) if b > a => s[a..=b].to_string(),
+        _ => s.to_string(),
     }
 }
 
@@ -723,6 +1202,186 @@ pub fn end_local_dm_session(session_id: String) {
 mod tests {
     use super::*;
 
+    /// The guard that stops a "critique" from replacing a good draft with a
+    /// worse one. Every case here is drawn from the live A/B that motivated it:
+    /// Claude drafted 3546 chars of specific, playable detail, Codex was handed
+    /// the pen, and what came back was a 2141-char generic summary that had
+    /// dropped a fact stated in the campaign intake — while the critique
+    /// prompt's entire job was catching omissions.
+    #[test]
+    fn a_revision_that_summarizes_instead_of_fixing_is_rejected() {
+        let draft = "# Frame\n- **Aldric Venn** keeps the ledgers and the secrets.\n\
+                     - The party **owes a debt** to the guild, worked off job by job.\n\
+                     - The mine flooded last winter and something came up with the water.\n\
+                     - A drowned body in guild issue that nobody reported missing.";
+
+        // Same substance, expanded — exactly what a gap-fill should look like.
+        let good = format!("{draft}\n- Venn keeps a second ledger, and the debt is tracked as a number.");
+        assert!(revision_is_safe(draft, &good).0);
+
+        // The measured failure: two thirds the length, nothing added.
+        let summary = "# Frame\n- The guild factor keeps records.\n- The mine flooded.";
+        let (ok, why) = revision_is_safe(draft, summary);
+        assert!(!ok, "a two-thirds-length rewrite must not replace the draft");
+        assert!(why.contains("summary"), "{why}");
+
+        // Long enough, but a named entity vanished.
+        let padded = "# Frame\n- The guild factor keeps the ledgers and the secrets of this place.\n\
+                      - The party owes money to the guild, worked off job by job over time.\n\
+                      - The mine flooded last winter and something came up with the water here.\n\
+                      - A drowned body in guild issue that nobody ever reported missing at all.";
+        let (ok, why) = revision_is_safe(draft, padded);
+        assert!(!ok, "dropping a named entity must not replace the draft");
+        assert!(why.contains("Aldric Venn"), "{why}");
+
+        assert!(!revision_is_safe(draft, "   ").0, "empty is never a revision");
+    }
+
+    /// Patching exists to give one guarantee a rewrite cannot: text nobody named
+    /// comes out byte-identical. These cases are the ways that guarantee could
+    /// be lost.
+    #[test]
+    fn a_patch_changes_only_what_it_names_and_refuses_anything_ambiguous() {
+        let doc = "# Frame\n- **Aldric Venn** keeps the ledgers.\n- Track the debt as a number.\n- The moor is cold.\n- The moor is cold.";
+
+        // A clean, unique edit lands and leaves everything else untouched.
+        let (out, applied, refused) = apply_doc_edits(
+            doc,
+            &[DocEdit {
+                find: "- Track the debt as a number.".into(),
+                replace: "- Track the debt as a number: they owe 800 gp, wages run 1 gp/day.".into(),
+            }],
+        );
+        assert_eq!((applied, refused.len()), (1, 0));
+        assert!(out.contains("800 gp"));
+        assert!(out.contains("**Aldric Venn** keeps the ledgers."), "untouched text must survive verbatim");
+
+        // A phrase appearing twice is ambiguous — guessing which one was meant is
+        // how a patch silently corrupts a document.
+        let (out, applied, refused) = apply_doc_edits(
+            doc,
+            &[DocEdit { find: "- The moor is cold.".into(), replace: "- The moor is wrong.".into() }],
+        );
+        assert_eq!(applied, 0);
+        assert!(refused[0].contains("matches 2 places"), "{:?}", refused);
+        assert_eq!(out, doc, "a refused edit must change nothing");
+
+        // Text the model hallucinated is refused, not fuzzily matched.
+        let (_, applied, refused) = apply_doc_edits(
+            doc,
+            &[DocEdit { find: "- Venn keeps the ledgers.".into(), replace: "x".into() }],
+        );
+        assert_eq!(applied, 0);
+        assert!(refused[0].contains("not in the document"), "{:?}", refused);
+
+        // Insertion is the same operation: echo an anchor, append after it.
+        let (out, applied, _) = apply_doc_edits(
+            doc,
+            &[DocEdit {
+                find: "# Frame".into(),
+                replace: "# Frame\n- **The party:** Thorin and Mira.".into(),
+            }],
+        );
+        assert_eq!(applied, 1);
+        assert!(out.contains("**The party:** Thorin and Mira."));
+
+        // Deletion, and a partial batch: good edits land, bad ones are reported.
+        let (out, applied, refused) = apply_doc_edits(
+            doc,
+            &[
+                DocEdit { find: "- **Aldric Venn** keeps the ledgers.\n".into(), replace: String::new() },
+                DocEdit { find: "nonexistent".into(), replace: "y".into() },
+                DocEdit { find: String::new(), replace: "z".into() },
+            ],
+        );
+        assert_eq!(applied, 1);
+        assert_eq!(refused.len(), 2);
+        assert!(!out.contains("Aldric Venn"));
+        assert!(refused[1].contains("empty `find`"), "{:?}", refused);
+    }
+
+    /// Two rounds, and only two. An open loop on a document with no objective
+    /// finish line thrashes; one round misses the follow-on problems that the
+    /// first round's own answers create.
+    #[test]
+    fn review_rounds_are_capped_and_rotate_the_lens() {
+        assert_eq!(MAX_REVIEW_ROUNDS, 2);
+        // With two reviewers, two rounds must cover all three lenses rather than
+        // asking the same two questions twice.
+        let used: Vec<&str> = (0..MAX_REVIEW_ROUNDS)
+            .flat_map(|round| (0..2).map(move |i| REVIEW_LENSES[(round * 2 + i) % REVIEW_LENSES.len()].0))
+            .collect();
+        assert_eq!(used, vec!["coverage", "usability at the table", "internal consistency", "coverage"]);
+
+        // Round 2 must re-point the reviewer at the PATCHED document, or it
+        // re-reports everything the first round just fixed.
+        let r0 = with_document("orig prompt", "patched doc", 0);
+        assert_eq!(r0, "orig prompt", "round 1 reviews the draft the prompt already quotes");
+        let r1 = with_document("orig prompt", "patched doc", 1);
+        assert!(r1.contains("patched doc") && r1.contains("Review THIS version"), "{r1}");
+    }
+
+    /// A lapsed sign-in has to be recognised from an engine's error text, so
+    /// ingestion can finish the work somewhere else instead of silently dropping
+    /// it. Inputs are verbatim: agy's banner, and Codex's `login status` line.
+    #[test]
+    fn a_lapsed_sign_in_is_recognised_and_kept_apart_from_a_real_failure() {
+        assert!(looks_signed_out(
+            "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?..."
+        ));
+        assert!(looks_signed_out("Error: authentication interrupted"));
+        assert!(looks_signed_out("Not logged in"));
+        assert!(looks_signed_out("HTTP 401 Unauthorized"));
+        assert!(looks_signed_out("invalid_grant: Token has been expired or revoked."));
+
+        // Real failures must NOT be read as a sign-in problem — failing over on
+        // these would just repeat a genuine error on a second engine and burn
+        // quota doing it.
+        assert!(!looks_signed_out("Codex returned nothing usable."));
+        assert!(!looks_signed_out("error: unexpected argument '--sandbox' found"));
+        assert!(!looks_signed_out("Error: empty prompt. Usage: agy --print \"your prompt here\""));
+        assert!(!looks_signed_out(""));
+
+        // Quota and sign-in are different conditions; only one of them means the
+        // cached "signed in" answer has to be thrown away.
+        assert!(looks_rate_limited("429 rate limit exceeded") && !looks_signed_out("429 rate limit exceeded"));
+    }
+
+    /// The settings panel has always offered several reviewers; the backend
+    /// held one and the frontend sent `.find(...)`, so ticking Codex AND Gemini
+    /// consulted exactly one of them. Whatever is ticked must arrive intact,
+    /// minus the primary — a model reviewing its own draft is not a check.
+    #[test]
+    fn every_ticked_reviewer_is_kept_except_the_one_that_wrote_the_draft() {
+        use crate::cli_provider::CliEngine;
+
+        set_ingestion_engine("claude".into(), Some(vec!["codex".into(), "gemini".into()]));
+        assert_eq!(ingestion_reviewers(), vec![CliEngine::Codex, CliEngine::Gemini]);
+        // The single-reviewer paths (failover, tile picks) take the first.
+        assert_eq!(ingestion_reviewer(), Some(CliEngine::Codex));
+
+        // The primary is dropped even when ticked, and duplicates collapse.
+        set_ingestion_engine("codex".into(), Some(vec!["codex".into(), "claude".into(), "claude".into()]));
+        assert_eq!(ingestion_reviewers(), vec![CliEngine::Claude]);
+
+        // Nothing ticked means the drafting engine revises its own work, which
+        // is what happened before cross-checking existed.
+        set_ingestion_engine("claude".into(), None);
+        assert!(ingestion_reviewers().is_empty());
+        assert_eq!(ingestion_reviewer(), None);
+    }
+
+    /// Only actual NAMES count as must-keep — a rewrite is free to drop a
+    /// `**Setting:**` style field label or re-word a bolded sentence.
+    #[test]
+    fn bold_names_picks_out_names_and_ignores_field_labels() {
+        let names = bold_names(
+            "**Setting:** Harrowfen\n**Aldric Venn** is the factor.\n**the guild** runs it.\n\
+             **This is a whole bolded sentence that goes on well past being a name.**",
+        );
+        assert_eq!(names, vec!["Aldric Venn".to_string()]);
+    }
+
     /// This predicate decides whether a stalled session RECOVERS on another
     /// engine or just stops. Being broad is deliberate: a false positive costs
     /// one wasted retry, a false negative ends the game night.
@@ -770,6 +1429,42 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// The brief is ~39K resolved and `exec resume`/`--conversation` replay the
+    /// whole thread, so re-sending it every turn would stack a copy per turn. But
+    /// skipping it when the campaign HAS changed loses the one property Claude
+    /// gets free by re-reading CLAUDE.md: a chapter advance reaching the DM on the
+    /// very next turn. Both halves are sabotage-checked below.
+    #[test]
+    fn the_cli_brief_is_sent_once_per_thread_and_again_whenever_the_campaign_changes() {
+        let root = Scratch::new("cli-ctx");
+        std::fs::write(root.0.join("memory.md"), "Chapter 1: the marsh.").unwrap();
+        std::fs::write(root.0.join("CLAUDE.md"), "You are the DM.\n@memory.md").unwrap();
+
+        // A fresh thread always gets it, and it really does carry the import.
+        let first = cli_project_context(&root.0, false).expect("a fresh thread gets the brief");
+        assert!(first.contains("You are the DM."));
+        assert!(first.contains("Chapter 1: the marsh."), "the @import must be inlined");
+        assert!(first.contains("END of standing instructions"), "needs a boundary the model can see");
+
+        // Same thread, nothing changed → not resent.
+        assert_eq!(cli_project_context(&root.0, true), None);
+
+        // A chapter advance rewrites an import; the next turn must see it.
+        std::fs::write(root.0.join("memory.md"), "Chapter 2: the barrow.").unwrap();
+        let after = cli_project_context(&root.0, true).expect("a changed campaign resends");
+        assert!(after.contains("Chapter 2: the barrow."));
+        assert_eq!(cli_project_context(&root.0, true), None, "and then settles again");
+
+        // A NEW thread on the same campaign gets it even though nothing changed —
+        // the new conversation has no history to have seen it in.
+        assert!(cli_project_context(&root.0, false).is_some());
+
+        // No CLAUDE.md at all (a campaign folder that predates it) → nothing to
+        // send, and no empty header block pretending to be a brief.
+        let bare = Scratch::new("cli-ctx-bare");
+        assert_eq!(cli_project_context(&bare.0, false), None);
     }
 
     #[test]

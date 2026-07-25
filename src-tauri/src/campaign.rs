@@ -580,14 +580,22 @@ fn build_establish_campaign_prompt(intake: &CampaignIntake, inventory: &str) -> 
 /// prioritization (minor/one-off) or an oversight (something recurring that
 /// should be there), plus the usual genericness/contradiction/vague-hook
 /// checks, then asks for a full revised doc.
-fn build_campaign_lore_critique_prompt(draft: &str, inventory: &str) -> String {
+fn build_campaign_lore_critique_prompt(draft: &str, intake: &CampaignIntake, inventory: &str) -> String {
     format!(
         "You drafted the campaign-lore doc below from the inventory that follows it, for a Dungeons & Dragons campaign.\n\n\
         Draft:\n{draft}\n\n\
+        What the DM asked for when they created the campaign — this is a SOURCE, exactly as much as the inventory is. \
+        Anything here is established fact that belongs in the doc; it is not invention, and must not be flagged as unsupported:\n\
+        - Players: {}\n\
+        - Module/scenario: {}\n\
+        - Other notes: {}\n\n\
         Inventory it was drafted from:\n{}\n\n\
         Check specifically: which named entries from the inventory are missing from the draft, and for each, is that omission a defensible prioritization (minor, one-off, not worth permanent tracking) or an oversight (something recurring/important that should be there)? Also check for generic fantasy-trope phrasing, anything that contradicts the inventory, and hooks vague enough that they don't actually foreshadow anything specific. Then rewrite the doc to fix any real oversights and sharpen anything generic — keep whatever was already working. Keep the same concise, well-organized markdown-outline style, with length still scaled to how much the inventory actually contains (don't pad a thin inventory just to seem thorough).\n\n\
         {NARRATOR_VOICE_TRAILER_INSTRUCTION} If the draft already ended with a NARRATOR_VOICE line, reconsider it against the revised doc's tone rather than assuming it still fits.\n\n\
         Reply with ONLY the full, revised markdown doc followed by that one NARRATOR_VOICE line, no other commentary, no code fences.",
+        intake.players.trim(),
+        intake.module.trim(),
+        intake.notes.trim(),
         if inventory.trim().is_empty() { "(none)" } else { inventory.trim() },
     )
 }
@@ -638,7 +646,7 @@ fn establish_campaign_lore_at(root: &Path, id: &str, intake: &CampaignIntake) ->
         return Err("Campaign-lore establishment returned empty content.".into());
     }
 
-    let final_lore = crate::local_llm::ask_ingest_critique(build_campaign_lore_critique_prompt(&draft, &inventory), Some("opus"), false)
+    let final_lore = crate::local_llm::ask_ingest_critique(build_campaign_lore_critique_prompt(&draft, intake, &inventory), &draft, Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -735,7 +743,7 @@ fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<Stri
         return Err("Campaign-lore update returned empty content; leaving campaign_lore.md untouched.".into());
     }
 
-    let lore = crate::local_llm::ask_ingest_critique(build_update_lore_critique_prompt(&draft, &existing, &inventory), Some("opus"), false)
+    let lore = crate::local_llm::ask_ingest_critique(build_update_lore_critique_prompt(&draft, &existing, &inventory), &draft, Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -1107,9 +1115,23 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
     write_atomic(&records_dir.join(format!("{session_id}.md")), &format!("# {session_id} ({date})\n\n{}\n", transcript.trim()))?;
 
     let mut summaries = Vec::new();
+    let mut failed_chunks = 0usize;
     for chunk in split_into_chunks(transcript, EXTRACTION_CHUNK_MAX_CHARS) {
-        let Ok(reply) = crate::local_llm::ask_ingest_once(build_session_digest_prompt(&chunk), Some("opus"), true) else {
-            continue;
+        let reply = match crate::local_llm::ask_ingest_once(build_session_digest_prompt(&chunk), Some("opus"), true) {
+            Ok(r) => r,
+            // Skipping a chunk loses everything that happened in it: the NPCs
+            // met, the places visited, the promises made. The raw transcript
+            // above survives, so nothing is unrecoverable — but this used to
+            // skip in total silence, so a whole night could produce no memory
+            // updates at all and look like a clean finish. Say so.
+            Err(e) => {
+                crate::maplog::log(
+                    "SESSION DIGEST CHUNK FAILED",
+                    &format!("this chunk contributed no memory entries: {e}"),
+                );
+                failed_chunks += 1;
+                continue;
+            }
         };
         let digest = parse_session_digest(&reply);
         for e in &digest.entities {
@@ -1132,7 +1154,21 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
         }
     }
 
-    let summary = if summaries.is_empty() { "(session recorded — no summary produced)".to_string() } else { summaries.join(" ") };
+    // A partial digest must SAY it is partial. The raw transcript is safe either
+    // way, but "no summary produced" reads like a quiet night rather than like
+    // the memory pass having failed — and the difference matters when you come
+    // back next week wondering why the DM forgot everyone.
+    let summary = match (summaries.is_empty(), failed_chunks) {
+        (true, 0) => "(session recorded — no summary produced)".to_string(),
+        (true, n) => format!(
+            "(session recorded, but the memory pass FAILED on all {n} part(s) — the full transcript is saved under session records, and re-running the digest after checking your engine sign-in will recover the details)"
+        ),
+        (false, 0) => summaries.join(" "),
+        (false, n) => format!(
+            "{} [Note: {n} part(s) of this session could not be processed — some NPCs, places or promises from it are missing from memory. The full transcript is saved under session records.]",
+            summaries.join(" ")
+        ),
+    };
     append_session_index_line_at(root, id, &session_id, date, &summary)?;
     // Keep the active module's arc plan honest about what actually happened —
     // see reconcile_module_plan_at. Best-effort: this must never fail the
@@ -3887,6 +3923,107 @@ fn build_vision_message(slots: &[(&Placement, Vec<crate::tile_library::TileCandi
     json!({"type":"user","message":{"role":"user","content":content}}).to_string()
 }
 
+/// The same slot/candidate shortlist as `build_vision_message`, written out as
+/// FILENAMES for an engine that is only reading text. Deliberately a different
+/// lens, not a redundant one: the primary judges the picture, this judges what
+/// the artist called the file. Pure.
+///
+/// Reply shape is identical to the vision call's, so `parse_vision_picks` reads
+/// both and there is one format to get wrong instead of two.
+fn describe_object_options(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> String {
+    let mut out = format!(
+        "A {biome} battle map needs one tile per slot below. You can only see the FILENAMES — judge each option purely on whether its name plausibly describes that slot's thing, and on nothing else.\n"
+    );
+    for (i, (p, cands)) in slots.iter().enumerate() {
+        out.push_str(&format!("\n[slot {}] \"{}\" ({}x{} cells):\n", i + 1, p.label, p.w, p.h));
+        for (j, c) in cands.iter().enumerate() {
+            out.push_str(&format!("  [{}.{}] {}\n", i + 1, j + 1, c.rel_path));
+        }
+    }
+    out.push_str(
+        "\nFor EACH slot pick the option number whose FILENAME best names that slot's thing. If no filename plausibly names it, choose 0 for that slot. \
+         Reply with ONLY this JSON, one entry per slot, nothing else: {\"picks\":[{\"slot\":1,\"choice\":2},{\"slot\":2,\"choice\":0}]}",
+    );
+    out
+}
+
+/// Ask a second engine to choose from the same object shortlists by filename,
+/// and log every slot the two disagree on.
+///
+/// This is where the cross-check actually earns its place. The known bad picks
+/// are all OBJECTS — "dais side board" landing on `Spirit_Board`, "trophy armor
+/// display" on `Display_Pillow` — cases where English buries the identity word
+/// mid-label and the head noun is generic. A model reading the filename fails
+/// differently from one reading the picture, which is exactly what makes the
+/// disagreement informative. Never changes the pick: nobody is watching at
+/// generation time, so this names ambiguous slots for later rather than
+/// overruling a judgment made from the actual art.
+fn cross_check_object_picks(
+    slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)],
+    biome: &str,
+    picked: &[Option<usize>],
+) {
+    let Some(reviewer) = crate::local_llm::ingestion_reviewer() else { return };
+    // Only slots with a real choice to make. A one-candidate slot cannot be
+    // disagreed with, and a slot the primary declined outright (0) is a
+    // different conversation from picking the wrong one.
+    let worth_asking: Vec<usize> =
+        (0..slots.len()).filter(|&i| slots[i].1.len() > 1 && picked.get(i).copied().flatten().is_some()).collect();
+    if worth_asking.is_empty() {
+        return;
+    }
+    let reply = match crate::dm::run_engine_oneshot(
+        reviewer,
+        &format!(
+            "{}\n\n(You are checking another model's choices. Answer independently.)",
+            describe_object_options(slots, biome)
+        ),
+        None,
+        None,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            crate::maplog::log(
+                "OBJECT PICK CROSS-CHECK FAILED",
+                &format!("{} did not answer ({e}) — the primary's picks stand", reviewer.label()),
+            );
+            return;
+        }
+    };
+    let theirs = parse_vision_picks(&reply, slots.len());
+    let name = |slot: usize, idx: Option<usize>| match idx {
+        Some(i) => slots[slot].1.get(i).map(|c| c.rel_path.as_str()).unwrap_or("?").to_string(),
+        None => "(declined)".to_string(),
+    };
+    let mut disputed = 0;
+    for i in worth_asking {
+        let (mine, other) = (picked.get(i).copied().flatten(), theirs.get(i).copied().flatten());
+        // A reviewer that declines where the primary chose is not a disagreement
+        // about WHICH tile — it saw no filename it liked, which is the expected
+        // outcome whenever the art is named for its pack rather than its subject.
+        if other.is_none() || other == mine {
+            continue;
+        }
+        disputed += 1;
+        crate::maplog::log(
+            "OBJECT PICK DISPUTED",
+            &format!(
+                "\"{}\": primary chose {} — {} chose {} by filename — worth a look",
+                slots[i].0.label,
+                name(i, mine),
+                reviewer.label(),
+                name(i, other),
+            ),
+        );
+    }
+    if disputed == 0 {
+        crate::maplog::log(
+            "OBJECT PICKS AGREED",
+            &format!("{} matched the primary on every slot it had an opinion about", reviewer.label()),
+        );
+    }
+}
+
 /// Max candidate images in a single vision request. One call for a whole map
 /// (12 slots x 8 = 96 images) is rejected as "Prompt is too long" — each image
 /// costs ~1.5k tokens and the CLI also loads the project's CLAUDE.md/plugin
@@ -3962,7 +4099,9 @@ fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)
     match crate::dm::run_claude_vision(&build_vision_message(chunk, biome), Some(VISION_PICK_MODEL)) {
         Ok(reply) => {
             crate::maplog::log("VISION TILE PICK (raw reply)", &reply);
-            parse_vision_picks(&reply, chunk.len())
+            let picks = parse_vision_picks(&reply, chunk.len());
+            cross_check_object_picks(chunk, biome, &picks);
+            picks
         }
         Err(e) => {
             crate::maplog::log(
@@ -4565,8 +4704,15 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
     // "trophy armor display" -> Display_Pillow) are exactly the cases where
     // coverage and biome affinity conflict and no ranking rule has separated
     // them. Two models disagreeing is the signal a rule couldn't produce.
+    // A one-candidate shortlist cannot be disagreed with — there is nothing else
+    // to choose. Live: this map's liquid pick had exactly one candidate and still
+    // spent a full reviewer call to be told "1". Measured on the same run, that is
+    // ~3s of the 73s tile phase bought for information that was already certain.
+    if cands.len() < 2 {
+        return Some(picked);
+    }
     if let Some(reviewer) = crate::local_llm::ingestion_reviewer() {
-        if let Ok(second) = crate::dm::run_engine_oneshot(
+        let second = crate::dm::run_engine_oneshot(
             reviewer,
             &format!(
                 "{}\n\n(You are checking another model's choice. Answer independently.)",
@@ -4574,27 +4720,48 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
             ),
             None,
             None,
-        ) {
-            if let Some(other) = serde_json::from_str::<serde_json::Value>(&extract_json_object(&second))
+        );
+        let name = |i: usize| cands.get(i).map(|c| c.rel_path.as_str()).unwrap_or("?").to_string();
+        // Every outcome gets a line. Logging ONLY disagreement means silence covers
+        // "agreed", "replied with something unparseable" and "never ran at all" —
+        // the exact ambiguity that made the critique cross-check look healthy while
+        // it was returning empty for every leg.
+        match second {
+            Err(e) => crate::maplog::log(
+                "TILE PICK CROSS-CHECK FAILED",
+                &format!("{kind}: {} did not answer ({e}) — the primary's pick stands", reviewer.label()),
+            ),
+            Ok(reply) => match serde_json::from_str::<serde_json::Value>(&extract_json_object(&reply))
                 .ok()
                 .and_then(|v| v.get("choice").and_then(|c| c.as_u64()))
                 .filter(|c| (1..=cands.len() as u64).contains(c))
                 .map(|c| (c - 1) as usize)
             {
-                if other != picked {
-                    crate::maplog::log(
-                        "TILE PICK DISPUTED",
-                        &format!(
-                            "{kind}: primary chose #{} ({}), {} chose #{} ({}) — ambiguous query, worth a look",
-                            picked + 1,
-                            cands.get(picked).map(|c| c.rel_path.as_str()).unwrap_or("?"),
-                            reviewer.label(),
-                            other + 1,
-                            cands.get(other).map(|c| c.rel_path.as_str()).unwrap_or("?"),
-                        ),
-                    );
-                }
-            }
+                None => crate::maplog::log(
+                    "TILE PICK CROSS-CHECK UNREADABLE",
+                    &format!(
+                        "{kind}: {} answered with no usable choice in 1..={} — {}",
+                        reviewer.label(),
+                        cands.len(),
+                        reply.trim().chars().take(200).collect::<String>()
+                    ),
+                ),
+                Some(other) if other == picked => crate::maplog::log(
+                    "TILE PICK AGREED",
+                    &format!("{kind}: {} independently chose #{} ({}) too", reviewer.label(), picked + 1, name(picked)),
+                ),
+                Some(other) => crate::maplog::log(
+                    "TILE PICK DISPUTED",
+                    &format!(
+                        "{kind}: primary chose #{} ({}), {} chose #{} ({}) — ambiguous query, worth a look",
+                        picked + 1,
+                        name(picked),
+                        reviewer.label(),
+                        other + 1,
+                        name(other),
+                    ),
+                ),
+            },
         }
     }
     Some(picked)
@@ -7401,7 +7568,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     on_progress("synthesizing", 0, 0);
     let draft_plan = crate::local_llm::ask_ingest_once(build_plan_synthesis_prompt(&extracts, &campaign_lore, &other_modules_summary), Some("opus"), false)?;
     on_progress("critiquing", 0, 0);
-    let plan = crate::local_llm::ask_ingest_critique(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), Some("opus"), false)
+    let plan = crate::local_llm::ask_ingest_critique(build_plan_critique_prompt(&draft_plan, &campaign_lore, &other_modules_summary), &draft_plan, Some("opus"), false)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -10925,14 +11092,32 @@ Tactics:
 
     #[test]
     fn build_campaign_lore_critique_prompt_asks_about_coverage_of_missing_inventory_entries() {
+        let intake = CampaignIntake {
+            name: "Barovia".into(),
+            edition: "2014".into(),
+            players: "Ireena, a noble".into(),
+            module: "Curse of Strahd".into(),
+            notes: "The party owes a debt to the Vistani.".into(),
+            lore: String::new(),
+        };
         let prompt = build_campaign_lore_critique_prompt(
             "## Hub\nThe party operates out of Vallaki.",
+            &intake,
             "- **Strahd von Zarovich** — the vampire lord who rules Barovia.",
         );
         assert!(prompt.contains("The party operates out of Vallaki."));
         assert!(prompt.contains("Strahd von Zarovich"));
         assert!(prompt.to_lowercase().contains("oversight"), "should ask whether a missing entry is a defensible cut or an oversight");
         assert!(full_prompt_has_narrator_voice_trailer_instruction(&prompt));
+
+        // The intake is a SOURCE. The inventory is built only from intake.lore,
+        // so a reviewer shown the inventory alone cannot tell a DM-stated
+        // requirement from invention — and will flag it as unsupported. Live,
+        // Codex did exactly that to "the party owes a debt to the mining guild",
+        // which the DM had typed into the notes field themselves.
+        assert!(prompt.contains("The party owes a debt to the Vistani."), "intake notes must reach the reviewer");
+        assert!(prompt.contains("Curse of Strahd"));
+        assert!(prompt.contains("Ireena, a noble"));
     }
 
     #[test]

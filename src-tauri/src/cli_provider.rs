@@ -122,17 +122,22 @@ impl CliEngine {
         match self {
             Self::Claude => None, // dm::claude_logged_in already does this
             Self::Codex => Some(&["login", "status"]),
-            // None: agy has NO subcommand that touches auth, so the caller falls
-            // back to checking for its credential files.
+            // A real, tiny call — the ONLY thing that answers this honestly.
             //
-            // This used to be `Some(&["models"])` on the assumption that listing
-            // models required being signed in. It does not. Measured 2026-07-25
-            // with both credential stores empty and `agy --print` refusing with
-            // "Authentication required": `agy models` still printed the full
-            // catalogue and exited 0, so the Accounts panel showed a cheerful
-            // "signed in" for an account that could not take a single turn.
-            // `agents` and `changelog` are the same -- none of them need auth.
-            Self::Gemini => None,
+            // Two wrong answers preceded it, in both directions. `agy models`
+            // exits 0 with the full catalogue while signed OUT, so it reported
+            // everyone signed in. Checking for `~/.gemini/oauth_creds.json`
+            // then reported a genuinely signed-in user as signed OUT: that path
+            // belonged to the retired gemini-cli, and Antigravity keeps its
+            // token somewhere else entirely (not in ~/.gemini, not in
+            // %LOCALAPPDATA%\agy, not in Windows Credential Manager).
+            //
+            // No agy subcommand touches auth — `models`, `agents`, `changelog`
+            // and `plugins` were all checked — and `--print ""` fails on the
+            // empty prompt BEFORE auth is consulted. So the probe has to be a
+            // real prompt. It costs ~5s, which is why the caller caches a
+            // signed-in answer for the life of the process.
+            Self::Gemini => Some(&["--mode", "plan", "--sandbox", "--output-format", "json", "--print", "ok"]),
         }
     }
 
@@ -148,11 +153,12 @@ impl CliEngine {
                 let t = stdout.to_ascii_lowercase();
                 !t.contains("not logged in") && (t.contains("logged in") || t.contains("chatgpt") || t.contains("api key"))
             }
-            // Unreachable: `auth_probe_args` is None for Gemini because agy has
-            // no auth-aware subcommand, so nothing is ever probed to feed this.
-            // Kept explicit rather than deleted so that anyone who gives Gemini
-            // a probe again has to come here and confront the measurement.
-            Self::Gemini => false,
+            // The probe is a real prompt, so a completed turn is the proof.
+            // Signed out, agy writes an "Authentication required" banner and an
+            // OAuth URL to stderr and produces no envelope at all — so requiring
+            // the envelope's SUCCESS is both necessary and sufficient, and can't
+            // be faked by a catalogue listing the way `agy models` was.
+            Self::Gemini => stdout.contains("\"status\":\"SUCCESS\""),
         }
     }
 }
@@ -256,6 +262,15 @@ pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>
             // behind for every ingestion call.
             args.push("--ephemeral".into());
             push_model(&mut args, "--model", model);
+            // Reasoning is OFF by default — a live run's own banner read
+            // "reasoning effort: none" while Codex was being asked to review
+            // someone else's campaign lore, which is the most analytically
+            // demanding call in the whole pipeline. There is no flag for it;
+            // it goes through the config override.
+            if let Some(e) = effort {
+                args.push("-c".into());
+                args.push(format!("model_reasoning_effort=\"{e}\""));
+            }
             args.push("--output-last-message".into());
             args.push(last_message_file.to_string());
             Invocation { args, delivery: Delivery::LastMessageFile, prompt_on_stdin: true }
@@ -264,6 +279,11 @@ pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>
             let mut args: Vec<String> = vec![];
             args.extend(lockdown_flags(engine));
             push_model(&mut args, "--model", model);
+            // Same reasoning gap as Codex above; agy spells it as a flag.
+            if let Some(e) = effort {
+                args.push("--effort".into());
+                args.push(e.to_string());
+            }
             // agy prints the answer as plain text with no envelope, and takes
             // the prompt as this flag's value — appended by the caller.
             args.push("--print".into());
@@ -649,21 +669,73 @@ mod tests {
         assert!(e.auth_probe_says_signed_in("Logged in using an API key\n"));
     }
 
-    /// agy has no subcommand that requires being signed in, so there is nothing
-    /// to probe and the caller must fall back to looking for credential files.
+    /// Reasoning effort has to reach EVERY engine, not just Claude.
     ///
-    /// This was `Some(&["models"])`, on the reasonable-sounding assumption that
-    /// listing models needs an account. Measured with both credential stores
-    /// empty and `agy --print` refusing outright, `agy models` still printed the
-    /// whole catalogue and exited 0 — so the Accounts panel reported "signed in"
-    /// for an account that could not take a single turn. The lesson is the same
-    /// one Codex's `login status` taught: a probe is only a probe once it has
-    /// been run in the SIGNED-OUT state.
+    /// It was wired only into the Claude arm, so the other two ran the critique
+    /// pass — the most analytically demanding call in the pipeline — at their own
+    /// defaults. A live Codex run's banner read "reasoning effort: none" while it
+    /// was reviewing campaign lore. Each engine spells it differently, which is
+    /// exactly how it went unnoticed.
     #[test]
-    fn gemini_has_no_auth_probe_because_none_of_its_subcommands_need_auth() {
-        assert_eq!(CliEngine::Gemini.auth_probe_args(), None);
-        // ...so even output that looks healthy can never be read as a sign-in.
-        assert!(!CliEngine::Gemini.auth_probe_says_signed_in("gemini-3.6-flash-high\ngemini-3.1-pro-low"));
+    fn reasoning_effort_reaches_every_engine_in_its_own_spelling() {
+        let claude = oneshot_args(CliEngine::Claude, None, Some("high"), "o.txt").args;
+        let i = claude.iter().position(|a| a == "--effort").expect("claude --effort");
+        assert_eq!(claude[i + 1], "high");
+
+        // Codex has no flag for it; only the config override works.
+        let codex = oneshot_args(CliEngine::Codex, None, Some("high"), "o.txt").args;
+        let i = codex.iter().position(|a| a == "-c").expect("codex -c override");
+        assert_eq!(codex[i + 1], "model_reasoning_effort=\"high\"");
+
+        let gemini = oneshot_args(CliEngine::Gemini, None, Some("high"), "o.txt").args;
+        let i = gemini.iter().position(|a| a == "--effort").expect("agy --effort");
+        assert_eq!(gemini[i + 1], "high");
+
+        // And none of them may invent one when the caller passed nothing.
+        for engine in [CliEngine::Claude, CliEngine::Codex, CliEngine::Gemini] {
+            let args = oneshot_args(engine, None, None, "o.txt").args;
+            assert!(
+                !args.iter().any(|a| a == "--effort" || a.starts_with("model_reasoning_effort")),
+                "{engine:?} invented an effort: {args:?}"
+            );
+        }
+    }
+
+    /// Gemini's sign-in state can only be read from a REAL completed call.
+    ///
+    /// Two cheaper answers were tried and both were wrong, in opposite
+    /// directions — which is why this test pins verbatim output from each case:
+    ///
+    /// - `agy models` exits 0 and prints the whole catalogue while signed OUT,
+    ///   so it reported everyone as signed in.
+    /// - `~/.gemini/oauth_creds.json` reported a genuinely signed-in user as
+    ///   signed OUT. That path belonged to the retired gemini-cli; Antigravity
+    ///   stores its token somewhere else entirely.
+    ///
+    /// Same lesson as Codex's `login status`: a probe is only a probe once it has
+    /// been run in BOTH states.
+    #[test]
+    fn gemini_sign_in_can_only_be_read_from_a_real_completed_call() {
+        let probe = CliEngine::Gemini.auth_probe_args().expect("gemini needs a probe");
+        assert!(probe.contains(&"--print"), "the probe must be a real prompt: {probe:?}");
+        assert!(probe.contains(&"--output-format"), "and must ask for the envelope: {probe:?}");
+        // The lockdown applies even to the probe — it is a live model call.
+        assert!(probe.contains(&"--mode") && probe.contains(&"plan"), "{probe:?}");
+
+        let e = CliEngine::Gemini;
+        // A real success envelope, verbatim.
+        assert!(e.auth_probe_says_signed_in(
+            r#"{"conversation_id":"57c3ce5a","status":"SUCCESS","response":"ok\n","num_turns":1}"#
+        ));
+        // The catalogue that fooled the previous probe. Signed out, this is
+        // EXACTLY what `agy models` prints — it must never read as a sign-in.
+        assert!(!e.auth_probe_says_signed_in("gemini-3.6-flash-high\ngemini-3.1-pro-low\nclaude-sonnet-4-6"));
+        // What signed-out actually looks like: a banner on stderr, no envelope.
+        assert!(!e.auth_probe_says_signed_in(
+            "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?..."
+        ));
+        assert!(!e.auth_probe_says_signed_in(r#"{"status":"ERROR","error":"Error: empty prompt"}"#));
+        assert!(!e.auth_probe_says_signed_in(""));
     }
 
     #[test]
