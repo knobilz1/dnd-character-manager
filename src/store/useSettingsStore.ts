@@ -27,8 +27,13 @@ interface SettingsState {
    *  API (Ollama, LM Studio, llama.cpp server, koboldcpp all support this).
    *  Global for the device, changeable any time (see hooks/dm.rs's
    *  ask_dm_local/local_llm.rs). */
-  dmProvider: 'claude' | 'local';
-  setDmProvider: (v: 'claude' | 'local') => void;
+  /** `codex` and `gemini` join `claude` as SUBSCRIPTION engines — each runs via
+   *  that vendor's own CLI against a plan the user already pays for, never a
+   *  per-token API key (see cli_provider.rs). `local` remains the only
+   *  self-hosted option. Adding members needs no persist migration: every
+   *  previously stored value is still valid. */
+  dmProvider: 'claude' | 'local' | 'codex' | 'gemini';
+  setDmProvider: (v: 'claude' | 'local' | 'codex' | 'gemini') => void;
   localLlmBaseUrl: string;
   setLocalLlmBaseUrl: (v: string) => void;
   localLlmModel: string;
@@ -48,8 +53,8 @@ interface SettingsState {
    *  local path uses (see local_llm.rs's set_ingestion_provider/ask_ingest_once).
    *  Best for small throwaway one-shot campaigns where ingestion quality matters
    *  less than not spending Claude budget. */
-  ingestionProvider: 'claude' | 'local';
-  setIngestionProvider: (v: 'claude' | 'local') => void;
+  ingestionProvider: 'claude' | 'local' | 'codex' | 'gemini';
+  setIngestionProvider: (v: 'claude' | 'local' | 'codex' | 'gemini') => void;
   /** Which engine synthesizes the DM/NPC voices. 'kokoro' (default) is the
    *  fast, CPU, always-available preset-voice engine; 'f5' is the optional
    *  high-fidelity GPU voice-cloning engine (see src-tauri/src/tts.rs). ONE-WAY

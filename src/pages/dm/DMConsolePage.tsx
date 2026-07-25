@@ -18,6 +18,7 @@ import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
 import { listTableCameras, captureTableFrame, coarsePhotoWarning, type TableCamera } from '../../utils/tableCamera';
+import { EngineAccounts } from '../../components/EngineAccounts';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -4667,21 +4668,28 @@ export function DMConsolePage() {
             <label className="block text-xs text-slate-400 mb-1">Engine</label>
             <select
               value={dmProvider}
-              onChange={(e) => setDmProvider(e.target.value as 'claude' | 'local')}
+              onChange={(e) => setDmProvider(e.target.value as 'claude' | 'local' | 'codex' | 'gemini')}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600"
             >
-              <option value="claude">Claude (your subscription)</option>
+              <option value="claude">Claude (your Claude subscription)</option>
+              <option value="codex">Codex (your ChatGPT subscription)</option>
+              <option value="gemini">Gemini (your Google account)</option>
               <option value="local">Local LLM (Ollama / LM Studio / llama.cpp server…)</option>
             </select>
           </div>
+          {/* Sign-in lives right under the picker, because choosing an engine
+              you haven't signed into is the moment you need it. */}
+          <EngineAccounts />
           <div>
             <label className="block text-xs text-slate-400 mb-1">Ingestion &amp; memory</label>
             <select
               value={ingestionProvider}
-              onChange={(e) => setIngestionProvider(e.target.value as 'claude' | 'local')}
+              onChange={(e) => setIngestionProvider(e.target.value as 'claude' | 'local' | 'codex' | 'gemini')}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-600"
             >
               <option value="claude">Claude (best quality)</option>
+              <option value="codex">Codex (your ChatGPT subscription)</option>
+              <option value="gemini">Gemini (free tier available)</option>
               <option value="local">Local LLM (free, lower quality)</option>
             </select>
             <p className="text-xs text-slate-500 mt-1">
