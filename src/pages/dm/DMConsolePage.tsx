@@ -1904,7 +1904,7 @@ export function DMConsolePage() {
     // rather than hidden.
     if (dmProvider === 'codex' || dmProvider === 'gemini') {
       return invoke<{ text: string; session_id?: string }>('ask_dm_engine', {
-        engine: dmProvider, prompt, sessionId, campaignId,
+        engine: dmProvider, prompt, sessionId, campaignId, effort,
       });
     }
     return invoke<{ text: string; session_id?: string }>('ask_dm', { prompt, sessionId, campaignId, effort });

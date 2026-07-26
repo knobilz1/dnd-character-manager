@@ -556,6 +556,38 @@ pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
     ingestion_reviewers().into_iter().next()
 }
 
+/// One subscription-backed ingestion call. This is the single policy boundary
+/// for model/effort routing: Claude keeps the caller's tier and effort, Gemini
+/// keeps its workload probe, and Codex always takes the catalog-selected newest
+/// xhigh-capable model at xhigh. Keeping it here prevents map generation,
+/// classification, critique and failover from quietly drifting apart again.
+fn ask_subscription_ingest_once(
+    engine: crate::cli_provider::CliEngine,
+    prompt: &str,
+    claude_model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<String, String> {
+    let (model, effort) = subscription_ingest_options(engine, claude_model, effort);
+    match engine {
+        crate::cli_provider::CliEngine::Claude => crate::dm::ask_claude_once(prompt.to_string(), model, effort),
+        other => crate::dm::run_engine_oneshot(other, prompt, model, effort),
+    }
+}
+
+/// Pure half of ask_subscription_ingest_once, kept separate so the Codex
+/// quality policy is pinned without spawning or requiring any signed-in CLI.
+fn subscription_ingest_options<'a>(
+    engine: crate::cli_provider::CliEngine,
+    claude_model: Option<&'a str>,
+    effort: Option<&'a str>,
+) -> (Option<&'a str>, Option<&'a str>) {
+    match engine {
+        crate::cli_provider::CliEngine::Claude => (claude_model, effort),
+        crate::cli_provider::CliEngine::Codex => (None, Some("xhigh")),
+        crate::cli_provider::CliEngine::Gemini => (None, effort),
+    }
+}
+
 /// Run one ingestion prompt on a SPECIFIC engine, bypassing the configured
 /// primary — how a critique leg reaches the reviewer. Falls back to the normal
 /// path if that engine fails, because a second opinion is an improvement, not a
@@ -564,7 +596,7 @@ pub fn ask_ingest_once_on(
     engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>, expect_json: bool,
     effort: Option<&str>,
 ) -> Result<String, String> {
-    match crate::dm::run_engine_oneshot(engine, &prompt, claude_model, effort) {
+    match ask_subscription_ingest_once(engine, &prompt, claude_model, effort) {
         Ok(text) => {
             // Logged on SUCCESS, not just on failure. Because this degrades
             // silently, a quiet log was indistinguishable from the reviewer
@@ -723,7 +755,7 @@ pub fn ask_ingest_once(prompt: String, claude_model: Option<&str>, expect_json: 
                     other.label()
                 ),
             );
-            crate::dm::run_engine_oneshot(other, &prompt, None, None).map_err(|second| {
+            ask_subscription_ingest_once(other, &prompt, None, None).map_err(|second| {
                 format!("{e}\n\nAlso tried {}: {second}", other.label())
             })
         }
@@ -739,16 +771,12 @@ fn ask_ingest_inner(prompt: String, claude_model: Option<&str>, expect_json: boo
         }
         ask_local_once(&cfg.base_url, &cfg.model, &prompt, expect_json)
     } else {
-        match cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude) {
-            // Claude keeps its own long-standing path: `claude_model` is a tier
-            // hint (opus/sonnet) that only means something to that CLI, and
-            // ask_claude_once already handles it.
-            crate::cli_provider::CliEngine::Claude => crate::dm::ask_claude_once(prompt, claude_model, None),
-            // Other engines run whatever model their subscription gives them,
-            // so the tier hint is dropped rather than passed through as a name
-            // they'd reject.
-            other => crate::dm::run_engine_oneshot(other, &prompt, None, None),
-        }
+        ask_subscription_ingest_once(
+            cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude),
+            &prompt,
+            claude_model,
+            None,
+        )
     }
 }
 
@@ -1126,8 +1154,10 @@ fn extract_json_object(s: &str) -> String {
     }
 }
 
-/// Same dispatch as `ask_ingest_once`, but forces `low` extended-thinking
-/// effort on the Claude path — see build_claude_args's doc comment (dm.rs):
+/// Same dispatch as `ask_ingest_once`, but requests `low` extended-thinking
+/// on Claude. Codex intentionally overrides this to xhigh: map specs are a
+/// quality workload when Codex is primary, and its effort policy is kept
+/// consistent with ordinary ingestion. See build_claude_args's doc comment:
 /// the live DM turn loop already forces `low` for ordinary turns, measured
 /// to cut real wall-clock latency by roughly a quarter with no quality
 /// regression even on nuanced judgment calls. Battle-map generation (its
@@ -1162,7 +1192,12 @@ pub fn ask_ingest_once_at_effort(
     if cfg.use_local {
         ask_ingest_once(prompt, claude_model, false)
     } else {
-        crate::dm::ask_claude_once(prompt, claude_model, Some(effort))
+        ask_subscription_ingest_once(
+            cfg.engine.unwrap_or(crate::cli_provider::CliEngine::Claude),
+            &prompt,
+            claude_model,
+            Some(effort),
+        )
     }
 }
 
@@ -1219,6 +1254,14 @@ pub fn end_local_dm_session(session_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_ingestion_always_uses_xhigh_and_never_a_claude_model_name() {
+        use crate::cli_provider::CliEngine;
+        assert_eq!(subscription_ingest_options(CliEngine::Codex, Some("opus"), None), (None, Some("xhigh")));
+        assert_eq!(subscription_ingest_options(CliEngine::Codex, Some("sonnet"), Some("low")), (None, Some("xhigh")));
+        assert_eq!(subscription_ingest_options(CliEngine::Claude, Some("sonnet"), Some("low")), (Some("sonnet"), Some("low")));
+    }
 
     /// The guard that stops a "critique" from replacing a good draft with a
     /// worse one. Every case here is drawn from the live A/B that motivated it:

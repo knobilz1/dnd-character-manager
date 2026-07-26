@@ -1834,6 +1834,7 @@ pub async fn ask_dm_engine(
     prompt: String,
     session_id: Option<String>,
     campaign_id: Option<String>,
+    effort: Option<String>,
 ) -> Result<DmReply, String> {
     let engine = crate::cli_provider::CliEngine::from_setting(&engine);
     if engine == crate::cli_provider::CliEngine::Claude {
@@ -1845,7 +1846,9 @@ pub async fn ask_dm_engine(
         Some(id) => Some(crate::campaign::campaign_dir(&app, &id)?),
         None => None,
     };
-    tokio::task::spawn_blocking(move || run_engine_turn(&app, engine, &prompt, session_id.as_deref(), cwd))
+    tokio::task::spawn_blocking(move || {
+        run_engine_turn(&app, engine, &prompt, session_id.as_deref(), cwd, effort.as_deref())
+    })
         .await
         .map_err(|e| format!("Turn task failed: {e}"))?
 }
@@ -1870,6 +1873,60 @@ pub async fn ask_dm_engine(
 /// invalidate those measurements.
 const GEMINI_TURN_MODELS: &[&str] = &["gemini-3.1-pro-low", "gemini-3.6-flash-high"];
 const GEMINI_INGEST_MODELS: &[&str] = &["gemini-3.1-pro-high", "gemini-3.6-flash-high"];
+
+#[derive(serde::Deserialize)]
+struct CodexModelCatalog {
+    models: Vec<CodexCatalogModel>,
+}
+
+#[derive(serde::Deserialize)]
+struct CodexCatalogModel {
+    slug: String,
+    visibility: String,
+    priority: i64,
+    supported_reasoning_levels: Vec<CodexReasoningLevel>,
+}
+
+#[derive(serde::Deserialize)]
+struct CodexReasoningLevel {
+    effort: String,
+}
+
+/// Picks the catalog's preferred visible model that can actually run xhigh.
+/// `codex debug models` orders its public catalog with `priority` (lower is
+/// better), so this selects gpt-5.6-sol today and automatically follows a 5.7,
+/// 6.0, etc. once the installed CLI promotes it. Requiring xhigh prevents a
+/// newly-listed fast/small model from winning merely because it is new.
+fn preferred_codex_ingest_model(catalog_json: &str) -> Option<String> {
+    let catalog: CodexModelCatalog = serde_json::from_str(catalog_json).ok()?;
+    catalog.models.into_iter()
+        .filter(|m| m.visibility == "list" && m.supported_reasoning_levels.iter().any(|r| r.effort == "xhigh"))
+        .min_by_key(|m| m.priority)
+        .map(|m| m.slug)
+}
+
+/// Best Codex model for non-interactive ingestion/map work, cached for the app
+/// run. The CLI catalog is the authority for both availability and ordering;
+/// hardcoding today's model would strand the app on it after the next release.
+/// A failed probe falls back to Codex's own default rather than blocking work.
+fn best_codex_ingest_model() -> Option<&'static str> {
+    static BEST: OnceLock<Option<String>> = OnceLock::new();
+    BEST.get_or_init(|| {
+        let mut cmd = engine_command(crate::cli_provider::CliEngine::Codex, &["debug", "models"]).ok()?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output().ok()?;
+        if !output.status.success() { return None; }
+        let model = preferred_codex_ingest_model(&String::from_utf8_lossy(&output.stdout));
+        if let Some(model) = &model {
+            crate::maplog::log("CODEX MODEL", &format!("ingestion: using {model} at xhigh"));
+        }
+        model
+    }).as_deref()
+}
 
 /// The best Gemini model this account can actually run, probed once per process.
 ///
@@ -1988,6 +2045,7 @@ fn run_engine_turn(
     prompt: &str,
     session_id: Option<&str>,
     cwd: Option<PathBuf>,
+    effort: Option<&str>,
 ) -> Result<DmReply, String> {
     // Setting cwd is enough for Claude and for nobody else: measured, `agy` reads
     // none of CLAUDE.md/AGENTS.md/GEMINI.md and `codex` reads AGENTS.md only, so
@@ -2013,7 +2071,7 @@ fn run_engine_turn(
     let mut session = session_id.map(str::to_string);
     let mut reply = DmReply { text: String::new(), session_id: None };
     for (i, piece) in pieces.iter().enumerate() {
-        reply = run_engine_turn_once(app, engine, piece, session.as_deref(), cwd.clone())?;
+        reply = run_engine_turn_once(app, engine, piece, session.as_deref(), cwd.clone(), effort)?;
         // The barge-in contract: empty text AND no session id. Stop priming
         // rather than spending the rest of the pieces on a cancelled turn.
         if reply.text.is_empty() && reply.session_id.is_none() {
@@ -2052,6 +2110,7 @@ fn run_engine_turn_once(
     prompt: &str,
     session_id: Option<&str>,
     cwd: Option<PathBuf>,
+    effort: Option<&str>,
 ) -> Result<DmReply, String> {
     use crate::cli_provider::{turn_args, Delivery};
 
@@ -2069,7 +2128,7 @@ fn run_engine_turn_once(
         engine,
         session_id,
         model_for(engine, None, GEMINI_TURN_MODELS, "turn"),
-        None,
+        if engine == crate::cli_provider::CliEngine::Codex { effort } else { None },
         false,
         &out_path.to_string_lossy(),
     );
@@ -2195,9 +2254,8 @@ fn run_engine_turn_once(
 /// looked broken and healthy at the same time, depending which leg you watched.
 /// Measured against a live run 2026-07-25.
 ///
-/// If per-engine model choice is ever offered, this is the function to revisit —
-/// the invariant is "a CLAUDE model name is Claude's alone", not "other engines
-/// never get a model".
+/// Codex ingestion now gets its own catalog-selected model below; this helper
+/// still owns the invariant that a CLAUDE model name is Claude's alone.
 fn claude_tier_only(
     engine: crate::cli_provider::CliEngine, model: Option<&str>,
 ) -> Option<&str> {
@@ -2217,8 +2275,8 @@ fn explicit_gemini_model(model: Option<&str>) -> Option<&str> {
 
 /// Which model actually reaches an engine's `--model`.
 ///
-/// This is the "per-engine model choice" the comment above anticipated. Claude
-/// keeps its caller-chosen tier. Codex keeps its own default. Gemini takes a real
+/// Claude keeps its caller-chosen tier. Codex live turns keep their own default
+/// (ingestion is selected separately in run_engine_oneshot). Gemini takes a real
 /// Gemini model name — from the caller if it gave one, otherwise the best its
 /// account can run.
 ///
@@ -2248,7 +2306,11 @@ pub(crate) fn run_engine_oneshot(
 ) -> Result<String, String> {
     use crate::cli_provider::{oneshot_args, Delivery};
 
-    let model = model_for(engine, model, GEMINI_INGEST_MODELS, "ingestion");
+    let model = if engine == crate::cli_provider::CliEngine::Codex {
+        best_codex_ingest_model()
+    } else {
+        model_for(engine, model, GEMINI_INGEST_MODELS, "ingestion")
+    };
 
     // Unique per call so two concurrent ingestion calls can't read each other's
     // answer — map generation fans several of these out at once.
@@ -2707,6 +2769,18 @@ mod tests {
         assert_eq!(explicit_gemini_model(Some("sonnet")), None);
         assert_eq!(explicit_gemini_model(None), None);
         assert_eq!(explicit_gemini_model(Some("gemini-3.6-flash-high")), Some("gemini-3.6-flash-high"));
+    }
+
+    #[test]
+    fn codex_ingestion_uses_the_catalog_priority_and_requires_xhigh() {
+        let catalog = r#"{"models":[
+            {"slug":"gpt-5.6-terra","visibility":"list","priority":2,"supported_reasoning_levels":[{"effort":"xhigh"}]},
+            {"slug":"gpt-6.0-fast","visibility":"list","priority":0,"supported_reasoning_levels":[{"effort":"medium"}]},
+            {"slug":"gpt-5.7-sol","visibility":"list","priority":1,"supported_reasoning_levels":[{"effort":"low"},{"effort":"xhigh"}]},
+            {"slug":"hidden-model","visibility":"hidden","priority":0,"supported_reasoning_levels":[{"effort":"xhigh"}]}
+        ]}"#;
+        assert_eq!(preferred_codex_ingest_model(catalog).as_deref(), Some("gpt-5.7-sol"));
+        assert_eq!(preferred_codex_ingest_model("not json"), None);
     }
 
     /// An argv engine is refused BEFORE spawning, because the OS failure it would

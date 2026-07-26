@@ -4710,11 +4710,11 @@ fn classify_biome(profile: &PackProfile, spec: &str) -> String {
                 .map(|_| {
                     let prompt = prompt.clone();
                     let ids = &ids;
-                    // Opus at medium effort, not sonnet at low. This is a
-                    // one-word answer that decides every terrain query on the
-                    // map, and the cheap version was measurably unstable on an
-                    // unchanged spec. Still trivial beside a ~9-minute map, and
-                    // the votes run concurrently.
+                    // Claude uses Opus at medium effort; Codex uses the same
+                    // newest/xhigh policy as every other ingestion call. This
+                    // one-word answer decides every terrain query on the map,
+                    // and the cheap version was measurably unstable on an
+                    // unchanged spec. The votes run concurrently.
                     s.spawn(move || match crate::local_llm::ask_ingest_once_at_effort(prompt, Some("opus"), "medium") {
                         Ok(reply) => {
                             let lc = reply.to_lowercase();

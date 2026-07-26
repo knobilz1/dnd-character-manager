@@ -339,6 +339,10 @@ pub fn turn_args(
                 args.push(s.to_string());
             }
             push_model(&mut args, "--model", model);
+            if let Some(e) = effort {
+                args.push("-c".into());
+                args.push(format!("model_reasoning_effort=\"{e}\""));
+            }
             // --json carries the session id we need for the NEXT turn; the
             // answer itself comes from the file, which is far less brittle.
             args.push("--json".into());
@@ -686,6 +690,10 @@ mod tests {
         let codex = oneshot_args(CliEngine::Codex, None, Some("high"), "o.txt").args;
         let i = codex.iter().position(|a| a == "-c").expect("codex -c override");
         assert_eq!(codex[i + 1], "model_reasoning_effort=\"high\"");
+
+        let codex_turn = turn_args(CliEngine::Codex, Some("abc"), None, Some("medium"), false, "o.txt").args;
+        let i = codex_turn.iter().position(|a| a == "-c").expect("codex turn -c override");
+        assert_eq!(codex_turn[i + 1], "model_reasoning_effort=\"medium\"");
 
         let gemini = oneshot_args(CliEngine::Gemini, None, Some("high"), "o.txt").args;
         let i = gemini.iter().position(|a| a == "--effort").expect("agy --effort");
