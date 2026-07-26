@@ -1072,7 +1072,10 @@ export function DMConsolePage() {
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
   const [tileLibraryRootCount, setTileLibraryRootCount] = React.useState(0);
+  const [tileLibraryManaged, setTileLibraryManaged] = React.useState(false);
+  const [tileLibraryUnavailableRoots, setTileLibraryUnavailableRoots] = React.useState(0);
   const [tileLibraryBusy, setTileLibraryBusy] = React.useState(false);
+  const [tileImportProgress, setTileImportProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [tileLibraryNotice, setTileLibraryNotice] = React.useState<string | null>(null);
   const [mapEncounterHint, setMapEncounterHint] = React.useState('');
   const [modulePlan, setModulePlan] = React.useState('');
@@ -1669,6 +1672,7 @@ export function DMConsolePage() {
   React.useEffect(() => {
     const unlistenPlan = listen<{ phase: string; done: number; total: number }>('plan-progress', (e) => setPlanProgress(e.payload));
     const unlistenIngest = listen<{ phase: string; done: number; total: number }>('ingest-progress', (e) => setIngestProgress(e.payload));
+    const unlistenTileImport = listen<{ done: number; total: number }>('tile-import-progress', (e) => setTileImportProgress(e.payload));
     // Map generation re-emits on a timer while it works, so a climbing
     // elapsed_s is visible proof it hasn't hung during the one long, silent
     // model call. 'done' clears it.
@@ -1678,6 +1682,7 @@ export function DMConsolePage() {
     return () => {
       unlistenPlan.then((f) => f());
       unlistenIngest.then((f) => f());
+      unlistenTileImport.then((f) => f());
       unlistenMap.then((f) => f());
     };
   }, []);
@@ -3171,12 +3176,16 @@ export function DMConsolePage() {
    *  on Plan dialog open so the count shown is never stale after a restart. */
   async function refreshTileLibrarySummary() {
     try {
-      const summary = await invoke<{ total: number; roots: string[] } | null>('get_tile_library_summary');
+      const summary = await invoke<{ total: number; roots: string[]; managed: boolean; unavailable_roots: number } | null>('get_tile_library_summary');
       setTileLibraryTotal(summary?.total ?? null);
       setTileLibraryRootCount(summary?.roots.length ?? 0);
+      setTileLibraryManaged(summary?.managed ?? false);
+      setTileLibraryUnavailableRoots(summary?.unavailable_roots ?? 0);
     } catch {
       setTileLibraryTotal(null);
       setTileLibraryRootCount(0);
+      setTileLibraryManaged(false);
+      setTileLibraryUnavailableRoots(0);
     }
   }
 
@@ -3231,8 +3240,8 @@ export function DMConsolePage() {
   }
 
   /** "Import…"/"Add another folder…"/"Replace…" for the optional local tile
-   *  library (see tile_library.rs) — a folder picker, then a one-shot
-   *  scan+index command. `merge` folds the picked folder into whatever's
+   *  library (see tile_library.rs) — a folder picker, then a managed copy into
+   *  Tavern Sheet's app-data directory plus its index. `merge` folds the picked folder into whatever's
    *  already imported, so a second asset pack can be added without losing
    *  the first; without it, the picked folder REPLACES the whole catalog
    *  (see import_tile_library's doc comment — re-picking the SAME folder
@@ -3240,26 +3249,33 @@ export function DMConsolePage() {
    *  Prefer merge when re-picking a folder already in the catalog: a REPLACE
    *  also drops what `audit_tile_library` measured, and re-auditing the pixels
    *  of a full pack was timed at 17.6 minutes.
-   *  Nothing here ever touches git or the app bundle: the art stays exactly
-   *  where the DM put it, only a small filename manifest is cached locally. */
+   *  Nothing here touches git or the app bundle: the private copy is writable
+   *  app data, so updates cannot replace it and the source folder can disappear. */
   async function importTileLibrary(merge: boolean) {
     const root = await open({ directory: true, multiple: false });
     if (!root || typeof root !== 'string') return;
     setTileLibraryBusy(true);
+    setTileImportProgress(null);
+    setTileLibraryNotice(null);
     try {
-      const summary = await invoke<{ total: number; roots: string[] }>('import_tile_library', { root, merge });
+      const summary = await invoke<{ total: number; roots: string[]; managed: boolean; unavailable_roots: number }>('import_tile_library', { root, merge });
       setTileLibraryPath(root);
       setTileLibraryTotal(summary.total);
       setTileLibraryRootCount(summary.roots.length);
+      setTileLibraryManaged(summary.managed);
+      setTileLibraryUnavailableRoots(summary.unavailable_roots);
+      setTileLibraryNotice(`${summary.total.toLocaleString()} tiles copied into Tavern Sheet's managed library.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setTileLibraryBusy(false);
+      setTileImportProgress(null);
     }
   }
 
-  /** "Moved the folder?…" — the art is in a new place, so point the catalog AND
-   *  every saved map's resolved-tile sidecar at it (tile_library.rs's
+  /** Legacy recovery for catalogs imported before Tavern-owned copies: point
+   *  the old catalog AND every saved map's resolved-tile sidecar at its current
+   *  source folder (tile_library.rs's
    *  repoint_tile_library).
    *
    *  Deliberately not a re-Import. The pack is unchanged, so this is a path
@@ -4654,7 +4670,7 @@ export function DMConsolePage() {
                   <span className="text-xs text-slate-400">
                     Tileset library:{' '}
                     {tileLibraryTotal != null
-                      ? `${tileLibraryTotal.toLocaleString()} objects imported${tileLibraryRootCount > 1 ? ` (${tileLibraryRootCount} folders)` : ''}`
+                      ? `${tileLibraryTotal.toLocaleString()} tiles ${tileLibraryManaged ? 'managed' : 'indexed from their source'}${tileLibraryRootCount > 1 ? ` (${tileLibraryRootCount} imports)` : ''}`
                       : 'not imported'}
                   </span>
                   {tileLibraryTotal == null ? (
@@ -4669,15 +4685,25 @@ export function DMConsolePage() {
                       <Button size="sm" variant="outline" onClick={() => importTileLibrary(false)} disabled={tileLibraryBusy}>
                         {tileLibraryBusy ? 'Importing…' : 'Replace…'}
                       </Button>
-                      <Button size="sm" variant="outline" onClick={repointTileLibrary} disabled={tileLibraryBusy}>
-                        {tileLibraryBusy ? 'Working…' : 'Moved the folder?…'}
-                      </Button>
+                      {!tileLibraryManaged && (
+                        <Button size="sm" variant="outline" onClick={repointTileLibrary} disabled={tileLibraryBusy}>
+                          {tileLibraryBusy ? 'Working…' : 'Recover legacy library…'}
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>
+                {tileLibraryBusy && tileImportProgress && (
+                  <p className="text-xs text-slate-400 mb-2">
+                    Copying {tileImportProgress.done.toLocaleString()} / {tileImportProgress.total.toLocaleString()} tiles into Tavern Sheet…
+                  </p>
+                )}
                 {tileLibraryTotal != null && (
                   <p className="text-xs text-slate-500 mb-2">
-                    "Add another folder…" keeps everything already imported; "Replace…" wipes it and starts over with only the new folder. Re-picking the same folder either way just refreshes it, never duplicates. If the art itself moved to a new drive or folder, use "Moved the folder?…" — it re-points existing maps at it instead of re-scanning, so they keep the exact art they were made with.
+                    {tileLibraryManaged
+                      ? 'Tavern Sheet owns a private copy in app data, so imported art remains available if the source drive disconnects. '
+                      : `This catalog predates managed copies${tileLibraryUnavailableRoots > 0 ? ` and ${tileLibraryUnavailableRoots} source ${tileLibraryUnavailableRoots === 1 ? 'folder is' : 'folders are'} unavailable` : ''}; import its folder again to make Tavern Sheet own it. `}
+                    "Add another folder…" keeps existing imports; "Replace…" starts over with only the new one.
                   </p>
                 )}
                 {tileLibraryNotice && <p className="text-xs text-emerald-400 mb-2">{tileLibraryNotice}</p>}

@@ -87,13 +87,10 @@ interface SettingsState {
    *  every time, deterministically. */
   battleTileStyle: string;
   setBattleTileStyle: (v: string) => void;
-  /** Local folder path of an imported battle-map tile library (e.g. a
-   *  Forgotten Adventures Patreon pack) — remembered here for display only.
-   *  The real catalog (a manifest of filenames + derived metadata, never the
-   *  art itself) lives Rust-side (see tile_library.rs) and is never
-   *  committed or bundled: vendor asset packs keep their own ownership, so
-   *  this stays a local, user-imported resource, not something the app
-   *  ships. `null` (the default, and every install before this feature)
+  /** Source folder last picked for a battle-map tile import — remembered for
+   *  display only. Rust copies the art into Tavern Sheet's private app-data
+   *  library and builds its manifest there; it is never committed or bundled
+   *  into the public installer. `null` (the default, and every install before this feature)
    *  means map generation never even mentions the Objects: layer. */
   tileLibraryPath: string | null;
   setTileLibraryPath: (v: string | null) => void;

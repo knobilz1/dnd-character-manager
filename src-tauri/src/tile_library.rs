@@ -7,13 +7,12 @@
 //! This deliberately never touches git or the Tauri resource bundle. Vendor
 //! packs like Forgotten Adventures keep ownership of their art, and even
 //! their paid commercial tier excludes software products — bundling these
-//! files into a public installer isn't a license this app can rely on. So
-//! the source folder stays wherever the user put it on disk, and the only
-//! thing persisted here is a small JSON manifest (filenames + derived
-//! metadata) at `app_data_dir/tile_library/manifest.json` — never the art
-//! itself. `search_tile_catalog` reads the handful of matched files straight
-//! off disk per call and returns them as data URLs, so nothing needs the
-//! Tauri asset-protocol scope widened for an arbitrary user folder.
+//! files into a public installer isn't a license this app can rely on. Import
+//! instead makes a private, Tavern-owned copy under
+//! `app_data_dir/tile_library/files/`, beside the manifest and derived profile.
+//! The app never depends on a removable/network source folder after Import,
+//! while the copied art still remains local user data rather than something
+//! shipped in the public installer.
 //!
 //! With nothing imported (the default, and every install before this
 //! feature), `tile_library_configured` is false, campaign.rs never asks the
@@ -22,6 +21,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -84,6 +84,8 @@ pub struct TileLibrarySummary {
     pub roots: Vec<String>,
     pub total: usize,
     pub by_category: HashMap<String, usize>,
+    pub managed: bool,
+    pub unavailable_roots: usize,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -282,6 +284,10 @@ fn manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join("manifest.json"))
 }
 
+fn managed_files_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(manifest_path(app)?.with_file_name("files"))
+}
+
 /// Cheap existence check, no manifest load — whether ANY tile library has
 /// been imported. This is what campaign.rs's map-generation prompt builder
 /// calls to decide whether to even mention the `Objects:` section.
@@ -395,12 +401,15 @@ fn reparse_entries(entries: &[TileLibraryEntry], layout: &PackLayout) -> Vec<Til
         .collect()
 }
 
-fn summarize(manifest: &TileLibraryManifest) -> TileLibrarySummary {
+fn summarize(manifest: &TileLibraryManifest, files_dir: Option<&Path>) -> TileLibrarySummary {
     let mut by_category: HashMap<String, usize> = HashMap::new();
     for e in &manifest.entries {
         *by_category.entry(e.category.clone()).or_insert(0) += 1;
     }
-    TileLibrarySummary { roots: manifest.roots.clone(), total: manifest.entries.len(), by_category }
+    let managed = !manifest.roots.is_empty()
+        && files_dir.is_some_and(|dir| manifest.roots.iter().all(|root| Path::new(root).parent() == Some(dir)));
+    let unavailable_roots = manifest.roots.iter().filter(|root| !Path::new(root).is_dir()).count();
+    TileLibrarySummary { roots: manifest.roots.clone(), total: manifest.entries.len(), by_category, managed, unavailable_roots }
 }
 
 /// Categories worth drawing Objects: vocabulary from — genuinely placeable,
@@ -566,11 +575,34 @@ pub fn object_vocabulary_for_app(app: &AppHandle) -> Vec<String> {
 
 fn save_manifest(app: &AppHandle, manifest: &TileLibraryManifest) -> Result<(), String> {
     let path = manifest_path(app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    let parent = path.parent().ok_or_else(|| "Manifest path has no parent folder.".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let json = serde_json::to_string(manifest).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let staged = parent.join(format!(".manifest-{nonce}.tmp"));
+    let backup = parent.join(format!(".manifest-{nonce}.old"));
+    fs::write(&staged, json).map_err(|e| format!("Couldn't stage tile manifest: {e}"))?;
+    let had_old = path.exists();
+    if had_old {
+        if let Err(e) = fs::rename(&path, &backup) {
+            let _ = fs::remove_file(&staged);
+            return Err(format!("Couldn't preserve the previous tile manifest: {e}"));
+        }
+    }
+    if let Err(e) = fs::rename(&staged, &path) {
+        if had_old {
+            let _ = fs::rename(&backup, &path);
+        }
+        let _ = fs::remove_file(&staged);
+        return Err(format!("Couldn't activate the new tile manifest: {e}"));
+    }
+    if had_old {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(())
 }
 
 fn load_manifest_cached(app: &AppHandle) -> Result<Option<std::sync::Arc<TileLibraryManifest>>, String> {
@@ -1292,33 +1324,147 @@ fn normalize_import_root(root: &str) -> String {
     root.replace('\\', "/")
 }
 
-/// Scans `root` and either replaces the whole catalog with just this folder
-/// (`merge: false` — the original behavior, still the default for a first
-/// Import) or folds it into whatever's already imported (`merge: true`, see
-/// `merge_manifest`), so a second asset pack can be added without losing
-/// the first.
+#[derive(Clone, Serialize)]
+struct TileImportProgress {
+    done: usize,
+    total: usize,
+}
+
+/// Stable destination for one picked source folder. Re-picking the same folder
+/// refreshes its existing managed copy; two source folders with the same leaf
+/// name still cannot collide.
+fn managed_root_id(source: &Path) -> String {
+    let digest = Sha256::digest(normalize_import_root(&source.to_string_lossy()).as_bytes());
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Copy exactly the files the scanner accepted, preserving their relative
+/// paths and changing every manifest entry to the Tavern-owned root. The
+/// caller supplies a staging directory, so a partial copy is never live.
+fn copy_scanned_tiles(
+    source: &Path,
+    staging: &Path,
+    managed_root: &str,
+    mut entries: Vec<TileLibraryEntry>,
+    mut progress: impl FnMut(usize, usize),
+) -> Result<Vec<TileLibraryEntry>, String> {
+    let total = entries.len();
+    progress(0, total);
+    for (i, entry) in entries.iter_mut().enumerate() {
+        let from = source.join(&entry.rel_path);
+        let to = staging.join(&entry.rel_path);
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("Couldn't create {}: {e}", parent.display()))?;
+        }
+        fs::copy(&from, &to).map_err(|e| format!("Couldn't copy {}: {e}", from.display()))?;
+        entry.root = managed_root.to_string();
+        let done = i + 1;
+        if done == total || done % 250 == 0 {
+            progress(done, total);
+        }
+    }
+    Ok(entries)
+}
+
+/// Scans the picked folder, copies its tiles into app data, then either replaces
+/// the whole catalog (`merge: false`) or folds this managed copy into it. The
+/// old manifest and old managed files remain live until the complete copy has
+/// been installed and the new manifest has been written successfully.
 #[tauri::command]
-pub fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<TileLibrarySummary, String> {
+pub async fn import_tile_library(app: AppHandle, root: String, merge: bool) -> Result<TileLibrarySummary, String> {
+    tauri::async_runtime::spawn_blocking(move || import_tile_library_blocking(app, root, merge))
+        .await
+        .map_err(|e| format!("Tile import task failed: {e}"))?
+}
+
+fn import_tile_library_blocking(app: AppHandle, root: String, merge: bool) -> Result<TileLibrarySummary, String> {
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
         return Err(format!("\"{root}\" isn't a folder."));
     }
+    let source = fs::canonicalize(&root_path).map_err(|e| format!("Couldn't open \"{root}\": {e}"))?;
+    let files_dir = managed_files_dir(&app)?;
+    fs::create_dir_all(&files_dir).map_err(|e| format!("Couldn't create {}: {e}", files_dir.display()))?;
+    let canonical_files_dir = fs::canonicalize(&files_dir).map_err(|e| format!("Couldn't open {}: {e}", files_dir.display()))?;
+    if canonical_files_dir.starts_with(&source) || source.starts_with(&canonical_files_dir) {
+        return Err("Choose the original tileset folder, not Tavern Sheet's managed tile-library folder or one of its parents.".into());
+    }
+    let old_manifest = load_manifest_cached(&app)?.map(|m| (*m).clone()).unwrap_or_default();
     let scanned = scan_tile_library(&root_path, &load_profile_cached(&app).layout);
     if scanned.is_empty() {
         return Err(format!("No image files found under \"{root}\"."));
     }
-    // From here on `root` has to match what the scan wrote into every entry, or
-    // merge can't tell this folder from one it has never seen. See
-    // `normalize_import_root`.
-    let root = normalize_import_root(&root);
-    let manifest = if merge {
-        merge_manifest(load_manifest_cached(&app)?.map(|m| (*m).clone()).unwrap_or_default(), &root, scanned)
-    } else {
-        TileLibraryManifest { roots: vec![root.clone()], entries: scanned, measured: HashMap::new() }
+
+    let id = managed_root_id(&source);
+    let final_root = files_dir.join(&id);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let staging = files_dir.join(format!(".{id}.staging-{nonce}"));
+    let backup = files_dir.join(format!(".{id}.old-{nonce}"));
+    fs::create_dir(&staging).map_err(|e| format!("Couldn't create import staging folder: {e}"))?;
+    let managed_root = normalize_import_root(&final_root.to_string_lossy());
+    let copied = match copy_scanned_tiles(&root_path, &staging, &managed_root, scanned, |done, total| {
+        let _ = app.emit("tile-import-progress", TileImportProgress { done, total });
+    }) {
+        Ok(entries) => entries,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(e);
+        }
     };
-    save_manifest(&app, &manifest)?;
-    let summary = summarize(&manifest);
+
+    let had_old_copy = final_root.is_dir();
+    if had_old_copy {
+        if let Err(e) = fs::rename(&final_root, &backup) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!("Couldn't prepare the previous managed copy for replacement: {e}"));
+        }
+    }
+    if let Err(e) = fs::rename(&staging, &final_root) {
+        if had_old_copy {
+            let _ = fs::rename(&backup, &final_root);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!("Couldn't activate the managed tile copy: {e}"));
+    }
+
+    let source_root = normalize_import_root(&root);
+    let manifest = if merge {
+        // A catalog written by the old in-place importer names the picked
+        // source directly. Remove that contribution before adding its managed
+        // replacement, or the first migration would double every entry.
+        let mut base = old_manifest.clone();
+        base.entries.retain(|e| normalize_import_root(&e.root) != source_root);
+        base.roots.retain(|r| normalize_import_root(r) != source_root);
+        merge_manifest(base, &managed_root, copied)
+    } else {
+        TileLibraryManifest { roots: vec![managed_root.clone()], entries: copied, measured: HashMap::new() }
+    };
+    if let Err(e) = save_manifest(&app, &manifest) {
+        let _ = fs::remove_dir_all(&final_root);
+        if had_old_copy {
+            let _ = fs::rename(&backup, &final_root);
+        }
+        return Err(e);
+    }
+    if had_old_copy {
+        let _ = fs::remove_dir_all(&backup);
+    }
+
+    // ponytail: retired managed roots stay on disk because saved map sidecars
+    // still name their exact art. Add explicit library cleanup only when it can
+    // first prove no saved map references a root.
+
+    let summary = summarize(&manifest, Some(&files_dir));
     *app.state::<TileLibraryState>().manifest.lock().unwrap() = Some(std::sync::Arc::new(manifest));
+    *app.state::<TileLibraryState>().idf.lock().unwrap() = None;
+    // Existing map sidecars from the pre-managed importer still name the picked
+    // source root. Move those references once so old maps become independent of
+    // the source folder too.
+    crate::campaign::repoint_battle_map_roots(&app, &source_root, &managed_root)
+        .map_err(|e| format!("Tiles were imported, but existing map references couldn't be migrated: {e}"))?;
     Ok(summary)
 }
 
@@ -1404,7 +1550,8 @@ pub fn repoint_tile_library(app: AppHandle, new_root: String) -> Result<RepointS
 
 #[tauri::command]
 pub fn get_tile_library_summary(app: AppHandle) -> Result<Option<TileLibrarySummary>, String> {
-    Ok(load_manifest_cached(&app)?.map(|m| summarize(&m)))
+    let files_dir = managed_files_dir(&app)?;
+    Ok(load_manifest_cached(&app)?.map(|m| summarize(&m, Some(&files_dir))))
 }
 
 fn load_overrides_cached(app: &AppHandle) -> std::sync::Arc<HashMap<String, ArtKind>> {
@@ -4836,6 +4983,34 @@ mod tests {
 
     fn entry_at(root: &str, rel_path: &str) -> TileLibraryEntry {
         TileLibraryEntry { root: root.into(), rel_path: rel_path.into(), biome: "Woodlands".into(), category: "Furniture".into(), keywords: vec!["table".into()], w: 1, h: 1 }
+    }
+
+    #[test]
+    fn managed_copy_preserves_relative_paths_and_rewrites_roots() {
+        let unique = format!(
+            "tavern-managed-copy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        );
+        let base = std::env::temp_dir().join(unique);
+        let source = base.join("source");
+        let staging = base.join("staging");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(source.join("nested/tile.webp"), b"tile bytes").unwrap();
+        let mut progress = Vec::new();
+        let copied = copy_scanned_tiles(
+            &source,
+            &staging,
+            "C:/managed/tiles",
+            vec![entry_at("C:/source", "nested/tile.webp")],
+            |done, total| progress.push((done, total)),
+        )
+        .unwrap();
+        assert_eq!(fs::read(staging.join("nested/tile.webp")).unwrap(), b"tile bytes");
+        assert_eq!(copied[0].root, "C:/managed/tiles");
+        assert_eq!(progress, vec![(0, 1), (1, 1)]);
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
