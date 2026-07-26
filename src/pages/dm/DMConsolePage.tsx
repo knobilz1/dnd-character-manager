@@ -928,6 +928,8 @@ export function DMConsolePage() {
   const [mapProgress, setMapProgress] = React.useState<{ phase: string; elapsed_s: number } | null>(null);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
+  const [artPickerCard, setArtPickerCard] = React.useState<MapCard | null>(null);
+  const [mapChangeInstruction, setMapChangeInstruction] = React.useState('');
   // The slug of the map currently shared to players over the LAN (Phase 5), or
   // null when nothing is shared. Only one map is on the table at a time.
   const [broadcastingSlug, setBroadcastingSlug] = React.useState<string | null>(null);
@@ -3346,6 +3348,50 @@ export function DMConsolePage() {
     }
   }
 
+  /** Re-runs only catalog tile selection for an existing map. The spec stays
+   *  untouched; reloading the card picks up the replaced sidecars and redraws
+   *  every floor with its newly-selected art. */
+  async function reresolveMapTiles(card: MapCard) {
+    if (!activeCampaignId) return;
+    setMapProgress(null);
+    setPlanBusy(`Re-picking artwork for "${card.name}"…`);
+    try {
+      await invoke('reresolve_map_tiles', { id: activeCampaignId, slug: card.slug });
+      const fresh = await loadMapCard(card);
+      const replace = (cards: MapCard[]) => cards.map((c) => (c.slug === fresh.slug ? fresh : c));
+      setPlanMapCards(replace);
+      setAdHocMapCards(replace);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
+    }
+  }
+
+  async function reviseMapWithDm(card: MapCard) {
+    if (!activeCampaignId || !mapChangeInstruction.trim()) return;
+    if (!(await ensureClaudeConnected())) return;
+    setMapProgress(null);
+    setPlanBusy(`Applying your changes to "${card.name}"…`);
+    try {
+      const meta = await withClaudeReconnect(() => invoke<BattleMapMeta>('revise_battle_map', {
+        id: activeCampaignId,
+        slug: card.slug,
+        instruction: mapChangeInstruction.trim(),
+      }));
+      const fresh = await loadMapCard(meta);
+      const replace = (cards: MapCard[]) => cards.map((c) => (c.slug === fresh.slug ? fresh : c));
+      setPlanMapCards(replace);
+      setAdHocMapCards(replace);
+      setArtPickerCard(null);
+      setMapChangeInstruction('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanBusy(null);
+    }
+  }
+
   async function exportMapPng(card: MapCard) {
     const dest = await save({ defaultPath: `${card.slug}.png`, filters: [{ name: 'PNG image', extensions: ['png'] }] });
     if (!dest) return;
@@ -4896,6 +4942,9 @@ export function DMConsolePage() {
                               <RotateCcw size={14} /> Regenerate
                             </Button>
                           )}
+                          <Button size="sm" variant="ghost" onClick={() => { setArtPickerCard(card); setMapChangeInstruction(''); }} disabled={!!planBusy || tileLibraryTotal == null} title={tileLibraryTotal == null ? 'Import a tileset library first' : 'Re-pick artwork or tell the DM how to revise this map'}>
+                            <RotateCcw size={14} /> Re-pick artwork
+                          </Button>
                           {broadcastingSlug === card.slug ? (
                             <Button size="sm" variant="outline" onClick={stopBroadcast} className="border-emerald-600 text-emerald-400 hover:bg-emerald-950/40" title="Players are seeing this map's revealed floors — click to stop sharing">
                               <Radio size={14} /> Sharing · Stop
@@ -5031,6 +5080,40 @@ export function DMConsolePage() {
           )}
           <Button onClick={() => setPlanOpen(false)}>Close</Button>
         </div>
+      </Dialog>
+
+      <Dialog open={!!artPickerCard} onClose={() => { if (!planBusy) setArtPickerCard(null); }} title={artPickerCard ? `Change artwork — ${artPickerCard.name}` : 'Change artwork'} elevated>
+        {artPickerCard && (
+          <div className="space-y-4">
+            <div>
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                disabled={!!planBusy}
+                onClick={() => { const card = artPickerCard; setArtPickerCard(null); void reresolveMapTiles(card); }}
+              >
+                <RotateCcw size={14} /> Re-pick all artwork
+              </Button>
+              <p className="mt-1 text-xs text-slate-500">Keep every wall, feature, and cell exactly where it is; choose new imported art only.</p>
+            </div>
+            <div className="border-t border-slate-800 pt-3">
+              <label className="block text-xs font-medium text-slate-300 mb-1">Tell the DM what to change</label>
+              <textarea
+                value={mapChangeInstruction}
+                onChange={(e) => setMapChangeInstruction(e.target.value)}
+                placeholder="e.g. Put a pile of skulls on H7, or move the tables beside the west wall"
+                className="w-full h-24 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-red-600"
+                disabled={!!planBusy}
+              />
+              <div className="flex justify-end gap-2 mt-2">
+                <Button variant="ghost" onClick={() => setArtPickerCard(null)} disabled={!!planBusy}>Cancel</Button>
+                <Button onClick={() => reviseMapWithDm(artPickerCard)} disabled={!!planBusy || !mapChangeInstruction.trim()}>
+                  Apply change &amp; re-pick art
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </Dialog>
 
       <Dialog open={dmModelOpen} onClose={() => setDmModelOpen(false)} title="DM Model">

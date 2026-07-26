@@ -5512,6 +5512,63 @@ pub async fn reresolve_map_tiles(app: AppHandle, id: String, slug: String) -> Re
     .map_err(|e| format!("Re-resolve task failed: {e}"))?
 }
 
+/// Prompt for a surgical, plain-English edit to an existing map. The current
+/// spec is authoritative: anything the operator did not request stays put.
+fn build_revise_battle_map_prompt(
+    current: &str, instruction: &str, objects_enabled: bool, vocabulary: &[String], footprint_guide: &[String],
+) -> String {
+    format!(
+        "You are revising an EXISTING D&D battle map, not designing a new one. Apply the operator's requested change exactly and preserve everything else: the title, dimensions, walls, terrain, other objects, tactics, deployment, and every unaffected cell. If an object moves, clear its old cells and update every Features/Objects/Tactics reference to it. If an object is added, draw it with the correct legend code or Objects entry and name its exact cells. Never add creatures to the grid or object layers.\n\n\
+         {format_rules}\n\n\
+         Here is the authoritative current map:\n\n{MAP_SPEC_DELIMITER}\n{current}\n{MAP_SPEC_DELIMITER}\n\n\
+         OPERATOR REQUEST (authoritative): {instruction}\n\n\
+         Return the COMPLETE revised map between {MAP_SPEC_DELIMITER} lines. Do not explain the edit and do not redesign anything else.",
+        format_rules = battle_map_format_instructions(crate::local_llm::is_local_ingestion(), objects_enabled, vocabulary, footprint_guide),
+        current = current.trim(),
+        instruction = instruction.trim(),
+    )
+}
+
+/// Applies one natural-language edit through the configured map/ingestion
+/// engine, runs the same normalize + validate/retry pipeline as generation,
+/// saves the revised spec atomically, then re-picks art for every floor.
+#[tauri::command]
+pub async fn revise_battle_map(app: AppHandle, id: String, slug: String, instruction: String) -> Result<BattleMapMeta, String> {
+    if !is_valid_map_slug(&slug) {
+        return Err(format!("Invalid map id \"{slug}\"."));
+    }
+    if instruction.trim().is_empty() {
+        return Err("Tell the DM what to change first.".into());
+    }
+    tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let root = campaigns_root(&app)?;
+        let path = battle_maps_dir(&root, &id).join(format!("{slug}.md"));
+        let current = fs::read_to_string(&path).map_err(|_| format!("No battle map found for \"{slug}\"."))?;
+        let title = map_title(&current);
+        let objects_enabled = crate::tile_library::tile_library_configured(&app);
+        let vocabulary = crate::tile_library::object_vocabulary_for_app(&app);
+        let footprint_guide = crate::tile_library::object_footprint_guide_for_app(&app);
+        let prompt = build_revise_battle_map_prompt(&current, &instruction, objects_enabled, &vocabulary, &footprint_guide);
+        let revised = with_map_ticker(&app, "revising the map", started, || generate_one_map_spec(&prompt, 1, &footprint_guide))?;
+        let revised = force_map_title(&revised, &title);
+        write_atomic(&path, &format!("{}\n", revised.trim()))?;
+        rebuild_battle_maps_index_at(&root, &id)?;
+        with_map_ticker(&app, "matching tile art", started, || {
+            let dir = battle_maps_dir(&root, &id);
+            let _ = fs::remove_file(dir.join(format!("{slug}.tiles.json")));
+            remove_higher_floor_sidecars(&dir, &slug, 1);
+            if let Err(e) = resolve_map_tiles(&app, &root, &id, &slug) {
+                crate::maplog::log("TILE RESOLUTION ERROR", &e); // the revised spec is still a usable map
+            }
+        });
+        let _ = app.emit("map-progress", MapProgress { phase: "done", elapsed_s: started.elapsed().as_secs() });
+        Ok(BattleMapMeta { slug, name: title, summary: map_summary(&revised) })
+    })
+    .await
+    .map_err(|e| format!("Map revision task failed: {e}"))?
+}
+
 /// True when every cell `line` refers to would pass `validate_map_spec`'s
 /// Features checks — same three rules (in grid, an object code, and the
 /// right KIND of object code if the label names furniture), just as a bool
@@ -10547,6 +10604,16 @@ Tactics:
         create_campaign_at(&root.0, &intake("Alpha Quest")).unwrap();
         let names: Vec<String> = list_campaigns_at(&root.0).unwrap().into_iter().map(|c| c.name).collect();
         assert_eq!(names, vec!["Alpha Quest", "Zeta Quest"]);
+    }
+
+    #[test]
+    fn revise_map_prompt_makes_the_requested_cell_edit_authoritative_and_preserves_the_rest() {
+        let current = "# Crypt\nGrid: 2x2, 5 ft squares.\nMap:\n##\n##\nFeatures:\n- Table at A1\nTactics:\n- Hold the door.";
+        let prompt = build_revise_battle_map_prompt(current, "put a pile of skulls on B2", true, &[], &[]);
+        assert!(prompt.contains(current));
+        assert!(prompt.contains("OPERATOR REQUEST (authoritative): put a pile of skulls on B2"));
+        assert!(prompt.contains("preserve everything else"));
+        assert!(prompt.contains("Never add creatures to the grid or object layers"));
     }
 
     #[test]

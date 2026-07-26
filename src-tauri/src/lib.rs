@@ -115,6 +115,7 @@ pub fn run() {
       campaign::save_battle_map,
       campaign::get_map_tiles,
       campaign::reresolve_map_tiles,
+      campaign::revise_battle_map,
       campaign::read_table_positions,
       party_listener::release_table_camera,
       party_listener::set_table_photos,
