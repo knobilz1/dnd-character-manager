@@ -7,13 +7,37 @@ a multi-engine LLM layer. Windows is the dev box; releases build Windows + macOS
 Published as `knobilz1`.
 
 **This file is auto-loaded by Codex.** Claude Code reads `CLAUDE.md`; `agy`
-(Gemini/Antigravity) reads neither — see §6, it's measured, not assumed.
+(Gemini/Antigravity) reads neither — see §7, it's measured, not assumed.
 
 **State:** v0.23.5 (2026-07-25), `main` clean, 470 Rust tests, all feature
 branches merged. The updater endpoint serves it across 6 signed platforms.
 
-Contents: §1 rules · §2 release · §3 repo map · §4 campaign data · §5 flows ·
-§6 multi-engine · §7 driving the app · §8 horizon · §9 hard lessons
+Contents: §1 rules · §2 setup/build/test · §3 GitHub Actions · §4 repo map ·
+§5 campaign data · §6 flows · §7 multi-engine · §8 driving the app ·
+§9 feature map (shipped + planned) · §10 hard lessons
+
+### Start here
+
+**This file is a map, not a substitute for the source.** It tells you where to
+look and what will bite; it cannot stand in for 28k lines of Rust. Before
+changing anything:
+
+1. Read §1 (rules) and the relevant task row in §4.
+2. **Read the `//!` module doc comment at the top of the file you're touching.**
+   They are long, current, and explain *why* — `campaign.rs` has 56 lines of it,
+   `cli_provider.rs` 44. Then read the `///` on the specific function. Many of
+   them record a measurement or a bug that is the whole reason the code is shaped
+   that way, and several name the exact function to revisit if you extend it.
+3. If it's DM behaviour, read the campaign's own `CLAUDE.md` and
+   `memory/dm_rules.md` on disk (§5) — the DM's instructions live there, not in
+   this repo, and `dm_rules.md` is regenerated so the on-disk copy is the truth.
+4. If it's map or tile behaviour, generate one and **look at it** (§8). The tile
+   list will not show you brick ground in a marsh.
+
+A concrete first pass for `campaign.rs`, which is the file most work lands in:
+its module doc, then `BASE_CLAUDE_MD` and `DM_RULES` (the DM's actual
+instructions), then whichever of the three areas you need — campaign/memory
+files, module import + chapters, or battle-map generation + tile resolution.
 
 ---
 
@@ -36,9 +60,137 @@ Every one of these has actually gone wrong here.
 
 ---
 
-## 2. Release checklist
+## 2. Setup, building, testing
+
+### Prerequisites
+
+Node 24+ (CI pins 24; Node 26 locally for the harnesses' built-in `WebSocket`),
+a stable Rust toolchain, and WebView2 (present on current Windows). Then
+`npm install`.
+
+Runtime things that live **outside the repo** and that a fresh clone won't have:
+
+| Needs | Where | Without it |
+|---|---|---|
+| `.env` with `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | repo root, gitignored | Drive sync can't authorise. **Never print these.** |
+| Campaign folders | `%APPDATA%\com.nabil.dndsheet\campaigns\` | The DM has nothing to run |
+| Tile library (`manifest.json` ~86 MB, `pack_profile.json`, `pack_profile_overrides.json`) | `%APPDATA%\com.nabil.dndsheet\tile_library\` | Maps render as built-in sprites, no catalog art |
+| Vendor CLIs installed **and signed in** | `claude`, `codex`, `agy` | DM turns and ingestion fail |
+| Release signing key | GitHub secret, see §3 | CI fails fast on purpose |
+
+### Commands
+
+```bash
+npm run tauri dev            # desktop app (add the CDP env var — see §8)
+npm run dev                  # frontend only in a browser; no Tauri IPC, most DM features dead
+npx tsc -b --force           # the ONLY typecheck that works here
+npm run build                # production frontend build
+cd src-tauri && cargo test --lib          # 470 tests
+```
+
+### Reading the code
+
+**The `//!` module doc comments are the real documentation** — 56 lines at the
+top of `campaign.rs`, 44 in `cli_provider.rs`, 30 in `dm.rs`, 28 in
+`local_llm.rs`, 21 in `tile_library.rs`. They explain *why*, and they are kept
+current. Read the module doc before the code, and read the `///` on any function
+you're about to change — a lot of them record a measurement or a past bug, and
+several say explicitly "if X is ever added, this is the function to revisit".
+
+Tests are inline `#[cfg(test)] mod tests` at the bottom of each file (265 in
+`campaign.rs` alone).
+
+**`#[ignore]`d tests are real-data harnesses, not dead tests.** They hit the live
+catalog, real campaigns, or live models, and are driven by env vars. Run with
+`cargo test --lib <name> -- --ignored --nocapture`. The useful ones:
+
+| Harness | Env vars | Use |
+|---|---|---|
+| `classify_biome_over_the_real_map_corpus` | `MAP_FILTER`, `MAP_CORPUS` | Which biome real map specs classify as |
+| `vocabulary_misses_over_the_real_map_corpus` | `MAP_CORPUS` | Words the maps use that the catalog has never heard of — the single cheapest source of tile bugs |
+| `rank_snapshot_over_the_real_catalog` | `TILE_CORPUS`, `TILE_SNAPSHOT`, `TILE_SCENES`, `TILE_CATEGORY`, `TILE_DEPTH` | Before/after ranking diffs. **Sweep any ranking change through this before believing it.** |
+| `deployment_standability_over_the_real_maps` | `MAP_CORPUS` | Are deployment cells actually stand-on-able |
+| `chapterize_a_real_module`, `measure_candidate_heading_lines` | `HEADING_SCAN_PDF` | Module import against a real PDF |
+| `local_ingestion_end_to_end` | `LOCAL_INGEST_URL`, `LOCAL_INGEST_MODEL` | The local-LLM path |
+| `*_end_to_end` (chapterize, lore, digest, plan) | — | Live model calls; slow and costly |
+
+---
+
+## 3. GitHub Actions — the whole release flow
+
+One workflow: `.github/workflows/release.yml`. **It is the only CI.** There is no
+PR check and **no test job** — pushing a tag proves the app compiles on three
+platforms and nothing more. Tests and typechecks are local-only, which is why the
+checklist below matters.
+
+### Trigger
+
+```yaml
+on: { push: { tags: ['v*'] } }
+```
+
+Only a pushed tag. Pushing to `main` runs nothing.
+
+### Job 1 — `build` (matrix of 3)
+
+| Runner | Target |
+|---|---|
+| `macos-latest` | `aarch64-apple-darwin` |
+| `macos-latest` | `x86_64-apple-darwin` |
+| `windows-latest` | native |
+
+`fail-fast: false`, so one platform failing does **not** cancel the others.
+
+Steps: checkout → Node 24 → Rust stable (+ the matrix target) → `swatinem/rust-cache`
+scoped to `./src-tauri -> target` → `npm install` → **verify the signing key
+secret exists** (fails fast with a clear message rather than building for ten
+minutes and failing at the end) → `tauri-apps/tauri-action@v0`, which builds,
+creates the GitHub release, and uploads that platform's artifacts.
+
+Note `includeUpdaterJson: false` — the action deliberately does **not** write
+`latest.json`. That's job 2.
+
+Release is published live immediately (`releaseDraft: false`, `prerelease: false`).
+
+### Job 2 — `publish-updater` (`needs: build`, ubuntu)
+
+An inline Python script that:
+
+1. `gh release download <tag> --pattern '*.sig'` — pulls every signature.
+2. Reads exactly three: `Tavern.Sheet_aarch64.app.tar.gz.sig`,
+   `Tavern.Sheet_x64.app.tar.gz.sig`, `Tavern.Sheet_<version>_x64_en-US.msi.sig`.
+3. Builds `latest.json` mapping each signature to **two** platform keys
+   (`darwin-aarch64` + `darwin-aarch64-app`, etc. — Tauri looks up both spellings).
+4. **Exits 1 if no signatures were found** ("builds likely failed").
+5. `gh release upload ... --clobber`.
+
+### Why v0.23.2 broke, and what it teaches
+
+`needs: build` means job 2 runs only if **all three** matrix legs succeed. With
+`fail-fast: false`, both macOS legs failed to compile while Windows succeeded —
+so Windows artifacts were published to a live, non-draft, non-prerelease
+release, and `publish-updater` was skipped. The result: a "latest" release with
+**no `latest.json`**, which 404'd the updater for every existing user.
+
+Two consequences worth holding onto:
+
+- **A partly-failed release still publishes.** Nothing rolls back what the
+  succeeding legs already uploaded.
+- **Green-looking artifacts are not a working release.** Always check the
+  endpoint (below).
+
+### Secrets (repo Settings → Secrets → Actions)
+
+| Secret | Used for |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | Updater signatures. Checked before any build. Password is deliberately empty. |
+| `VITE_GOOGLE_CLIENT_ID` / `VITE_GOOGLE_CLIENT_SECRET` | Passed as `GOOGLE_CLIENT_ID`/`_SECRET`, baked into the Rust binary at build time |
+| `GITHUB_TOKEN` | Automatic; creates the release and uploads assets |
+
+### Release checklist
 
 1. `cargo test --lib` (separate target dir) · `npx tsc -b --force` · `npm run build`.
+   **CI will not do any of this for you.**
 2. **If `src-tauri/src/dm.rs` changed, run the cfg-inversion check.** It's the
    only file with platform arms and nothing local compiles the macOS side.
    v0.23.2 shipped Windows-only because a `#[cfg(windows)]` got detached from its
@@ -49,12 +201,25 @@ Every one of these has actually gone wrong here.
 3. Bump `tauri.conf.json` → commit `chore: vX.Y.Z` → push `main` → push the tag.
 4. **Verify the release, don't trust green CI:**
    `curl -sL https://github.com/knobilz1/dnd-character-manager/releases/latest/download/latest.json`
-   must be HTTP 200, the new version, all platforms signed. v0.23.2 published
-   without `latest.json` and 404'd every user's updater.
+   must be HTTP 200, the new version, and every platform signed.
+
+### If you change this workflow
+
+- Renaming artifacts breaks job 2 silently-ish — the filenames in the Python
+  block are hardcoded, and a missed signature just drops that platform from
+  `latest.json` rather than failing (only *zero* platforms is an error).
+- Adding a platform means adding a matrix leg **and** a `read_sig` + platform
+  block in the Python.
+- `npm install` (not `npm ci`) — the lockfile isn't enforced, and heavy
+  devDependencies land on every CI run on all three legs. Keep them out.
+- A rollback is `gh release delete vX.Y.Z --cleanup-tag`. Marking a bad release
+  as prerelease is the fast mitigation: `releases/latest/download/` resolves to
+  the newest **non**-prerelease, so it immediately falls back to the previous
+  good version.
 
 ---
 
-## 3. Repo map
+## 4. Repo map
 
 ### Backend — `src-tauri/src/` (~28k lines, 105 Tauri commands)
 
@@ -104,7 +269,7 @@ Every one of these has actually gone wrong here.
 
 ---
 
-## 4. Campaign data and memory — where the DM's brain lives
+## 5. Campaign data and memory — where the DM's brain lives
 
 **Not in the repo.** Each campaign is a folder at
 `%APPDATA%\com.nabil.dndsheet\campaigns\<campaign-id>\`, and the DM CLI is run
@@ -166,7 +331,7 @@ a new file imported.
 
 ### Non-Claude engines don't get any of this for free
 
-Only `CLAUDE.md` is written, and only Claude reads it (§6). For Codex/Gemini,
+Only `CLAUDE.md` is written, and only Claude reads it (§7). For Codex/Gemini,
 `local_llm::cli_project_context` resolves `CLAUDE.md` + its `@imports` and
 prepends the result to the prompt — once per thread, and again whenever the
 content hash changes (so a chapter advance still reaches the DM next turn, which
@@ -174,7 +339,7 @@ is the property Claude gets free by re-reading the file).
 
 ---
 
-## 5. How the main flows work
+## 6. How the main flows work
 
 **A live DM turn.** Mic → Whisper (off-thread) → `dmPrompt.ts` builds the turn
 (party status + battle log + what was said; persona/lore come from the campaign
@@ -206,7 +371,7 @@ spoken turns and table photos and pull narration. One camera holder at a time.
 
 ---
 
-## 6. The multi-engine layer
+## 7. The multi-engine layer
 
 Every engine is the vendor's own CLI as a subprocess, so Nabil pays a flat
 subscription and never a per-token API key.
@@ -257,7 +422,7 @@ are pinned on measurements that auto-overriding would silently invalidate
 
 ---
 
-## 7. Driving and verifying the app
+## 8. Driving and verifying the app
 
 It's a native window; browser-preview tooling can't host it. Start with the
 debugger open:
@@ -279,7 +444,53 @@ generation run.
 
 ---
 
-## 8. Where things stand, and what's next
+## 9. Feature map — shipped and planned
+
+### Shipped and working (the app as it stands)
+
+Treat all of this as done. It is easy to look at a 13k-line file and assume
+something is half-built; almost nothing here is.
+
+**Character side**
+- Creation wizard — species/race, class, subclass, background, ability scores,
+  skills, feats, spells, starting equipment. **PHB 2014 and 2024 both supported**,
+  gated per-book by `BookId` (14 source books).
+- Sheet — HP, conditions, death saves (with the skull die), exhaustion,
+  inspiration; combat tab with spell slots, pact magic, class/subclass resources,
+  hit dice, rests; full spellbook with prepared/concentration tracking; inventory
+  with weight + encumbrance and a generated Town Store; traits/notes; session
+  journal; a customisable sidebar of 9 pinnable modules.
+- Level up — ASI/feat choices, subclass selection, multiclassing (including
+  multiclass proficiency gains), HP rolling.
+- **3D character viewer** — all PHB base races M/F, HP-driven wound/limp/dying
+  states, modular hair with colour tint, helmet armor via bone-socket attachment.
+  Models are side-loaded Tauri resources, not embedded (embedding overflows LLVM).
+- Export/import — JSON, an official WotC-style print sheet, a built-in PDF
+  generator, multi-character print, **Google Drive sync** (PKCE loopback OAuth,
+  per-character merge, tombstones, OS keychain).
+- Graveyard, 8 themes, dice roller with a d20 FAB, auto-update on startup.
+
+**DM side**
+- **Voice DM console** — mic → Whisper → engine → TTS, with distinct
+  auto-assigned per-NPC voices. Claude streams so narration starts early.
+- **Campaign memory** — persistent lore, entities, locations, party, flagged
+  facts, session index and recaps, all recalled across sessions (§5).
+- **Module import** — adventure PDF → text extraction → chapterization → per
+  chapter naming → arc plan → cross-model critique. Chapter progress tracked.
+- **Plan Next Session** — drafts what's coming, critiqued, cached.
+- **Battle map generator** — printable lettered/numbered tactical maps composed
+  from a 183k-tile catalog (15 biome packs), plus an optional AI atmosphere pass
+  (local ComfyUI or Gemini).
+- **Multi-story maps** — stacked floors joined by cell-aligned stairs.
+- **Three battle modes** — Theater, Grid, Hex; the mode gates a lot of rules text.
+- **LAN party sync** — players join from their own devices, narration broadcasts
+  to the table, players can talk to the DM from their own sheet.
+- **Present to TV** — chrome-less second-monitor map view.
+- **Camera board read** — photograph the physical table, get which printed square
+  each miniature is on, DM confirms, it lands in the battle log.
+- **TTS** — Kokoro by default; F5 is an opt-in HD engine with a 108-voice archive.
+- **Multi-engine** — Claude / Codex / Gemini / a local LLM, per-workload model
+  choice, cross-model critique, failover (§7).
 
 ### Shipped in v0.23.5 (this week's work)
 
@@ -291,7 +502,7 @@ generation run.
   failure-state ones. Maps are generated for `[combat]` encounters and no others.
 - **Three maps per plan** (`MAX_PLAN_MAPS`), in plan order, everything dropped
   named in `skipped_maps` and shown in the UI.
-- **Biome classification hardened** — see §9, the worst silent defect found.
+- **Biome classification hardened** — see §10, the worst silent defect found.
 
 ### Open, highest value first
 
@@ -301,7 +512,7 @@ generation run.
    an unmapped place. **`ask_dm_engine` rejects Claude**, so the engine most
    sessions use was never tested. Try a real Claude session first. If it stays
    silent, the fix is probably surfacing the action in the always-loaded action
-   list — which needs an upgrade path for existing campaigns (§4), not a one-liner.
+   list — which needs an upgrade path for existing campaigns (§5), not a one-liner.
 2. **Curse of Strahd import.** Never run. Extraction is the cost (~10× the
    Gloamwood module); the critique pipeline is validated and roughly constant.
 3. **Map quality defects**, all seen in real output: `o` pillars render as ~10px
@@ -323,11 +534,21 @@ generation run.
    `zz-gloam` is the useful one (Gloamwood Whispers imported, grid mode, 4 maps).
    The maplog interleaves on concurrent writes (cosmetic).
 
-### Longer horizon (discussed, not started)
+### Intend to ship (discussed, scoped, not started)
 
-Android port · party-wide initiative tracking · per-NPC custom voice cloning
-("whisper" feature on top of the shipped F5-TTS engine) · extending the
-cross-check to the vision board read · a UI for re-resolving tile art.
+| Idea | Notes |
+|---|---|
+| **Mid-session map generation that's actually usable** | The pieces exist — `generate_battle_map` takes a free-text hint and `makeMap` lets the DM ask — but a map is ~9 minutes and the ad-hoc control lives inside the Plan dialog. Plan: surface it during play, keep generation async, and cut candidates for the on-demand path (measure before believing that one). |
+| **Per-NPC custom voices** | F5-TTS is shipped; cloning a specific voice per NPC is the remaining "whisper" feature. |
+| **Android port** | Long-discussed, unscoped. |
+| **Party-wide initiative tracking** | Shelved. |
+| **Cross-check on the vision board read** | The diff exists (`boardCrossCheck.ts`); extending the same idea to the tile *vision* picks is open. |
+| **A UI for `reresolve_map_tiles`** | Backend command exists, no button. |
+| **Curse of Strahd import** | The real stress test of chapterization: 230 pages, non-linear, Tarokka branching. |
+
+Deliberately **not** doing: an API-key path for any model. Everything runs on
+subscriptions the user already pays for, via each vendor's own CLI. That
+constraint is the reason the multi-engine layer looks the way it does.
 
 ### Numbers worth not re-deriving
 
@@ -342,7 +563,7 @@ cross-check to the vision board read · a UI for re-resolving tile art.
 
 ---
 
-## 9. Hard lessons
+## 10. Hard lessons
 
 Written down because each one cost real time, and most look like nothing.
 
