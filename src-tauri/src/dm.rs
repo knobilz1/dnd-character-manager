@@ -1735,6 +1735,7 @@ pub(crate) fn run_engine_vision(
     let inv = vision_args(
         engine,
         None,
+        None,
         &[img_path.to_string_lossy().to_string()],
         &out_path.to_string_lossy(),
     );
@@ -1767,6 +1768,78 @@ pub(crate) fn run_engine_vision(
     answer
         .filter(|a| !a.trim().is_empty())
         .ok_or_else(|| format!("{} returned nothing for the board photo.", engine.label()))
+}
+
+/// Run the same multi-image judgment through whichever verified image engine
+/// owns ingestion. Claude receives its structured stream-json message; Codex
+/// receives ordinary prompt text plus staged `--image` files.
+pub(crate) fn run_engine_image_prompt(
+    engine: crate::cli_provider::CliEngine,
+    claude_message: &str,
+    text_prompt: &str,
+    image_data_urls: &[String],
+    claude_model: Option<&str>,
+) -> Result<String, String> {
+    use crate::cli_provider::CliEngine;
+    match engine {
+        CliEngine::Claude => run_claude_vision(claude_message, claude_model),
+        CliEngine::Codex => run_codex_image_prompt(text_prompt, image_data_urls),
+        CliEngine::Gemini => Err("Gemini image input has not been verified in headless mode.".into()),
+    }
+}
+
+fn run_codex_image_prompt(prompt: &str, image_data_urls: &[String]) -> Result<String, String> {
+    use crate::cli_provider::{vision_args, CliEngine, Delivery};
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut image_paths = Vec::new();
+    let staged = (|| -> Result<(), String> {
+        for (i, data_url) in image_data_urls.iter().enumerate() {
+            let (media, b64) = crate::campaign::split_data_url(data_url);
+            let ext = if media.contains("png") { "png" } else if media.contains("webp") { "webp" } else { "jpg" };
+            let path = std::env::temp_dir().join(format!("tavern-tile-{}-{stamp}-{i}.{ext}", std::process::id()));
+            let bytes = base64_decode(b64).ok_or("Tile artwork wasn't valid base64.")?;
+            std::fs::write(&path, bytes).map_err(|e| format!("Couldn't stage tile artwork: {e}"))?;
+            image_paths.push(path);
+        }
+        Ok(())
+    })();
+    if let Err(e) = staged {
+        for p in image_paths { let _ = std::fs::remove_file(p); }
+        return Err(e);
+    }
+
+    let out_path = std::env::temp_dir().join(format!("tavern-tile-out-{}-{stamp}.txt", std::process::id()));
+    let path_strings = image_paths.iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>();
+    let result = (|| -> Result<String, String> {
+        let inv = vision_args(CliEngine::Codex, best_codex_ingest_model(), Some("xhigh"), &path_strings, &out_path.to_string_lossy());
+        let arg_refs = inv.args.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut cmd = engine_command(CliEngine::Codex, &arg_refs)?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+            .map_err(|e| format!("Couldn't start Codex image selection: {e}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(prompt.as_bytes()).map_err(|e| format!("Couldn't send Codex the image prompt: {e}"))?;
+        }
+        let out = child.wait_with_output().map_err(|e| format!("Codex image wait failed: {e}"))?;
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let answer = match inv.delivery {
+            Delivery::LastMessageFile => std::fs::read_to_string(&out_path).ok(),
+            Delivery::Stdout => crate::cli_provider::extract_final_text(CliEngine::Codex, &stdout),
+        };
+        answer.filter(|a| !a.trim().is_empty()).ok_or_else(|| {
+            format!("Codex returned no image selection. {}", String::from_utf8_lossy(&out.stderr).trim())
+        })
+    })();
+    for p in image_paths { let _ = std::fs::remove_file(p); }
+    let _ = std::fs::remove_file(out_path);
+    result
 }
 
 /// The board-read instructions as plain text, for engines that take the image

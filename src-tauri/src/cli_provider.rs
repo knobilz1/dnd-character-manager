@@ -384,7 +384,7 @@ pub fn turn_args(
 /// (images are referenced from the prompt). So callers hand over PATHS and let
 /// each engine decide, which means the data URL has to be spilled to a temp file
 /// for the two that want one.
-pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String], last_message_file: &str) -> Invocation {
+pub fn vision_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>, image_paths: &[String], last_message_file: &str) -> Invocation {
     match engine {
         CliEngine::Claude => {
             let mut args: Vec<String> = vec![
@@ -397,6 +397,7 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             ];
             args.extend(lockdown_flags(engine));
             push_model(&mut args, "--model", model);
+            if let Some(e) = effort { args.extend(["--effort".into(), e.into()]); }
             Invocation { args, delivery: Delivery::Stdout, prompt_on_stdin: true }
         }
         CliEngine::Codex => {
@@ -405,6 +406,7 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             args.push("--skip-git-repo-check".into());
             args.push("--ephemeral".into());
             push_model(&mut args, "--model", model);
+            if let Some(e) = effort { args.extend(["-c".into(), format!("model_reasoning_effort=\"{e}\"")]); }
             for p in image_paths {
                 args.push("--image".into());
                 args.push(p.clone());
@@ -419,6 +421,7 @@ pub fn vision_args(engine: CliEngine, model: Option<&str>, image_paths: &[String
             args.push("--output-format".into());
             args.push("json".into());
             push_model(&mut args, "--model", model);
+            if let Some(e) = effort { args.extend(["--effort".into(), e.into()]); }
             // Same alias trap as turn_args: --prompt IS --print, and it wants
             // the prompt as its value. (run_engine_vision refuses Gemini today,
             // so this shape is unexercised — but a wrong builder left in place
@@ -546,7 +549,7 @@ mod tests {
                 ("oneshot", oneshot_args(engine, Some("opus"), Some("low"), "out.txt")),
                 ("turn/new", turn_args(engine, None, Some("sonnet"), None, true, "out.txt")),
                 ("turn/resume", turn_args(engine, Some("sess-1"), None, None, false, "out.txt")),
-                ("vision", vision_args(engine, Some("opus"), &["a.png".into()], "out.txt")),
+                ("vision", vision_args(engine, Some("opus"), None, &["a.png".into()], "out.txt")),
             ];
             for (what, inv) in builds {
                 // The flags must appear, adjacently and in order — a stray
@@ -587,7 +590,7 @@ mod tests {
             oneshot_args(CliEngine::Codex, None, None, "o.txt"),
             turn_args(CliEngine::Codex, None, None, None, false, "o.txt"),
             turn_args(CliEngine::Codex, Some("s"), None, None, true, "o.txt"),
-            vision_args(CliEngine::Codex, None, &[], "o.txt"),
+            vision_args(CliEngine::Codex, None, None, &[], "o.txt"),
         ] {
             assert!(inv.args.iter().any(|a| a == "--skip-git-repo-check"), "{:?}", inv.args);
         }
@@ -637,7 +640,7 @@ mod tests {
         for inv in [
             turn_args(CliEngine::Gemini, None, None, None, false, "o.txt"),
             oneshot_args(CliEngine::Gemini, None, None, "o.txt"),
-            vision_args(CliEngine::Gemini, None, &[], "o.txt"),
+            vision_args(CliEngine::Gemini, None, None, &[], "o.txt"),
         ] {
             assert!(!inv.prompt_on_stdin, "agy never reads stdin: {:?}", inv.args);
             assert_eq!(
@@ -694,6 +697,10 @@ mod tests {
         let codex_turn = turn_args(CliEngine::Codex, Some("abc"), None, Some("medium"), false, "o.txt").args;
         let i = codex_turn.iter().position(|a| a == "-c").expect("codex turn -c override");
         assert_eq!(codex_turn[i + 1], "model_reasoning_effort=\"medium\"");
+
+        let codex_vision = vision_args(CliEngine::Codex, None, Some("xhigh"), &["a.png".into()], "o.txt").args;
+        let i = codex_vision.iter().position(|a| a == "-c").expect("codex vision -c override");
+        assert_eq!(codex_vision[i + 1], "model_reasoning_effort=\"xhigh\"");
 
         let gemini = oneshot_args(CliEngine::Gemini, None, Some("high"), "o.txt").args;
         let i = gemini.iter().position(|a| a == "--effort").expect("agy --effort");

@@ -22,6 +22,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1951,22 +1952,16 @@ fn shortlist_rank(entry: &TileLibraryEntry, tokens: &[String], idf: &HashMap<Str
     any.then_some((coverage.max(u32::from(head_hit)), total))
 }
 
-/// Query words this catalog has no keyword for at all, counted across one
-/// map's resolution. Drained and logged by `resolve_map_tiles`.
-///
-/// Every vocabulary bug found so far was found the slow way — generate a map,
-/// render it, notice the art is absurd, then go count keywords by hand. All
-/// four were the same shape: the DM wrote a perfectly ordinary English noun
-/// the pack has never heard of, so the query fell through to whatever the
-/// remaining words matched. `hearth` (0 tiles, the pack files 349 under
-/// `fireplace`), `stall` (0, it draws 572 `awning`), `counter` (0, so "Shop
-/// counter" drew a hanging shop SIGN), `timber` (0, the pack says `wood`).
-///
-/// That check needs no model and no rendering: the answer is already sitting
-/// in the IDF map, which is keyword -> rarity over the whole catalog and so IS
-/// the pack's vocabulary — 2,616 words against 183,190 tiles, so this is a
-/// scan of thousands, not hundreds of thousands.
-static UNANSWERED: Mutex<BTreeMap<String, (usize, bool)>> = Mutex::new(BTreeMap::new());
+// Query words this catalog has no keyword for at all, counted across one map's
+// resolution. Drained and logged by `resolve_map_tiles`. Every vocabulary bug
+// found so far was mechanically detectable here before rendering. Per-thread
+// storage keeps concurrently-resolved maps from stealing one another's misses.
+thread_local! {
+    /// Per-map resolver thread: planned maps now resolve concurrently, so one
+    /// global bucket would attribute map A's missing words to whichever map B
+    /// happened to finish first.
+    static UNANSWERED: RefCell<BTreeMap<String, (usize, bool)>> = RefCell::new(BTreeMap::new());
+}
 
 /// Count any query word the catalog's whole vocabulary can't answer. `bool` is
 /// "was it ever the HEAD noun" — a modifier the pack lacks (`timber`,
@@ -1978,17 +1973,19 @@ fn note_unanswered_words(tokens: &[String], idf: &HashMap<String, f64>) {
         if idf.keys().any(|k| token_matches(k, t) || bridges(k, t)) {
             continue;
         }
-        let mut seen = UNANSWERED.lock().unwrap();
-        let e = seen.entry(t.clone()).or_insert((0, false));
-        e.0 += 1;
-        e.1 |= i == tokens.len() - 1;
+        UNANSWERED.with(|seen| {
+            let mut seen = seen.borrow_mut();
+            let e = seen.entry(t.clone()).or_insert((0, false));
+            e.0 += 1;
+            e.1 |= i == tokens.len() - 1;
+        });
     }
 }
 
 /// Take and clear what `note_unanswered_words` has collected:
 /// `(word, times asked, was ever a head noun)`, rarest-first by name.
 pub fn drain_unanswered_words() -> Vec<(String, usize, bool)> {
-    std::mem::take(&mut *UNANSWERED.lock().unwrap()).into_iter().map(|(w, (n, head))| (w, n, head)).collect()
+    UNANSWERED.with(|seen| std::mem::take(&mut *seen.borrow_mut()).into_iter().map(|(w, (n, head))| (w, n, head)).collect())
 }
 
 /// The same check run over a batch of labels against a manifest on disk, for

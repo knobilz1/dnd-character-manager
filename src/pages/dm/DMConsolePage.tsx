@@ -431,6 +431,13 @@ interface MapCard {
    *  floorArt[i] is floor i's tiles + terrain, drawn over that floor's grid. One
    *  entry for a single-floor map; empty when no library / nothing resolved. */
   floorArt: Array<{ tiles: MapTileArt[]; terrain: MapTerrain }>;
+  artDiagnostics: {
+    status: string;
+    biome: string | null;
+    placements_total: number;
+    placements_resolved: number;
+    fallback_reasons: string[];
+  };
   /** One preview per floor (ground first) for multi-story places; a single-
    *  floor map has exactly one and `png === floors[0].png`. `revealed` gates
    *  the Phase-5 player broadcast — ground revealed, upper floors hidden until
@@ -918,8 +925,8 @@ export function DMConsolePage() {
   /** Step progress for the currently-running plan/maps generation — see
    *  campaign.rs's PlanProgress ("plan-progress" event). `phase` is "plan"
    *  (the single session-plan-text call, nothing to increment mid-call) or
-   *  "maps" (done/total combat-encounter maps generated, ticking up in real
-   *  completion order). Reset to null whenever a new generate/regenerate
+   *  "maps" (done/total combat-encounter specs generated) or "art" (those
+   *  maps resolving imported artwork, two at a time). Reset whenever a new generate/regenerate
    *  starts, same lifecycle as planBusy. */
   const [planProgress, setPlanProgress] = React.useState<{ phase: string; done: number; total: number } | null>(null);
   /** Live phase + age of an in-flight map generation, re-emitted every ~2s by
@@ -3152,26 +3159,30 @@ export function DMConsolePage() {
   /** The vision-resolved catalog tiles for one map, with their art preloaded
    *  so the synchronous render can draw them. Empty (silent) when no library is
    *  imported or nothing resolved — the render then uses built-in sprites. */
-  async function fetchMapTiles(slug: string): Promise<MapCard['floorArt']> {
+  async function fetchMapTiles(slug: string): Promise<Pick<MapCard, 'floorArt' | 'artDiagnostics'>> {
+    const unavailable: MapCard['artDiagnostics'] = {
+      status: 'failed', biome: null, placements_total: 0, placements_resolved: 0,
+      fallback_reasons: ['Artwork diagnostics could not be loaded.'],
+    };
     try {
       type RawFloor = { tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean };
-      const res = await invoke<RawFloor & { floors?: RawFloor[] }>('get_map_tiles', { id: activeCampaignId, slug });
+      const res = await invoke<RawFloor & { floors?: RawFloor[]; diagnostics: MapCard['artDiagnostics'] }>('get_map_tiles', { id: activeCampaignId, slug });
       // Per-floor art (ground first). Fall back to the top-level fields as a
       // single ground floor for a backend that predates `floors`.
       const raw = res.floors?.length ? res.floors : [res];
       const floorArt = raw.map((f) => ({ tiles: f.tiles, terrain: { floor: f.floor, liquid: f.liquid, naturalWalls: f.natural_walls } as MapTerrain }));
       for (const fa of floorArt) await preloadResolvedTileArt(fa.tiles, fa.terrain);
-      return floorArt;
+      return { floorArt, artDiagnostics: res.diagnostics ?? unavailable };
     } catch {
-      return [];
+      return { floorArt: [], artDiagnostics: unavailable };
     }
   }
 
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
     const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
-    const floorArt = await fetchMapTiles(meta.slug);
+    const { floorArt, artDiagnostics } = await fetchMapTiles(meta.slug);
     const floors = renderFloors(spec, floorArt);
-    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, floorArt, floors, png: floors[0]?.png ?? null };
+    return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, floorArt, artDiagnostics, floors, png: floors[0]?.png ?? null };
   }
 
   /** Loads the currently-imported tile library's summary (if any) — called
@@ -4634,6 +4645,8 @@ export function DMConsolePage() {
             <p className="text-sm text-slate-400 mb-1">
               {planProgress?.phase === 'maps'
                 ? `Generating battle maps… (${planProgress.done} of ${planProgress.total})`
+                : planProgress?.phase === 'art'
+                  ? `Matching imported artwork… (${planProgress.done} of ${planProgress.total})`
                 : "Thinking through what's coming up…"}
             </p>
             <div className="h-1.5 w-full bg-slate-800 rounded overflow-hidden">
@@ -4641,7 +4654,7 @@ export function DMConsolePage() {
                 className="h-full bg-red-600 transition-all"
                 style={{
                   width:
-                    planProgress?.phase === 'maps' && planProgress.total > 0
+                    (planProgress?.phase === 'maps' || planProgress?.phase === 'art') && planProgress.total > 0
                       ? `${Math.min(100, (planProgress.done / planProgress.total) * 100)}%`
                       : '25%',
                 }}
@@ -4935,6 +4948,24 @@ export function DMConsolePage() {
                         <div className="min-w-[12rem] flex-1">
                           <div className="text-sm font-medium text-slate-100">{card.name}</div>
                           {card.summary && <div className="text-xs text-slate-500">{card.summary}</div>}
+                          {card.artDiagnostics.fallback_reasons.length > 0 ? (
+                            <details className="mt-1 text-[11px] text-amber-400">
+                              <summary className="cursor-pointer">
+                                Artwork: {card.artDiagnostics.status}
+                                {card.artDiagnostics.biome ? ` · ${card.artDiagnostics.biome}` : ''}
+                                {card.artDiagnostics.placements_total > 0 ? ` · ${card.artDiagnostics.placements_resolved}/${card.artDiagnostics.placements_total} placements` : ''}
+                              </summary>
+                              <ul className="mt-1 list-disc pl-4 space-y-0.5 text-amber-300/80">
+                                {card.artDiagnostics.fallback_reasons.map((reason, i) => <li key={`${i}-${reason}`}>{reason}</li>)}
+                              </ul>
+                            </details>
+                          ) : (
+                            <div className="mt-1 text-[11px] text-emerald-500">
+                              Artwork: {card.artDiagnostics.status}
+                              {card.artDiagnostics.biome ? ` · ${card.artDiagnostics.biome}` : ''}
+                              {card.artDiagnostics.placements_total > 0 ? ` · ${card.artDiagnostics.placements_resolved}/${card.artDiagnostics.placements_total} placements` : ''}
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           {planOwnedSlugs.has(card.slug) && (

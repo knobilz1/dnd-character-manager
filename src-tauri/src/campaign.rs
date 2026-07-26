@@ -56,6 +56,7 @@
 //! the way a plain recency cutoff would.
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -3792,7 +3793,21 @@ fn tiles_up_to_date(tiles: &Path, spec: &Path) -> bool {
 /// much cheaper than Opus for what is a visual matching task, not a reasoning
 /// one. (Verified live that the subscription CLI accepts image blocks and
 /// Sonnet identifies tiles correctly.)
+// Claude's measured tile-picking tier. Codex ignores this hint and uses the
+// newest available model at xhigh effort (see `run_codex_image_prompt`).
 const VISION_PICK_MODEL: &str = "sonnet";
+
+thread_local! {
+    static MAP_ART_WARNINGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn note_map_art_warning(warning: String) {
+    MAP_ART_WARNINGS.with(|warnings| warnings.borrow_mut().push(warning));
+}
+
+fn drain_map_art_warnings() -> Vec<String> {
+    MAP_ART_WARNINGS.with(|warnings| std::mem::take(&mut *warnings.borrow_mut()))
+}
 
 /// One resolved placement persisted to `<slug>.tiles.json` and reloaded (with
 /// fresh art) by `get_map_tiles` at render time. `w`/`h` are the placement's
@@ -3953,6 +3968,37 @@ struct ResolvedMap {
     natural_walls: bool,
 }
 
+/// Human-readable resolution state persisted beside the art sidecars. Art
+/// failures are intentionally non-fatal, so without this file a missing tile
+/// and a failed model call both look like the same built-in sprite in the UI.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct MapArtDiagnostics {
+    status: String,
+    biome: Option<String>,
+    placements_total: usize,
+    placements_resolved: usize,
+    #[serde(default)]
+    fallback_reasons: Vec<String>,
+}
+
+#[derive(Default)]
+struct FloorResolutionDiagnostics {
+    placements_total: usize,
+    placements_resolved: usize,
+    fallback_reasons: Vec<String>,
+}
+
+fn tile_status_path(dir: &Path, slug: &str) -> PathBuf {
+    dir.join(format!("{slug}.tiles.status.json"))
+}
+
+fn save_tile_diagnostics(dir: &Path, slug: &str, diagnostics: &MapArtDiagnostics) -> Result<(), String> {
+    write_atomic(
+        &tile_status_path(dir, slug),
+        &serde_json::to_string_pretty(diagnostics).map_err(|e| e.to_string())?,
+    )
+}
+
 /// Splits a `data:<media>;base64,<b64>` URL into (media_type, base64). Falls
 /// back to webp if it's not shaped as expected. Pure.
 pub(crate) fn split_data_url(u: &str) -> (&str, &str) {
@@ -4031,6 +4077,39 @@ fn build_vision_message(slots: &[(&Placement, Vec<crate::tile_library::TileCandi
          Reply with ONLY this JSON, one entry per slot, nothing else: {\"picks\":[{\"slot\":1,\"choice\":2},{\"slot\":2,\"choice\":0}]}"
     }));
     json!({"type":"user","message":{"role":"user","content":content}}).to_string()
+}
+
+fn build_image_text_prompt(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> String {
+    let mut out = format!("The attached images are candidate artwork for a {biome} tabletop battle map, in the exact order listed below. Match identity, material, and footprint.\n");
+    let mut image = 1usize;
+    for (slot, (placement, candidates)) in slots.iter().enumerate() {
+        out.push_str(&format!("\nSlot {}: \"{}\", {}x{} cells.\n", slot + 1, placement.label, placement.w, placement.h));
+        for (choice, candidate) in candidates.iter().enumerate() {
+            out.push_str(&format!("  Choice {} = attached image {} ({}x{} tile)\n", choice + 1, image, candidate.w, candidate.h));
+            image += 1;
+        }
+    }
+    out.push_str("\nFor every slot, choose the image that actually depicts the requested object and fits. Choose 0 when none do. Reply with ONLY JSON: {\"picks\":[{\"slot\":1,\"choice\":2}]}");
+    out
+}
+
+fn run_map_image_prompt(
+    claude_message: &str, text_prompt: &str, image_data_urls: &[String],
+) -> Result<String, String> {
+    let mut errors = Vec::new();
+    for engine in crate::local_llm::ingestion_vision_engines() {
+        match crate::dm::run_engine_image_prompt(engine, claude_message, text_prompt, image_data_urls, Some(VISION_PICK_MODEL)) {
+            Ok(reply) => {
+                crate::maplog::log("VISION ENGINE", &format!("{} selected the artwork", engine.label()));
+                return Ok(reply);
+            }
+            Err(e) => {
+                crate::maplog::log("VISION ENGINE FAILED", &format!("{}: {e}", engine.label()));
+                errors.push(format!("{}: {e}", engine.label()));
+            }
+        }
+    }
+    Err(errors.join("\n"))
 }
 
 /// The same slot/candidate shortlist as `build_vision_message`, written out as
@@ -4164,20 +4243,24 @@ fn vision_chunks(slot_candidate_counts: &[usize], cap: usize) -> Vec<(usize, usi
     chunks
 }
 
-/// Shows Claude the candidate tiles and returns its pick per slot. Splits the
+/// Shows the configured image-capable engine the candidate tiles and returns
+/// its pick per slot. Splits the
 /// slots into image-budget-sized chunks run IN PARALLEL (mirrors
 /// generate_map_spec's parallel candidate calls) — one giant request is
 /// "Prompt is too long", and a chunk failing only loses its own slots (they
 /// fall back to built-in sprites), not the whole map. Never fatal.
-fn pick_tiles_via_vision(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> Vec<Option<usize>> {
+fn pick_tiles_via_vision(slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> (Vec<Option<usize>>, Vec<String>) {
     let counts: Vec<usize> = slots.iter().map(|(_, c)| c.len()).collect();
     let chunks = vision_chunks(&counts, MAX_IMAGES_PER_VISION_CALL);
-    let results: Vec<(usize, Vec<Option<usize>>)> = std::thread::scope(|s| {
+    let results: Vec<(usize, Vec<Option<usize>>, Vec<String>)> = std::thread::scope(|s| {
         chunks
             .iter()
             .map(|&(start, len)| {
                 let chunk = &slots[start..start + len];
-                s.spawn(move || (start, pick_one_chunk(chunk, biome)))
+                s.spawn(move || {
+                    let (picks, warnings) = pick_one_chunk(chunk, biome);
+                    (start, picks, warnings)
+                })
             })
             .collect::<Vec<_>>()
             .into_iter()
@@ -4185,12 +4268,14 @@ fn pick_tiles_via_vision(slots: &[(&Placement, Vec<crate::tile_library::TileCand
             .collect()
     });
     let mut picks = vec![None; slots.len()];
-    for (start, chunk_picks) in results {
+    let mut warnings = Vec::new();
+    for (start, chunk_picks, chunk_warnings) in results {
         for (i, p) in chunk_picks.into_iter().enumerate() {
             picks[start + i] = p;
         }
+        warnings.extend(chunk_warnings);
     }
-    picks
+    (picks, warnings)
 }
 
 /// One vision call for one chunk of slots — picks aligned to the chunk's own
@@ -4205,20 +4290,24 @@ fn pick_tiles_via_vision(slots: &[(&Placement, Vec<crate::tile_library::TileCand
 /// dropped all 6 objects from a tavern and all 4 from a sewer, and both maps
 /// rendered as bare glyphs — with a perfectly good keg, crate and barrel
 /// sitting at rank #1 the whole time.
-fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> Vec<Option<usize>> {
-    match crate::dm::run_claude_vision(&build_vision_message(chunk, biome), Some(VISION_PICK_MODEL)) {
+fn pick_one_chunk(chunk: &[(&Placement, Vec<crate::tile_library::TileCandidate>)], biome: &str) -> (Vec<Option<usize>>, Vec<String>) {
+    let images = chunk.iter().flat_map(|(_, candidates)| candidates.iter().map(|c| c.data_url.clone())).collect::<Vec<_>>();
+    match run_map_image_prompt(&build_vision_message(chunk, biome), &build_image_text_prompt(chunk, biome), &images) {
         Ok(reply) => {
             crate::maplog::log("VISION TILE PICK (raw reply)", &reply);
             let picks = parse_vision_picks(&reply, chunk.len());
             cross_check_object_picks(chunk, biome, &picks);
-            picks
+            (picks, Vec::new())
         }
         Err(e) => {
             crate::maplog::log(
                 "VISION TILE PICK FAILED",
                 &format!("{e}\n(no judgment was made, so this chunk keeps shortlist rank #1 rather than falling back to built-in sprites)"),
             );
-            chunk.iter().map(|(_, cands)| (!cands.is_empty()).then_some(0)).collect()
+            (
+                chunk.iter().map(|(_, cands)| (!cands.is_empty()).then_some(0)).collect(),
+                vec![format!("Artwork model selection failed for {} object placement(s): {e}. Shortlist rank #1 was used.", chunk.len())],
+            )
         }
     }
 }
@@ -4735,7 +4824,7 @@ fn glossed_biome_ids(profile: &PackProfile) -> String {
 /// could tie on and five would pay for without buying much.
 const BIOME_VOTES: usize = 3;
 
-fn classify_biome(profile: &PackProfile, spec: &str) -> String {
+fn classify_biome_result(profile: &PackProfile, spec: &str) -> (String, Option<String>) {
     let ids = biome_ids(profile);
     let prompt = format!(
         "A tabletop battle map is described below. Which single setting best fits the PHYSICAL PLACE it depicts — its ground, its walls, its structures? Answer for the location itself, never for whoever happens to be fighting there: a cave full of drow is still a cave, a tavern full of goblins is still a tavern.\nReply with EXACTLY one word from this list and nothing else (the bracketed group is what each word means, don't reply with it): {}.\n\n{}",
@@ -4829,7 +4918,7 @@ fn classify_biome(profile: &PackProfile, spec: &str) -> String {
                 ),
             );
         }
-        return winner.clone();
+        return (winner.clone(), None);
     }
 
     let why = votes
@@ -4851,7 +4940,15 @@ fn classify_biome(profile: &PackProfile, spec: &str) -> String {
             crate::pack_profile::BUILTIN_SCENE
         ),
     );
-    crate::pack_profile::BUILTIN_SCENE.to_string()
+    (
+        crate::pack_profile::BUILTIN_SCENE.to_string(),
+        Some(format!("Biome classification failed; using the built-in scene. {why}")),
+    )
+}
+
+#[cfg(test)]
+fn classify_biome(profile: &PackProfile, spec: &str) -> String {
+    classify_biome_result(profile, spec).0
 }
 
 /// The same shortlist described in WORDS, for a reviewer that can't see images.
@@ -4893,11 +4990,28 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
     }
     content.push(json!({"type":"text","text":"Reply with ONLY this JSON: {\"choice\":N} where N is the best option's number."}));
     let msg = json!({"type":"user","message":{"role":"user","content":content}}).to_string();
-    let reply = crate::dm::run_claude_vision(&msg, Some(VISION_PICK_MODEL)).ok()?;
+    let text_prompt = format!(
+        "The {} attached images are candidate textures for a {biome} tabletop battle map, in choice order 1 through {}. Pick the one that best reads as {kind}. Prefer a solid, opaque, seamless top-down texture. Reply with ONLY JSON: {{\"choice\":N}}.",
+        cands.len(), cands.len()
+    );
+    let images = cands.iter().map(|c| c.data_url.clone()).collect::<Vec<_>>();
+    let reply = match run_map_image_prompt(&msg, &text_prompt, &images) {
+        Ok(reply) => reply,
+        Err(e) => {
+            crate::maplog::log("VISION TEXTURE PICK FAILED", &format!("{kind}: {e}"));
+            note_map_art_warning(format!("Artwork model selection failed for {kind}: {e}"));
+            return None;
+        }
+    };
     crate::maplog::log("VISION TEXTURE PICK (raw reply)", &format!("{kind}: {reply}"));
-    let v: serde_json::Value = serde_json::from_str(&extract_json_object(&reply)).ok()?;
-    let choice = v.get("choice")?.as_u64()?;
-    let picked = (1..=cands.len() as u64).contains(&choice).then(|| (choice - 1) as usize)?;
+    let picked = serde_json::from_str::<serde_json::Value>(&extract_json_object(&reply)).ok()
+        .and_then(|v| v.get("choice").and_then(|choice| choice.as_u64()))
+        .filter(|choice| (1..=cands.len() as u64).contains(choice))
+        .map(|choice| (choice - 1) as usize);
+    let Some(picked) = picked else {
+        note_map_art_warning(format!("Artwork model returned no usable choice for {kind}; built-in artwork is shown."));
+        return None;
+    };
 
     // Cross-check: a SECOND engine picks from the same shortlist, and a
     // disagreement is logged. Nobody is watching at generation time, so this
@@ -5099,26 +5213,41 @@ fn remove_higher_floor_sidecars(dir: &Path, slug: &str, keep_from: usize) {
 }
 
 fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Result<(), String> {
+    resolve_map_tiles_as(app, root, id, slug, slug, false)
+}
+
+/// Resolve `spec_slug` into sidecars named for `output_slug`. A separate output
+/// name is what lets re-pick finish completely before it touches known-good art.
+fn resolve_map_tiles_as(
+    app: &AppHandle, root: &Path, id: &str, spec_slug: &str, output_slug: &str, force: bool,
+) -> Result<(), String> {
+    let dir = battle_maps_dir(root, id);
     if !crate::tile_library::tile_library_configured(app) {
+        save_tile_diagnostics(&dir, output_slug, &MapArtDiagnostics {
+            status: "built-in".into(),
+            fallback_reasons: vec!["No imported tile library is configured; this map uses built-in artwork.".into()],
+            ..Default::default()
+        })?;
         return Ok(());
     }
     // Skip when the sidecar is already at least as new as the spec — so this is
     // safe to call from every path: a fresh/regenerated map (newer .md) gets
     // resolved, a plan cache-hit (unchanged .md, existing .tiles.json) self-
     // skips and spends no vision call.
-    let dir = battle_maps_dir(root, id);
-    let (spec_path, tiles_path) = (dir.join(format!("{slug}.md")), dir.join(format!("{slug}.tiles.json")));
-    if tiles_up_to_date(&tiles_path, &spec_path) {
+    let (spec_path, tiles_path) = (dir.join(format!("{spec_slug}.md")), dir.join(format!("{output_slug}.tiles.json")));
+    if !force && tiles_up_to_date(&tiles_path, &spec_path) {
         return Ok(());
     }
-    let spec = read_battle_map_at(root, id, slug)?;
+    let result = (|| -> Result<MapArtDiagnostics, String> {
+    let _ = drain_map_art_warnings();
+    let spec = read_battle_map_at(root, id, spec_slug)?;
     // The imported pack's profile decides what scene words even EXIST, what
     // each one's ground is and whether its walls are living rock — so it's read
     // once here and threaded through every step below.
     let profile = crate::tile_library::load_profile_cached(app);
     // Classify the scene ONCE — it drives both the object picks (material fit)
     // and the ground texture.
-    let biome = classify_biome(&profile, &spec);
+    let (biome, biome_warning) = classify_biome_result(&profile, &spec);
     // Ground texture + wall style are PLACE-level — one classification for the
     // whole map, shared across every floor (a tower's floors are the same place,
     // one biome, one ground). classify_biome and resolve_floor each make a model
@@ -5130,16 +5259,24 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
     let floor = resolve_floor(app, &profile, &biome);
     let natural_walls = has_natural_walls(&profile, &biome);
     let write_floor = |i: usize, resolved: &ResolvedMap| -> Result<(), String> {
-        let path = if i == 0 { tiles_path.clone() } else { dir.join(format!("{slug}.floor{i}.tiles.json")) };
+        let path = if i == 0 { tiles_path.clone() } else { dir.join(format!("{output_slug}.floor{i}.tiles.json")) };
         // Always write (even if nothing resolved) so the mtime gate marks this
         // spec done and we don't re-run the vision/classify calls on every open.
         write_atomic(&path, &serde_json::to_string_pretty(resolved).map_err(|e| e.to_string())?)
     };
+    let mut diagnostics = MapArtDiagnostics { biome: Some(biome.clone()), ..Default::default() };
+    diagnostics.fallback_reasons.extend(biome_warning);
+    let mut add_floor = |d: FloorResolutionDiagnostics| {
+        diagnostics.placements_total += d.placements_total;
+        diagnostics.placements_resolved += d.placements_resolved;
+        diagnostics.fallback_reasons.extend(d.fallback_reasons);
+    };
     match floor_specs(&spec) {
         None => {
-            let resolved = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, &spec, slug);
+            let (resolved, floor_diagnostics) = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, &spec, spec_slug);
             write_floor(0, &resolved)?;
-            remove_higher_floor_sidecars(&dir, slug, 1);
+            remove_higher_floor_sidecars(&dir, output_slug, 1);
+            add_floor(floor_diagnostics);
         }
         Some((_title, floors, _shared)) => {
             // Ground (floor 0) is written LAST: `<slug>.tiles.json` carries the
@@ -5147,14 +5284,35 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
             // floor's sidecar is on disk.
             let mut ground: Option<ResolvedMap> = None;
             for (i, (name, fspec)) in floors.iter().enumerate() {
-                let resolved = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, fspec, &format!("{slug} [{name}]"));
+                let (resolved, floor_diagnostics) = resolve_one_grid(app, &profile, &biome, &floor, natural_walls, fspec, &format!("{spec_slug} [{name}]"));
                 if i == 0 { ground = Some(resolved); } else { write_floor(i, &resolved)?; }
+                add_floor(floor_diagnostics);
             }
             if let Some(g) = ground { write_floor(0, &g)?; }
-            remove_higher_floor_sidecars(&dir, slug, floors.len());
+            remove_higher_floor_sidecars(&dir, output_slug, floors.len());
         }
     }
-    Ok(())
+    if floor.is_none() {
+        diagnostics.fallback_reasons.push(format!("No imported ground texture was selected for the {biome} biome; the built-in floor is shown."));
+    }
+    diagnostics.fallback_reasons.extend(drain_map_art_warnings());
+    diagnostics.fallback_reasons.sort();
+    diagnostics.fallback_reasons.dedup();
+    diagnostics.status = if diagnostics.fallback_reasons.is_empty() { "resolved".into() } else { "partial".into() };
+    Ok(diagnostics)
+    })();
+
+    match result {
+        Ok(diagnostics) => save_tile_diagnostics(&dir, output_slug, &diagnostics),
+        Err(e) => {
+            let _ = save_tile_diagnostics(&dir, output_slug, &MapArtDiagnostics {
+                status: "failed".into(),
+                fallback_reasons: vec![e.clone()],
+                ..Default::default()
+            });
+            Err(e)
+        }
+    }
 }
 
 /// Resolve ONE standalone grid — a single floor, or a whole single-floor map —
@@ -5163,11 +5321,12 @@ fn resolve_map_tiles(app: &AppHandle, root: &Path, id: &str, slug: &str) -> Resu
 /// `resolve_map_tiles` and shared across floors (a place's floors are one biome
 /// and share a ground). Per-grid here: the object placements and the liquid.
 /// `label` tags the maplog lines (the slug, plus the floor name when multi-floor).
-fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_texture: &Option<TileRef>, natural_walls: bool, spec: &str, label: &str) -> ResolvedMap {
+fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_texture: &Option<TileRef>, natural_walls: bool, spec: &str, label: &str) -> (ResolvedMap, FloorResolutionDiagnostics) {
     // Shadow to owned so the (verbatim) body below keeps its `&biome` / `&spec`.
     let biome = biome.to_string();
     let spec = spec.to_string();
     let placements = parse_placements(&spec);
+    let mut diagnostics = FloorResolutionDiagnostics { placements_total: placements.len(), ..Default::default() };
     let t_short = std::time::Instant::now();
     // Search at the library's real size for guide nouns even when the placement
     // is smaller. A `T` cell is 1x1 BY DEFINITION, so no prompt rule can ever
@@ -5248,6 +5407,7 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
             look(&if uncaptioned { noun.to_string() } else { format!("{} {noun}", p.label) }, gw, gh)
         });
         if cands.is_empty() {
+            diagnostics.fallback_reasons.push(format!("{label}: no imported artwork matched \"{}\".", p.label));
             continue; // nothing real to place — the procedural foliage glyph carries it
         }
         // Vary only among the TOP few. Skipping vision lost the novelty filter,
@@ -5278,17 +5438,21 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
         let pick = &cands[(c.wrapping_mul(7) ^ r.wrapping_mul(13)) % pool];
         let (tw, th, rotated) = orient(pick.w, pick.h, p.w, p.h);
         field_objects.push(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: pick.root.clone(), rel_path: pick.rel_path.clone(), sub: None, rotated, single: false });
+        diagnostics.placements_resolved += 1;
     }
 
-    let slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
+    let all_slots: Vec<(&Placement, Vec<crate::tile_library::TileCandidate>)> = placements
         .iter()
         .filter(|p| p.field_glyph.is_none())
         .map(|p| {
             let (sw, sh) = search_size(&p.label, p.w, p.h);
             (p, crate::tile_library::shortlist(app, &p.label, &biome, sw, sh, VISION_SHORTLIST_K))
         })
-        .filter(|(_, cands)| !cands.is_empty())
         .collect();
+    for (p, _) in all_slots.iter().filter(|(_, cands)| cands.is_empty()) {
+        diagnostics.fallback_reasons.push(format!("{label}: no imported artwork matched \"{}\".", p.label));
+    }
+    let slots: Vec<_> = all_slots.into_iter().filter(|(_, cands)| !cands.is_empty()).collect();
     eprintln!("[map-timing] shortlist: {:.1}s for {} placement(s), {} field cell(s)", t_short.elapsed().as_secs_f64(), placements.len(), field_objects.len());
     let mut objects: Vec<ResolvedTile> = field_objects;
     if !slots.is_empty() {
@@ -5297,7 +5461,8 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
             &format!("{label}: biome={biome}, {} placement(s) with candidates:\n{}", slots.len(),
                 slots.iter().enumerate().map(|(i, (p, c))| format!("  [slot {}] \"{}\" {}x{} — {} candidates", i + 1, p.label, p.w, p.h, c.len())).collect::<Vec<_>>().join("\n")),
         );
-        let mut picks = pick_tiles_via_vision(&slots, &biome);
+        let (mut picks, vision_warnings) = pick_tiles_via_vision(&slots, &biome);
+        diagnostics.fallback_reasons.extend(vision_warnings);
         // Four "Pillar" cells in one hall are four of the SAME pillar. Each
         // slot is shortlisted and vision-picked on its own, so identical labels
         // came back as independent answers — live, a castle great hall got a
@@ -5333,11 +5498,13 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
         let mut dropped: Vec<&str> = Vec::new();
         objects.extend(slots.iter().zip(picks).filter_map(|((p, cands), pick)| match pick.and_then(|i| cands.get(i)) {
             Some(c) => {
+                diagnostics.placements_resolved += 1;
                 let (tw, th, rotated) = orient(c.w, c.h, p.w, p.h);
                 Some(ResolvedTile { cells: p.cells.clone(), w: p.w, h: p.h, tw, th, root: c.root.clone(), rel_path: c.rel_path.clone(), sub: None, rotated, single: label_is_singular(&p.label) })
             }
             None => {
                 dropped.push(p.label.as_str());
+                diagnostics.fallback_reasons.push(format!("{label}: the artwork picker declined every candidate for \"{}\".", p.label));
                 None
             }
         }));
@@ -5388,6 +5555,9 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
     let grid_rows = split_spec_grid(&spec).map(|(_, r, _)| r).unwrap_or_default();
     let liquid_caption = liquid_caption_query(&spec);
     let liquid = resolve_liquid(app, profile, &biome, &grid_rows, floor_texture.as_ref(), liquid_caption.as_deref());
+    if grid_rows.iter().any(|r| r.contains('~')) && liquid.is_none() {
+        diagnostics.fallback_reasons.push(format!("{label}: no imported liquid texture was selected; built-in liquid is shown."));
+    }
     let resolved = ResolvedMap { objects, floor: floor_texture.clone(), liquid, natural_walls };
     let basename = |p: &str| p.rsplit('/').next().unwrap_or("").to_string();
     crate::maplog::log(
@@ -5417,7 +5587,7 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
             ),
         );
     }
-    resolved
+    (resolved, diagnostics)
 }
 
 /// One resolved tile with fresh art, for the renderer. `cells` are (col,row);
@@ -5460,24 +5630,39 @@ pub struct MapTiles {
     liquid: Option<String>,
     natural_walls: bool,
     floors: Vec<FloorArt>,
+    diagnostics: MapArtDiagnostics,
 }
 
 #[tauri::command]
 pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
     let root = campaigns_root(&app)?;
     let dir = battle_maps_dir(&root, &id);
+    let mut diagnostics = fs::read_to_string(tile_status_path(&dir, &slug))
+        .ok()
+        .and_then(|json| serde_json::from_str::<MapArtDiagnostics>(&json).ok())
+        .unwrap_or_default();
     // Load one sidecar (`<slug>.tiles.json` = ground, `<slug>.floorN.tiles.json`
     // above it) into a FloorArt with its art embedded. None when the file's absent.
-    let load_one = |path: &Path| -> Option<FloorArt> {
+    let mut load_one = |path: &Path| -> Option<FloorArt> {
         let json = fs::read_to_string(path).ok()?;
         let resolved: ResolvedMap = serde_json::from_str(&json).unwrap_or_default();
-        let tiles = resolved
-            .objects
-            .into_iter()
-            .filter_map(|t| Some(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url: crate::tile_library::load_tile_data_url(&t.root, &t.rel_path)?, sub: t.sub, rotated: t.rotated, single: t.single }))
-            .collect();
-        let load = |r: Option<TileRef>| r.and_then(|t| crate::tile_library::load_tile_data_url(&t.root, &t.rel_path));
-        Some(FloorArt { tiles, floor: load(resolved.floor), liquid: load(resolved.liquid), natural_walls: resolved.natural_walls })
+        let mut tiles = Vec::new();
+        for t in resolved.objects {
+            match crate::tile_library::load_tile_data_url(&t.root, &t.rel_path) {
+                Some(data_url) => tiles.push(MapTileArt { cells: t.cells, w: t.w, h: t.h, tw: t.tw, th: t.th, data_url, sub: t.sub, rotated: t.rotated, single: t.single }),
+                None => diagnostics.fallback_reasons.push(format!("Imported artwork is missing: {}", t.rel_path)),
+            }
+        }
+        let mut load = |kind: &str, r: Option<TileRef>| r.and_then(|t| match crate::tile_library::load_tile_data_url(&t.root, &t.rel_path) {
+            Some(data) => Some(data),
+            None => {
+                diagnostics.fallback_reasons.push(format!("Imported {kind} artwork is missing: {}", t.rel_path));
+                None
+            }
+        });
+        let floor = load("floor", resolved.floor);
+        let liquid = load("liquid", resolved.liquid);
+        Some(FloorArt { tiles, floor, liquid, natural_walls: resolved.natural_walls })
     };
     // Ground first, then floor1, floor2, … contiguously until one is missing.
     let mut floors = Vec::new();
@@ -5490,23 +5675,120 @@ pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTile
             }
         }
     }
+    if diagnostics.status.is_empty() {
+        if floors.is_empty() {
+            diagnostics.status = "unresolved".into();
+            diagnostics.fallback_reasons.push("No artwork resolution record exists for this map; built-in artwork is shown.".into());
+        } else {
+            diagnostics.status = "resolved".into();
+        }
+    }
+    diagnostics.fallback_reasons.sort();
+    diagnostics.fallback_reasons.dedup();
+    if !diagnostics.fallback_reasons.is_empty() && diagnostics.status == "resolved" {
+        diagnostics.status = "partial".into();
+    }
     // Top-level fields = ground (floor 0), for the single-grid callers.
     let g = floors.first().cloned().unwrap_or_default();
-    Ok(MapTiles { tiles: g.tiles, floor: g.floor, liquid: g.liquid, natural_walls: g.natural_walls, floors })
+    Ok(MapTiles { tiles: g.tiles, floor: g.floor, liquid: g.liquid, natural_walls: g.natural_walls, floors, diagnostics })
 }
 
-/// Re-resolve catalog tiles for an EXISTING map (all floors), replacing its
-/// sidecars. Deletes the current sidecars first so the staleness gate can't skip
-/// — the on-demand equivalent of what generation does, for when the imported
-/// tile library changed under a map that was resolved against the old one.
+fn tile_sidecar_paths(dir: &Path, slug: &str) -> Vec<PathBuf> {
+    let prefix = format!("{slug}.");
+    let mut paths = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
+                name.starts_with(&prefix)
+                    && (name.ends_with(".tiles.json") || name.ends_with(".tiles.status.json"))
+            })
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+/// Replace a map's complete sidecar set from a fully-resolved staging set.
+/// Every old file is held in memory until all new files land; any write/remove
+/// failure restores the exact old set instead of leaving a half-new map.
+fn commit_staged_sidecars(dir: &Path, slug: &str, staging_slug: &str) -> Result<(), String> {
+    let staged = tile_sidecar_paths(dir, staging_slug);
+    let staged_ground = format!("{staging_slug}.tiles.json");
+    if !staged.iter().any(|p| p.file_name().and_then(|n| n.to_str()) == Some(staged_ground.as_str())) {
+        return Err("Artwork resolution produced no ground-floor sidecar.".into());
+    }
+    let old = tile_sidecar_paths(dir, slug);
+    let backup = old
+        .iter()
+        .map(|p| fs::read(p).map(|bytes| (p.clone(), bytes)).map_err(|e| format!("Couldn't back up {}: {e}", p.display())))
+        .collect::<Result<Vec<_>, _>>()?;
+    let new_paths = staged
+        .iter()
+        .map(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).ok_or_else(|| format!("Invalid sidecar path: {}", p.display()))?;
+            Ok(dir.join(name.replacen(staging_slug, slug, 1)))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let apply = (|| -> Result<(), String> {
+        for (source, destination) in staged.iter().zip(&new_paths) {
+            let json = fs::read_to_string(source).map_err(|e| format!("Couldn't read staged artwork: {e}"))?;
+            write_atomic(destination, &json)?;
+        }
+        for obsolete in old.iter().filter(|p| !new_paths.contains(p)) {
+            fs::remove_file(obsolete).map_err(|e| format!("Couldn't remove obsolete artwork sidecar: {e}"))?;
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = apply {
+        let mut restore_errors = Vec::new();
+        for p in &new_paths {
+            if let Err(remove_error) = fs::remove_file(p) {
+                if remove_error.kind() != std::io::ErrorKind::NotFound {
+                    restore_errors.push(format!("couldn't clear {}: {remove_error}", p.display()));
+                }
+            }
+        }
+        for (p, bytes) in backup {
+            match String::from_utf8(bytes) {
+                Ok(json) => if let Err(write_error) = write_atomic(&p, &json) {
+                    restore_errors.push(format!("couldn't restore {}: {write_error}", p.display()));
+                },
+                Err(_) => restore_errors.push(format!("couldn't decode the backup for {}", p.display())),
+            }
+        }
+        return if restore_errors.is_empty() {
+            Err(format!("{e} The previous artwork was restored."))
+        } else {
+            Err(format!("{e} Restoring the previous artwork also failed: {}", restore_errors.join("; ")))
+        };
+    }
+    for p in staged {
+        let _ = fs::remove_file(p);
+    }
+    Ok(())
+}
+
+/// Re-resolve catalog tiles for an EXISTING map (all floors). The complete new
+/// set is written under a temporary slug and only replaces the current art after
+/// every floor succeeds, so a failed re-pick cannot destroy a good selection.
 #[tauri::command]
 pub async fn reresolve_map_tiles(app: AppHandle, id: String, slug: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let root = campaigns_root(&app)?;
         let dir = battle_maps_dir(&root, &id);
-        let _ = fs::remove_file(dir.join(format!("{slug}.tiles.json")));
-        remove_higher_floor_sidecars(&dir, &slug, 1);
-        resolve_map_tiles(&app, &root, &id, &slug)
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let staging_slug = format!("{slug}-repick-{}-{stamp}", std::process::id());
+        let result = resolve_map_tiles_as(&app, &root, &id, &slug, &staging_slug, true)
+            .and_then(|_| commit_staged_sidecars(&dir, &slug, &staging_slug));
+        for p in tile_sidecar_paths(&dir, &staging_slug) {
+            let _ = fs::remove_file(p);
+        }
+        result
     })
     .await
     .map_err(|e| format!("Re-resolve task failed: {e}"))?
@@ -5527,6 +5809,66 @@ fn build_revise_battle_map_prompt(
         current = current.trim(),
         instruction = instruction.trim(),
     )
+}
+
+fn revision_grids(spec: &str) -> Option<Vec<(String, Vec<String>)>> {
+    match floor_specs(spec) {
+        None => split_spec_grid(spec).map(|(_, rows, _)| vec![("Ground".into(), rows)]),
+        Some((_title, floors, _shared)) => floors
+            .into_iter()
+            .map(|(name, floor)| split_spec_grid(&floor).map(|(_, rows, _)| (name, rows)))
+            .collect(),
+    }
+}
+
+/// Reject revisions that quietly redesign the map's physical skeleton. Object
+/// and terrain edits remain free-form; dimensions/floors never change, and
+/// walls/doors/stairs/bridges/void only change when the operator named that
+/// kind of structural work.
+fn validate_revision_scope(current: &str, revised: &str, instruction: &str) -> Vec<String> {
+    let (Some(before), Some(after)) = (revision_grids(current), revision_grids(revised)) else {
+        return vec!["The revised map no longer has a readable grid.".into()];
+    };
+    let mut issues = Vec::new();
+    if before.len() != after.len() {
+        issues.push(format!("The revision changed the floor count from {} to {}.", before.len(), after.len()));
+        return issues;
+    }
+    let structural_requested = {
+        let lower = instruction.to_lowercase();
+        [
+            "add wall", "add a wall", "move wall", "move the wall", "remove wall", "remove the wall", "change wall", "replace wall", "new wall",
+            "add door", "add a door", "move door", "move the door", "remove door", "remove the door", "replace door", "new door",
+            "add gate", "remove gate", "move gate", "add stair", "remove stair", "move stair", "add ladder", "remove ladder",
+            "add bridge", "remove bridge", "move bridge", "expand room", "shrink room", "add room", "remove room", "change the map boundary",
+        ].iter().any(|phrase| lower.contains(phrase))
+    };
+    let structural = |ch: char| matches!(ch, '#' | 'B' | '+' | '_' | 'H' | ' ');
+    for ((before_name, before_rows), (after_name, after_rows)) in before.iter().zip(&after) {
+        if before_name != after_name {
+            issues.push(format!("The floor \"{before_name}\" was renamed to \"{after_name}\"."));
+        }
+        let before_width = before_rows.first().map(|r| r.chars().count()).unwrap_or(0);
+        let after_width = after_rows.first().map(|r| r.chars().count()).unwrap_or(0);
+        if before_rows.len() != after_rows.len() || before_width != after_width {
+            issues.push(format!(
+                "Floor \"{before_name}\" changed dimensions from {before_width}x{} to {after_width}x{}.",
+                before_rows.len(), after_rows.len()
+            ));
+            continue;
+        }
+        if structural_requested {
+            continue;
+        }
+        let changed = before_rows.iter().zip(after_rows).flat_map(|(a, b)| a.chars().zip(b.chars()))
+            .filter(|(a, b)| a != b && (structural(*a) || structural(*b))).count();
+        if changed > 0 {
+            issues.push(format!(
+                "Floor \"{before_name}\" changed {changed} wall, door, stair, bridge, or map-boundary cell(s), but the request did not ask for structural changes."
+            ));
+        }
+    }
+    issues
 }
 
 /// Applies one natural-language edit through the configured map/ingestion
@@ -5552,14 +5894,36 @@ pub async fn revise_battle_map(app: AppHandle, id: String, slug: String, instruc
         let prompt = build_revise_battle_map_prompt(&current, &instruction, objects_enabled, &vocabulary, &footprint_guide);
         let revised = with_map_ticker(&app, "revising the map", started, || generate_one_map_spec(&prompt, 1, &footprint_guide))?;
         let revised = force_map_title(&revised, &title);
+        let scope_issues = validate_revision_scope(&current, &revised, &instruction);
+        if !scope_issues.is_empty() {
+            return Err(format!("The DM's revision was rejected because it changed more than requested:\n- {}\nThe original map is untouched.", scope_issues.join("\n- ")));
+        }
+        let remaining_issues = validate_map_spec(&revised);
+        if !remaining_issues.is_empty() {
+            return Err(format!("The DM's revision was still invalid after its repair attempts:\n- {}\nThe original map is untouched.", remaining_issues.join("\n- ")));
+        }
+        let revisions = battle_maps_dir(&root, &id).join("revisions");
+        fs::create_dir_all(&revisions).map_err(|e| format!("Couldn't create the map revision history: {e}"))?;
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        write_atomic(&revisions.join(format!("{slug}-{stamp}.md")), &current)?;
         write_atomic(&path, &format!("{}\n", revised.trim()))?;
         rebuild_battle_maps_index_at(&root, &id)?;
         with_map_ticker(&app, "matching tile art", started, || {
             let dir = battle_maps_dir(&root, &id);
-            let _ = fs::remove_file(dir.join(format!("{slug}.tiles.json")));
-            remove_higher_floor_sidecars(&dir, &slug, 1);
-            if let Err(e) = resolve_map_tiles(&app, &root, &id, &slug) {
+            let art_stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+            let staging_slug = format!("{slug}-revision-{}-{art_stamp}", std::process::id());
+            let art_result = resolve_map_tiles_as(&app, &root, &id, &slug, &staging_slug, true)
+                .and_then(|_| commit_staged_sidecars(&dir, &slug, &staging_slug));
+            for p in tile_sidecar_paths(&dir, &staging_slug) {
+                let _ = fs::remove_file(p);
+            }
+            if let Err(e) = art_result {
                 crate::maplog::log("TILE RESOLUTION ERROR", &e); // the revised spec is still a usable map
+                let _ = save_tile_diagnostics(&dir, &slug, &MapArtDiagnostics {
+                    status: "partial".into(),
+                    fallback_reasons: vec![format!("New artwork selection failed: {e} Previous artwork was preserved and may not match the revised map.")],
+                    ..Default::default()
+                });
             }
         });
         let _ = app.emit("map-progress", MapProgress { phase: "done", elapsed_s: started.elapsed().as_secs() });
@@ -8351,14 +8715,27 @@ pub async fn suggest_session_plan(app: AppHandle, id: String) -> Result<SessionP
     .map_err(|e| format!("Session-plan task failed: {e}"))?
 }
 
-/// Resolve catalog tiles for every map a session-plan result owns. Each call
-/// self-skips maps whose sidecar is already current (see resolve_map_tiles's
-/// staleness gate), so a plan cache-hit spends no vision calls; only the maps
-/// actually (re)generated this run get resolved. Never fatal.
+/// Resolve catalog tiles for every map a session-plan result owns, two maps at
+/// a time. Per-map vision already fans out internally, so two is the practical
+/// ceiling: it removes most serial latency without launching every model
+/// process in a three-map plan at once. Never fatal.
 fn resolve_result_tiles(app: &AppHandle, root: &Path, id: &str, result: &SessionPlanResult) {
-    for m in &result.maps {
-        if let Err(e) = resolve_map_tiles(app, root, id, &m.slug) {
-            crate::maplog::log("TILE RESOLUTION ERROR", &format!("{}: {e}", m.slug));
+    let total = result.maps.len();
+    let _ = app.emit("plan-progress", PlanProgress { phase: "art".into(), done: 0, total });
+    let mut done = 0;
+    for batch in result.maps.chunks(2) {
+        let outcomes = std::thread::scope(|scope| {
+            batch.iter().map(|m| {
+                let slug = m.slug.clone();
+                scope.spawn(move || (slug.clone(), resolve_map_tiles(app, root, id, &slug)))
+            }).collect::<Vec<_>>().into_iter().map(|h| h.join().unwrap()).collect::<Vec<_>>()
+        });
+        for (slug, outcome) in outcomes {
+            if let Err(e) = outcome {
+                crate::maplog::log("TILE RESOLUTION ERROR", &format!("{slug}: {e}"));
+            }
+            done += 1;
+            let _ = app.emit("plan-progress", PlanProgress { phase: "art".into(), done, total });
         }
     }
 }
@@ -8975,6 +9352,24 @@ Tactics:
         write_atomic(&path, "new content").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "new content");
         assert!(!path.with_file_name("existing.md.tmp").exists());
+    }
+
+    #[test]
+    fn staged_artwork_replaces_the_complete_old_set_only_after_ground_exists() {
+        let root = Scratch::new("staged-art");
+        fs::write(root.0.join("map.tiles.json"), "old-ground").unwrap();
+        fs::write(root.0.join("map.floor1.tiles.json"), "old-upper").unwrap();
+        fs::write(root.0.join("stage.tiles.json"), "new-ground").unwrap();
+        fs::write(root.0.join("stage.tiles.status.json"), "new-status").unwrap();
+
+        commit_staged_sidecars(&root.0, "map", "stage").unwrap();
+        assert_eq!(fs::read_to_string(root.0.join("map.tiles.json")).unwrap(), "new-ground");
+        assert_eq!(fs::read_to_string(root.0.join("map.tiles.status.json")).unwrap(), "new-status");
+        assert!(!root.0.join("map.floor1.tiles.json").exists(), "an obsolete upper floor must not survive");
+
+        fs::write(root.0.join("broken.tiles.status.json"), "failed").unwrap();
+        assert!(commit_staged_sidecars(&root.0, "map", "broken").is_err());
+        assert_eq!(fs::read_to_string(root.0.join("map.tiles.json")).unwrap(), "new-ground", "a failed staging set must not touch current art");
     }
 
     #[test]
@@ -10614,6 +11009,18 @@ Tactics:
         assert!(prompt.contains("OPERATOR REQUEST (authoritative): put a pile of skulls on B2"));
         assert!(prompt.contains("preserve everything else"));
         assert!(prompt.contains("Never add creatures to the grid or object layers"));
+    }
+
+    #[test]
+    fn revision_scope_allows_object_edits_but_rejects_unasked_structural_changes() {
+        let current = "# Crypt\nGrid: 5x4, 5 ft squares.\nMap:\n#####\n#...#\n#...#\n#####\nFeatures:\n- Table at C2\nTactics:\n- Hold.";
+        let object_edit = current.replace("#...#\n#...#", "#.==#\n#...#");
+        assert!(validate_revision_scope(current, &object_edit, "put tables at C2-D2").is_empty());
+
+        let wall_edit = current.replace("#####\n#...#", "##+##\n#...#");
+        let issues = validate_revision_scope(current, &wall_edit, "put a pile of skulls at C2");
+        assert!(issues.iter().any(|i| i.contains("structural")), "{issues:?}");
+        assert!(validate_revision_scope(current, &wall_edit, "add a door in the north wall").is_empty());
     }
 
     #[test]

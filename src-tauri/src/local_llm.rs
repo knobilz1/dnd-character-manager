@@ -556,6 +556,21 @@ pub fn ingestion_reviewer() -> Option<crate::cli_provider::CliEngine> {
     ingestion_reviewers().into_iter().next()
 }
 
+/// Image-capable subscription engines in the order map tile selection should
+/// try them: configured primary, configured reviewers, then the other verified
+/// image engine. Local and Gemini ingestion still get a working image path.
+pub fn ingestion_vision_engines() -> Vec<crate::cli_provider::CliEngine> {
+    use crate::cli_provider::CliEngine;
+    let cfg = ingest_config().lock().unwrap();
+    let mut engines = vec![cfg.engine.unwrap_or(CliEngine::Claude)];
+    engines.extend(cfg.cross_check.iter().copied());
+    engines.extend([CliEngine::Claude, CliEngine::Codex]);
+    engines.retain(|e| matches!(e, CliEngine::Claude | CliEngine::Codex));
+    let mut seen = Vec::new();
+    engines.retain(|e| if seen.contains(e) { false } else { seen.push(*e); true });
+    engines
+}
+
 /// One subscription-backed ingestion call. This is the single policy boundary
 /// for model/effort routing: Claude keeps the caller's tier and effort, Gemini
 /// keeps its workload probe, and Codex always takes the catalog-selected newest
@@ -1424,6 +1439,7 @@ mod tests {
         // The primary is dropped even when ticked, and duplicates collapse.
         set_ingestion_engine("codex".into(), Some(vec!["codex".into(), "claude".into(), "claude".into()]));
         assert_eq!(ingestion_reviewers(), vec![CliEngine::Claude]);
+        assert_eq!(ingestion_vision_engines(), vec![CliEngine::Codex, CliEngine::Claude]);
 
         // Nothing ticked means the drafting engine revises its own work, which
         // is what happened before cross-checking existed.

@@ -3,12 +3,15 @@
 // look at is what the DM would see. Judging a map from its tile list is the
 // mistake this exists to prevent.
 //
-// Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx]
+// Pass --reresolve to exercise the artwork-only regeneration path before
+// rendering. This keeps the visual check and its persisted diagnostics together.
+// Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx] [--reresolve]
 import { writeFileSync } from 'node:fs';
 
-const [campaignId, slug, outPath, cellPxArg] = process.argv.slice(2);
-if (!campaignId || !slug || !outPath) { console.error('Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx]'); process.exit(2); }
+const [campaignId, slug, outPath, cellPxArg, actionArg] = process.argv.slice(2);
+if (!campaignId || !slug || !outPath) { console.error('Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx] [--reresolve]'); process.exit(2); }
 const cellPx = Number(cellPxArg || 64);
+const reresolve = actionArg === '--reresolve';
 
 const targets = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter((t) => t.type === 'page');
 const page = targets.find((t) => /localhost:\d+|tauri:\/\//.test(t.url || '')) || targets[0];
@@ -24,6 +27,9 @@ const r = await send('Runtime.evaluate', {
   expression: `(async () => {
     try {
       const inv = window.__TAURI_INTERNALS__.invoke;
+      if (${JSON.stringify(reresolve)}) {
+        await inv('reresolve_map_tiles', { id: ${JSON.stringify(campaignId)}, slug: ${JSON.stringify(slug)} });
+      }
       const spec = await inv('read_battle_map', { id: ${JSON.stringify(campaignId)}, slug: ${JSON.stringify(slug)} });
       const art  = await inv('get_map_tiles',   { id: ${JSON.stringify(campaignId)}, slug: ${JSON.stringify(slug)} });
       const m = await import('/src/utils/battleMapRender.ts');
@@ -39,7 +45,7 @@ const r = await send('Runtime.evaluate', {
       if (!url) return { ok: false, error: 'renderer returned null — the spec did not parse' };
       const parsed = m.parseBattleMapFloors(spec)[0];
       return { ok: true, url, cols: parsed?.cols, rows: parsed?.rows,
-               tiles: (floor.tiles ?? []).length, spec };
+               tiles: (floor.tiles ?? []).length, diagnostics: art?.diagnostics, spec };
     } catch (e) { return { ok: false, error: String(e && e.stack || e) }; }
   })()`,
   returnByValue: true, awaitPromise: true, timeout: 240000,
@@ -49,6 +55,7 @@ if (!out?.ok) { console.error('FAILED:', out?.error ?? JSON.stringify(r).slice(0
 
 writeFileSync(outPath, Buffer.from(out.url.split(',')[1], 'base64'));
 console.log(`wrote ${outPath}  (${out.cols}x${out.rows} grid, ${out.tiles} resolved tile(s), ${Math.round(out.url.length / 1366)} KB)`);
+if (out.diagnostics) console.log(`art diagnostics: ${JSON.stringify(out.diagnostics)}`);
 writeFileSync(outPath.replace(/\.png$/, '.spec.txt'), out.spec);
 console.log(`wrote ${outPath.replace(/\.png$/, '.spec.txt')}`);
 ws.close();
