@@ -140,6 +140,9 @@ export function buildTurnPrompt(opts: {
   }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
   parts.push(`Battle mode: ${BATTLE_MODE_LABELS[battleMode]}.`);
+  if (battleMode === 'grid') {
+    parts.push('Map readiness check: before replying, check battle_maps/index.md. If a real fight is taking shape here, use `recallMap` when a matching map exists; otherwise request one NOW by ending your reply with exactly ```dm-actions {"makeMap":"one-line fight and location description"} ```. Do not wait for initiative.');
+  }
   const battleLogText = battleLog ? battleLogStatusText(battleLog) : '';
   if (battleLogText) {
     parts.push(`Active battle log (tracked outside your memory, ground truth, given fresh every turn — keep it current via the \`battleLog\` action):\n${battleLogText}`);

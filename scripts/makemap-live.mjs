@@ -19,8 +19,14 @@ const ev = async (expr, ms = 1200000) => {
 };
 const inv = (n, a) => `window.__TAURI_INTERNALS__.invoke(${JSON.stringify(n)}, ${JSON.stringify(a)})`;
 
+if (!campaignId) {
+  console.log(await ev(inv('list_campaigns', {})));
+  ws.close();
+  process.exit(0);
+}
+
 const prev = await ev(`(async () => { try { return await ${inv('read_battle_mode', { id: campaignId })}; } catch (e) { return 'theater'; } })()`);
-await ev(`${inv('set_battle_mode', { id: campaignId, mode: 'grid' })}`);
+if (prev !== 'grid') await ev(`${inv('set_battle_mode', { id: campaignId, mode: 'grid' })}`);
 console.log(`battle mode: ${prev} -> grid (regenerates dm_rules.md with the map protocol)`);
 
 // A fight clearly taking shape, at a place no prepared map covers. The scene
@@ -35,17 +41,25 @@ console.log(`battle mode: ${prev} -> grid (regenerates dm_rules.md with the map 
 // "you haven't found cultist tracks, an old sawmill, or evidence of a ritual" —
 // because dm_rules.md tells it to reject invented player overreach outright. A
 // test that trips that rule measures the rule, not the feature.
-const PROMPT = `A player at the table says, in character:
+const PROMPT = `Battle mode: Square Grid (printed map + physical miniatures).
+
+Map readiness check: before replying, check battle_maps/index.md. If a real fight is taking shape here, use \`recallMap\` when a matching map exists; otherwise request one NOW by ending your reply with exactly \`\`\`dm-actions {"makeMap":"one-line fight and location description"} \`\`\`. Do not wait for initiative.
+
+A player at the table says, in character:
 
 "That chanting in the clearing ahead — that's them. We creep up through the reeds until we can see the whole gathering, and then we charge them before they finish."`;
 
 const started = Date.now();
+const command = engine === 'claude' ? 'ask_dm' : 'ask_dm_engine';
+const args = engine === 'claude'
+  ? { prompt: PROMPT, sessionId: null, campaignId }
+  : { engine, prompt: PROMPT, sessionId: null, campaignId };
 const out = await ev(`(async () => { try {
-    const r = await ${inv('ask_dm_engine', { engine, prompt: PROMPT, sessionId: null, campaignId })};
+    const r = await ${inv(command, args)};
     return { ok: true, text: r.text };
   } catch (e) { return { ok: false, error: String(e && e.message || e) }; } })()`);
 const secs = ((Date.now() - started) / 1000).toFixed(1);
-await ev(`${inv('set_battle_mode', { id: campaignId, mode: prev })}`);
+if (prev !== 'grid') await ev(`${inv('set_battle_mode', { id: campaignId, mode: prev })}`);
 console.log(`battle mode restored to: ${prev}`);
 
 if (!out?.ok) { console.error(`FAILED after ${secs}s: ${out?.error}`); ws.close(); process.exit(1); }
