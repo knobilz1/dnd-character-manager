@@ -3559,6 +3559,14 @@ struct Placement {
     field_glyph: Option<char>,
 }
 
+#[derive(Clone)]
+struct FieldSearch {
+    query: String,
+    category: Option<String>,
+    w: u32,
+    h: u32,
+}
+
 /// 4-connected components of a cell set — so "Bar counter at C3-J3" (one
 /// contiguous run) is ONE placement, while "Pillars at C4, G4" (two separate
 /// cells) splits into two, each resolved and sized on its own. Pure.
@@ -3697,6 +3705,11 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
 
 /// How many real candidate tiles the vision picker is shown per slot.
 const VISION_SHORTLIST_K: usize = 8;
+
+/// A flagged field asset gets a separate, deeper lookup. The normal field
+/// shortlist must stay at 8: its decoder is lazy, so raising K changed even the
+/// first five results and replaced established trees before review ran.
+const COHERENCE_SHORTLIST_K: usize = 16;
 
 /// How many of a field's ranked candidates to vary across its cells. Small on
 /// purpose: field cells skip vision, so this leans on the ranking to keep the
@@ -4093,6 +4106,81 @@ fn build_image_text_prompt(slots: &[(&Placement, Vec<crate::tile_library::TileCa
     out
 }
 
+#[derive(Clone)]
+struct VisualReference {
+    label: String,
+    data_url: String,
+}
+
+/// Add accepted scene art around the existing picker message without changing
+/// any of its identity, footprint, decline, variety, or JSON instructions.
+fn build_repick_vision_message(
+    slot: &Placement, candidates: Vec<crate::tile_library::TileCandidate>, flagged_choices: &[usize], biome: &str, references: &[VisualReference],
+) -> String {
+    use serde_json::json;
+    let mut message: serde_json::Value = serde_json::from_str(&build_vision_message(&[(slot, candidates)], biome)).unwrap();
+    let content = message["message"]["content"].as_array_mut().unwrap();
+    let at = content.len().saturating_sub(1);
+    let rejected = if flagged_choices.is_empty() {
+        "The previously selected artwork was flagged and has already been removed from these options.".to_string()
+    } else {
+        let flagged = flagged_choices.iter().map(|choice| (choice + 1).to_string()).collect::<Vec<_>>().join(", ");
+        format!("Choices [{flagged}] were flagged as visual outliers; do not choose them again.")
+    };
+    let mut reference_content = vec![json!({"type":"text","text":format!(
+        "{rejected} A recolour or material variant of the same rejected visual style is not an improvement. The following pieces are already accepted scene references. Keep the original identity and footprint rules primary; among correct choices, prefer matching perspective, realism, detail and apparent scale. Choose 0 if every other correct choice still looks foreign.",
+    )})];
+    for reference in references {
+        reference_content.push(json!({"type":"text","text":format!("[accepted reference] {}", reference.label)}));
+        let (media, b64) = split_data_url(&reference.data_url);
+        reference_content.push(json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}));
+    }
+    content.splice(at..at, reference_content);
+    message.to_string()
+}
+
+fn repick_visual_outlier(
+    slot: &Placement, candidates: &[crate::tile_library::TileCandidate], flagged_choices: &[usize], biome: &str, references: &[VisualReference],
+) -> Result<Option<usize>, String> {
+    let claude = build_repick_vision_message(slot, candidates.to_vec(), flagged_choices, biome, references);
+    let mut text_prompt = build_image_text_prompt(&[(slot, candidates.to_vec())], biome);
+    let candidate_images = candidates.len();
+    let rejected = if flagged_choices.is_empty() {
+        "The previously selected artwork was flagged and has already been removed from these options.".to_string()
+    } else {
+        let flagged = flagged_choices.iter().map(|choice| (choice + 1).to_string()).collect::<Vec<_>>().join(", ");
+        format!("Choices [{flagged}] were flagged as visual outliers; do not choose them again.")
+    };
+    text_prompt.push_str(&format!("\n{rejected} A recolour or material variant of the same rejected visual style is not an improvement. Keep identity and footprint primary. The remaining attached images are accepted scene references; among correct choices match their perspective, realism, detail and apparent scale. Choose 0 if every other correct choice still looks foreign.\n"));
+    for (i, reference) in references.iter().enumerate() {
+        text_prompt.push_str(&format!("Accepted reference {} = attached image {}: {}\n", i + 1, candidate_images + i + 1, reference.label));
+    }
+    text_prompt.push_str("Reply with the same picks JSON required above.");
+    let images = candidates
+        .iter()
+        .map(|c| c.data_url.clone())
+        .chain(references.iter().map(|r| r.data_url.clone()))
+        .collect::<Vec<_>>();
+    let reply = run_map_image_prompt(&claude, &text_prompt, &images)?;
+    let value: serde_json::Value = serde_json::from_str(&extract_json_object(&reply))
+        .map_err(|_| "the coherence re-pick returned malformed JSON".to_string())?;
+    let answered = value
+        .get("picks")
+        .and_then(|v| v.as_array())
+        .is_some_and(|picks| picks.iter().any(|p| p.get("slot").and_then(|v| v.as_u64()) == Some(1) && p.get("choice").is_some()));
+    if !answered {
+        return Err("the coherence re-pick did not answer slot 1".into());
+    }
+    let pick = parse_vision_picks(&reply, 1)[0];
+    if pick.is_some_and(|i| i >= candidates.len()) {
+        return Err("the coherence re-pick chose an out-of-range option".into());
+    }
+    if pick.is_some_and(|choice| flagged_choices.contains(&choice)) {
+        return Ok(None);
+    }
+    Ok(pick)
+}
+
 fn run_map_image_prompt(
     claude_message: &str, text_prompt: &str, image_data_urls: &[String],
 ) -> Result<String, String> {
@@ -4110,6 +4198,290 @@ fn run_map_image_prompt(
         }
     }
     Err(errors.join("\n"))
+}
+
+/// One unique piece of final chosen artwork. Repeated placements share a
+/// group: if one rubble sprite looks foreign, every cell using it is retried.
+#[derive(Clone, Debug, PartialEq)]
+struct SelectedArtGroup {
+    root: String,
+    rel_path: String,
+    labels: Vec<String>,
+    occurrences: usize,
+}
+
+fn selected_art_groups(objects: &[ResolvedTile], placements: &[Placement]) -> Vec<SelectedArtGroup> {
+    let mut groups = Vec::<SelectedArtGroup>::new();
+    let mut by_asset = HashMap::<(String, String), usize>::new();
+    for tile in objects {
+        let label = placements
+            .iter()
+            .find(|p| p.cells == tile.cells && p.w == tile.w && p.h == tile.h)
+            .map(|p| p.label.clone())
+            .unwrap_or_else(|| "unlabelled map object".into());
+        let key = (tile.root.clone(), tile.rel_path.clone());
+        if let Some(&i) = by_asset.get(&key) {
+            groups[i].occurrences += 1;
+            if !groups[i].labels.contains(&label) {
+                groups[i].labels.push(label);
+            }
+        } else {
+            by_asset.insert(key.clone(), groups.len());
+            groups.push(SelectedArtGroup { root: key.0, rel_path: key.1, labels: vec![label], occurrences: 1 });
+        }
+    }
+    groups.sort_by(|a, b| b.occurrences.cmp(&a.occurrences).then_with(|| a.rel_path.cmp(&b.rel_path)));
+    groups
+}
+
+/// `Some([])` is a valid "everything fits" answer; `None` means the reviewer
+/// did not provide the promised JSON, which must never delete good artwork.
+fn parse_coherence_outliers(reply: &str, group_count: usize) -> Option<Vec<usize>> {
+    let value: serde_json::Value = serde_json::from_str(&extract_json_object(reply)).ok()?;
+    let answers = value.get("outliers")?.as_array()?;
+    let mut out = Vec::new();
+    for answer in answers {
+        let raw = answer
+            .as_u64()
+            .or_else(|| answer.as_str().and_then(|s| s.trim().parse().ok()))
+            .or_else(|| answer.get("art").and_then(|v| v.as_u64()));
+        if let Some(i) = raw.and_then(|n| usize::try_from(n).ok()).and_then(|n| n.checked_sub(1)).filter(|&n| n < group_count) {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Build the same compact coherence request for Claude's structured image
+/// message and Codex's ordered attachments. `reviewed` are the only IDs the
+/// model may flag; the other images are common-art references for large sets.
+fn build_coherence_prompts(
+    shown: &[(usize, &SelectedArtGroup, String)], reviewed: &[usize], biome: &str,
+) -> (String, String, Vec<String>) {
+    use serde_json::json;
+    let reviewed_ids = reviewed.iter().map(|i| (i + 1).to_string()).collect::<Vec<_>>().join(", ");
+    let rule = format!(
+        "These are FINAL selected object artworks for one {biome} battle map. Act as an art director, not an object identifier. Review ONLY art IDs [{reviewed_ids}] and flag EVERY conspicuous mismatch, not just the worst one: a different rendering medium/style, conflicting camera angle, drastically different detail level, flat/cartoon/icon-like art among textured realistic art, or apparent scale that reads like a token instead of map scenery. Judge each ID independently. Do not flag normal differences in object type, material, or natural colour. Reply ONLY {{\"outliers\":[2,7]}}; an empty array means they fit."
+    );
+    let mut content = vec![json!({"type":"text","text":rule})];
+    let mut text_prompt = format!("Final selected artwork for one {biome} battle map. Review only IDs [{reviewed_ids}].\n");
+    let mut images = Vec::new();
+    for (image, (id, group, data_url)) in shown.iter().enumerate() {
+        let label = group.labels.join(" / ");
+        let caption = format!("[art {}] {label}; used {} time(s)", id + 1, group.occurrences);
+        content.push(json!({"type":"text","text":caption}));
+        let (media, b64) = split_data_url(data_url);
+        content.push(json!({"type":"image","source":{"type":"base64","media_type":media,"data":b64}}));
+        text_prompt.push_str(&format!("Art {} = attached image {}: {label}; used {} time(s)\n", id + 1, image + 1, group.occurrences));
+        images.push(data_url.clone());
+    }
+    text_prompt.push_str(&format!(
+        "Act as an art director, not an object identifier. Flag EVERY conspicuous style/perspective/detail/apparent-scale mismatch, including flat/cartoon/icon-like art among textured realistic art; judge each ID independently, not just the worst. Do not flag ordinary object, material or colour variety. Reply ONLY {{\"outliers\":[2,7]}}; empty means all fit. Review only IDs [{reviewed_ids}]."
+    ));
+    (json!({"type":"user","message":{"role":"user","content":content}}).to_string(), text_prompt, images)
+}
+
+struct CoherenceReview {
+    groups: Vec<SelectedArtGroup>,
+    outliers: HashSet<(String, String)>,
+    warnings: Vec<String>,
+}
+
+fn coherence_review_chunks(group_count: usize) -> Vec<Vec<usize>> {
+    let all: Vec<usize> = (0..group_count).collect();
+    if group_count <= MAX_IMAGES_PER_VISION_CALL {
+        return (!all.is_empty()).then_some(all).into_iter().collect();
+    }
+    let reviewed_per_call = MAX_IMAGES_PER_VISION_CALL.saturating_sub(3).max(1);
+    all.chunks(reviewed_per_call).map(|chunk| chunk.to_vec()).collect()
+}
+
+/// Compare the FINAL combined field + named-object selection. Most maps fit in
+/// one call; unusually diverse maps reuse their three most-common pieces as
+/// context in later image-budget-sized chunks.
+fn review_selected_art_coherence(objects: &[ResolvedTile], placements: &[Placement], biome: &str) -> CoherenceReview {
+    let groups = selected_art_groups(objects, placements);
+    let mut outliers = HashSet::new();
+    let mut warnings = Vec::new();
+    if groups.len() < 3 {
+        return CoherenceReview { groups, outliers, warnings };
+    }
+    let anchors: Vec<usize> = (0..groups.len().min(3)).collect();
+    for reviewed in coherence_review_chunks(groups.len()) {
+        let mut ids = if groups.len() <= MAX_IMAGES_PER_VISION_CALL { reviewed.clone() } else { anchors.clone() };
+        for &id in &reviewed {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        let shown: Vec<_> = ids
+            .iter()
+            .filter_map(|&id| crate::tile_library::load_tile_data_url(&groups[id].root, &groups[id].rel_path).map(|data| (id, &groups[id], data)))
+            .collect();
+        let available_reviewed: Vec<_> = reviewed.iter().copied().filter(|id| shown.iter().any(|(shown_id, _, _)| shown_id == id)).collect();
+        if available_reviewed.is_empty() {
+            continue;
+        }
+        let (claude, text, images) = build_coherence_prompts(&shown, &available_reviewed, biome);
+        match run_map_image_prompt(&claude, &text, &images) {
+            Ok(reply) => {
+                crate::maplog::log("ART COHERENCE REVIEW (raw reply)", &reply);
+                match parse_coherence_outliers(&reply, groups.len()) {
+                    Some(ids) => {
+                        for id in ids.into_iter().filter(|id| available_reviewed.contains(id)) {
+                            outliers.insert((groups[id].root.clone(), groups[id].rel_path.clone()));
+                            crate::maplog::log("ART COHERENCE OUTLIER", &format!("{} — {}", groups[id].labels.join(" / "), groups[id].rel_path));
+                        }
+                    }
+                    None => warnings.push("The artwork coherence reviewer returned malformed output; existing picks were kept.".into()),
+                }
+            }
+            Err(e) => warnings.push(format!("Artwork coherence review failed; existing picks were kept: {e}")),
+        }
+    }
+    CoherenceReview { groups, outliers, warnings }
+}
+
+/// Reconsider only artwork the final contact-sheet review flagged. Every
+/// failure mode preserves the original pick: style review is advisory and must
+/// never erase tactically meaningful map content.
+fn repick_coherence_outliers_once(
+    app: &AppHandle,
+    objects: &mut Vec<ResolvedTile>,
+    placements: &[Placement],
+    field_shortlists: &HashMap<(String, char), Vec<crate::tile_library::TileCandidate>>,
+    field_searches: &HashMap<(String, char), FieldSearch>,
+    named_slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)],
+    biome: &str,
+    diagnostics: &mut FloorResolutionDiagnostics,
+    rejected_assets: &mut HashSet<(String, String)>,
+) -> bool {
+    let review = review_selected_art_coherence(objects, placements, biome);
+    diagnostics.fallback_reasons.extend(review.warnings);
+    if review.outliers.is_empty() {
+        return false;
+    }
+    rejected_assets.extend(review.outliers.iter().cloned());
+    let references: Vec<_> = review
+        .groups
+        .iter()
+        .filter(|g| !rejected_assets.contains(&(g.root.clone(), g.rel_path.clone())))
+        .filter_map(|g| crate::tile_library::load_tile_data_url(&g.root, &g.rel_path).map(|data_url| VisualReference {
+            label: g.labels.join(" / "),
+            data_url,
+        }))
+        .take(3)
+        .collect();
+    if references.is_empty() {
+        diagnostics.fallback_reasons.push("Artwork coherence outliers were found, but no accepted reference art could be loaded; existing picks were kept.".into());
+        return true;
+    }
+
+    struct RetryTarget {
+        placement: Placement,
+        candidates: Vec<crate::tile_library::TileCandidate>,
+        flagged_choices: Vec<usize>,
+        object_indices: Vec<usize>,
+    }
+    let mut targets = Vec::<RetryTarget>::new();
+    let mut target_by_key = HashMap::<(String, u32, u32, Option<char>, String, String), usize>::new();
+    for (object_index, tile) in objects.iter().enumerate() {
+        let asset = (tile.root.clone(), tile.rel_path.clone());
+        if !review.outliers.contains(&asset) {
+            continue;
+        }
+        let Some(placement) = placements.iter().find(|p| p.cells == tile.cells && p.w == tile.w && p.h == tile.h) else {
+            continue;
+        };
+        let key = (
+            placement.label.clone(), placement.w, placement.h, placement.field_glyph,
+            tile.root.clone(), tile.rel_path.clone(),
+        );
+        if let Some(&target) = target_by_key.get(&key) {
+            targets[target].object_indices.push(object_index);
+            continue;
+        }
+        let candidates = match placement.field_glyph {
+            Some(glyph) => field_searches
+                .get(&(placement.label.clone(), glyph))
+                .map(|search| match &search.category {
+                    Some(category) => crate::tile_library::shortlist_in_category(
+                        app, &search.query, category, biome, search.w, search.h, COHERENCE_SHORTLIST_K,
+                    ),
+                    None => crate::tile_library::shortlist(
+                        app, &search.query, biome, search.w, search.h, COHERENCE_SHORTLIST_K,
+                    ),
+                })
+                .or_else(|| field_shortlists.get(&(placement.label.clone(), glyph)).cloned()),
+            None => named_slots.iter().find(|(p, _)| *p == placement).map(|(_, candidates)| candidates.clone()),
+        };
+        let Some(candidates) = candidates else {
+            diagnostics.fallback_reasons.push(format!("The coherence reviewer flagged \"{}\", but its alternatives were unavailable; existing art was kept.", placement.label));
+            continue;
+        };
+        let flagged_choices: Vec<usize> = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| rejected_assets.contains(&(candidate.root.clone(), candidate.rel_path.clone())))
+            .map(|(choice, _)| choice)
+            .collect();
+        target_by_key.insert(key, targets.len());
+        targets.push(RetryTarget { placement: placement.clone(), candidates, flagged_choices, object_indices: vec![object_index] });
+    }
+
+    for target in targets {
+        match repick_visual_outlier(&target.placement, &target.candidates, &target.flagged_choices, biome, &references) {
+            Ok(Some(choice)) => {
+                let candidate = &target.candidates[choice];
+                for index in target.object_indices {
+                    let tile = &mut objects[index];
+                    let (tw, th, rotated) = orient(candidate.w, candidate.h, tile.w, tile.h);
+                    tile.tw = tw;
+                    tile.th = th;
+                    tile.root = candidate.root.clone();
+                    tile.rel_path = candidate.rel_path.clone();
+                    tile.rotated = rotated;
+                }
+                crate::maplog::log("ART COHERENCE RE-PICK", &format!("\"{}\" now uses {}", target.placement.label, candidate.rel_path));
+            }
+            Ok(None) => {
+                diagnostics.fallback_reasons.push(format!(
+                    "The coherence reviewer found no safer replacement for \"{}\"; the previous imported art was kept.",
+                    target.placement.label,
+                ));
+            }
+            Err(e) => diagnostics.fallback_reasons.push(format!(
+                "The coherence re-pick for \"{}\" failed; the previous imported art was kept: {e}", target.placement.label,
+            )),
+        }
+    }
+    true
+}
+
+fn repick_coherence_outliers(
+    app: &AppHandle,
+    objects: &mut Vec<ResolvedTile>,
+    placements: &[Placement],
+    field_shortlists: &HashMap<(String, char), Vec<crate::tile_library::TileCandidate>>,
+    field_searches: &HashMap<(String, char), FieldSearch>,
+    named_slots: &[(&Placement, Vec<crate::tile_library::TileCandidate>)],
+    biome: &str,
+    diagnostics: &mut FloorResolutionDiagnostics,
+) {
+    let mut rejected_assets = HashSet::new();
+    // Live 2026-07-26: round one found the strongest mismatch (an altar) but
+    // not the cartoon-like rubble visible beside it. Review the UPDATED set
+    // once more; more rounds add latency and invite aesthetic churn.
+    for round in 1..=2 {
+        crate::maplog::log("ART COHERENCE ROUND", &round.to_string());
+        if !repick_coherence_outliers_once(
+            app, objects, placements, field_shortlists, field_searches, named_slots, biome, diagnostics, &mut rejected_assets,
+        ) {
+            break;
+        }
+    }
 }
 
 /// The same slot/candidate shortlist as `build_vision_message`, written out as
@@ -5368,9 +5740,11 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
     // are real local trees, not the novelty a lone vision pick sometimes grabbed.
     let mut field_objects: Vec<ResolvedTile> = Vec::new();
     let mut field_shortlists: HashMap<(String, char), Vec<crate::tile_library::TileCandidate>> = HashMap::new();
+    let mut field_searches: HashMap<(String, char), FieldSearch> = HashMap::new();
     for p in placements.iter().filter(|p| p.field_glyph.is_some()) {
         let glyph = p.field_glyph.unwrap();
-        let cands = field_shortlists.entry((p.label.clone(), glyph)).or_insert_with(|| {
+        let field_key = (p.label.clone(), glyph);
+        let cands = field_shortlists.entry(field_key.clone()).or_insert_with(|| {
             let noun = field_glyph_noun(glyph);
             // Searched at the DM guide's SMALLEST well-stocked footprint on
             // purpose. Raising it to the pack's modal size (5x5 for "tree") did
@@ -5397,14 +5771,17 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
             let query = field_query(&p.label, noun, crate::tile_library::scene_biome(&biome, profile), names_own);
             let (sw, sh) = if names_own { search_size(&p.label, 1, 1) } else { (gw, gh) };
             let out = look(&query, sw, sh);
-            if !out.is_empty() {
-                return out;
-            }
-            // Never end up with LESS art than the plain canonical noun would
-            // have found — "felled pine" and "thick undergrowth" name nothing
-            // the catalog stocks, and an empty shortlist drops the cell to the
-            // bare procedural glyph.
-            look(&if uncaptioned { noun.to_string() } else { format!("{} {noun}", p.label) }, gw, gh)
+            let (query, w, h, out) = if out.is_empty() {
+                // Never end up with LESS art than the plain canonical noun
+                // would have found. Remember whichever query actually worked
+                // so only a flagged outlier can request a deeper reserve.
+                let fallback = if uncaptioned { noun.to_string() } else { format!("{} {noun}", p.label) };
+                (fallback.clone(), gw, gh, look(&fallback, gw, gh))
+            } else {
+                (query, sw, sh, out)
+            };
+            field_searches.insert(field_key.clone(), FieldSearch { query, category: cat.clone(), w, h });
+            out
         });
         if cands.is_empty() {
             diagnostics.fallback_reasons.push(format!("{label}: no imported artwork matched \"{}\".", p.label));
@@ -5515,6 +5892,12 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
             );
         }
     }
+    // The first-pass rules above stay deliberately different: dense fields
+    // need deterministic variety, while named objects need visual identity and
+    // footprint judgment. Only after both paths converge can a reviewer see
+    // that individually valid art nevertheless looks foreign beside the map's
+    // other selections. Re-pick only those outliers; never reopen good choices.
+    repick_coherence_outliers(app, &mut objects, &placements, &field_shortlists, &field_searches, &slots, &biome, &mut diagnostics);
     // Light every resolved fire vessel that came through unlit. The catalog
     // ships fireplaces (and empty braziers) with no flame — the fire is a
     // separate !Effects/Fire sprite meant to be stacked on top. So a lit hearth
@@ -10163,6 +10546,50 @@ Tactics:
         let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None, rgb: None };
         let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
         assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
+    }
+
+    #[test]
+    fn coherence_repick_wraps_instead_of_replacing_the_hard_learned_prompt() {
+        let p = Placement { label: "Stone rubble".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: Some('^') };
+        let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "rubble.webp".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None, rgb: None };
+        let original = build_vision_message(&[(&p, vec![cand.clone()])], "forest");
+        let retry = build_repick_vision_message(&p, vec![cand], &[0], "forest", &[VisualReference { label: "forest tree".into(), data_url: "data:image/webp;base64,BB".into() }]);
+        for lesson in ["MATERIAL or COLOUR", "fits its footprint", "better nothing than a wrong object", "natural variety", "ONLY this JSON"] {
+            assert!(original.contains(lesson) && retry.contains(lesson), "coherence retry lost {lesson:?}");
+        }
+        assert!(!original.contains("accepted scene references"));
+        assert!(retry.contains("accepted scene references") && retry.contains("perspective, realism, detail and apparent scale"));
+    }
+
+    #[test]
+    fn coherence_parser_distinguishes_an_empty_verdict_from_malformed_output() {
+        assert_eq!(parse_coherence_outliers(r#"{"outliers":[2,"3",{"art":2},99]}"#, 3), Some(vec![1, 2]));
+        assert_eq!(parse_coherence_outliers(r#"{"outliers":[]}"#, 3), Some(vec![]));
+        assert_eq!(parse_coherence_outliers("looks fine", 3), None);
+    }
+
+    #[test]
+    fn coherence_chunks_review_every_art_id_without_exceeding_the_image_budget() {
+        assert_eq!(coherence_review_chunks(24), vec![(0..24).collect::<Vec<_>>()]);
+        let chunks = coherence_review_chunks(25);
+        assert_eq!(chunks.iter().flatten().copied().collect::<Vec<_>>(), (0..25).collect::<Vec<_>>());
+        assert!(chunks.iter().all(|chunk| chunk.len() + 3 <= MAX_IMAGES_PER_VISION_CALL));
+    }
+
+    #[test]
+    fn selected_art_groups_collapses_repeated_cells_but_keeps_their_labels() {
+        let placements = vec![
+            Placement { label: "Rubble".into(), cells: vec![(0, 0)], w: 1, h: 1, field_glyph: Some('^') },
+            Placement { label: "Broken stone".into(), cells: vec![(1, 0)], w: 1, h: 1, field_glyph: Some('^') },
+            Placement { label: "Tree".into(), cells: vec![(2, 0)], w: 1, h: 1, field_glyph: Some('T') },
+        ];
+        let tile = |cells: Vec<(usize, usize)>, rel_path: &str| ResolvedTile { cells, w: 1, h: 1, tw: 1, th: 1, root: "r".into(), rel_path: rel_path.into(), sub: None, rotated: false, single: false };
+        let groups = selected_art_groups(&[
+            tile(vec![(0, 0)], "rock.webp"), tile(vec![(1, 0)], "rock.webp"), tile(vec![(2, 0)], "tree.webp"),
+        ], &placements);
+        assert_eq!(groups[0].occurrences, 2);
+        assert_eq!(groups[0].labels, vec!["Rubble", "Broken stone"]);
+        assert_eq!(groups[1].rel_path, "tree.webp");
     }
 
     /// The battlefield-design guidance distilled from DM map-design guides: a

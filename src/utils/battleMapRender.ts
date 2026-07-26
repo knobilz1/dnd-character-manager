@@ -970,10 +970,14 @@ export interface MapTileArt {
  *  preloadBattleTileSprites. Safe to call for any list; already-loaded URLs
  *  are free. */
 export async function preloadResolvedTileArt(tiles: MapTileArt[], terrain?: MapTerrain | null): Promise<void> {
-  const urls = tiles.map((t) => t.data_url);
-  if (terrain?.floor) urls.push(terrain.floor);
-  if (terrain?.liquid) urls.push(terrain.liquid);
-  await Promise.all(urls.map((u) => loadOneSprite(u)));
+  // A forest can reuse one large tree dozens of times. Decoding the same data
+  // URL once per placement exhausted a cold WebView image queue: small rubble
+  // loaded while most canopies silently fell through. One decode per unique,
+  // not-yet-cached asset is both the cache contract and the complete fix.
+  const urls = new Set(tiles.map((t) => t.data_url));
+  if (terrain?.floor) urls.add(terrain.floor);
+  if (terrain?.liquid) urls.add(terrain.liquid);
+  await Promise.all([...urls].filter((u) => !spriteCache.has(u)).map(loadOneSprite));
 }
 
 /** Which furniture look best fits a Features label — real variety instead
@@ -1328,28 +1332,13 @@ function renderBattleMapContent(map: ParsedBattleMap, cellPx: number, win?: Rend
   ctx.fillStyle = COLORS.void;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // A SCATTERED `^` cell is procedural rubble — a bunched rock heap drawn by
-  // drawTile — not a catalog placement. Drop any tile the resolver produced for
-  // one so it can never override the heap with a single boulder or, worse, an
-  // off-biome Structure (live 2026-07-22: coast=Desert resolved "barnacled
-  // boulders" to fifteen Window tiles — fifteen SEPARATE 1x1 placements, each
-  // caught by the cell count below). Old sidecars self-heal on re-render.
-  //
-  // A multi-cell tile is a different animal: a Features line NAMED that run, so
-  // parse_placements deliberately merged it into ONE pile the size of the run
-  // and the resolver shopped for art that size. This filter used to bin those
-  // too — "field `^` cells are 1x1, so the origin cell IS the glyph" stopped
-  // being true the moment named runs existed — which left the whole named-pile
-  // path dead at the last step. Live: a crypt's collapsed ceiling resolved
-  // Rubble_Pile_Stone_Slate_A28_5x3 and still drew as 24 identical procedural
-  // blobs in a perfect 8x3 lattice.
-  tiles = tiles.filter((t) => {
-    if (t.cells.length > 1) return true; // a named run is one real pile — keep it
-    const oc = Math.min(...t.cells.map(([c]) => c));
-    const orr = Math.min(...t.cells.map(([, r]) => r));
-    return map.grid[orr]?.[oc] !== '^';
-  });
-
+  // Resolved catalog art always wins, including a single `^` cell. This used to
+  // discard every resolved single-cell rubble tile and force the built-in grey
+  // blob even after the backend had selected coherent imported art. Live
+  // 2026-07-26: realistic rubble from the same pack as the trees was thrown away
+  // on a forest map, producing the apparent cross-tileset mismatch this resolver
+  // is meant to prevent. If resolution declines a cell it is absent from `tiles`
+  // and the normal procedural fallback below still renders it.
   // Cells a resolved catalog tile will cover — the base pass draws plain floor
   // there (not the built-in glyph sprite) so the real tile sits on floor with
   // no squished-column / campfire artefact peeking out from under it.

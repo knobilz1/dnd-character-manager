@@ -5,13 +5,14 @@
 //
 // Pass --reresolve to exercise the artwork-only regeneration path before
 // rendering. This keeps the visual check and its persisted diagnostics together.
-// Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx] [--reresolve]
+// Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx] [--reresolve] [--engine=codex]
 import { writeFileSync } from 'node:fs';
 
-const [campaignId, slug, outPath, cellPxArg, actionArg] = process.argv.slice(2);
-if (!campaignId || !slug || !outPath) { console.error('Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx] [--reresolve]'); process.exit(2); }
+const [campaignId, slug, outPath, cellPxArg, ...options] = process.argv.slice(2);
+if (!campaignId || !slug || !outPath) { console.error('Usage: node render-map.mjs <campaignId> <slug> <out.png> [cellPx] [--reresolve] [--engine=codex]'); process.exit(2); }
 const cellPx = Number(cellPxArg || 64);
-const reresolve = actionArg === '--reresolve';
+const reresolve = options.includes('--reresolve');
+const engine = options.find((arg) => arg.startsWith('--engine='))?.slice('--engine='.length);
 
 const targets = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter((t) => t.type === 'page');
 const page = targets.find((t) => /localhost:\d+|tauri:\/\//.test(t.url || '')) || targets[0];
@@ -27,6 +28,9 @@ const r = await send('Runtime.evaluate', {
   expression: `(async () => {
     try {
       const inv = window.__TAURI_INTERNALS__.invoke;
+      if (${JSON.stringify(engine ?? null)}) {
+        await inv('set_ingestion_engine', { engine: ${JSON.stringify(engine ?? '')}, crossCheck: [] });
+      }
       if (${JSON.stringify(reresolve)}) {
         await inv('reresolve_map_tiles', { id: ${JSON.stringify(campaignId)}, slug: ${JSON.stringify(slug)} });
       }
