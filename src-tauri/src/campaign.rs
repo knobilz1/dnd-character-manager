@@ -759,7 +759,10 @@ fn update_campaign_lore_at(root: &Path, id: &str, addition: &str) -> Result<Stri
 pub struct CampaignMeta {
     pub id: String,
     pub name: String,
+    pub archived: bool,
 }
+
+const CAMPAIGN_ARCHIVED_MARKER: &str = ".archived";
 
 fn campaigns_root(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -840,7 +843,8 @@ fn list_campaigns_at(root: &Path) -> Result<Vec<CampaignMeta>, String> {
         }
         let id = entry.file_name().to_string_lossy().to_string();
         let name = fs::read_to_string(entry.path().join("name.txt")).unwrap_or_else(|_| id.clone());
-        out.push(CampaignMeta { id, name: name.trim().to_string() });
+        let archived = entry.path().join(CAMPAIGN_ARCHIVED_MARKER).is_file();
+        out.push(CampaignMeta { id, name: name.trim().to_string(), archived });
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(out)
@@ -873,7 +877,50 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
     // fresh campaign has no battle_mode.txt yet, so it starts on the default.
     write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(DEFAULT_BATTLE_MODE))?;
     write_atomic(&dir.join("name.txt"), trimmed)?;
-    Ok(CampaignMeta { id, name: trimmed.to_string() })
+    Ok(CampaignMeta { id, name: trimmed.to_string(), archived: false })
+}
+
+/// Resolves only an immediate child of `root`. These ids cross the IPC trust
+/// boundary and bulk deletion is irreversible, so validate the entire batch
+/// before touching even the first campaign.
+fn campaign_path_at(root: &Path, id: &str) -> Result<PathBuf, String> {
+    let mut parts = Path::new(id).components();
+    if id.is_empty() || !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some() {
+        return Err(format!("Invalid campaign id \"{id}\"."));
+    }
+    let path = root.join(id);
+    if !path.is_dir() {
+        return Err(format!("No campaign found with id \"{id}\"."));
+    }
+    Ok(path)
+}
+
+fn campaign_paths_at(root: &Path, ids: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut paths = ids.iter().map(|id| campaign_path_at(root, id)).collect::<Result<Vec<_>, _>>()?;
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn set_campaigns_archived_at(root: &Path, ids: &[String], archived: bool) -> Result<(), String> {
+    for path in campaign_paths_at(root, ids)? {
+        let marker = path.join(CAMPAIGN_ARCHIVED_MARKER);
+        if archived {
+            write_atomic(&marker, "archived\n")?;
+        } else if let Err(e) = fs::remove_file(&marker) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(format!("Couldn't unarchive {}: {e}", path.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn delete_campaigns_at(root: &Path, ids: &[String]) -> Result<(), String> {
+    for path in campaign_paths_at(root, ids)? {
+        fs::remove_dir_all(&path).map_err(|e| format!("Couldn't delete {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Zips a campaign's entire on-disk folder (CLAUDE.md, memory/, any imported
@@ -931,6 +978,10 @@ fn import_campaign_at(root: &Path, zip_path: &Path) -> Result<(CampaignMeta, Opt
     let _ = fs::remove_dir_all(&scratch);
     let result = (|| {
         crate::tts::extract_zip_to(zip_path, &scratch)?;
+        // Archive is local list organization, not campaign content. A restored
+        // backup must be visible immediately instead of silently importing into
+        // the manager's hidden section.
+        let _ = fs::remove_file(scratch.join(CAMPAIGN_ARCHIVED_MARKER));
         let name = fs::read_to_string(scratch.join("name.txt"))
             .map_err(|_| "That zip doesn't look like a campaign backup (missing name.txt).".to_string())?;
         let original = name.trim().to_string();
@@ -944,7 +995,7 @@ fn import_campaign_at(root: &Path, zip_path: &Path) -> Result<(CampaignMeta, Opt
         let final_dir = root.join(&id);
         fs::rename(&scratch, &final_dir).map_err(|e| format!("Couldn't move the imported campaign into place: {e}"))?;
         let renamed_from = if final_name != original { Some(original) } else { None };
-        Ok((CampaignMeta { id, name: final_name }, renamed_from))
+        Ok((CampaignMeta { id, name: final_name, archived: false }, renamed_from))
     })();
     if result.is_err() {
         let _ = fs::remove_dir_all(&scratch);
@@ -7770,6 +7821,18 @@ pub fn list_campaigns(app: AppHandle) -> Result<Vec<CampaignMeta>, String> {
 }
 
 #[tauri::command]
+pub fn set_campaigns_archived(app: AppHandle, ids: Vec<String>, archived: bool) -> Result<(), String> {
+    set_campaigns_archived_at(&campaigns_root(&app)?, &ids, archived)
+}
+
+#[tauri::command]
+pub async fn delete_campaigns(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || delete_campaigns_at(&campaigns_root(&app)?, &ids))
+        .await
+        .map_err(|e| format!("Campaign deletion task failed: {e}"))?
+}
+
+#[tauri::command]
 pub fn create_campaign(app: AppHandle, intake: CampaignIntake) -> Result<CampaignMeta, String> {
     create_campaign_at(&campaigns_root(&app)?, &intake)
 }
@@ -10484,6 +10547,43 @@ Tactics:
         create_campaign_at(&root.0, &intake("Alpha Quest")).unwrap();
         let names: Vec<String> = list_campaigns_at(&root.0).unwrap().into_iter().map(|c| c.name).collect();
         assert_eq!(names, vec!["Alpha Quest", "Zeta Quest"]);
+    }
+
+    #[test]
+    fn campaigns_can_be_archived_and_unarchived_without_moving_their_data() {
+        let root = Scratch::new("archive-campaigns");
+        let alpha = create_campaign_at(&root.0, &intake("Alpha Quest")).unwrap();
+        let beta = create_campaign_at(&root.0, &intake("Beta Quest")).unwrap();
+
+        set_campaigns_archived_at(&root.0, std::slice::from_ref(&beta.id), true).unwrap();
+        let listed = list_campaigns_at(&root.0).unwrap();
+        assert!(!listed.iter().find(|c| c.id == alpha.id).unwrap().archived);
+        assert!(listed.iter().find(|c| c.id == beta.id).unwrap().archived);
+        assert!(root.0.join(&beta.id).join("memory").is_dir(), "archiving must leave campaign data in place");
+
+        set_campaigns_archived_at(&root.0, std::slice::from_ref(&beta.id), false).unwrap();
+        assert!(!list_campaigns_at(&root.0).unwrap().iter().find(|c| c.id == beta.id).unwrap().archived);
+
+        set_campaigns_archived_at(&root.0, std::slice::from_ref(&beta.id), true).unwrap();
+        let backup = root.0.join("archived.zip");
+        export_campaign_at(&root.0, &beta.id, &backup).unwrap();
+        let (restored, _) = import_campaign_at(&root.0, &backup).unwrap();
+        assert!(!restored.archived);
+        assert!(!root.0.join(restored.id).join(CAMPAIGN_ARCHIVED_MARKER).exists(), "a restored backup must return to the visible list");
+    }
+
+    #[test]
+    fn bulk_delete_validates_the_whole_batch_before_removing_anything() {
+        let root = Scratch::new("delete-campaigns");
+        let alpha = create_campaign_at(&root.0, &intake("Alpha Quest")).unwrap();
+        let beta = create_campaign_at(&root.0, &intake("Beta Quest")).unwrap();
+
+        let err = delete_campaigns_at(&root.0, &[alpha.id.clone(), "../outside".into()]).unwrap_err();
+        assert!(err.contains("Invalid campaign id"));
+        assert!(root.0.join(&alpha.id).is_dir(), "a bad later id must not partially delete an earlier valid campaign");
+
+        delete_campaigns_at(&root.0, &[alpha.id.clone(), beta.id.clone()]).unwrap();
+        assert!(!root.0.join(alpha.id).exists() && !root.0.join(beta.id).exists());
     }
 
     #[test]

@@ -7,7 +7,7 @@ import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -300,6 +300,7 @@ interface TurnResult {
 interface CampaignMeta {
   id: string;
   name: string;
+  archived: boolean;
 }
 
 interface CampaignIntake {
@@ -707,6 +708,12 @@ export function DMConsolePage() {
   const [sttReady, setSttReady] = React.useState(false);
 
   const [campaigns, setCampaigns] = React.useState<CampaignMeta[]>([]);
+  const [campaignManagerOpen, setCampaignManagerOpen] = React.useState(false);
+  const [showArchivedCampaigns, setShowArchivedCampaigns] = React.useState(false);
+  const [selectedCampaignIds, setSelectedCampaignIds] = React.useState<Set<string>>(new Set());
+  const [campaignManagementBusy, setCampaignManagementBusy] = React.useState(false);
+  const [deleteCampaignIds, setDeleteCampaignIds] = React.useState<string[] | null>(null);
+  const lastCampaignSelectionRef = React.useRef<number | null>(null);
   const [newCampaignOpen, setNewCampaignOpen] = React.useState(false);
   const [newCampaign, setNewCampaign] = React.useState<CampaignIntake>(BLANK_INTAKE);
   const [pendingModuleFile, setPendingModuleFile] = React.useState<{ name: string; text: string } | null>(null);
@@ -2579,6 +2586,74 @@ export function DMConsolePage() {
     setActiveCampaignId(newId || null);
   }
 
+  function closeCampaignManager() {
+    if (campaignManagementBusy || moduleBusy || busy) return;
+    setCampaignManagerOpen(false);
+    setSelectedCampaignIds(new Set());
+    lastCampaignSelectionRef.current = null;
+  }
+
+  function toggleCampaignSelection(id: string, index: number, shiftKey: boolean) {
+    setSelectedCampaignIds((current) => {
+      const next = new Set(current);
+      if (shiftKey && lastCampaignSelectionRef.current !== null) {
+        const [start, end] = [lastCampaignSelectionRef.current, index].sort((a, b) => a - b);
+        managedCampaigns.slice(start, end + 1).forEach((campaign) => next.add(campaign.id));
+      } else if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      lastCampaignSelectionRef.current = index;
+      return next;
+    });
+  }
+
+  async function archiveSelectedCampaigns(archived: boolean) {
+    const ids = [...selectedCampaignIds];
+    if (!ids.length) return;
+    setCampaignManagementBusy(true);
+    try {
+      if (archived && activeCampaignId && selectedCampaignIds.has(activeCampaignId)) {
+        stopSpeakingAndClearQueue();
+        await wrapUpCurrentSession();
+        setActiveCampaignId(null);
+      }
+      await invoke('set_campaigns_archived', { ids, archived });
+      const changed = new Set(ids);
+      setCampaigns((current) => current.map((campaign) => changed.has(campaign.id) ? { ...campaign, archived } : campaign));
+      setSelectedCampaignIds(new Set());
+      lastCampaignSelectionRef.current = null;
+    } catch (e) {
+      setError(`Couldn't ${archived ? 'archive' : 'unarchive'} campaigns: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCampaignManagementBusy(false);
+    }
+  }
+
+  async function confirmDeleteCampaigns() {
+    const ids = deleteCampaignIds ?? [];
+    if (!ids.length) return;
+    setCampaignManagementBusy(true);
+    try {
+      if (activeCampaignId && ids.includes(activeCampaignId)) {
+        stopSpeakingAndClearQueue();
+        await wrapUpCurrentSession();
+        setActiveCampaignId(null);
+      }
+      await invoke('delete_campaigns', { ids });
+      const deleted = new Set(ids);
+      setCampaigns((current) => current.filter((campaign) => !deleted.has(campaign.id)));
+      setSelectedCampaignIds(new Set());
+      setDeleteCampaignIds(null);
+      lastCampaignSelectionRef.current = null;
+    } catch (e) {
+      setError(`Couldn't delete campaigns: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCampaignManagementBusy(false);
+    }
+  }
+
   /** Wraps a `claude`-calling invoke so a connection that died sometime after
    *  the last check (or a fresh install/reinstall that never actually worked)
    *  gets the same connect/install remediation runTurn's catch offers,
@@ -3727,6 +3802,28 @@ export function DMConsolePage() {
   }
 
   const activeCampaignName = campaigns.find((c) => c.id === activeCampaignId)?.name;
+  const availableCampaigns = campaigns.filter((campaign) => !campaign.archived);
+  const managedCampaigns = campaigns.filter((campaign) => showArchivedCampaigns || !campaign.archived);
+  const hasArchivedCampaigns = campaigns.some((campaign) => campaign.archived);
+  const showCampaignManagerEntry = campaigns.length > 5 || hasArchivedCampaigns;
+  const selectedCampaigns = campaigns.filter((campaign) => selectedCampaignIds.has(campaign.id));
+  const selectedHaveActive = selectedCampaigns.some((campaign) => !campaign.archived);
+  const selectedHaveArchived = selectedCampaigns.some((campaign) => campaign.archived);
+  const campaignActionsBlocked = campaignManagementBusy || !!moduleBusy || busy;
+
+  React.useEffect(() => {
+    if (!campaignManagerOpen) return;
+    const selectAll = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        setSelectedCampaignIds(new Set(
+          campaigns.filter((campaign) => showArchivedCampaigns || !campaign.archived).map((campaign) => campaign.id)
+        ));
+      }
+    };
+    window.addEventListener('keydown', selectAll);
+    return () => window.removeEventListener('keydown', selectAll);
+  }, [campaignManagerOpen, campaigns, showArchivedCampaigns]);
   // Only non-null while a chapterize_and_import_module call is actually in
   // flight (see the two setIngestProgress(null) call sites bracketing it) —
   // every other moduleBusy consumer never touches it, so no extra check for
@@ -3758,12 +3855,19 @@ export function DMConsolePage() {
         <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">
           <select
             value={activeCampaignId ?? ''}
-            onChange={(e) => handleSelectCampaign(e.target.value)}
-            disabled={busy}
+            onChange={(e) => {
+              if (e.target.value === '__manage__') {
+                setCampaignManagerOpen(true);
+                return;
+              }
+              handleSelectCampaign(e.target.value);
+            }}
+            disabled={busy || !!moduleBusy}
             className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-red-600 disabled:opacity-50"
           >
             <option value="">Select a campaign…</option>
-            {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {availableCampaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {showCampaignManagerEntry && <option value="__manage__">Manage campaigns…</option>}
           </select>
 
           <Button size="sm" variant="outline" onClick={() => { setNewCampaign(BLANK_INTAKE); setPendingModuleFile(null); setPendingLoreFile(null); setNewCampaignOpen(true); }}>
@@ -4215,6 +4319,94 @@ export function DMConsolePage() {
           <Button onClick={handleCreateCampaign} disabled={creatingCampaign || !newCampaign.name.trim()}>
             {moduleBusyLabel ?? (creatingCampaign ? 'Creating…' : 'Create campaign')}
           </Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={campaignManagerOpen} onClose={closeCampaignManager} title="Manage campaigns" wide>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-slate-400">Click to select, Shift-click for a range, or press Ctrl+A to select all shown campaigns.</p>
+            {hasArchivedCampaigns && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setShowArchivedCampaigns((shown) => !shown);
+                  setSelectedCampaignIds(new Set());
+                  lastCampaignSelectionRef.current = null;
+                }}
+                disabled={campaignActionsBlocked}
+              >
+                {showArchivedCampaigns ? <EyeOff size={14} /> : <Eye size={14} />}
+                {showArchivedCampaigns ? 'Hide archived campaigns' : 'Show archived campaigns'}
+              </Button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-400">{selectedCampaignIds.size} selected</span>
+            <div className="flex gap-2">
+              <button className="text-slate-300 hover:text-white" onClick={() => setSelectedCampaignIds(new Set(managedCampaigns.map((campaign) => campaign.id)))}>Select all</button>
+              <button className="text-slate-300 hover:text-white" onClick={() => setSelectedCampaignIds(new Set())}>Clear</button>
+            </div>
+          </div>
+
+          <div className="max-h-80 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+            {managedCampaigns.map((campaign, index) => (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={selectedCampaignIds.has(campaign.id)}
+                key={campaign.id}
+                onClick={(event) => toggleCampaignSelection(campaign.id, index, event.shiftKey)}
+                className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2 text-left select-none transition-colors ${
+                  campaign.archived
+                    ? 'bg-slate-950/80 border-slate-800 text-slate-500'
+                    : selectedCampaignIds.has(campaign.id)
+                      ? 'bg-red-950/40 border-red-700 text-white'
+                      : 'bg-slate-900 border-slate-700 text-slate-200 hover:border-slate-500'
+                }`}
+              >
+                <span aria-hidden="true" className={`w-4 h-4 rounded border flex items-center justify-center text-xs ${selectedCampaignIds.has(campaign.id) ? 'bg-red-700 border-red-600 text-white' : 'border-slate-500'}`}>
+                  {selectedCampaignIds.has(campaign.id) ? '✓' : ''}
+                </span>
+                <span className="flex-1 truncate">{campaign.name}</span>
+                {campaign.archived && <Badge>Archived</Badge>}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-slate-700">
+            <Button variant="outline" onClick={closeCampaignManager} disabled={campaignActionsBlocked}>Done</Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="secondary" onClick={() => archiveSelectedCampaigns(false)} disabled={!selectedHaveArchived || campaignActionsBlocked}>
+                <ArchiveRestore size={14} /> Unarchive
+              </Button>
+              <Button variant="secondary" onClick={() => archiveSelectedCampaigns(true)} disabled={!selectedHaveActive || campaignActionsBlocked}>
+                <Archive size={14} /> Archive
+              </Button>
+              <Button variant="danger" onClick={() => setDeleteCampaignIds([...selectedCampaignIds])} disabled={!selectedCampaignIds.size || campaignActionsBlocked}>
+                <Trash2 size={14} /> Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog open={!!deleteCampaignIds} onClose={() => { if (!campaignActionsBlocked) setDeleteCampaignIds(null); }} title="Permanently delete campaigns?" elevated>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-300">
+            This permanently deletes {deleteCampaignIds?.length ?? 0} campaign{deleteCampaignIds?.length === 1 ? '' : 's'} and all of their memory, imported modules, and prepared maps. This cannot be undone unless you exported a backup.
+          </p>
+          <ul className="max-h-40 overflow-y-auto list-disc list-inside text-sm text-slate-400">
+            {(deleteCampaignIds ?? []).map((id) => <li key={id}>{campaigns.find((campaign) => campaign.id === id)?.name ?? id}</li>)}
+          </ul>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeleteCampaignIds(null)} disabled={campaignActionsBlocked}>Cancel</Button>
+            <Button variant="danger" onClick={confirmDeleteCampaigns} disabled={campaignActionsBlocked}>
+              <Trash2 size={14} /> {campaignManagementBusy ? 'Deleting…' : 'Delete permanently'}
+            </Button>
+          </div>
         </div>
       </Dialog>
 

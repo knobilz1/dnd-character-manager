@@ -63,6 +63,8 @@ pub fn run() {
       party_listener::set_broadcast_map,
       party_listener::clear_broadcast_map,
       campaign::list_campaigns,
+      campaign::set_campaigns_archived,
+      campaign::delete_campaigns,
       campaign::create_campaign,
       campaign::export_campaign,
       campaign::import_campaign,
