@@ -9,8 +9,9 @@ Published as `knobilz1`.
 **This file is auto-loaded by Codex.** Claude Code reads `CLAUDE.md`; `agy`
 (Gemini/Antigravity) reads neither — see §7, it's measured, not assumed.
 
-**State:** v0.23.5 (2026-07-25), `main` clean, 470 Rust tests, all feature
-branches merged. The updater endpoint serves it across 6 signed platforms.
+**State:** v0.23.9 (2026-07-28), `main` clean, 482 Rust tests (+23 `#[ignore]`d
+real-data harnesses), all feature branches merged. The updater endpoint serves
+6 signed platforms.
 
 Contents: §1 rules · §2 setup/build/test · §3 GitHub Actions · §4 repo map ·
 §5 campaign data · §6 flows · §7 multi-engine · §8 driving the app ·
@@ -74,7 +75,7 @@ Runtime things that live **outside the repo** and that a fresh clone won't have:
 |---|---|---|
 | `.env` with `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | repo root, gitignored | Drive sync can't authorise. **Never print these.** |
 | Campaign folders | `%APPDATA%\com.nabil.dndsheet\campaigns\` | The DM has nothing to run |
-| Tile library (`manifest.json` ~86 MB, `pack_profile.json`, `pack_profile_overrides.json`) | `%APPDATA%\com.nabil.dndsheet\tile_library\` | Maps render as built-in sprites, no catalog art |
+| Tile library (`manifest.json` ~86 MB, `pack_profile.json`, `pack_profile_overrides.json`) | `%APPDATA%\com.nabil.dndsheet\tile_library\` — importable in-app now (`import_tile_library`), no longer a manual copy | Maps render as built-in sprites, no catalog art |
 | Vendor CLIs installed **and signed in** | `claude`, `codex`, `agy` | DM turns and ingestion fail |
 | Release signing key | GitHub secret, see §3 | CI fails fast on purpose |
 
@@ -85,7 +86,7 @@ npm run tauri dev            # desktop app (add the CDP env var — see §8)
 npm run dev                  # frontend only in a browser; no Tauri IPC, most DM features dead
 npx tsc -b --force           # the ONLY typecheck that works here
 npm run build                # production frontend build
-cd src-tauri && cargo test --lib          # 470 tests
+cd src-tauri && cargo test --lib          # 482 tests
 ```
 
 ### Reading the code
@@ -416,9 +417,14 @@ different pass-phrase, asked each CLI for "the pass-phrase":
 ### Model choice
 
 Gemini is probed per workload — turns take `gemini-3.1-pro-low`, ingestion takes
-`-pro-high`. Claude and Codex are deliberately **not** auto-selected: their tiers
-are pinned on measurements that auto-overriding would silently invalidate
-(`BOARD_READ_MODEL` is opus because sonnet scored 3/6 against opus's 6/6).
+`-pro-high`. Codex probes its own ingest model too (`best_codex_ingest_model`).
+
+**Claude is deliberately still NOT auto-selected**, and that is not an oversight:
+its tiers are pinned on measurements that auto-overriding would silently
+invalidate (`BOARD_READ_MODEL` is opus because sonnet scored 3/6 against opus's
+6/6; `classify_biome` is opus-at-medium because the cheap call was the
+destructive one, §10). Probe the engines whose tiers rest on nothing measured;
+leave alone the ones that do.
 
 ---
 
@@ -492,7 +498,15 @@ something is half-built; almost nothing here is.
 - **Multi-engine** — Claude / Codex / Gemini / a local LLM, per-workload model
   choice, cross-model critique, failover (§7).
 
-### Shipped in v0.23.5 (this week's work)
+### Shipped in v0.23.6 – v0.23.9
+
+- Campaign archive/delete manager; in-app tile-library import; artwork re-pick
+  and DM-driven `revise_battle_map` from the map card; vision picks chunked and
+  routed across engines with a persisted `MapArtDiagnostics` sidecar; a coherence
+  pass that reviews the chosen art *as a set* and re-picks outliers; a grid-mode
+  map-readiness nudge in every turn prompt (the `makeMap` trigger attempt).
+
+### Shipped in v0.23.5
 
 - Cross-model critique now also runs on **Plan Next Session** (it already ran on
   campaign lore, lore updates, and a module's plan at import). Measured: two
@@ -525,13 +539,24 @@ something is half-built; almost nothing here is.
 4. **The liquid-contrast rule fights the fiction.** It rejects water too close to
    the floor colour for legibility, which guarantees a marsh map can't have the
    "black water" its own spec describes. Both goals are legitimate.
-5. **`reresolve_map_tiles` has no UI.** Re-runs only tile resolution (~72s vs a
-   ~542s full regenerate) — very useful for iterating on tile art.
+5. **Tree canopy hides map entrances.** FA ships `Tree_*_3x3.webp`; `split_footprint`
+   reads that size from the vendor's own filename and the renderer draws it
+   centred on its 1x1 cell, overhanging on purpose (canopy, not shrubs). But a
+   `T` anchored beside a border opening throws canopy across it, so a map with a
+   4-cell southern mouth reads as sealed. **Only a human is misled** — the bot
+   reads the ASCII, so its tactics stay correct. Do NOT "fix" this with a shrink
+   constant: `split_footprint` falls back to `1x1`, so packs that don't use
+   `_NxM` filenames have no overhang to shrink, and you would be tuning an
+   FA-only number while crushing FA's trees into shrubs. Anything keyed on the
+   *grid* (which border cells are open) travels to every pack.
 6. **Never verified:** `getUserMedia` actually returning a frame (no camera on
    this box, so `captureTableFrame` has never run for real); the
    `TILE PICK AGREED` log arm.
-7. **Housekeeping:** 81 campaigns exist, mostly `x1-*`/`w1-*`/`zz-*` scratch.
-   `zz-gloam` is the useful one (Gloamwood Whispers imported, grid mode, 4 maps).
+7. **Housekeeping:** the scratch campaigns now have an archive/delete manager
+   (`set_campaigns_archived`, `delete_campaigns`), so this is a chore, not a
+   missing feature. `zz-gloam` is the useful one (Gloamwood Whispers imported,
+   grid mode). `test-campaign/the-black-fen` is a hand-made dark-floor fixture —
+   the only repro of a marsh floor with black water; keep it.
    The maplog interleaves on concurrent writes (cosmetic).
 
 ### Intend to ship (discussed, scoped, not started)
@@ -543,8 +568,43 @@ something is half-built; almost nothing here is.
 | **Android port** | Long-discussed, unscoped. |
 | **Party-wide initiative tracking** | Shelved. |
 | **Cross-check on the vision board read** | The diff exists (`boardCrossCheck.ts`); extending the same idea to the tile *vision* picks is open. |
-| **A UI for `reresolve_map_tiles`** | Backend command exists, no button. |
+| **Manual map tile editing** | Nudge a misplaced tile by hand instead of re-rolling a ~9-minute map. Scoped below. |
 | **Curse of Strahd import** | The real stress test of chapterization: 230 pages, non-linear, Tarokka branching. |
+
+#### Manual map tile editing — scoped 2026-07-28, not started
+
+The escape hatch for a generator that costs ~9 minutes and is non-deterministic:
+today the only remedy for one badly-placed tile is a full re-roll that may come
+back worse. Nine minutes and a gamble versus five seconds is the asymmetry that
+justifies this — not any single bad map.
+
+**The one rule: edit the grid glyph, never the sprite placement.** A drag that
+only re-anchored artwork would leave the DM still believing there is a tree at
+the old cell — deliberately building the render/truth desync that most of §10
+exists to prevent. Editing the glyph keeps the picture and the bot's tactical
+model in lockstep for free, because both read the same grid, and a human nudge
+then corrects the DM's understanding too.
+
+Easy half and hard half, from `parse_placements`:
+
+- **Field glyphs (`T` foliage, `^` rubble) are self-describing** — their position
+  lives *only* in the grid character, and the Features line supplies nothing but
+  flavour ("willow" vs "pine"). Moving one is a one-character edit. They also
+  resolve with variety and **no vision call**, so re-anchoring them is near-instant.
+- **Named objects (`=`, `o`, crates) also carry cells in their Features caption**,
+  so moving one means rewriting `"Sunken bog-oak idol at K9-L10"` as well. Second
+  phase; don't start here.
+
+Smallest version: a **grid editor, not a sprite editor** — click or rubber-band
+cells, set them to `T` or `.`, write the grid back. No adding, rotating or
+deleting objects. Plus one small backend piece: a field-glyph-only re-anchor, so
+an edit doesn't need the full `reresolve_map_tiles` (~2 min, re-picks
+*everything*) before the render catches up. That gap is the difference between a
+tool that gets used and one that gets avoided.
+
+Zero-code way to validate demand first: hand-edit a `T` in a `<slug>.md` grid,
+save, and hit Change artwork in the console. If nudging by hand feels worth it,
+the editor is that with a mouse.
 
 Deliberately **not** doing: an API-key path for any model. Everything runs on
 subscriptions the user already pays for, via each vendor's own CLI. That
@@ -580,6 +640,17 @@ Written down because each one cost real time, and most look like nothing.
   Undetectable downstream, because within the horror pack that art is correct.
   Now voted, on opus at medium effort. Spend redundancy where blast radius is
   large, not where cost is high.
+- **A number fitted to an eyeball judgement should be delegated back to eyes
+  when it starts fighting the fiction.** `LIQUID_FLOOR_CONTRAST_MIN` was
+  calibrated against maps already judged by eye, then used as a pre-pick cull —
+  which made "black water" impossible on any dark floor, because mean RGB cannot
+  see the ripples that make dark-on-dark readable. On the worst floor it dropped
+  **7 of 8** candidates: not biasing the vision pick, *deleting* it. Measured
+  2026-07-28 after handing the judgement to the picker (shown the floor tile):
+  a marsh chose water **59** apart and it reads clearly, where the 2026-07-22
+  failure was **64** apart and invisible. Five points closer, opposite outcome —
+  proof the metric was never measuring the thing that makes water readable. The
+  constant survives as an advisory `LIQUID CONTRAST AUDIT` log line, never a gate.
 - **Compiling isn't building.** `cargo` here only ever compiles the Windows arm.
 - **`--help` is not the flag list.** `--output-format` was real and undocumented;
   a flag can also be accepted and silently ignored.
@@ -592,6 +663,16 @@ Written down because each one cost real time, and most look like nothing.
   player overreach and it does — you'll measure that rule instead of your feature.
 - **Waiting for the page to answer ≠ waiting for the rebuild to land.** If the old
   app never went down, a CDP poll passes instantly and you test stale code.
+- **Run `git diff --stat` after the FIRST edit to a large file, not the third.**
+  A 13k-line file is one tool quirk away from a whole-file reformat: an edit to
+  `campaign.rs` once reprinted it as 5,363 insertions of rustfmt-style rewrapping,
+  two more edits were stacked on the wreckage, and the session ended with zero
+  code landed. **This codebase is not rustfmt-clean on purpose** (deliberate long
+  single-line log/json calls), so any wholesale format is both a lost session and
+  a diff nobody can review. Surgical edits here run tens of lines, not thousands.
+- **Scripted edits anchor on content, not line numbers** — and re-read the file
+  immediately before splicing. Line numbers recorded earlier in a session are a
+  liability; the recovery attempt above failed a second time on exactly that.
 - **Never build JS with bash heredocs** (`\n`, `\d`, backticks, `${}` all mangle),
   and remember **the page has no `process`** — referencing it throws silently, so
   a script that prints success unconditionally will lie to you.
