@@ -2441,6 +2441,12 @@ fn tile_luminance(e: &TileLibraryEntry, measured: &HashMap<String, MeasuredArt>)
 /// sewer stone vs murky water 176 (fine), swamp marsh vs swamp water 64 (the
 /// failure: 77 cells of channel a player simply cannot pick out from the bank).
 /// 120 sits in the empty gap between 64 and 176 with room on both sides.
+///
+/// Retired as a GATE 2026-07-27: used as a pre-pick cull it made fiction like
+/// "black water" impossible on any dark floor, because mean colour cannot see
+/// the ripples that make dark-on-dark readable. The picker now sees the floor
+/// and judges legibility itself (campaign.rs `resolve_liquid`); this constant
+/// survives only as the audit yardstick those picks are logged against.
 pub const LIQUID_FLOOR_CONTRAST_MIN: f64 = 120.0;
 
 /// Summed absolute R+G+B difference between two mean colours.
@@ -2449,7 +2455,7 @@ pub fn colour_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 /// Mean R,G,B for one already-chosen tile, decoded now. `None` when the file
-/// can't be read — callers then skip the contrast test rather than guess.
+/// can't be read — callers then skip the contrast audit rather than guess.
 pub fn mean_rgb(root: &str, rel_path: &str) -> Option<[f64; 3]> {
     load_tile_art(root, rel_path).and_then(|(_, s)| s).map(|s| s.rgb)
 }

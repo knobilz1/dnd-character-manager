@@ -5352,9 +5352,26 @@ Candidate files:
 
 /// Vision-pick the best-looking ground texture for `biome` from its candidate
 /// tiles. `None` on any transport/parse failure (keep the built-in floor).
-fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandidate]) -> Option<usize> {
+///
+/// `beside` shows the picker ONE already-chosen tile the pick must not vanish
+/// into — today that is the floor a liquid is drawn next to. Liquid legibility
+/// used to be a mean-RGB cull before this call (`LIQUID_FLOOR_CONTRAST_MIN`),
+/// and mean colour cannot tell "invisible" from "dark but rippled": a marsh
+/// could never have the black water its spec described, because the number
+/// said no however readable the texture. That threshold was fitted to an
+/// eyeballed judgement in the first place, so the judgement now belongs to the
+/// picker — made with its eyes, seeing the actual floor.
+fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandidate], beside: Option<(&str, &str)>) -> Option<usize> {
     use serde_json::json;
-    let mut content = vec![json!({"type":"text","text": format!("These are candidate texture tiles for a {biome} battle map. Pick the one that best reads as {kind}. Prefer a SOLID, fully-opaque tile that fills the whole square — avoid any that look like a sparse, mostly-transparent decal or overlay.")})];
+    let mut content = vec![match beside {
+        Some((_, desc)) => json!({"type":"text","text": format!("These are candidate texture tiles for a {biome} battle map. The FIRST image is {desc} — context, NOT a candidate. The tile you pick is drawn directly beside it, so pick the candidate that best reads as {kind} while staying EASY TO TELL APART from it at a glance: a player must see where one terrain ends and the other begins. Prefer a SOLID, fully-opaque tile that fills the whole square — avoid any that look like a sparse, mostly-transparent decal or overlay.")}),
+        None => json!({"type":"text","text": format!("These are candidate texture tiles for a {biome} battle map. Pick the one that best reads as {kind}. Prefer a SOLID, fully-opaque tile that fills the whole square — avoid any that look like a sparse, mostly-transparent decal or overlay.")}),
+    }];
+    if let Some((url, desc)) = beside {
+        content.push(json!({"type":"text","text": format!("[CONTEXT — {desc}, not a candidate]")}));
+        let (m, b) = split_data_url(url);
+        content.push(json!({"type":"image","source":{"type":"base64","media_type":m,"data":b}}));
+    }
     for (j, c) in cands.iter().enumerate() {
         content.push(json!({"type":"text","text": format!("[{}]", j + 1)}));
         let (m, b) = split_data_url(&c.data_url);
@@ -5362,11 +5379,17 @@ fn pick_texture(biome: &str, kind: &str, cands: &[crate::tile_library::TileCandi
     }
     content.push(json!({"type":"text","text":"Reply with ONLY this JSON: {\"choice\":N} where N is the best option's number."}));
     let msg = json!({"type":"user","message":{"role":"user","content":content}}).to_string();
-    let text_prompt = format!(
-        "The {} attached images are candidate textures for a {biome} tabletop battle map, in choice order 1 through {}. Pick the one that best reads as {kind}. Prefer a solid, opaque, seamless top-down texture. Reply with ONLY JSON: {{\"choice\":N}}.",
-        cands.len(), cands.len()
-    );
-    let images = cands.iter().map(|c| c.data_url.clone()).collect::<Vec<_>>();
+    let text_prompt = match beside {
+        Some((_, desc)) => format!(
+            "The first attached image is {desc} (context, not a candidate); the {} images AFTER it are candidate textures for a {biome} tabletop battle map, in choice order 1 through {}. Pick the candidate that best reads as {kind} while staying easy to tell apart from the context image at a glance. Prefer a solid, opaque, seamless top-down texture. Reply with ONLY JSON: {{\"choice\":N}}.",
+            cands.len(), cands.len()
+        ),
+        None => format!(
+            "The {} attached images are candidate textures for a {biome} tabletop battle map, in choice order 1 through {}. Pick the one that best reads as {kind}. Prefer a solid, opaque, seamless top-down texture. Reply with ONLY JSON: {{\"choice\":N}}.",
+            cands.len(), cands.len()
+        ),
+    };
+    let images = beside.iter().map(|(url, _)| (*url).to_string()).chain(cands.iter().map(|c| c.data_url.clone())).collect::<Vec<_>>();
     let reply = match run_map_image_prompt(&msg, &text_prompt, &images) {
         Ok(reply) => reply,
         Err(e) => {
@@ -5485,7 +5508,7 @@ fn resolve_floor(app: &AppHandle, profile: &PackProfile, biome: &str) -> Option<
         "FLOOR RESOLUTION",
         &format!("biome={biome}, d20={roll} → query={query:?}, {} texture candidate(s){}", cands.len(), if dropped > 0 { format!(" ({dropped} dropped as unusably dark/bright)") } else { String::new() }),
     );
-    let idx = pick_texture(biome, &format!("natural {biome} ground underfoot"), &cands)?;
+    let idx = pick_texture(biome, &format!("natural {biome} ground underfoot"), &cands, None)?;
     let c = cands.get(idx)?;
     Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
 }
@@ -5502,51 +5525,28 @@ fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[S
     // molten vat is lava even on a foundry whose folder stocks none. See
     // `liquid_caption_query`.
     let query = caption_query.unwrap_or_else(|| liquid_query(profile, biome));
-    let mut cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
-    // Drop any liquid that would vanish into the floor it is drawn on. `~` means
-    // "this square is different terrain"; a channel a player cannot pick out
-    // from the bank is not doing that job, however correct the material is.
+    let cands = crate::tile_library::shortlist_in_category(app, query, "Textures", biome, 1, 1, VISION_SHORTLIST_K);
+    // Legibility is judged by the picker with its eyes, not by a mean-RGB gate:
+    // it is shown the floor tile and told the pick must read apart from it. The
+    // gate this replaced (`LIQUID_FLOOR_CONTRAST_MIN`) could not tell
+    // "invisible" from "dark but rippled" — mean colour has no texture — so a
+    // marsh could never have the black water its spec described.
     //
     // Live 2026-07-22: a bog's floor resolved to `Marsh_Wet_A_01` (80,77,38) and
     // its water to `Water_Still_B_05` (54,53,24) — both from the pack's own
     // Swamp folder, both olive, 64 apart. Every one of the 77 water cells read
     // as more marsh. Note the liquid was not WRONG, which is why no
     // biome/keyword rule catches this: swamp water in a swamp is the right
-    // answer, and it is only wrong NEXT TO that particular floor.
-    let floor_rgb = floor.and_then(|f| crate::tile_library::mean_rgb(&f.root, &f.rel_path));
-    if let Some(fr) = floor_rgb {
-        // `c.rgb` is None for every AUDITED tile, because `shortlist_impl`
-        // deliberately skips decoding when the audit already has a verdict —
-        // and textures are exactly what gets audited. Relying on it alone made
-        // this whole guard a silent no-op that still reported success, which is
-        // how the first cut of it shipped and did nothing. Decode on demand for
-        // the handful that survive to here; it is at most 8 files, once per map,
-        // and only for maps that actually contain `~`.
-        let clear: Vec<_> = cands
-            .iter()
-            .filter(|c| {
-                c.rgb
-                    .or_else(|| crate::tile_library::mean_rgb(&c.root, &c.rel_path))
-                    .is_none_or(|cr| crate::tile_library::colour_distance(cr, fr) >= crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN)
-            })
-            .cloned()
-            .collect();
-        // Never empty the shortlist: a pack whose only liquid is floor-coloured
-        // should still draw its channels, and the built-in fallback is worse.
-        if !clear.is_empty() && clear.len() < cands.len() {
-            crate::maplog::log(
-                "LIQUID CONTRAST",
-                &format!(
-                    "floor mean rgb {fr:?}: dropped {} of {} candidate(s) closer than {} to it, so the liquid reads as its own terrain",
-                    cands.len() - clear.len(),
-                    cands.len(),
-                    crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN
-                ),
-            );
-            cands = clear;
-        }
-    }
-    crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={query:?}, {} texture candidate(s)", cands.len()));
+    // answer, and it is only wrong NEXT TO that particular floor. The picker
+    // seeing the floor is what catches it now. When the floor art cannot be
+    // decoded there is no guard at all — exactly the condition under which the
+    // old gate also skipped.
+    let floor_art = floor.and_then(|f| crate::tile_library::load_tile_art(&f.root, &f.rel_path));
+    let (floor_url, floor_rgb) = match &floor_art {
+        Some((url, signals)) => (Some(url.as_str()), signals.map(|s| s.rgb)),
+        None => (None, None),
+    };
+    crate::maplog::log("LIQUID RESOLUTION", &format!("biome={biome}, query={query:?}, {} texture candidate(s){}", cands.len(), if floor_url.is_some() { " (picker shown the floor tile to judge legibility)" } else { "" }));
     // Name the liquid, don't just say "a pool". The shortlist is built from
     // `query`, so every candidate already matches it — which means a pack that
     // ships one texture per FLUID COLOUR hands the picker a set differing in
@@ -5554,8 +5554,19 @@ fn resolve_liquid(app: &AppHandle, profile: &PackProfile, biome: &str, rows: &[S
     // charnel house asked for "blood", got FA's Blood_A_01..06 (red, navy,
     // brown, black, white, orange — monster-blood variants of one texture),
     // and filled its gore channels with NAVY BLUE.
-    let idx = pick_texture(biome, &format!("a still pool of {query} seen from directly above"), &cands)?;
+    let idx = pick_texture(biome, &format!("a still pool of {query} seen from directly above"), &cands, floor_url.map(|u| (u, "the map's floor")))?;
     let c = cands.get(idx)?;
+    // Advisory audit of the replaced gate: how far the PICKED liquid sits from
+    // the floor in mean colour. Below the calibrated minimum the picker is
+    // asserting a texture difference the number cannot see — right for rippled
+    // black water, wrong for the bog above. Logged so the judgement can be
+    // audited, never enforced: enforcing it is what fought the fiction.
+    if let Some(fr) = floor_rgb {
+        if let Some(cr) = c.rgb.or_else(|| crate::tile_library::mean_rgb(&c.root, &c.rel_path)) {
+            let d = crate::tile_library::colour_distance(cr, fr);
+            crate::maplog::log("LIQUID CONTRAST AUDIT", &format!("{} picked at distance {d:.0} from the floor — {} the calibrated {}", c.rel_path, if d >= crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN { "clears" } else { "BELOW" }, crate::tile_library::LIQUID_FLOOR_CONTRAST_MIN));
+        }
+    }
     Some(TileRef { root: c.root.clone(), rel_path: c.rel_path.clone() })
 }
 
