@@ -1079,6 +1079,10 @@ export function DMConsolePage() {
   const [profileEdits, setProfileEdits] = React.useState<ProfileOverrides>({ biomes: {} });
   const [profileBusy, setProfileBusy] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
+  /** The pack-profile view is fetched on demand (see the planOpen effect), so
+   *  the panel needs its own in-flight state — `profileBusy` means "re-profiling
+   *  the pack with the model", which is a different, much rarer operation. */
+  const [profileLoading, setProfileLoading] = React.useState(false);
   const [tileLibraryTotal, setTileLibraryTotal] = React.useState<number | null>(null);
   const [tileLibraryRootCount, setTileLibraryRootCount] = React.useState(0);
   const [tileLibraryManaged, setTileLibraryManaged] = React.useState(false);
@@ -3207,18 +3211,27 @@ export function DMConsolePage() {
    *  mis-detected universal biome doesn't fail, it just quietly makes every
    *  map render as generic stone, three sessions later. */
   async function refreshPackProfile() {
+    setProfileLoading(true);
     try {
       setPackProfile(await invoke<PackProfileView | null>('get_pack_profile'));
       setProfileEdits(await invoke<ProfileOverrides>('get_pack_profile_overrides'));
     } catch {
       setPackProfile(null);
+    } finally {
+      setProfileLoading(false);
     }
   }
 
+  // Opening this dialog must stay CHEAP — it exists to show what's already been
+  // made. `get_tile_library_summary` is ~63ms and gates the artwork buttons, so
+  // it stays; `get_pack_profile` does NOT, because it decodes ~680 tile images
+  // to build its view (measured 175,567ms on a Drive-backed pack, which froze
+  // the whole window — see its doc comment in tile_library.rs). It now loads
+  // when the "Detected biomes" panel is actually expanded, which is also the
+  // only place its data is ever shown, and that panel starts collapsed.
   React.useEffect(() => {
     if (planOpen) {
       void refreshTileLibrarySummary();
-      void refreshPackProfile();
     }
   }, [planOpen]);
 
@@ -4771,6 +4784,27 @@ export function DMConsolePage() {
                     SILENT — a pack whose folders aren't recognised still reports
                     "imported ✓" and then resolves nothing, so the only symptom is
                     maps that look like the library was never there. */}
+                {/* Same panel before its data exists. Expanding it is what pays
+                    for the view (~680 tile decodes), so a session that only
+                    opens Plan to look at its maps never spends that at all. */}
+                {tileLibraryTotal != null && !packProfile && (
+                  <div className="border border-slate-800 rounded-lg mb-3">
+                    <button
+                      type="button"
+                      onClick={() => { setProfileOpen(true); void refreshPackProfile(); }}
+                      disabled={profileLoading}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left disabled:opacity-60"
+                    >
+                      <span className="text-sm text-slate-200">
+                        Detected biomes{' '}
+                        <span className="text-slate-500">
+                          {profileLoading ? '(reading the pack — this can take a few minutes on a cloud-synced pack)' : '(show)'}
+                        </span>
+                      </span>
+                      <span className="text-slate-500 text-xs">▸</span>
+                    </button>
+                  </div>
+                )}
                 {tileLibraryTotal != null && packProfile && (
                   <div className="border border-slate-800 rounded-lg mb-3">
                     <button

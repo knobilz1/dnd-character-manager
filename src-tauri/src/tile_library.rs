@@ -3147,8 +3147,32 @@ fn thumbnail_data_url(root: &str, rel_path: &str) -> Option<String> {
     Some(format!("data:image/png;base64,{}", STANDARD.encode(&png)))
 }
 
+/// MUST stay `async` + `spawn_blocking`: a sync `#[tauri::command]` runs on the
+/// MAIN thread, and this one is far too expensive to be there. It decodes real
+/// image files — `build_biome_evidence` samples 6 ground candidates × 5 files per
+/// biome, and every biome also decodes and re-encodes a `ground_thumb` — so a
+/// 22-biome pack reads ~680 images, and a manifest rooted on a Google Drive path
+/// makes each of those a network fetch.
+///
+/// Measured 2026-07-28 on the live app: **175,567 ms** — the DM console's Plan
+/// dialog calls this from its open effect, so opening Plan froze the entire
+/// window for nearly three minutes with a busy cursor, looking like a hang
+/// rather than slow work. The other three calls that dialog makes on open
+/// (`get_tile_library_summary`, `read_cached_session_plan`, `list_battle_maps`)
+/// were 63 ms, 3 ms and 4 ms — this was 100% of it.
+///
+/// Off the main thread the window stays live and the panel just fills in late.
+/// The ~175 s itself is still unreasonable; caching the built view (as
+/// `load_manifest_cached`/`load_profile_cached` already do) or only building it
+/// when the pack panel is actually opened is the real follow-up.
 #[tauri::command]
-pub fn get_pack_profile(app: AppHandle) -> Result<Option<PackProfileView>, String> {
+pub async fn get_pack_profile(app: AppHandle) -> Result<Option<PackProfileView>, String> {
+    tauri::async_runtime::spawn_blocking(move || get_pack_profile_blocking(app))
+        .await
+        .map_err(|e| format!("Pack profile task failed: {e}"))?
+}
+
+fn get_pack_profile_blocking(app: AppHandle) -> Result<Option<PackProfileView>, String> {
     let Some(manifest) = load_manifest_cached(&app)? else {
         return Ok(None);
     };
