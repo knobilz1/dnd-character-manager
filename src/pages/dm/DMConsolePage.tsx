@@ -3069,14 +3069,24 @@ export function DMConsolePage() {
     setStandingResult(null);
     setModuleBusy('Looking for what this module decides once and uses later…');
     try {
-      const found = await withClaudeReconnect(() =>
-        invoke<number>('reconcile_module_decisions', { id: activeCampaignId, moduleId: activeModuleId }),
+      const r = await withClaudeReconnect(() =>
+        invoke<{ registered: number; dropped: number }>('reconcile_module_decisions', {
+          id: activeCampaignId,
+          moduleId: activeModuleId,
+        }),
       );
       setStandingText(await invoke<string>('read_module_decisions', { id: activeCampaignId, moduleId: activeModuleId }));
+      // A dropped entry means the register is genuinely incomplete. It used to
+      // vanish silently, which is the worst possible failure for a file whose
+      // entire job is "don't lose track of this".
+      const overflow =
+        r.dropped > 0
+          ? ` ${r.dropped} more didn't fit — this list is re-read every turn, so it has a size limit. Rebuild to try for shorter entries.`
+          : '';
       setStandingResult(
-        found === 0
+        r.registered === 0
           ? 'No cross-chapter dependencies found — this module is self-contained chapter to chapter.'
-          : `Registered ${found} cross-chapter dependenc${found === 1 ? 'y' : 'ies'}.`,
+          : `Registered ${r.registered} cross-chapter dependenc${r.registered === 1 ? 'y' : 'ies'}.${overflow}`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

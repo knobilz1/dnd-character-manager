@@ -8883,12 +8883,18 @@ fn build_module_decisions_prompt(module_title: &str, chapter_index: &str, plan: 
         2. Only things that genuinely cross chapters. Something set up and paid off inside one chapter needs no \
         register entry — the chapter text is right there. If this module has no cross-chapter dependencies at all, \
         return an empty list; that is a perfectly good answer and much better than padding.\n\n\
-        Aim for the handful that really matter, not everything that could conceivably recur. This list is re-read \
-        by the DM on every single turn, so each entry has to earn its place.\n\n\
+        WRITE TIGHT. This whole list is re-read by the DM on every single turn, so it has a hard budget and long \
+        entries crowd out real ones. \"Tser Pool, ch 14 — Madam Eva\" says everything \"Chapter 1 explains it; it is \
+        actually performed once by Madam Eva at Tser Pool Encampment (area G, chapter 14), early in play\" says, in a \
+        fifth of the space. Keep `decided` and `matters_in` to a short phrase each — name the chapter and the thing, \
+        skip the sentence around it. Keep `record` to one sentence. Chapter numbers beat chapter descriptions.\n\n\
+        Aim for the five to eight that really matter rather than three exhaustive ones — coverage is worth more here \
+        than detail, because a dependency that isn't listed is one nobody is watching for. Still nothing that's \
+        paid off inside one chapter, and still an empty list if this module genuinely has none.\n\n\
         Chapter index:\n{chapter_index}\n\n\
         Arc plan:\n{}\n\n\
         Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
-        {{\"decisions\": [{{\"name\": \"<short name>\", \"decided\": \"<where/when it gets decided>\", \"matters_in\": \"<which later chapters or situations depend on it>\", \"record\": \"<what the DM should write down when it happens>\"}}]}}",
+        {{\"decisions\": [{{\"name\": \"<a few words>\", \"decided\": \"<short phrase: where/when>\", \"matters_in\": \"<short phrase: which later chapters>\", \"record\": \"<one sentence: what to write down>\"}}]}}",
         if plan.trim().is_empty() { "(none)" } else { plan.trim() },
     )
 }
@@ -8911,17 +8917,32 @@ struct StandingDecisionsReply {
     decisions: Vec<StandingDecision>,
 }
 
-/// Renders the register, dropping entries with no name and stopping before
+/// What a render produced: the file, how many entries made it, and how many
+/// were cut for space.
+///
+/// `dropped` exists because the cut used to be silent. Measured on Curse of
+/// Strahd, three verbose entries filled 2,477 of the 3,000 budget — a fourth
+/// would have vanished with nothing anywhere saying so, and a dependency nobody
+/// knows was dropped is worse than one that was never found.
+struct RenderedStanding {
+    text: String,
+    kept: usize,
+    dropped: usize,
+}
+
+/// Renders the register, skipping entries with no name and stopping before
 /// MAX_STANDING_CHARS. Truncating by whole entries rather than mid-line: half a
 /// dependency ("record which card came up and what it") is worse than one fewer,
 /// because it still reads as an instruction.
-fn render_standing_decisions(decisions: &[StandingDecision]) -> String {
+fn render_standing_decisions(decisions: &[StandingDecision]) -> RenderedStanding {
     let mut out = String::from(
         "# Standing decisions\n\n\
         _Things this module decides ONCE and depends on chapters later. The answers are not here — they happen at \
         the table. When one of these comes up in play, record the outcome with `remember` so it survives past this \
         chapter._\n\n",
     );
+    let mut kept = 0usize;
+    let mut dropped = 0usize;
     for d in decisions.iter().filter(|d| !d.name.trim().is_empty()) {
         let entry = format!(
             "- **{}** — decided: {} · matters in: {}\n  - RECORD: {}\n",
@@ -8930,12 +8951,17 @@ fn render_standing_decisions(decisions: &[StandingDecision]) -> String {
             if d.matters_in.trim().is_empty() { "—" } else { d.matters_in.trim() },
             if d.record.trim().is_empty() { "the outcome, in one line" } else { d.record.trim() },
         );
+        // Keep going rather than break: a later entry may be short enough to
+        // fit where this one wasn't, and there's no reason to prefer the
+        // model's ordering over getting more coverage into the same budget.
         if out.chars().count() + entry.chars().count() > MAX_STANDING_CHARS {
-            break;
+            dropped += 1;
+            continue;
         }
         out.push_str(&entry);
+        kept += 1;
     }
-    out
+    RenderedStanding { text: out, kept, dropped }
 }
 
 /// Builds (or rebuilds) one module's standing-decisions register.
@@ -8946,9 +8972,18 @@ fn render_standing_decisions(decisions: &[StandingDecision]) -> String {
 /// that were imported before it existed. Same manual-trigger shape as
 /// reconcile_campaign_hooks.
 ///
-/// Returns how many decisions were registered. Zero is a real answer — plenty of
-/// modules are chapter-local all the way through.
-fn reconcile_module_decisions_at(root: &Path, id: &str, module_id: &str) -> Result<usize, String> {
+/// Reports both what was registered and what didn't fit. Zero registered is a
+/// real answer — plenty of modules are chapter-local all the way through.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct StandingDecisionsResult {
+    pub registered: usize,
+    /// Entries the model returned that the always-loaded budget had no room
+    /// for. Non-zero means the register is genuinely incomplete, which the DM
+    /// needs to hear rather than have hidden.
+    pub dropped: usize,
+}
+
+fn reconcile_module_decisions_at(root: &Path, id: &str, module_id: &str) -> Result<StandingDecisionsResult, String> {
     let dir = root.join(id);
     let module_dir = dir.join("modules").join(module_id);
     if !module_dir.is_dir() {
@@ -8974,9 +9009,18 @@ fn reconcile_module_decisions_at(root: &Path, id: &str, module_id: &str) -> Resu
     )?;
     let parsed: StandingDecisionsReply = serde_json::from_str(strip_code_fences(&reply))
         .map_err(|e| format!("Couldn't parse the standing-decisions reply: {e}. Raw: {reply}"))?;
-    let kept = parsed.decisions.iter().filter(|d| !d.name.trim().is_empty()).count();
+    let rendered = render_standing_decisions(&parsed.decisions);
+    if rendered.dropped > 0 {
+        crate::maplog::log(
+            "STANDING DECISIONS TRUNCATED",
+            &format!(
+                "{module_id}: {} entries didn't fit the {MAX_STANDING_CHARS}-char always-loaded budget",
+                rendered.dropped
+            ),
+        );
+    }
 
-    write_atomic(&module_dir.join("standing.md"), &render_standing_decisions(&parsed.decisions))?;
+    write_atomic(&module_dir.join("standing.md"), &rendered.text)?;
     // Only mirror into the always-loaded path if THIS module is the active one —
     // otherwise reconciling a background module would silently hand the DM
     // another adventure's dependencies.
@@ -8984,7 +9028,7 @@ fn reconcile_module_decisions_at(root: &Path, id: &str, module_id: &str) -> Resu
         sync_active_module_indirection_at(root, id, module_id)?;
     }
     sync_standing_import_at(root, id)?;
-    Ok(kept)
+    Ok(StandingDecisionsResult { registered: rendered.kept, dropped: rendered.dropped })
 }
 
 /// Adds the `@active_module/standing.md` import to a campaign that predates this
@@ -9762,7 +9806,7 @@ pub async fn reconcile_campaign_hooks(app: AppHandle, id: String) -> Result<usiz
 /// Returns how many entries were registered; 0 is a real answer for a module
 /// that's chapter-local throughout.
 #[tauri::command]
-pub async fn reconcile_module_decisions(app: AppHandle, id: String, module_id: String) -> Result<usize, String> {
+pub async fn reconcile_module_decisions(app: AppHandle, id: String, module_id: String) -> Result<StandingDecisionsResult, String> {
     tokio::task::spawn_blocking(move || {
         let root = campaigns_root(&app)?;
         reconcile_module_decisions_at(&root, &id, &module_id)
@@ -11964,19 +12008,40 @@ Tactics:
     #[test]
     fn render_standing_decisions_caps_by_whole_entries_and_skips_nameless_ones() {
         let many: Vec<StandingDecision> = (0..200).map(|i| decision(&format!("Decision {i}"))).collect();
-        let out = render_standing_decisions(&many);
-        assert!(out.chars().count() <= MAX_STANDING_CHARS, "got {} chars", out.chars().count());
-        assert!(out.contains("Decision 0"), "it should fit at least the first entries");
-        assert!(!out.contains("Decision 199"));
+        let r = render_standing_decisions(&many);
+        assert!(r.text.chars().count() <= MAX_STANDING_CHARS, "got {} chars", r.text.chars().count());
+        assert!(r.text.contains("Decision 0"), "it should fit at least the first entries");
+        assert!(!r.text.contains("Decision 199"));
         // No entry may be cut mid-way: every RECORD line that started must have
         // finished.
-        assert_eq!(out.matches("- RECORD:").count(), out.matches("· matters in:").count());
+        assert_eq!(r.text.matches("- RECORD:").count(), r.text.matches("· matters in:").count());
+        // Whatever didn't fit has to be COUNTED, not silently gone — measured on
+        // Curse of Strahd, three entries filled 83% of the budget, so a real
+        // module is one verbose entry away from losing one.
+        assert_eq!(r.kept + r.dropped, 200);
+        assert!(r.dropped > 0);
+        assert_eq!(r.kept, r.text.matches("- RECORD:").count());
 
         let mut nameless = decision("");
         nameless.record = "should never appear".into();
-        let out = render_standing_decisions(&[nameless, decision("Real one")]);
-        assert!(!out.contains("should never appear"));
-        assert!(out.contains("Real one"));
+        let r = render_standing_decisions(&[nameless, decision("Real one")]);
+        assert!(!r.text.contains("should never appear"));
+        assert!(r.text.contains("Real one"));
+        assert_eq!((r.kept, r.dropped), (1, 0), "a nameless entry is skipped, not counted as dropped for space");
+    }
+
+    /// A long entry must not bury the short ones behind it — the budget should
+    /// end up holding as much coverage as it can, not stop at the first thing
+    /// that doesn't fit.
+    #[test]
+    fn render_standing_decisions_keeps_later_short_entries_after_one_too_big_to_fit() {
+        let mut huge = decision("Huge");
+        huge.record = "x".repeat(MAX_STANDING_CHARS);
+        let r = render_standing_decisions(&[decision("First"), huge, decision("Last")]);
+        assert!(r.text.contains("First"));
+        assert!(r.text.contains("Last"), "a short entry after an oversized one still fits");
+        assert!(!r.text.contains("**Huge**"));
+        assert_eq!((r.kept, r.dropped), (2, 1));
     }
 
     /// An empty list is a legitimate answer — plenty of modules are chapter-local
@@ -11984,9 +12049,18 @@ Tactics:
     /// something that reads as broken.
     #[test]
     fn render_standing_decisions_of_nothing_is_still_a_sensible_file() {
-        let out = render_standing_decisions(&[]);
-        assert!(out.starts_with("# Standing decisions"));
-        assert!(!out.contains("- **"));
+        let r = render_standing_decisions(&[]);
+        assert!(r.text.starts_with("# Standing decisions"));
+        assert!(!r.text.contains("- **"));
+        assert_eq!((r.kept, r.dropped), (0, 0));
+    }
+
+    #[test]
+    fn build_module_decisions_prompt_asks_for_terse_entries_and_real_coverage() {
+        let p = build_module_decisions_prompt("Curse of Strahd", "1. Into the Mists", "");
+        assert!(p.contains("WRITE TIGHT"), "verbosity is what crowded out real entries on the live run");
+        assert!(p.contains("five to eight"));
+        assert!(p.contains("Tser Pool, ch 14"), "the terse-vs-verbose example is the instruction that lands");
     }
 
     /// The single most damaging thing this pass could do is invent an answer to
