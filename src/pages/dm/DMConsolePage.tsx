@@ -1662,6 +1662,14 @@ export function DMConsolePage() {
     // per-push sync in the dm-party-character listener no-ops without an
     // active campaign, so this catch-up is what guarantees the DM knows the
     // whole table's backstories regardless of join-vs-select order.
+    // A different campaign has its own party.md and its own hook ledger, so
+    // whoever was already reconciled elsewhere means nothing here. Cancel any
+    // pending pass too — it was aimed at the campaign we just left.
+    hookedNamesRef.current = new Set();
+    if (hookTimerRef.current !== null) {
+      window.clearTimeout(hookTimerRef.current);
+      hookTimerRef.current = null;
+    }
     partyRef.current.forEach(syncPartyMemberToCampaign);
 
     // What the "Recap" button will read aloud — per campaign, so switching
@@ -1844,6 +1852,54 @@ export function DMConsolePage() {
       .catch(() => {});
   }, [activeCampaignId, ttsEngine, f5Capable]);
 
+  /** Names already covered by a campaign-hooks pass this sitting, and the timer
+   *  batching new arrivals. Keyed by lowercased name to match party.md's own
+   *  case-insensitive upsert. */
+  const hookedNamesRef = React.useRef<Set<string>>(new Set());
+  const hookTimerRef = React.useRef<number | null>(null);
+
+  /** How long to wait after a character arrives before tying them into the
+   *  lore. Long enough that a table where everyone connects within a few
+   *  seconds of each other costs ONE pass covering all of them rather than one
+   *  per player — the pass reads the whole of party.md, so a single late call
+   *  does strictly more than several early ones. */
+  const HOOK_DEBOUNCE_MS = 12_000;
+
+  /** Ties newly-arrived party members into established lore, automatically.
+   *
+   *  This used to be a manual button in the Lore dialog plus an automatic run
+   *  at "End session" — which meant a character who joined over LAN got no hook
+   *  until the first session was already OVER. The hook exists to give the DM a
+   *  deliberate connection to play off, so having it arrive after the session
+   *  it was for is close to useless: the first sitting is exactly the one where
+   *  the DM knows least about these characters.
+   *
+   *  Nobody would have known to press that button. Nabil only knew because I
+   *  told him, which is the definition of a step that should not be manual.
+   *
+   *  Debounced and fire-and-forget, so it never blocks a turn. It's a free
+   *  no-op once everyone has a hook (reconcile_campaign_hooks_at filters to
+   *  members without one and returns without a model call if that's empty), so
+   *  a redundant fire costs an IPC round trip and nothing else. */
+  function scheduleHookReconcile(names: string[]) {
+    const campaignId = campaignIdRef.current;
+    if (!campaignId) return;
+    const fresh = names.filter((n) => n.trim() && !hookedNamesRef.current.has(n.trim().toLowerCase()));
+    if (!fresh.length) return;
+    for (const n of fresh) hookedNamesRef.current.add(n.trim().toLowerCase());
+    if (hookTimerRef.current !== null) window.clearTimeout(hookTimerRef.current);
+    hookTimerRef.current = window.setTimeout(() => {
+      hookTimerRef.current = null;
+      // Re-read the campaign at fire time: a campaign switch during the wait
+      // must not tie these characters into the wrong campaign's lore.
+      const target = campaignIdRef.current;
+      if (!target) return;
+      invoke('reconcile_campaign_hooks', { id: target }).catch((e) =>
+        console.warn('Automatic campaign-hooks reconciliation failed (the Lore dialog button still works):', e),
+      );
+    }, HOOK_DEBOUNCE_MS);
+  }
+
   /** Mirrors one character's identity/backstory into the active campaign's
    *  memory/party.md (see buildPartyMemberSummary + campaign.rs's
    *  upsert_party_member). Best-effort fire-and-forget: a failed write just
@@ -1855,6 +1911,7 @@ export function DMConsolePage() {
     const campaignId = campaignIdRef.current;
     if (!campaignId || !character.name?.trim()) return;
     invoke('upsert_party_member', { id: campaignId, name: character.name, description: buildPartyMemberSummary(character) })
+      .then(() => scheduleHookReconcile([character.name]))
       .catch((e) => console.warn('Failed to sync a party member to party.md:', e));
   }
 
@@ -4229,7 +4286,9 @@ export function DMConsolePage() {
         ? ' — writing the plan'
         : ingestProgress?.phase === 'critiquing'
           ? ' — polishing the plan'
-          : '';
+          : ingestProgress?.phase === 'registering'
+            ? ' — noting what carries across chapters'
+            : '';
   const moduleBusyLabel = moduleBusy
     ? `${moduleBusy} (${formatElapsed(Math.floor((Date.now() - moduleBusyStartRef.current) / 1000))})${ingestStepSuffix}`
     : null;
@@ -4914,7 +4973,8 @@ export function DMConsolePage() {
                 <p className="text-xs text-slate-400">
                   Things this module decides once and depends on chapters later — a card reading that fixes where
                   treasures are, an early choice that changes a later chapter. Holds the questions, not the answers;
-                  the DM records each outcome when it actually happens at your table.
+                  the DM records each outcome when it actually happens at your table. Built automatically when a
+                  module is imported — this is for rebuilding it, or for a module imported before it existed.
                 </p>
               </div>
               <Button size="sm" variant="outline" onClick={handleReconcileModuleDecisions} disabled={!!moduleBusy}>

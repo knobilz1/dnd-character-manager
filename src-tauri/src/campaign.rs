@@ -9326,6 +9326,30 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
         .unwrap_or(draft_plan);
 
     let (module_id, summaries) = write_chapters_to_disk(root, id, &chapters, &plan, &module_title)?;
+
+    // Register the module's cross-chapter dependencies while we're here.
+    //
+    // This is also exposed as its own button, and was ONLY that at first — the
+    // reasoning being that re-chaptering a 900k-char book to gain a 2k file
+    // would be an absurd trade, so it had to work against an already-imported
+    // module. That reasoning holds and the manual trigger stays. What it missed
+    // is that nobody would ever know to press it: the register's whole job is to
+    // stop a chapter-1 decision being lost by chapter 9, and a DM who doesn't
+    // know it exists loses it exactly the same way.
+    //
+    // One extra call at the end of an import that already spent dozens, and
+    // never fatal — a failure here leaves the module fully imported with an
+    // empty register, which is what you had before this existed.
+    on_progress("registering", 0, 0);
+    if let Err(e) = reconcile_module_decisions_at(root, id, &module_id) {
+        crate::maplog::log("STANDING DECISIONS FAILED", &format!("{module_id}: {e}"));
+        concerns.push(
+            "Couldn't work out this module's cross-chapter dependencies — everything else imported fine. \
+             Retry from Module → Standing decisions."
+                .to_string(),
+        );
+    }
+
     Ok(ChapterizeImportResult { module_id, module_title, chapters: summaries, concerns })
 }
 
