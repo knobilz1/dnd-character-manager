@@ -271,6 +271,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       enabledBooks: draft.enabledBooks,
       raceId: draft.raceId!,
       backgroundId: draft.backgroundId!,
+      backgroundCustom: draft.backgroundCustom,
       classes: draft.classes!,
       abilityScoreMethod: draft.abilityScoreMethod ?? 'manual',
       baseAbilityScores: finalBaseScores,

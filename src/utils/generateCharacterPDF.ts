@@ -12,7 +12,7 @@ import { getSubclass } from '../data/subclasses';
 import { getSpell } from '../data/spells';
 import { totalCharacterLevel, SKILL_ABILITY } from '../data/mechanics';
 import { getRace } from '../data/races/index';
-import { getBackground } from '../data/backgrounds';
+import { resolveBackground } from '../data/backgrounds';
 
 // ── Page constants ────────────────────────────────────────────────────────────
 const PW = 612;   // US Letter width  (pt)
@@ -190,7 +190,7 @@ function drawInfoRow(pg: PDFPage, character: Character, d: ReturnType<typeof com
     .map(cl => cl.subclassId ? getSubclass(cl.subclassId)?.name ?? '' : '')
     .filter(Boolean).join(', ');
   const raceStr = getRace(character.raceId)?.name || character.raceId || '—';
-  const bgStr = getBackground(character.backgroundId)?.name || character.backgroundId || '—';
+  const bgStr = resolveBackground(character)?.name || character.backgroundId || '—';
   const alignStr = character.alignment || '—';
   const profStr = `+${d.profBonus}`;
 
@@ -398,7 +398,7 @@ function drawPersonalitySection(pg: PDFPage, character: Character,
   const halfW  = Math.floor((w - 4) / 2);
   const halfH  = Math.floor((h - 4) / 2);
 
-  const bg = getBackground(character.backgroundId);
+  const bg = resolveBackground(character);
   const boxes = [
     { label: 'Personality Traits', value: bg?.personalityTraits?.[0] ?? character.notes ?? '', x: x,            yTop: topY },
     { label: 'Ideals',             value: bg?.ideals?.[0] ?? '',           x: x + halfW + 4, yTop: topY },

@@ -10,7 +10,7 @@ import type { Character } from '../types';
 import { getRace } from '../data/races';
 import { getClass } from '../data/classes';
 import { ALL_SUBCLASSES } from '../data/subclasses';
-import { getBackground } from '../data/backgrounds';
+import { resolveBackground } from '../data/backgrounds';
 import { getSpell } from '../data/spells';
 import { lookupWeapon, damageLine } from '../data/weapons';
 import { totalCharacterLevel } from '../data/mechanics';
@@ -1303,7 +1303,7 @@ function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefo
   const subclass = primary?.subclassId
     ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId)
     : null;
-  const bg = getBackground(character.backgroundId);
+  const bg = resolveBackground(character);
   const totalLevel = totalCharacterLevel(character.classes);
 
   const multiclassLabel = character.classes.length > 1

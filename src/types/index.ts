@@ -211,6 +211,20 @@ export interface Background {
   flaws: string[];
 }
 
+/** Player-authored background flavour. Any field filled in here replaces the
+ *  book's suggested text everywhere the background is DISPLAYED (sheet, print,
+ *  PDF, the DM's party notes). Mechanics — skill/tool proficiencies, languages,
+ *  starting equipment, the background feature — always come from `backgroundId`,
+ *  so rewriting your history never changes what you're proficient in. */
+export interface BackgroundCustom {
+  name?: string;
+  personalityTraits?: string;
+  ideals?: string;
+  bonds?: string;
+  flaws?: string;
+  backstory?: string;
+}
+
 export interface FeatPrerequisite {
   minLevel?: number;
   ability?: Partial<Record<AbilityKey, number>>;
@@ -486,6 +500,9 @@ export interface Character {
   enabledBooks: BookId[];
   raceId: string;
   backgroundId: string;
+  /** Player's own wording for the background — name, traits, backstory.
+   *  Undefined/blank fields fall back to the book's suggestions. */
+  backgroundCustom?: BackgroundCustom;
   classes: ClassLevel[];
   abilityScoreMethod: AbilityScoreMethod;
   baseAbilityScores: AbilityScores;

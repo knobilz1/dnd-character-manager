@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
 import { SectionHeader, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
-import { getBackground } from '../../data/backgrounds';
+import { getBackground, resolveBackground } from '../../data/backgrounds';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
 import { ALL_SUBCLASSES } from '../../data/subclasses';
@@ -15,11 +15,11 @@ import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { totalCharacterLevel } from '../../data/mechanics';
 import { useCharacterStore } from '../../store/useCharacterStore';
-import type { Character, JournalEntry } from '../../types';
+import type { Background, BackgroundCustom, Character, JournalEntry } from '../../types';
 
 export function TraitsPanel({ character, setNotes }: { character: Character; setNotes: (n: string) => void }) {
-  const { setExperiencePoints, setCampaignName, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
-  const bg = getBackground(character.backgroundId);
+  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
+  const bg = resolveBackground(character);
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
@@ -88,19 +88,12 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
 
       {/* Background Traits */}
       {bg && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-          <SectionHeader>Background: {bg.name}</SectionHeader>
-          <div className="mb-3 bg-slate-900 rounded-lg p-3">
-            <p className="text-xs font-bold text-slate-300 mb-1">Feature: {bg.feature.name}</p>
-            <p className="text-xs text-slate-400 leading-relaxed">{bg.feature.description}</p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <TraitSection title="Personality Traits" items={bg.personalityTraits.slice(0, 2)} />
-            <TraitSection title="Ideals" items={bg.ideals.slice(0, 1)} />
-            <TraitSection title="Bonds" items={bg.bonds.slice(0, 1)} />
-            <TraitSection title="Flaws" items={bg.flaws.slice(0, 1)} />
-          </div>
-        </div>
+        <BackgroundSection
+          bg={bg}
+          bookBg={getBackground(character.backgroundId)}
+          custom={character.backgroundCustom ?? {}}
+          onChange={updateBackgroundCustom}
+        />
       )}
 
       {/* Racial Traits */}
@@ -682,6 +675,103 @@ function NotesSection({ notes, setNotes }: { notes: string; setNotes: (n: string
         placeholder="Adventure notes, reminders, contacts, lore..."
         className="w-full min-h-32 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-500 transition-colors resize-none"
       />
+    </div>
+  );
+}
+
+// ── Background: book mechanics, player's words ─────────────────────────────────
+// `bg` is the resolved background (player text already laid over the book's);
+// `bookBg` is the raw book entry, kept only to offer the original wording as a
+// placeholder so it's obvious what a blank field falls back to.
+function BackgroundSection({
+  bg,
+  bookBg,
+  custom,
+  onChange,
+}: {
+  bg: Background;
+  bookBg: Background | undefined;
+  custom: BackgroundCustom;
+  onChange: (patch: Partial<BackgroundCustom>) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  const fields = [
+    { key: 'personalityTraits', label: 'Personality Traits', book: bookBg?.personalityTraits },
+    { key: 'ideals', label: 'Ideals', book: bookBg?.ideals },
+    { key: 'bonds', label: 'Bonds', book: bookBg?.bonds },
+    { key: 'flaws', label: 'Flaws', book: bookBg?.flaws },
+  ] as const;
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <SectionHeader className="mb-0">Background: {bg.name}</SectionHeader>
+        <button
+          onClick={() => setEditing(e => !e)}
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-violet-300 transition-colors border border-slate-600 hover:border-violet-600 rounded-lg px-2 py-1"
+        >
+          {editing ? <><Check size={11} /> Done</> : <><Pencil size={11} /> Edit</>}
+        </button>
+      </div>
+
+      <div className="mb-3 bg-slate-900 rounded-lg p-3">
+        <p className="text-xs font-bold text-slate-300 mb-1">Feature: {bg.feature.name}</p>
+        <p className="text-xs text-slate-400 leading-relaxed">{bg.feature.description}</p>
+      </div>
+
+      {editing ? (
+        <div className="space-y-3">
+          <p className="text-[10px] text-slate-500">Blank fields use {bookBg?.name ?? 'the book'}'s default text. Editing these never changes your proficiencies or feature.</p>
+          <div>
+            <label className="text-xs font-bold text-slate-400">Background Name</label>
+            <input
+              type="text"
+              value={custom.name ?? ''}
+              onChange={e => onChange({ name: e.target.value })}
+              placeholder={bookBg?.name ?? ''}
+              className="mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-violet-500"
+            />
+          </div>
+          {fields.map(f => (
+            <div key={f.key}>
+              <label className="text-xs font-bold text-slate-400">{f.label}</label>
+              <textarea
+                value={custom[f.key] ?? ''}
+                onChange={e => onChange({ [f.key]: e.target.value })}
+                placeholder={f.book?.[0] ?? ''}
+                rows={2}
+                className="mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 resize-y"
+              />
+            </div>
+          ))}
+          <div>
+            <label className="text-xs font-bold text-slate-400">Backstory</label>
+            <textarea
+              value={custom.backstory ?? ''}
+              onChange={e => onChange({ backstory: e.target.value })}
+              placeholder="Who were you before the first session?"
+              rows={6}
+              className="mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-500 resize-y"
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <TraitSection title="Personality Traits" items={bg.personalityTraits.slice(0, 2)} />
+            <TraitSection title="Ideals" items={bg.ideals.slice(0, 1)} />
+            <TraitSection title="Bonds" items={bg.bonds.slice(0, 1)} />
+            <TraitSection title="Flaws" items={bg.flaws.slice(0, 1)} />
+          </div>
+          {custom.backstory?.trim() && (
+            <div className="mt-2 bg-slate-900 rounded-lg p-3">
+              <p className="text-xs font-bold text-slate-400 mb-1">Backstory</p>
+              <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{custom.backstory}</p>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

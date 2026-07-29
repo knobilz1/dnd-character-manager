@@ -3,7 +3,7 @@ import { useCreatorStore } from '../../../store/useCreatorStore';
 import { Input, Select, Badge } from '../../../components/ui';
 import { getRace } from '../../../data/races';
 import { getClass } from '../../../data/classes';
-import { getBackground } from '../../../data/backgrounds';
+import { resolveBackground } from '../../../data/backgrounds';
 import { ALL_SUBCLASSES } from '../../../data/subclasses';
 import { ALL_FEATS } from '../../../data/feats';
 import { ALL_SPELLS } from '../../../data/spells';
@@ -24,7 +24,7 @@ export function StepReview() {
   const primaryClass = draft.classes?.[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
   const subclass = primaryClass?.subclassId ? ALL_SUBCLASSES.find(s => s.id === primaryClass.subclassId) : null;
-  const background = getBackground(draft.backgroundId ?? '');
+  const background = resolveBackground(draft);
   const scores = draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 };
   const totalLevel = totalCharacterLevel(draft.classes ?? []);
   const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;

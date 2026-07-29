@@ -142,6 +142,9 @@ interface CharacterState {
   // Misc
   toggleInspiration: () => void;
   setNotes: (notes: string) => void;
+  /** Rewrite part of the player-authored background (name, traits, backstory).
+   *  Merges, so one field can be edited without clearing the rest. */
+  updateBackgroundCustom: (patch: Partial<import('../types').BackgroundCustom>) => void;
   setExperiencePoints: (xp: number) => void;
   updateCurrency: (coin: 'cp' | 'sp' | 'ep' | 'gp' | 'pp', value: number) => void;
   setPortrait: (dataUrl: string | undefined) => void;
@@ -1004,6 +1007,11 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setCampaignName: (name) =>
     set((s) => s.character ? { character: { ...s.character, campaignName: name } } : s),
+
+  updateBackgroundCustom: (patch) =>
+    set((s) => s.character
+      ? { character: { ...s.character, backgroundCustom: { ...s.character.backgroundCustom, ...patch } } }
+      : s),
 
   addJournalEntry: (entry) =>
     set((s) => {

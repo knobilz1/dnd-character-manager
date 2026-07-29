@@ -2,13 +2,19 @@ import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_BACKGROUNDS } from '../../../data/backgrounds';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
+import type { BackgroundCustom } from '../../../types';
 
 export function StepBackground() {
   const { draft, updateDraft } = useCreatorStore();
   const available = ALL_BACKGROUNDS.filter(b => bookEnabled(b, draft.enabledBooks));
+  const custom = draft.backgroundCustom ?? {};
 
   function select(id: string) {
     updateDraft({ backgroundId: id });
+  }
+
+  function setCustom(patch: Partial<BackgroundCustom>) {
+    updateDraft({ backgroundCustom: { ...custom, ...patch } });
   }
 
   const selected = available.find(b => b.id === draft.backgroundId);
@@ -17,7 +23,7 @@ export function StepBackground() {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div>
         <h2 className="text-2xl font-bold text-white mb-2">Choose Your Background</h2>
-        <p className="text-slate-400 mb-4">Your background reveals where you came from, how you became an adventurer, and your place in the world.</p>
+        <p className="text-slate-400 mb-4">Your background reveals where you came from, how you became an adventurer, and your place in the world. Pick the one that fits closest — you can rename it and write your own history on the right.</p>
 
         <div className="grid gap-2 sm:grid-cols-2">
           {available.map(bg => (
@@ -42,10 +48,11 @@ export function StepBackground() {
         </div>
       </div>
 
-      <div className="lg:sticky lg:top-0 lg:self-start">
+      <div className="lg:sticky lg:top-0 lg:self-start space-y-4">
         {selected ? (
+          <>
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-            <h3 className="text-xl font-bold text-white mb-3">{selected.name}</h3>
+            <h3 className="text-xl font-bold text-white mb-3">{custom.name?.trim() || selected.name}</h3>
 
             <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
               <div className="bg-slate-900 rounded-lg p-3">
@@ -64,26 +71,121 @@ export function StepBackground() {
               )}
             </div>
 
-            <div className="bg-slate-900 rounded-lg p-3 mb-4">
+            <div className="bg-slate-900 rounded-lg p-3">
               <h5 className="font-bold text-white text-sm mb-1">Feature: {selected.feature.name}</h5>
               <p className="text-xs text-slate-400 leading-relaxed">{selected.feature.description}</p>
             </div>
+          </div>
+
+          {/* Make it yours — everything below is free text. The book's tables are
+              only suggestions: click one to drop it in, then edit it however you
+              like. Blank means "use the book's default". */}
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-4">
+            <div>
+              <h3 className="text-lg font-bold text-white">Make It Yours</h3>
+              <p className="text-xs text-slate-400">Write your own, or click a suggestion to start from the book. Anything you leave blank uses {selected.name}'s default. Your proficiencies and feature don't change.</p>
+            </div>
 
             <div>
-              <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Personality Traits</h4>
-              <div className="space-y-1">
-                {selected.personalityTraits.slice(0, 2).map((t, i) => (
-                  <p key={i} className="text-xs text-slate-400 italic">"{t}"</p>
-                ))}
-              </div>
+              <label className="text-xs font-bold uppercase tracking-widest text-slate-400">Background Name</label>
+              <input
+                type="text"
+                value={custom.name ?? ''}
+                onChange={e => setCustom({ name: e.target.value })}
+                placeholder={selected.name}
+                className="mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-500 transition-colors"
+              />
+            </div>
+
+            <TraitField
+              label="Personality Traits"
+              value={custom.personalityTraits ?? ''}
+              onChange={v => setCustom({ personalityTraits: v })}
+              suggestions={selected.personalityTraits}
+            />
+            <TraitField
+              label="Ideal"
+              value={custom.ideals ?? ''}
+              onChange={v => setCustom({ ideals: v })}
+              suggestions={selected.ideals}
+            />
+            <TraitField
+              label="Bond"
+              value={custom.bonds ?? ''}
+              onChange={v => setCustom({ bonds: v })}
+              suggestions={selected.bonds}
+            />
+            <TraitField
+              label="Flaw"
+              value={custom.flaws ?? ''}
+              onChange={v => setCustom({ flaws: v })}
+              suggestions={selected.flaws}
+            />
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-widest text-slate-400">Backstory</label>
+              <textarea
+                value={custom.backstory ?? ''}
+                onChange={e => setCustom({ backstory: e.target.value })}
+                placeholder="Who were you before the first session? Family, home, the thing that set you on the road…"
+                rows={6}
+                className="mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-500 transition-colors resize-y"
+              />
             </div>
           </div>
+          </>
         ) : (
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 text-center text-slate-500">
             Select a background to see details
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** A free-text trait box with the book's d8 table as one-click starting points. */
+function TraitField({
+  label,
+  value,
+  onChange,
+  suggestions,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  suggestions: string[];
+}) {
+  return (
+    <div>
+      <label className="text-xs font-bold uppercase tracking-widest text-slate-400">{label}</label>
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={suggestions[0] ?? ''}
+        rows={2}
+        className="mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-500 transition-colors resize-y"
+      />
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              type="button"
+              title={s}
+              onClick={() => onChange(s)}
+              className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded border transition-colors max-w-full truncate',
+                value === s
+                  ? 'border-red-600 bg-red-950/40 text-red-200'
+                  : 'border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200',
+              )}
+            >
+              {i + 1}. {s}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

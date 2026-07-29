@@ -27,7 +27,7 @@ import type { PreparedSpeech } from '../../utils/dmSpeech';
 import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
 import { getRace } from '../../data/races';
 import { getClass } from '../../data/classes';
-import { getBackground } from '../../data/backgrounds';
+import { resolveBackground } from '../../data/backgrounds';
 import { ALL_SUBCLASSES } from '../../data/subclasses';
 import type { Character } from '../../types';
 
@@ -630,7 +630,20 @@ async function pickAndExtractModuleFile(): Promise<{ name: string; text: string;
  *  a few KB in an always-loaded file is a fair price for the DM knowing it). */
 function buildPartyMemberSummary(c: Character): string {
   const race = getRace(c.raceId)?.name ?? c.raceId ?? '';
-  const background = getBackground(c.backgroundId)?.name;
+  const background = resolveBackground(c)?.name;
+  // Only the lines the PLAYER wrote. The book's suggestion tables are 8 generic
+  // entries per category — handing those to the DM would bury the one thing that
+  // actually distinguishes this character under a wall of boilerplate.
+  const bgc = c.backgroundCustom;
+  const written = ([
+    ['Personality', bgc?.personalityTraits],
+    ['Ideal', bgc?.ideals],
+    ['Bond', bgc?.bonds],
+    ['Flaw', bgc?.flaws],
+  ] as const)
+    .filter(([, v]) => v?.trim())
+    .map(([label, v]) => `${label}: ${v!.replace(/\s+/g, ' ').trim()}`)
+    .join(' ');
   const totalLevel = (c.classes ?? []).reduce((s, cl) => s + (cl.level || 0), 0);
   const classText = (c.classes ?? [])
     .map((cl) => {
@@ -648,6 +661,8 @@ function buildPartyMemberSummary(c: Character): string {
     [`Level ${totalLevel}`, race, classText].filter((p) => p.trim()).join(' ') +
       (c.alignment?.trim() ? `, ${c.alignment.trim()}` : '') +
       (background ? `, ${background} background.` : '.'),
+    written || undefined,
+    bgc?.backstory?.trim() ? `Backstory: ${bgc.backstory.replace(/\s+/g, ' ').trim()}` : undefined,
     c.notes?.trim() ? `Player-written backstory/notes: ${c.notes.replace(/\s+/g, ' ').trim()}` : undefined,
   ];
   return parts.filter(Boolean).join(' ');

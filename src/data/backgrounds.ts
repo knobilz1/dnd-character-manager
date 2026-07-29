@@ -1,4 +1,4 @@
-import type { Background } from '../types';
+import type { Background, BackgroundCustom } from '../types';
 import { PHB2024_BACKGROUNDS } from './backgrounds-phb2024';
 import { GGR_BACKGROUNDS } from './backgrounds-ggr';
 
@@ -813,4 +813,32 @@ export const ALL_BACKGROUNDS: Background[] = [
 
 export function getBackground(id: string): Background | undefined {
   return ALL_BACKGROUNDS.find(b => b.id === id);
+}
+
+/** The background as the PLAYER has it: book mechanics with any player-authored
+ *  flavour laid over the top (see `BackgroundCustom`).
+ *
+ *  Every path that DISPLAYS a background goes through this. The mechanical paths
+ *  — StepSkills, StepEquipment, LevelUpDialog, useCharacterDerived — keep calling
+ *  getBackground directly, because a rewritten bond never changes a proficiency.
+ *
+ *  Takes the fields structurally rather than a Character so the creator can pass
+ *  its half-built draft. */
+export function resolveBackground(
+  c: { backgroundId?: string; backgroundCustom?: BackgroundCustom },
+): Background | undefined {
+  const bg = getBackground(c.backgroundId ?? '');
+  const custom = c.backgroundCustom;
+  if (!bg || !custom) return bg;
+  // A written line replaces the whole book table — consumers slice/join these
+  // lists to print "the" trait, so one entry is the player's chosen answer.
+  const over = (v: string | undefined, book: string[]) => (v?.trim() ? [v.trim()] : book);
+  return {
+    ...bg,
+    name: custom.name?.trim() || bg.name,
+    personalityTraits: over(custom.personalityTraits, bg.personalityTraits),
+    ideals: over(custom.ideals, bg.ideals),
+    bonds: over(custom.bonds, bg.bonds),
+    flaws: over(custom.flaws, bg.flaws),
+  };
 }
