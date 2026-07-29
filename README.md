@@ -14,7 +14,8 @@ An unofficial, fan-made 5e character sheet app — and AI Dungeon Master — bui
 - **Combat tab** — spell slots, pact magic, class & subclass resources, hit dice, short/long rest
 - **Spell management** — full spellbook, prepared spells, concentration tracking
 - **Inventory & Town Store** — item database with autocomplete, weight tracking, equip/unequip, buy/sell at a generated shop
-- **Traits & notes** — personality, ideals, bonds, flaws, free-text notes, session journal
+- **Your own background** — rename the background and write your own personality, ideal, bond, flaw and backstory, with the book's tables as one-click suggestions; editable later from the sheet. Proficiencies and features still come from the book
+- **Traits & notes** — free-text notes and a session journal
 - **Level up** — ASI / feat choices, subclass selection, multiclassing, HP rolling
 - **Export / Import** — save characters as JSON, print an official WotC-style sheet or a built-in PDF, or sync across devices with Google Drive
 - **Graveyard** — a record of fallen characters
@@ -22,15 +23,22 @@ An unofficial, fan-made 5e character sheet app — and AI Dungeon Master — bui
 
 ### DM Console — AI Dungeon Master
 
-A voice-driven AI DM that runs a full campaign, either through your Claude subscription or a fully offline local LLM.
+A voice-driven AI DM that runs a full campaign — on your Claude, Codex, or Gemini subscription, or a fully offline local LLM.
 
-- **Talk to the DM** — mic → speech-to-text → Claude (or a local LLM) → text-to-speech narration, with distinct auto-assigned voices per NPC
-- **Campaign memory** — persistent lore, NPCs, locations, and session recaps the DM recalls across sessions
-- **Module import** — upload an adventure PDF; it's auto-chapterized and progress is tracked chapter by chapter
+- **Talk to the DM** — mic → speech-to-text → your chosen engine → text-to-speech narration, with distinct auto-assigned voices per NPC
+- **Campaign memory** — persistent lore, NPCs, locations, party backstories and session recaps the DM recalls across sessions
+- **Module import** — upload an adventure PDF; it's auto-chapterized so only the current chapter loads each turn, and progress is tracked chapter by chapter
+- **Standing decisions** — finds what a module decides once and depends on chapters later (a card reading that fixes where treasures are, an early choice that changes a later chapter) and keeps it in front of the DM the whole way through
+- **Session Zero handout** — a spoiler-free document to give your players before the first session: what the campaign is, what to agree on together, and how to write a background that fits the setting
+- **Party roster** — add a player by importing their exported character, or by hand; either way their backstory gets tied into the campaign's established lore. Remove one and the DM writes that character out of the story
 - **Plan Next Session** — drafts what's coming up next from campaign memory and the current chapter, on demand
-- **Battle Map Generator** — auto-generates a printable, lettered/numbered tactical map per combat encounter for Grid mode, with an optional AI atmosphere pass (local ComfyUI or Gemini)
+- **Recap** — reads last session's recap aloud at the top of the night
+- **Battle Map Generator** — a printable, lettered/numbered tactical map per combat encounter for Grid mode, multi-floor where the fiction has levels, with an optional AI atmosphere pass (local ComfyUI or Gemini)
+- **Bring your own tiles** — import a battle-map tileset and the generator matches real artwork to what each map calls for
+- **Read the board** — point a camera at the table and the DM works out which printed square each mini is standing on
 - **Three battle modes** — Theater of the Mind, Grid (printable maps), and Hex (physical terrain tracking)
-- **LAN party sync** — players join from their own devices on the same network; narration broadcasts live to the table
+- **LAN party sync** — players join from their own devices on the same network; narration broadcasts live to the table, and maps can be presented to a second screen or TV
+- **Cross-checked ingestion** — campaign lore, arc plans and handouts are drafted by one model and reviewed by another before they're saved
 
 ## Supported Source Books
 
@@ -111,6 +119,6 @@ GitHub Actions builds the installers and publishes a release. Installed copies o
 - [Tailwind CSS v4](https://tailwindcss.com)
 - [Lucide React](https://lucide.dev) — icons
 - [Three.js](https://threejs.org) — 3D character viewer
-- Claude / a local LLM (via [vLLM](https://github.com/vllm-project/vllm) or [Ollama](https://ollama.com)) — DM narration
+- [Claude Code](https://claude.com/claude-code), Codex or Gemini CLI on your own subscription, or a local LLM (via [vLLM](https://github.com/vllm-project/vllm) or [Ollama](https://ollama.com)) — DM narration and campaign ingestion
 - [Kokoro](https://github.com/hexgrad/kokoro) / an optional local [F5-TTS](https://github.com/SWivid/F5-TTS) runtime — DM voice synthesis
 - Local [ComfyUI](https://www.comfy.org) or the Gemini API — optional AI-styled battle maps
