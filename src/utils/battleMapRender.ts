@@ -363,14 +363,7 @@ function drawTileProcedural(ctx: Ctx, code: string, x: number, y: number, px: nu
     }
     case 'o': {
       drawFloor(ctx, x, y, px);
-      ctx.fillStyle = COLORS.stone;
-      ctx.beginPath();
-      ctx.arc(x + px * 0.5, y + px * 0.5, px * 0.32, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = COLORS.stoneHi;
-      ctx.beginPath();
-      ctx.arc(x + px * 0.42, y + px * 0.42, px * 0.12, 0, Math.PI * 2);
-      ctx.fill();
+      drawPillar(ctx, x, y, px);
       return;
     }
     case '=': {
@@ -1018,6 +1011,21 @@ function drawSand(ctx: Ctx, x: number, y: number, px: number): boolean {
   return true;
 }
 
+/** The top-down cross-section of a pillar / standing stone: a stone disc with a
+ *  highlight. Shared by both `o` paths so they draw the same stone — the sprite
+ *  path seats it on the scene's own ground, the procedural fallback on the
+ *  built-in floor. */
+function drawPillar(ctx: Ctx, x: number, y: number, px: number) {
+  ctx.fillStyle = COLORS.stone;
+  ctx.beginPath();
+  ctx.arc(x + px * 0.5, y + px * 0.5, px * 0.32, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = COLORS.stoneHi;
+  ctx.beginPath();
+  ctx.arc(x + px * 0.42, y + px * 0.42, px * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /** A bunched heap of rubble: several stones clustered toward the centre with a
  *  soft ground shadow and three depth-sorted shades, so a `^` reads as a pile
  *  of rock rather than one lonely boulder. Deterministic (a fixed constellation
@@ -1141,9 +1149,17 @@ function drawTile(ctx: Ctx, code: string, x: number, y: number, px: number, wall
       // drawn three cells TALL, a side-on view), but an `o` is a single 1x1
       // cell, so drawSprite crushes it to a third height into a stubby,
       // barrel-looking blob nobody can identify. A pillar on a TOP-DOWN grid
-      // is a round stone cross-section anyway — fall through to the
-      // procedural `case 'o'` (floor + stone disc + highlight), which draws
-      // exactly that and reads correctly.
+      // is a round stone cross-section anyway, so draw that instead.
+      //
+      // Seat it on the SCENE's ground, the same way `^` seats its rubble pile
+      // below. Falling through to the procedural case (as this used to) paints
+      // COLORS.floor — the tan dungeon flagstone — so every standing stone on
+      // a marsh, forest or snowfield sat in a pale tan square that reads as a
+      // hole in the terrain. Live: zz-gloam's sunken shrine, `o` at H12/O12.
+      if (drawGround(ctx, x, y, px, terrain, style)) {
+        drawPillar(ctx, x, y, px);
+        return;
+      }
       break;
     case '=': {
       const sprite = style.furniture[furnitureVariantFor(featureLabel)];
