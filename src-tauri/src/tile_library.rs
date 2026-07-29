@@ -1615,8 +1615,20 @@ fn read_with_retry(path: &Path) -> Option<Vec<u8>> {
 /// single-threaded for 183k files, hence the worker pool and the progress
 /// events. Everything else in this module only ever measures the handful of
 /// candidates a shortlist already read.
+///
+/// MUST stay `async` + `spawn_blocking` for the same reason `get_pack_profile`
+/// does: a sync `#[tauri::command]` runs on the MAIN thread, so the internal
+/// worker pool would still leave the window frozen for the whole ~18 minutes
+/// while it waited. The pool parallelises the decoding; it does nothing about
+/// the thread the command itself is parked on.
 #[tauri::command]
-pub fn audit_tile_library(app: AppHandle, csv_path: String) -> Result<TileAuditSummary, String> {
+pub async fn audit_tile_library(app: AppHandle, csv_path: String) -> Result<TileAuditSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || audit_tile_library_blocking(app, csv_path))
+        .await
+        .map_err(|e| format!("Tile audit task failed: {e}"))?
+}
+
+fn audit_tile_library_blocking(app: AppHandle, csv_path: String) -> Result<TileAuditSummary, String> {
     let Some(manifest) = load_manifest_cached(&app)? else {
         return Err("No tile library imported yet.".into());
     };
@@ -3025,8 +3037,19 @@ fn ask(prompt: String) -> Result<String, String> {
 /// Never destructive: any failure leaves the previous profile in place, and a
 /// pack that has never been profiled falls back to the Forgotten Adventures
 /// default — which is exactly the behaviour that predates this.
+///
+/// Async + `spawn_blocking`, and here it matters most of the three: this makes
+/// live `ask(...)` model calls, so as a sync `#[tauri::command]` the "Profile
+/// this pack" button parked an entire LLM round-trip on the main thread and
+/// froze the window until the model answered.
 #[tauri::command]
-pub fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
+pub async fn profile_tile_library(app: AppHandle) -> Result<PackProfile, String> {
+    tauri::async_runtime::spawn_blocking(move || profile_tile_library_blocking(app))
+        .await
+        .map_err(|e| format!("Pack profiling task failed: {e}"))?
+}
+
+fn profile_tile_library_blocking(app: AppHandle) -> Result<PackProfile, String> {
     let Some(manifest) = load_manifest_cached(&app)? else {
         return Err("No tile library imported yet.".into());
     };

@@ -6027,8 +6027,19 @@ pub struct MapTiles {
     diagnostics: MapArtDiagnostics,
 }
 
+/// Async + `spawn_blocking` because this decodes and base64-encodes EVERY tile
+/// in the map (79 on a real one, plus floor and liquid), and a sync
+/// `#[tauri::command]` would do all of that on the main thread. The Plan dialog
+/// calls it once per map card, so on a campaign with several maps the window
+/// used to stall for the whole batch. Same defect `get_pack_profile` had.
 #[tauri::command]
-pub fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
+pub async fn get_map_tiles(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
+    tauri::async_runtime::spawn_blocking(move || get_map_tiles_blocking(app, id, slug))
+        .await
+        .map_err(|e| format!("Map artwork task failed: {e}"))?
+}
+
+fn get_map_tiles_blocking(app: AppHandle, id: String, slug: String) -> Result<MapTiles, String> {
     let root = campaigns_root(&app)?;
     let dir = battle_maps_dir(&root, &id);
     let mut diagnostics = fs::read_to_string(tile_status_path(&dir, &slug))
@@ -9195,8 +9206,19 @@ pub struct ExtractedModuleText {
 /// read as UTF-8 text (.md/.txt, best-effort for other plain-text formats).
 /// The file path comes from the OS file picker (@tauri-apps/plugin-dialog),
 /// so it's whatever the DM chose, not something the app needs to sandbox.
+///
+/// Async + `spawn_blocking`: `pdf_extract::extract_text` on a whole adventure
+/// PDF is seconds to minutes of pure CPU, and a sync `#[tauri::command]` runs
+/// on the main thread — a 230-page module would lock the window for the entire
+/// extraction with no way to tell it apart from a crash.
 #[tauri::command]
-pub fn extract_module_text(path: String) -> Result<ExtractedModuleText, String> {
+pub async fn extract_module_text(path: String) -> Result<ExtractedModuleText, String> {
+    tauri::async_runtime::spawn_blocking(move || extract_module_text_blocking(path))
+        .await
+        .map_err(|e| format!("Module text extraction task failed: {e}"))?
+}
+
+fn extract_module_text_blocking(path: String) -> Result<ExtractedModuleText, String> {
     let is_pdf = Path::new(&path)
         .extension()
         .and_then(|e| e.to_str())
