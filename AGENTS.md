@@ -9,7 +9,7 @@ Published as `knobilz1`.
 **This file is auto-loaded by Codex.** Claude Code reads `CLAUDE.md`; `agy`
 (Gemini/Antigravity) reads neither — see §7, it's measured, not assumed.
 
-**State:** v0.23.9 (2026-07-28), `main` clean, 482 Rust tests (+23 `#[ignore]`d
+**State:** v0.23.9 (2026-07-28), `main` clean, 488 Rust tests (+23 `#[ignore]`d
 real-data harnesses), all feature branches merged. The updater endpoint serves
 6 signed platforms.
 
@@ -86,7 +86,7 @@ npm run tauri dev            # desktop app (add the CDP env var — see §8)
 npm run dev                  # frontend only in a browser; no Tauri IPC, most DM features dead
 npx tsc -b --force           # the ONLY typecheck that works here
 npm run build                # production frontend build
-cd src-tauri && cargo test --lib          # 482 tests
+cd src-tauri && cargo test --lib          # 488 tests
 ```
 
 ### Reading the code
@@ -330,6 +330,22 @@ functions (`sync_dm_rules_at`, `sync_session_index_at`,
 `CLAUDE.md` without rewriting its body — that's the pattern if you genuinely need
 a new file imported.
 
+Three repairs run inside `sync_dm_rules_at` on every load, all create-or-patch,
+never regenerate, so the DM's Notes edits always survive:
+
+| Function | Fixes |
+|---|---|
+| `heal_campaign_scaffolding_at` | Writes any **missing** standard file from the `DEFAULT_*_MD` consts. A folder that loses `CLAUDE.md` was otherwise permanently unopenable — every `sync_*_at` hard-errors on it and nothing recreated it. Live: `zz-gloam` had lost its whole scaffolding but still held two finished maps. |
+| `strip_superseded_positioning` | Deletes the dead hex-positioning section and `position`/`clearPositions` keys. |
+| `refresh_stale_contract_lines` | Re-states the dm-actions contract lines **from `BASE_CLAUDE_MD` itself** (via `base_claude_line`), never from a duplicated copy — a hardcoded replacement would go stale the moment the const changed, which is the bug being fixed. |
+
+That last one matters because the write-once rule cuts both ways: measured
+2026-07-28, **4 of 4** campaigns still carried the pre-`battleLog` key list *and*
+the absolute sentence "Only include this block when something actually changed" —
+which tells the DM not to emit a block for a pure request, exactly the shape
+`makeMap`/`recallMap`/`recallSession` need. If you add a key to
+`BASE_CLAUDE_MD`'s contract, existing campaigns get it only because of this.
+
 ### Non-Claude engines don't get any of this for free
 
 Only `CLAUDE.md` is written, and only Claude reads it (§7). For Codex/Gemini,
@@ -498,6 +514,19 @@ something is half-built; almost nothing here is.
 - **Multi-engine** — Claude / Codex / Gemini / a local LLM, per-workload model
   choice, cross-model critique, failover (§7).
 
+### Shipped since v0.23.9 (uncommitted-to-origin work on `main`)
+
+- **`makeMap` works on every engine.** Verified 2026-07-28 end to end: the DM
+  asks unprompted (codex 17-32s, gemini 26-30s, claude 12-21s), all three block
+  shapes parse with zero warnings, the block is stripped so TTS never speaks it,
+  and `generate_battle_map` produced a real map in 9.2 min. The old "it never
+  triggers" note was stale — Codex's per-turn nudge in `dmPrompt.ts` (`3fe485f`)
+  fixed it and nothing had re-measured. `ask_dm_engine` rejecting Claude was
+  never the blocker either: Claude streams via `ask_dm`, by design.
+- Campaign self-repair and dm-actions contract refresh (§5).
+- Five expensive commands moved off the main thread; liquid legibility delegated
+  to the picker; `o` pillar seating and shortlist.
+
 ### Shipped in v0.23.6 – v0.23.9
 
 - Campaign archive/delete manager; in-app tile-library import; artwork re-pick
@@ -520,13 +549,12 @@ something is half-built; almost nothing here is.
 
 ### Open, highest value first
 
-1. **`makeMap` doesn't trigger.** Fully wired (parses, strips, rejects malformed
-   input, grid-gated in code, never blocks the turn) but across four live Codex
-   turns the DM never asked — including a party explicitly declaring an attack on
-   an unmapped place. **`ask_dm_engine` rejects Claude**, so the engine most
-   sessions use was never tested. Try a real Claude session first. If it stays
-   silent, the fix is probably surfacing the action in the always-loaded action
-   list — which needs an upgrade path for existing campaigns (§5), not a one-liner.
+1. **Map quality on an ad-hoc `makeMap` request.** The action itself works (see
+   Shipped), but the one map generated this way classified as `dungeon` —
+   interior flagstone — from a hint that said outdoor *crumbling ruins*, and came
+   out ~40% bare floor (rows 12-16 of 16 empty). Both are instances of #3 below
+   rather than anything `makeMap`-specific, and a free-text hint is a thinner
+   brief than a session plan's encounter line, so this is where thin briefs show.
 2. **Curse of Strahd import.** Never run. Extraction is the cost (~10× the
    Gloamwood module); the critique pipeline is validated and roughly constant.
 3. **Map quality defects**, all seen in real output: `o` pillars render as ~10px
@@ -552,11 +580,13 @@ something is half-built; almost nothing here is.
 6. **Never verified:** `getUserMedia` actually returning a frame (no camera on
    this box, so `captureTableFrame` has never run for real); the
    `TILE PICK AGREED` log arm.
-7. **Housekeeping:** the scratch campaigns now have an archive/delete manager
-   (`set_campaigns_archived`, `delete_campaigns`), so this is a chore, not a
-   missing feature. `zz-gloam` is the useful one (Gloamwood Whispers imported,
-   grid mode). `test-campaign/the-black-fen` is a hand-made dark-floor fixture —
-   the only repro of a marsh floor with black water; keep it.
+7. **Housekeeping:** 5 campaigns left (down from 81) — the archive/delete manager
+   works. Two fixtures worth keeping: `test-campaign/the-black-fen` (hand-made,
+   the only repro of a marsh floor with black water) and
+   `zz-gloam/the-broken-green-shrine`. **`zz-gloam` lost its entire scaffolding
+   at some point** — no `CLAUDE.md`, no memory registries — and could not be
+   opened until `heal_campaign_scaffolding_at` (§5) restored it, so its *memory*
+   is empty even though its maps survived. Don't treat it as a rich campaign.
    The maplog interleaves on concurrent writes (cosmetic).
 
 ### Intend to ship (discussed, scoped, not started)

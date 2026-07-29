@@ -9,15 +9,19 @@
 // production is exactly what this sends.
 //
 // Usage: node makemap-matrix.mjs <campaignId> [engine,engine,...]
-const [campaignId, engineArg] = process.argv.slice(2);
+const [campaignId, engineArg, spokenArg] = process.argv.slice(2);
 const ENGINES = (engineArg || 'codex,gemini,claude').split(',').map((e) => e.trim()).filter(Boolean);
-if (!campaignId) { console.error('Usage: node makemap-matrix.mjs <campaignId> [engines]'); process.exit(2); }
+if (!campaignId) { console.error('Usage: node makemap-matrix.mjs <campaignId> [engines] [spoken line]'); process.exit(2); }
 
 // In-fiction, and deliberately leaves every specific to the DM. dm_rules.md
 // rejects players who invent unestablished NPCs/places, and separately says an
 // out-of-fiction/meta request must NEVER produce a dm-actions block — so a
 // prompt like "pretend a fight starts" would suppress the very thing under test.
-const SPOKEN = "We're not sneaking past this one. We move up on the ruins ahead and take them head-on — everyone, weapons out.";
+//
+// Pass a different line once the campaign HAS a map that fits this one: the
+// right answer then becomes `recallMap`, and a run that scores it as "did not
+// ask" would be measuring the DM getting it right.
+const SPOKEN = spokenArg || "We're not sneaking past this one. We move up on the ruins ahead and take them head-on — everyone, weapons out.";
 
 const targets = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter((t) => t.type === 'page');
 const page = targets.find((t) => /localhost:\d+|tauri:\/\//.test(t.url || '')) || targets[0];
