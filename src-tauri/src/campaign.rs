@@ -2900,9 +2900,14 @@ fn field_query(label: &str, noun: &str, folder: &str, names_own: bool) -> String
     }
 }
 
+/// The search noun a glyph's own LEGEND entry fixes, regardless of how the DM
+/// captioned the cell: `^` is rubble, `o` is a pillar, `T` is a tree. The field
+/// path searches this directly; the `o` path offers it as a second reading
+/// beside the caption (see `shortlist_including`).
 fn field_glyph_noun(glyph: char) -> &'static str {
     match glyph {
         '^' => "rubble",
+        'o' => "pillar",
         _ => "tree",
     }
 }
@@ -3557,6 +3562,12 @@ struct Placement {
     /// whole connected run. `glyph` is its source code, so the resolver can
     /// search the canonical noun (see `field_glyph_noun`).
     field_glyph: Option<char>,
+    /// The legend code these cells were drawn with, whatever path resolves them
+    /// — provenance, where `field_glyph` above is a ROUTING decision. `None` for
+    /// an `Objects:` line, which names a free placement with no cell code at all.
+    /// Read by the shortlist so a glyph whose legend fixes its meaning can offer
+    /// that reading too (see `shortlist_including`).
+    glyph: Option<char>,
 }
 
 #[derive(Clone)]
@@ -3674,18 +3685,19 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
             // ceiling drew six identical built-in smears in a 3x2 lattice.
             let noun = field_glyph_noun('^');
             let label = if label.to_lowercase().contains(noun) { label.clone() } else { format!("{label} {noun}") };
-            out.push(Placement { label, cells: comp, w, h, field_glyph: None });
+            out.push(Placement { label, cells: comp, w, h, field_glyph: None, glyph: Some('^') });
         }
         for comp in connected_components(&solid) {
             let (w, h) = bbox_wh(&comp);
-            out.push(Placement { label: label.clone(), cells: comp, w, h, field_glyph: None });
+            let glyph = comp.first().and_then(|&(c, r)| cell_at(&rows, c, r));
+            out.push(Placement { label: label.clone(), cells: comp, w, h, field_glyph: None, glyph });
         }
     }
     for (r, row) in rows.iter().enumerate() {
         for (c, ch) in row.chars().enumerate() {
             if FIELD_GLYPHS.contains(&ch) && !claimed.contains(&(c, r)) {
                 let label = field_label.get(&(c, r)).cloned().unwrap_or_else(|| field_glyph_noun(ch).to_string());
-                out.push(Placement { label, cells: vec![(c, r)], w: 1, h: 1, field_glyph: Some(ch) });
+                out.push(Placement { label, cells: vec![(c, r)], w: 1, h: 1, field_glyph: Some(ch), glyph: Some(ch) });
             }
         }
     }
@@ -3695,7 +3707,7 @@ fn parse_placements(spec: &str) -> Vec<Placement> {
                 .flat_map(|dc| (0..h as usize).map(move |dr| (dc, dr)))
                 .map(|(dc, dr)| (c + dc, r + dr))
                 .collect();
-            out.push(Placement { label, cells, w, h, field_glyph: None });
+            out.push(Placement { label, cells, w, h, field_glyph: None, glyph: None });
         }
     }
     out
@@ -5834,7 +5846,16 @@ fn resolve_one_grid(app: &AppHandle, profile: &PackProfile, biome: &str, floor_t
         .filter(|p| p.field_glyph.is_none())
         .map(|p| {
             let (sw, sh) = search_size(&p.label, p.w, p.h);
-            (p, crate::tile_library::shortlist(app, &p.label, &biome, sw, sh, VISION_SHORTLIST_K))
+            // `o` is the legend's PILLAR glyph, and a caption is free to name
+            // that in words the catalog files as a material ("Cracked standing
+            // stone" → head `stone` → a kitchen mortar). Offer vision the
+            // caption's own reading AND the pillar one and let it judge the art;
+            // no word-level rule separates the two. See `shortlist_including`.
+            let cands = match p.glyph {
+                Some('o') => crate::tile_library::shortlist_including(app, &p.label, field_glyph_noun('o'), &biome, sw, sh, VISION_SHORTLIST_K),
+                _ => crate::tile_library::shortlist(app, &p.label, &biome, sw, sh, VISION_SHORTLIST_K),
+            };
+            (p, cands)
         })
         .collect();
     for (p, _) in all_slots.iter().filter(|(_, cands)| cands.is_empty()) {
@@ -10565,6 +10586,17 @@ Tactics:
 
         let crate_p = p.iter().find(|x| x.label == "wooden crate").unwrap();
         assert_eq!(crate_p.cells, vec![(3, 5)]); // D6, 0-indexed
+
+        // Every cell-derived placement carries the legend code it was drawn
+        // with, so the shortlist can offer that glyph's own reading beside the
+        // caption's (see `shortlist_including`). Without it a caption whose head
+        // is a material — "Cracked standing stone" heads on `stone` — ranks on
+        // the material and lands on a kitchen mortar. An `Objects:` line names a
+        // free placement with no cell code, so it carries none.
+        assert!(pillars.iter().all(|x| x.glyph == Some('o')), "{pillars:#?}");
+        assert_eq!(bar.glyph, Some('='));
+        assert_eq!(p.iter().find(|x| x.label == "Brazier").unwrap().glyph, Some('*'));
+        assert_eq!(crate_p.glyph, None, "an Objects: line has no cell code");
     }
 
     #[test]
@@ -10575,7 +10607,7 @@ Tactics:
 
     #[test]
     fn vision_message_asks_for_variety_across_repeated_slots() {
-        let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: None };
+        let p = Placement { label: "Table".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: None, glyph: Some('=') };
         let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "x".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None, rgb: None };
         let msg = build_vision_message(&[(&p, vec![cand])], "tavern");
         assert!(msg.to_lowercase().contains("variety"), "vision pick must ask for variety across repeated slots: {msg}");
@@ -10583,7 +10615,7 @@ Tactics:
 
     #[test]
     fn coherence_repick_wraps_instead_of_replacing_the_hard_learned_prompt() {
-        let p = Placement { label: "Stone rubble".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: Some('^') };
+        let p = Placement { label: "Stone rubble".into(), cells: vec![(1, 1)], w: 1, h: 1, field_glyph: Some('^'), glyph: Some('^') };
         let cand = crate::tile_library::TileCandidate { root: "r".into(), rel_path: "rubble.webp".into(), w: 1, h: 1, data_url: "data:image/webp;base64,AA".into(), biome: "b".into(), kind: crate::tile_library::ArtKind::Prop, luminance: None, rgb: None };
         let original = build_vision_message(&[(&p, vec![cand.clone()])], "forest");
         let retry = build_repick_vision_message(&p, vec![cand], &[0], "forest", &[VisualReference { label: "forest tree".into(), data_url: "data:image/webp;base64,BB".into() }]);
@@ -10612,9 +10644,9 @@ Tactics:
     #[test]
     fn selected_art_groups_collapses_repeated_cells_but_keeps_their_labels() {
         let placements = vec![
-            Placement { label: "Rubble".into(), cells: vec![(0, 0)], w: 1, h: 1, field_glyph: Some('^') },
-            Placement { label: "Broken stone".into(), cells: vec![(1, 0)], w: 1, h: 1, field_glyph: Some('^') },
-            Placement { label: "Tree".into(), cells: vec![(2, 0)], w: 1, h: 1, field_glyph: Some('T') },
+            Placement { label: "Rubble".into(), cells: vec![(0, 0)], w: 1, h: 1, field_glyph: Some('^'), glyph: Some('^') },
+            Placement { label: "Broken stone".into(), cells: vec![(1, 0)], w: 1, h: 1, field_glyph: Some('^'), glyph: Some('^') },
+            Placement { label: "Tree".into(), cells: vec![(2, 0)], w: 1, h: 1, field_glyph: Some('T'), glyph: Some('T') },
         ];
         let tile = |cells: Vec<(usize, usize)>, rel_path: &str| ResolvedTile { cells, w: 1, h: 1, tw: 1, th: 1, root: "r".into(), rel_path: rel_path.into(), sub: None, rotated: false, single: false };
         let groups = selected_art_groups(&[

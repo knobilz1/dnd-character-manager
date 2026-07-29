@@ -2227,6 +2227,73 @@ pub fn shortlist_in_category(app: &AppHandle, query: &str, category: &str, scene
     shortlist_impl(app, query, Some(category), scene, fw, fh, k)
 }
 
+/// Take from `a`, then `b`, alternately, dropping any tile already taken, until
+/// `k` or both run dry. Order within each list is preserved, and `a` always
+/// leads — so the caller's primary reading keeps the top slot and at least
+/// ceil(k/2) of its own picks. Pure.
+fn interleave_dedup(a: Vec<TileCandidate>, b: Vec<TileCandidate>, k: usize) -> Vec<TileCandidate> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut out = Vec::with_capacity(k);
+    let (mut ia, mut ib) = (a.into_iter(), b.into_iter());
+    let mut take_from_a = true;
+    while out.len() < k {
+        // Pull from the chosen side; if it is spent, fall back to the other, and
+        // stop only when BOTH are — otherwise a short list would truncate the
+        // merge at half depth instead of letting the long one fill it.
+        let next = if take_from_a { ia.next().or_else(|| ib.next()) } else { ib.next().or_else(|| ia.next()) };
+        let Some(c) = next else { break };
+        take_from_a = !take_from_a;
+        if seen.insert((c.root.clone(), c.rel_path.clone())) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Whether `query` already names `noun`'s family, so the noun reading would be
+/// the same search twice. Synonym-aware on purpose: `column` IS `pillar` to the
+/// ranker (see SYNONYMS), so "Stalagmite column" must count as already-said and
+/// keep its own single search rather than spending half the shortlist on a
+/// second copy of it.
+fn query_already_names(query: &str, noun: &str) -> bool {
+    tokenize_query(query).iter().any(|t| token_matches(t, noun))
+}
+
+/// Shortlist a caption BOTH as written and with `noun` forced into head
+/// position, interleaved to `k` — the caller's own reading first.
+///
+/// For a glyph whose legend fixes its meaning (`o` is a pillar), a caption is
+/// free to name the thing in words the catalog files as a MATERIAL: "Cracked
+/// standing stone" heads on `stone`, which 24,656 tiles carry and 1,360 lead
+/// with, so every 1x1 rival ties at coverage 1 and the plainest wins — live, a
+/// kitchen `Mortar_A_Stone` where a menhir should stand, with
+/// `Pillar_Stone_Slate_A1` never shortlisted at all.
+///
+/// Deliberately ADDITIVE rather than a reorder. Measured over all 31 distinct
+/// `o` captions in 189 saved specs, every word-level rule that picks ONE
+/// reading fixes at most 3 and breaks at least 6: appending the noun outright
+/// turns `Ancient oak trunk`, `Mooring post` and `Stalagmite column` into wood
+/// pillars; gating on `label_names_its_own_object` is exactly inverted here
+/// (`stone` and `pillar` share the `Structures` modal category, so it blocks
+/// the fix and fires on the captions that must not move); gating on the
+/// identity fraction appends for `column` 0.000, `post` 0.056 and `trunk` 0.000
+/// alongside `stone` 0.055. Nothing at word level separates "standing stone"
+/// from "stone weight" — `stone` leads 1,360 tiles, so it is a real identity
+/// word in its own right, the case `promote_identity_head` documents as needing
+/// word-sense disambiguation rather than a reorder.
+///
+/// So offer both readings and let the vision pick decide from the actual art,
+/// which is the one stage that can. `k` is unchanged, so this costs no extra
+/// vision tokens — only a second ranking pass.
+pub fn shortlist_including(app: &AppHandle, query: &str, noun: &str, scene: &str, fw: u32, fh: u32, k: usize) -> Vec<TileCandidate> {
+    let own = shortlist(app, query, scene, fw, fh, k);
+    if query_already_names(query, noun) {
+        return own;
+    }
+    let with_noun = shortlist(app, &format!("{query} {noun}"), scene, fw, fh, k);
+    interleave_dedup(own, with_noun, k)
+}
+
 /// keyword → IDF for the currently-imported library, cached in state and keyed
 /// by entry count so a re-import recomputes it. Built once on first shortlist.
 fn load_idf_cached(app: &AppHandle, manifest: &TileLibraryManifest) -> std::sync::Arc<HashMap<String, f64>> {
@@ -4435,6 +4502,60 @@ mod tests {
         }
         std::fs::write(std::env::var("TILE_SNAPSHOT").unwrap(), &out).unwrap();
         println!("{} lines written", out.lines().count());
+    }
+
+    fn cand(rel: &str) -> TileCandidate {
+        TileCandidate {
+            root: "R".into(), rel_path: rel.into(), w: 1, h: 1, data_url: String::new(),
+            biome: "!Core_Settlements".into(), kind: ArtKind::Prop, luminance: None, rgb: None,
+        }
+    }
+    fn names(v: &[TileCandidate]) -> Vec<&str> {
+        v.iter().map(|c| c.rel_path.as_str()).collect()
+    }
+
+    /// The merge behind `shortlist_including` must never cost the caption its
+    /// OWN best answer — that is the whole reason it interleaves instead of
+    /// replacing. Measured over all 31 distinct `o` captions in 189 saved specs:
+    /// every one keeps its previous top pick at position 1.
+    #[test]
+    fn merging_a_glyph_noun_reading_keeps_the_caption_s_own_top_pick_first() {
+        let own = vec![cand("Mortar_A_Stone"), cand("Pot_Stone_Slate"), cand("Stone_Weight")];
+        let with = vec![cand("Pillar_Stone_Slate"), cand("Pillar_Stone_Earthy")];
+        let got = interleave_dedup(own, with, 4);
+        assert_eq!(names(&got), ["Mortar_A_Stone", "Pillar_Stone_Slate", "Pot_Stone_Slate", "Pillar_Stone_Earthy"]);
+    }
+
+    /// A short side must not truncate the merge at half depth — the long one
+    /// fills the rest, so `k` candidates still reach vision.
+    #[test]
+    fn a_spent_side_lets_the_other_fill_the_shortlist() {
+        let own = vec![cand("a1"), cand("a2"), cand("a3"), cand("a4")];
+        let got = interleave_dedup(own, vec![cand("b1")], 4);
+        assert_eq!(names(&got), ["a1", "b1", "a2", "a3"]);
+        // and the mirror: a thin primary still yields a full list
+        let got2 = interleave_dedup(vec![cand("a1")], vec![cand("b1"), cand("b2"), cand("b3")], 4);
+        assert_eq!(names(&got2), ["a1", "b1", "b2", "b3"]);
+    }
+
+    /// The same tile ranked by both readings must occupy ONE slot, not two.
+    #[test]
+    fn a_tile_both_readings_found_is_not_listed_twice() {
+        let got = interleave_dedup(vec![cand("same"), cand("a2")], vec![cand("same"), cand("b2")], 4);
+        assert_eq!(names(&got), ["same", "a2", "b2"]);
+    }
+
+    /// A caption that already says the noun must not spend half its shortlist on
+    /// a second copy of the same search — and `column` IS `pillar` to the ranker
+    /// (SYNONYMS), which is what keeps "Stalagmite column" resolving to
+    /// stalagmites instead of being handed wooden pillars.
+    #[test]
+    fn a_caption_that_already_names_the_noun_is_left_alone() {
+        assert!(query_already_names("Stone pillar", "pillar"));
+        assert!(query_already_names("Stalagmite column", "pillar"), "column is a declared pillar synonym");
+        assert!(query_already_names("Hull rib pillars", "pillar"), "plural still counts");
+        assert!(!query_already_names("Cracked standing stone", "pillar"));
+        assert!(!query_already_names("Mooring post", "pillar"));
     }
 
     #[test]
