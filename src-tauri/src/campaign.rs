@@ -1027,6 +1027,42 @@ fn append_session_recap_at(root: &Path, id: &str, date: &str, recap: &str) -> Re
     Ok(())
 }
 
+/// The most recent session recap, for the console's "Recap last session"
+/// button — the opening bookend to "End session", read aloud at the top of the
+/// night.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct LastSessionRecap {
+    pub date: String,
+    pub recap: String,
+}
+
+/// Pure: pulls the last `## Session — <date>` block out of a MEMORY.md.
+///
+/// Returns `None` rather than guessing when there's no such heading, which is
+/// not only the brand-new-campaign case: compact_memory_if_needed_at hands
+/// MEMORY.md to a model to rewrite once it grows past ~6000 chars, and the
+/// rewrite is only asked to keep the `# Campaign Memory` heading — the
+/// per-session headings are not guaranteed to survive in this exact form. A
+/// caller that gets `None` should say "no recap yet" and point at History,
+/// never invent one from whatever text happened to be last in the file.
+fn parse_last_session_recap(memory_md: &str) -> Option<LastSessionRecap> {
+    const HEADING: &str = "## Session — ";
+    let lines: Vec<&str> = memory_md.lines().collect();
+    let start = lines.iter().rposition(|l| l.trim_start().starts_with(HEADING))?;
+    let date = lines[start].trim_start().trim_start_matches(HEADING).trim().to_string();
+    let body: Vec<&str> = lines[start + 1..]
+        .iter()
+        .take_while(|l| !l.trim_start().starts_with("## "))
+        .copied()
+        .collect();
+    let recap = body.join("\n").trim().to_string();
+    if recap.is_empty() { None } else { Some(LastSessionRecap { date, recap }) }
+}
+
+fn read_last_session_recap_at(root: &Path, id: &str) -> Option<LastSessionRecap> {
+    parse_last_session_recap(&read_optional(&root.join(id).join("memory").join("MEMORY.md")))
+}
+
 // ── Session digest + retrieval (see the module doc comment) ──────────────────
 //
 // The end-of-session capture path used to be a single sonnet-low call that
@@ -2109,6 +2145,153 @@ fn reconcile_campaign_hooks_at(root: &Path, id: &str) -> Result<usize, String> {
     Ok(applied)
 }
 
+// ── Roster changes between sessions ─────────────────────────────────────────
+// party.md fills itself when players connect over LAN, which covers the table
+// that's already sitting down. It does NOT cover the two things that happen
+// between sessions: someone new is joining next week, and someone has stopped
+// coming. Both are roster edits the DM makes while planning, which is why they
+// live on the Plan Next Session dialog.
+//
+// Adding needs no new machinery — upsert_party_member writes the entry and
+// reconcile_campaign_hooks_at already ties any hook-less PC into established
+// lore. Removing is the one that needs writing, because a character who simply
+// vanishes from party.md leaves a DM narrating someone who isn't there.
+
+/// One party member as the roster UI lists them.
+#[derive(Serialize, Clone, Debug)]
+pub struct PartyMemberEntry {
+    pub name: String,
+    pub description: String,
+}
+
+fn list_party_members_at(root: &Path, id: &str) -> Vec<PartyMemberEntry> {
+    parse_entities_md(&read_optional(&root.join(id).join("memory").join("party.md")))
+        .into_iter()
+        .map(|(name, description)| PartyMemberEntry { name, description })
+        .collect()
+}
+
+/// Pure counterpart to `upsert_named_fact`: drops the entry matching `name`
+/// (case-insensitive, same matcher the upsert uses) and hands back the removed
+/// description. `None` when there's no such entry, so a caller can tell "we
+/// removed them" from "that name was never here" instead of silently
+/// succeeding at nothing.
+fn remove_named_fact(content: &str, name: &str) -> Option<(String, String)> {
+    let idx = find_entry_line_index(content, name)?;
+    let description = find_entry_description(content, name)?;
+    let remaining = content
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i != idx)
+        .map(|(_, line)| line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some((format!("{}\n", remaining.trim_end()), description))
+}
+
+/// Asks for the character's exit, in the campaign's own terms.
+///
+/// The instruction not to kill them is the important one. "A player left" is an
+/// out-of-game event, and the model's instinct for a dramatic send-off is to
+/// write a death — which is unrecoverable if that player comes back in three
+/// weeks, and is a call that belongs to the table rather than to a planning
+/// tool. So the default is a door left open, and only an explicit reason from
+/// the DM overrides it.
+fn build_party_departure_prompt(
+    name: &str, description: &str, reason: &str, campaign_lore: &str, memory: &str,
+) -> String {
+    let section = |label: &str, body: &str| {
+        format!("{label}:\n{}\n\n", if body.trim().is_empty() { "(none)" } else { body.trim() })
+    };
+    let reason_line = if reason.trim().is_empty() {
+        "The DM gave no particular reason — their player has simply stopped attending.".to_string()
+    } else {
+        format!("The DM's reason: {}", reason.trim())
+    };
+    format!(
+        "A player has left an ongoing Dungeons & Dragons campaign, so their character has to leave the story. \
+        Write how that happens.\n\n\
+        The character: {name} — {description}\n\n\
+        {reason_line}\n\n\
+        {}{}\
+        Write two or three sentences the DM can narrate at the start of the next session. Ground the exit in \
+        something ALREADY established above — a place they came from, a faction that wants them, an obligation \
+        from their own backstory — rather than a new element invented for this. It should feel like the story \
+        used them up gracefully, not like they were deleted.\n\n\
+        Unless the DM's reason explicitly says otherwise, do NOT kill the character and do not close the door: \
+        players come back. Send them somewhere they could plausibly be found again, and say where.\n\n\
+        Reply with ONLY those sentences — no heading, no commentary, no options to choose between.",
+        section("The campaign's established lore", campaign_lore),
+        section("What's happened so far", memory),
+    )
+}
+
+/// Writes a player character out of the campaign.
+///
+/// Order matters here. The narration is asked for FIRST, while the character is
+/// still in party.md and still in the lore the prompt reads — asking afterwards
+/// would be asking about someone the campaign no longer knows.
+///
+/// The roster edit itself is not allowed to depend on that call succeeding. A
+/// player who has left has left; if the model is unreachable or signed out, the
+/// DM still gets them off the roster and gets a plain factual line instead of a
+/// written exit. Holding a roster change hostage to a subscription CLI would be
+/// the wrong trade.
+///
+/// Where the pieces land, and why:
+/// - **out of party.md** — they are not a PC any more, and party.md is what the
+///   per-turn party status is built from.
+/// - **into entities.md** — a retired PC is exactly what an NPC is: a named
+///   person in the world with a known current situation. This is also what lets
+///   the DM answer "whatever happened to Sera?" three sessions later.
+/// - **into flagged_facts.md** — never compacted, so the departure can't be
+///   paraphrased away into a DM that starts narrating them as present again.
+/// - **cached session plan invalidated** — a plan written for six characters is
+///   the wrong plan for five.
+/// `date` comes from the caller for the same reason append_memory_note's does:
+/// the frontend owns the clock in this app, so the backend never guesses one.
+fn remove_party_member_at(root: &Path, id: &str, name: &str, reason: &str, date: &str) -> Result<String, String> {
+    let dir = root.join(id);
+    let party_path = dir.join("memory").join("party.md");
+    let party = read_optional(&party_path);
+    let (remaining, description) = remove_named_fact(&party, name)
+        .ok_or_else(|| format!("No party member named \"{name}\" — nothing to remove."))?;
+
+    let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
+    let memory = read_optional(&dir.join("memory").join("MEMORY.md"));
+    let departure = crate::local_llm::ask_ingest_once(
+        build_party_departure_prompt(name, &description, reason, &campaign_lore, &memory),
+        Some("opus"),
+        false,
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| {
+        if reason.trim().is_empty() {
+            format!("{name} has left the party.")
+        } else {
+            format!("{name} has left the party: {}", reason.trim())
+        }
+    });
+
+    write_atomic(&party_path, &remaining)?;
+    upsert_named_fact_at(root, id, "entities.md", name, &format!("Former party member. {departure}"))?;
+    append_memory_note_at(root, id, date, &format!("{name} has left the party. {departure}"))?;
+    // Their personal hook is now about someone who isn't at the table. Drop the
+    // ledger entry too, so re-adding the same character later earns a fresh hook
+    // rather than being skipped as "already reconciled".
+    let lore_path = dir.join("memory").join("campaign_lore.md");
+    if let Some((without_hook, _)) = remove_named_fact(&read_optional(&lore_path), name) {
+        write_atomic(&lore_path, &without_hook)?;
+    }
+    let mut reconciled = read_reconciled_hook_names_at(root, id);
+    reconciled.remove(&normalize_name_key(name));
+    write_reconciled_hook_names_at(root, id, &reconciled)?;
+    invalidate_session_plan_at(root, id);
+    Ok(departure)
+}
+
 /// Past this many characters, memory/MEMORY.md is worth compacting rather
 /// than left to grow forever — it's a standing CLAUDE.md import, reprocessed
 /// on every turn (see the module doc comment above).
@@ -2437,6 +2620,204 @@ fn build_session_plan_critique_prompt(
         section("The chapter the party is currently in", current_chapter),
         section("Campaign memory and open flagged facts", combined_memory),
     )
+}
+
+// ── Session Zero handout ────────────────────────────────────────────────────
+// A different document from the session plan, for a different reader. The plan
+// is for the DM, about what happens next. This is for the PLAYERS, before
+// anything has happened at all — the thing you hand out (or paste into the
+// group chat) a week before you sit down, so people show up with characters
+// that fit the campaign instead of six strangers who met in a tavern.
+
+/// Topic checklist the handout is generated against, condensed from the
+/// community Session 0 checklist Nabil pointed at
+/// (reddit.com/r/dndnext/comments/601awb, also mirrored as
+/// github.com/thorhj/dnd-session-0-checklist).
+///
+/// Deliberately NOT the full list. The source enumerates ~130 topics including
+/// a lot of pure rules adjudication — critical fumbles, spell component
+/// bookkeeping, how Ready an Action works — which are real session-zero
+/// business but belong in a DM's own notes, not in a document whose job is to
+/// get a player to write a good background. What survives here is what a player
+/// can usefully think about BEFORE the table meets: who they are, how they fit,
+/// and what everyone needs to agree on out loud.
+const SESSION_ZERO_TOPICS: &str = "\
+- Character concept and how it fits the party (no lone wolves, no characters who wouldn't travel with the others)\n\
+- Background, and the campaign-specific version of it: where you're from, who you know, why you're leaving\n\
+- Ties between characters — at least one pre-existing connection to another PC\n\
+- Party role and spotlight sharing, so two players don't arrive with the same character\n\
+- Character creation rules: edition, allowed books, ability scores, starting level, starting gear\n\
+- Races, classes and multiclassing: what's allowed, what's reflavoured, what's off the table\n\
+- Alignment, and how much it's enforced\n\
+- The pillars: how much combat vs roleplay vs exploration this campaign expects\n\
+- Tone and genre, and how deadly it is — whether characters are expected to die\n\
+- Player goals: what each person wants out of the campaign\n\
+- Lines and veils: subject matter that's off the table, or handled off-screen\n\
+- PvP, PC secrets, and rolling against each other\n\
+- Metagaming and min-maxing expectations\n\
+- Practicalities: schedule, session length, absences, phones at the table, food\n\
+- Note-taking, and who tracks what\n";
+
+/// The player handout prompt.
+///
+/// Three things here are load-bearing and none of them are cosmetic:
+///
+/// 1. **No spoilers.** The sources are the DM's own lore and the module's plot
+///    outline — the single most spoiler-dense material in the app. A handout
+///    that leaks the twist is worse than no handout, and it fails silently:
+///    it reads perfectly well to everyone except the DM who now can't run their
+///    own campaign. So the instruction is repeated, and framed as what a player
+///    would already know standing in the starting town.
+/// 2. **Backgrounds are the point**, per what this was asked for. The generic
+///    version of this advice is freely available and worthless; what nobody
+///    else can write is "a sailor doesn't work here, the nearest coast is three
+///    hundred miles away — but a river trader does". That requires this
+///    campaign's material, which is exactly what we have.
+/// 3. **Say when you don't know.** A campaign established from a thin intake
+///    genuinely may not fix the allowed books or the starting level. Inventing
+///    a confident answer means players build characters to a rule the DM never
+///    made. "Ask your DM" is the correct output there.
+fn build_session_zero_prompt(campaign_lore: &str, module_plan: &str, house_rules: &str) -> String {
+    let section = |label: &str, body: &str| {
+        format!("{label}:\n{}\n\n", if body.trim().is_empty() { "(none — this campaign hasn't established this)" } else { body.trim() })
+    };
+    format!(
+        "Write a Session Zero handout that a Dungeon Master will give to their players roughly a week before the \
+        campaign's first session. The players read this on their own, then everyone meets to talk it through and \
+        make characters together.\n\n\
+        Everything below is the DM's OWN material for this campaign. Use it to make the handout specific to this \
+        campaign — that specificity is the entire value of this document.\n\n\
+        {}{}{}\
+        THE ONE ABSOLUTE RULE: this document is read by PLAYERS. It must not spoil anything. No villains they \
+        haven't met, no twists, no plot, no secret behind the starting situation, nothing the module reveals \
+        later. Write only what a character would already know standing in the starting location on day one: the \
+        place, its people, the general state of the world, the kind of trouble that's normal there. When you are \
+        not sure whether something is common knowledge, leave it out. A handout that spoils the campaign is a \
+        failure even if everything else about it is good.\n\n\
+        Structure it in this order:\n\n\
+        1. **What this campaign is** — a short spoiler-free pitch. Setting, tone, genre, how dangerous it is, \
+        what kind of adventuring this will be. What sort of character will have a good time here.\n\n\
+        2. **Building your character's background** — the longest and most useful section, and the reason this \
+        document exists. Make it concrete to THIS setting:\n\
+        - which backgrounds fit this world and this starting situation, and which ones will strand a player \
+        (a sailor in a landlocked region, a noble in a place with no nobility) — name the actual alternatives\n\
+        - how they're connected to the starting location: who they know there, what they owe, what they'd lose\n\
+        - why they are leaving that life NOW — the thing that makes them an adventurer this month rather than \
+        next year\n\
+        - at least one tie to another player's character, with a few concrete suggestions for what those ties \
+        could be in this setting\n\
+        - one bond and one flaw the DM can actually pull on mid-campaign, with examples drawn from this world\n\
+        - names: a person, a place, a debt, a promise. Specific nouns the DM can put on stage. Explain that \
+        anything they name is likely to show up.\n\
+        - what NOT to write: a backstory that's already resolved, a lone wolf with no reason to trust anyone, \
+        secret royalty, a tragedy so total there's nothing left to lose, or twenty pages\n\
+        - 4 to 6 questions they should be able to answer about their character before session zero\n\
+        - roughly how long it should be\n\n\
+        3. **Character creation rules for this table** — edition, which books are allowed, how ability scores \
+        are generated, starting level and gear, anything restricted. State ONLY what the material above actually \
+        establishes. Where it doesn't, say plainly that this one is for the DM to confirm at session zero — do \
+        not invent a rule.\n\n\
+        4. **What we'll agree on together at Session Zero** — the topics everyone settles as a group, phrased as \
+        things to think about rather than rules already handed down. Draw them from this checklist, keeping the \
+        ones that matter for this campaign and dropping the ones that don't:\n\n{SESSION_ZERO_TOPICS}\n\
+        Include, plainly and without ceremony, that anyone can name subject matter they don't want at the table \
+        and that it will be respected.\n\n\
+        Write it in markdown, addressed to the players as \"you\". Warm and direct — this is a friend explaining \
+        their campaign, not a rulebook. No filler, no restating the obvious, no \"in the world of D&D...\". \
+        A player should finish it knowing exactly what to write and why. Aim for something that prints to two or \
+        three pages.\n\n\
+        One practical note to include where it fits naturally: they can write their background, personality \
+        traits, ideal, bond, flaw and backstory directly into their character in this app, on the Background \
+        step of the character creator.\n\n\
+        Output the handout itself and nothing else — no preamble, no commentary about what you wrote.",
+        section("The campaign's frame and lore", campaign_lore),
+        section("The module or adventure being run (SPOILERS — for grounding only, never to be repeated to players)", module_plan),
+        section("The DM's house rules and campaign notes", house_rules),
+    )
+}
+
+/// Review pass over the drafted handout.
+///
+/// The failure mode worth spending a second call on is a leak, not prose
+/// quality — and it's the one a reader can't self-check for, since the draft
+/// looks fine either way. So the reviewer gets the spoiler material explicitly
+/// and is asked to hunt it, first, before anything else.
+fn build_session_zero_critique_prompt(draft: &str, campaign_lore: &str, module_plan: &str) -> String {
+    format!(
+        "You drafted the Session Zero handout below. It is about to be given to PLAYERS in a Dungeons & Dragons \
+        campaign, before the first session.\n\n\
+        Draft handout:\n{draft}\n\n\
+        The DM's private material follows. This is what the players must NOT learn from the handout:\n\n\
+        Campaign lore:\n{}\n\n\
+        Module/adventure plot:\n{}\n\n\
+        Check, in this order:\n\
+        1. SPOILERS. Does anything in the handout reveal a villain, a twist, a secret, or a plot development the \
+        players are supposed to discover in play? Quote it. This is the one defect that cannot ship — treat a \
+        borderline case as a leak.\n\
+        2. Invented rules. Does it state a character-creation rule (allowed books, ability score method, starting \
+        level, banned races) that the DM's material does not actually establish? A confident invention here means \
+        players build to a rule that doesn't exist.\n\
+        3. Is the background section actually about THIS campaign, or is it generic advice that would fit any \
+        game? Generic background advice is the main thing this document exists to not be.\n\
+        4. Could a player finish this and still not know what to write?\n\n\
+        Ignore length and polish. A short handout that is specific and spoils nothing is the target.",
+        if campaign_lore.trim().is_empty() { "(none)" } else { campaign_lore.trim() },
+        if module_plan.trim().is_empty() { "(none)" } else { module_plan.trim() },
+    )
+}
+
+/// Campaign-level, not chapter-level — which is why it lives in `memory/`
+/// rather than beside the session plan in `active_module/`. A session zero
+/// happens once, before anything; advancing a chapter (or importing a whole
+/// new module) has no business invalidating it, and `active_module/` is the
+/// directory whose contents get swapped out when that happens.
+fn session_zero_path(root: &Path, id: &str) -> PathBuf {
+    root.join(id).join("memory").join("session_zero.md")
+}
+
+fn read_session_zero_at(root: &Path, id: &str) -> Option<String> {
+    let content = read_optional(&session_zero_path(root, id));
+    if content.trim().is_empty() { None } else { Some(content) }
+}
+
+fn write_session_zero_at(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let path = session_zero_path(root, id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    write_atomic(&path, text)
+}
+
+/// Cache-aware exactly like plan_next_session_at: `force = false` with a
+/// handout already on disk costs zero model calls, so re-opening the dialog
+/// can never quietly produce a second, different handout after the DM has
+/// already sent the first one to their players.
+fn suggest_session_zero_at(root: &Path, id: &str, force: bool) -> Result<String, String> {
+    if !force {
+        if let Some(cached) = read_session_zero_at(root, id) {
+            return Ok(cached);
+        }
+    }
+    let dir = root.join(id);
+    let campaign_lore = read_optional(&dir.join("memory").join("campaign_lore.md"));
+    let module_plan = read_optional(&dir.join("active_module").join("plan.md"));
+    let house_rules = read_optional(&dir.join("CLAUDE.md"));
+    let prompt = build_session_zero_prompt(&campaign_lore, &module_plan, &house_rules);
+    let draft = crate::local_llm::ask_ingest_once(prompt, Some("sonnet"), false)?;
+    // Same guarded shape as the session plan's critique: a failed or empty
+    // review keeps the draft rather than losing the handout.
+    let reviewed = crate::local_llm::ask_ingest_critique(
+        build_session_zero_critique_prompt(&draft, &campaign_lore, &module_plan),
+        &draft,
+        Some("opus"),
+        false,
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or(draft);
+    write_session_zero_at(root, id, &reviewed)?;
+    Ok(reviewed)
 }
 
 fn session_plan_path(root: &Path, id: &str) -> PathBuf {
@@ -8863,6 +9244,15 @@ pub fn read_campaign_memory(app: AppHandle, id: String) -> Result<String, String
     fs::read_to_string(campaign_dir(&app, &id)?.join("memory").join("MEMORY.md")).map_err(|e| e.to_string())
 }
 
+/// Just the latest session's recap — what the console's "Recap last session"
+/// button reads aloud, and what the Plan dialog shows as the context you're
+/// planning from. `None` when there isn't one to show; see
+/// parse_last_session_recap for why that's a real case beyond a new campaign.
+#[tauri::command]
+pub fn read_last_session_recap(app: AppHandle, id: String) -> Result<Option<LastSessionRecap>, String> {
+    Ok(read_last_session_recap_at(&campaigns_root(&app)?, &id))
+}
+
 /// See DEFAULT_FLAGGED_FACTS_MD — the standalone facts (dm-actions
 /// `remember`) split out of MEMORY.md so they're never subject to its lossy
 /// compaction. Feeds the History dialog alongside read_campaign_memory.
@@ -8999,6 +9389,29 @@ pub fn append_location_fact(app: AppHandle, id: String, name: String, descriptio
 #[tauri::command]
 pub fn upsert_party_member(app: AppHandle, id: String, name: String, description: String) -> Result<(), String> {
     upsert_named_fact_at(&campaigns_root(&app)?, &id, "party.md", &name, &description)
+}
+
+/// The current roster, for the Plan Next Session dialog's add/remove UI.
+#[tauri::command]
+pub fn list_party_members(app: AppHandle, id: String) -> Result<Vec<PartyMemberEntry>, String> {
+    Ok(list_party_members_at(&campaigns_root(&app)?, &id))
+}
+
+/// Writes a character out of the campaign when their player leaves — see
+/// remove_party_member_at. Returns the departure the DM can narrate.
+///
+/// Async + spawn_blocking: this makes a model call, and a sync command would
+/// make it on the main thread.
+#[tauri::command]
+pub async fn remove_party_member(
+    app: AppHandle, id: String, name: String, reason: String, date: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        remove_party_member_at(&root, &id, &name, &reason, &date)
+    })
+    .await
+    .map_err(|e| format!("Party-removal task failed: {e}"))?
 }
 
 /// Assigns an NPC's TTS voice (+ optional race/size pitch tag, + optional
@@ -9283,6 +9696,29 @@ pub async fn regenerate_session_plan(app: AppHandle, id: String) -> Result<Sessi
     })
     .await
     .map_err(|e| format!("Session-plan task failed: {e}"))?
+}
+
+/// Read-only peek at the cached Session Zero handout — never calls a model,
+/// same contract as read_cached_session_plan and for the same reason: opening
+/// a dialog must not spend quota.
+#[tauri::command]
+pub fn read_cached_session_zero(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    Ok(read_session_zero_at(&campaigns_root(&app)?, &id))
+}
+
+/// Generates (or regenerates, with `force`) the player-facing Session Zero
+/// handout. Async + spawn_blocking because a sync `#[tauri::command]` runs on
+/// the MAIN thread and this makes two model calls — the same defect that froze
+/// the whole window for 175 seconds when the Plan dialog eagerly profiled the
+/// tile pack.
+#[tauri::command]
+pub async fn suggest_session_zero(app: AppHandle, id: String, force: bool) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        suggest_session_zero_at(&root, &id, force)
+    })
+    .await
+    .map_err(|e| format!("Session-zero task failed: {e}"))?
 }
 
 /// Pure heuristic: `pdf_extract` (see extract_module_text) only reads a PDF's
@@ -11271,6 +11707,192 @@ Tactics:
         assert!(result.plan_text.contains("Bridge Ambush"));
         assert_eq!(result.maps.len(), 1);
         assert_eq!(result.maps[0].slug, "bridge-ambush");
+    }
+
+    #[test]
+    fn parse_last_session_recap_takes_the_most_recent_block_not_the_first() {
+        let root = Scratch::new("last-recap");
+        let meta = create_campaign_at(&root.0, &intake("Recaps")).unwrap();
+        append_session_recap_at(&root.0, &meta.id, "2026-07-03", "The party entered Barovia.").unwrap();
+        append_session_recap_at(&root.0, &meta.id, "2026-07-10", "They met Ireena.\nThe burgomaster was buried.").unwrap();
+
+        let last = read_last_session_recap_at(&root.0, &meta.id).unwrap();
+        assert_eq!(last.date, "2026-07-10");
+        assert!(last.recap.contains("Ireena"));
+        assert!(last.recap.contains("burgomaster"), "a multi-line recap keeps all its lines");
+        assert!(!last.recap.contains("Barovia"), "must not bleed in the earlier session");
+    }
+
+    /// A recap this can't find must read as "none", never as whatever prose
+    /// happened to be last in the file — MEMORY.md gets model-rewritten once it
+    /// grows, and the per-session headings aren't guaranteed to survive that.
+    #[test]
+    fn parse_last_session_recap_is_none_without_a_session_heading_or_body() {
+        assert!(parse_last_session_recap("").is_none());
+        assert!(parse_last_session_recap("# Campaign Memory\n\n_No sessions logged yet._\n").is_none());
+        assert!(
+            parse_last_session_recap("# Campaign Memory\n\n## Session — 2026-07-10\n\n").is_none(),
+            "a heading with an empty body is not a recap",
+        );
+        // A compacted file whose headings were rewritten away.
+        assert!(parse_last_session_recap("# Campaign Memory\n\nThe party is in Vallaki and owes the Keepers a favour.\n").is_none());
+    }
+
+    #[test]
+    fn parse_last_session_recap_stops_at_the_next_heading() {
+        let md = "# Campaign Memory\n\n## Session — 2026-07-03\nThey entered the cave.\n\n## Flagged\nSomething else entirely.\n";
+        let last = parse_last_session_recap(md).unwrap();
+        assert_eq!(last.recap, "They entered the cave.");
+    }
+
+    #[test]
+    fn list_party_members_at_reads_the_roster_and_is_empty_for_a_fresh_campaign() {
+        let root = Scratch::new("party-roster");
+        let meta = create_campaign_at(&root.0, &intake("Roster")).unwrap();
+        assert!(list_party_members_at(&root.0, &meta.id).is_empty());
+
+        upsert_named_fact_at(&root.0, &meta.id, "party.md", "Thorin", "Played by Alex. Level 3 Dwarf Fighter.").unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "party.md", "Sera", "Played by Jo. Level 3 Half-Elf Ranger.").unwrap();
+
+        let roster = list_party_members_at(&root.0, &meta.id);
+        assert_eq!(roster.len(), 2);
+        assert_eq!(roster[0].name, "Thorin");
+        assert!(roster[1].description.contains("Half-Elf Ranger"));
+    }
+
+    #[test]
+    fn remove_named_fact_drops_only_the_matching_entry_and_returns_its_description() {
+        let content = "# Party\n\n- **Thorin:** A dwarf fighter.\n- **Sera:** A half-elf ranger.\n";
+        // Case-insensitive, same matcher the upsert uses.
+        let (remaining, removed) = remove_named_fact(content, "sera").unwrap();
+        assert_eq!(removed, "A half-elf ranger.");
+        assert!(remaining.contains("Thorin"));
+        assert!(!remaining.contains("Sera"));
+        assert!(remaining.contains("# Party"), "the heading must survive");
+
+        assert!(remove_named_fact(content, "Gundren").is_none(), "an absent name is None, not a silent success");
+    }
+
+    /// The roster edit must not be hostage to a model call: no ingestion
+    /// provider is configured here, so ask_ingest_once fails and the fallback
+    /// line is what lands. The character still has to come off the roster —
+    /// a player who left has left whether or not a subscription CLI answered.
+    #[test]
+    fn remove_party_member_at_completes_the_roster_edit_even_when_the_model_call_fails() {
+        let root = Scratch::new("party-remove");
+        let meta = create_campaign_at(&root.0, &intake("Departures")).unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "party.md", "Thorin", "Played by Alex. Level 3 Dwarf Fighter.").unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "party.md", "Sera", "Played by Jo. Level 3 Half-Elf Ranger.").unwrap();
+
+        let departure = remove_party_member_at(&root.0, &meta.id, "Sera", "Jo moved away", "2026-07-28").unwrap();
+        assert!(departure.contains("Sera"), "the fallback line still names the character");
+
+        let dir = root.0.join(&meta.id).join("memory");
+        let party = fs::read_to_string(dir.join("party.md")).unwrap();
+        assert!(!party.contains("Sera"), "removed from the roster");
+        assert!(party.contains("Thorin"), "everyone else is untouched");
+
+        // A retired PC becomes an NPC — that's what lets the DM answer
+        // "whatever happened to Sera?" three sessions later.
+        let entities = fs::read_to_string(dir.join("entities.md")).unwrap();
+        assert!(entities.contains("Sera"));
+        assert!(entities.contains("Former party member"));
+
+        // Never-compacted, so the DM can't drift back to narrating them present.
+        let flagged = fs::read_to_string(dir.join("flagged_facts.md")).unwrap();
+        assert!(flagged.contains("Sera has left the party."));
+    }
+
+    #[test]
+    fn remove_party_member_at_errors_on_a_name_that_was_never_on_the_roster() {
+        let root = Scratch::new("party-remove-miss");
+        let meta = create_campaign_at(&root.0, &intake("Departures")).unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "party.md", "Thorin", "A dwarf fighter.").unwrap();
+
+        let err = remove_party_member_at(&root.0, &meta.id, "Gundren", "", "2026-07-28").unwrap_err();
+        assert!(err.contains("Gundren"));
+        let party = fs::read_to_string(root.0.join(&meta.id).join("memory").join("party.md")).unwrap();
+        assert!(party.contains("Thorin"), "a miss must leave the roster untouched");
+    }
+
+    /// Re-adding the same character later has to earn a fresh hook rather than
+    /// being skipped as "already reconciled" — the ledger entry goes with them.
+    #[test]
+    fn remove_party_member_at_clears_their_personal_hook_and_its_ledger_entry() {
+        let root = Scratch::new("party-remove-hook");
+        let meta = create_campaign_at(&root.0, &intake("Departures")).unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "party.md", "Sera", "A half-elf ranger.").unwrap();
+        upsert_named_fact_at(&root.0, &meta.id, "campaign_lore.md", "Sera", "Her old company still drinks in Vallaki.").unwrap();
+        let mut ledger = HashSet::new();
+        ledger.insert(normalize_name_key("Sera"));
+        write_reconciled_hook_names_at(&root.0, &meta.id, &ledger).unwrap();
+
+        remove_party_member_at(&root.0, &meta.id, "Sera", "", "2026-07-28").unwrap();
+
+        let lore = fs::read_to_string(root.0.join(&meta.id).join("memory").join("campaign_lore.md")).unwrap();
+        assert!(!lore.contains("Her old company still drinks"), "the hook goes with them");
+        assert!(!read_reconciled_hook_names_at(&root.0, &meta.id).contains(&normalize_name_key("Sera")));
+    }
+
+    #[test]
+    fn build_party_departure_prompt_grounds_the_exit_and_forbids_killing_them_by_default() {
+        let prompt = build_party_departure_prompt(
+            "Sera", "Played by Jo. Level 3 Half-Elf Ranger.", "Jo moved away",
+            "Vallaki is the hub; the Keepers of the Feather operate there.", "The party cleared the windmill.",
+        );
+        assert!(prompt.contains("Sera"));
+        assert!(prompt.contains("Jo moved away"));
+        assert!(prompt.contains("Keepers of the Feather"), "established lore has to reach the prompt");
+        assert!(prompt.contains("do NOT kill the character"));
+        assert!(prompt.contains("ALREADY established"));
+
+        // No reason given is the common case — a player who just stopped coming.
+        let bare = build_party_departure_prompt("Sera", "A ranger.", "  ", "", "");
+        assert!(bare.contains("stopped attending"));
+    }
+
+    /// Same contract as the plan's cache-hit test, and it matters more here:
+    /// this handout gets SENT to players, so a re-open that quietly generated a
+    /// second, different one would mean the DM and their table are reading two
+    /// different documents. No ingestion provider is configured, so any
+    /// accidental live call errors the test.
+    #[test]
+    fn suggest_session_zero_at_returns_the_cached_handout_without_any_llm_call() {
+        let root = Scratch::new("session-zero-cache-hit");
+        let meta = create_campaign_at(&root.0, &intake("Zero")).unwrap();
+        write_session_zero_at(&root.0, &meta.id, "# Welcome to Barovia\n\nBring a character who owes somebody something.\n").unwrap();
+
+        let handout = suggest_session_zero_at(&root.0, &meta.id, false).unwrap();
+        assert!(handout.contains("owes somebody something"));
+        assert!(read_session_zero_at(&root.0, &meta.id).is_some());
+    }
+
+    /// The handout is campaign-specific or it's worthless — and it must carry
+    /// the spoiler ban, which is the one defect its reader can't detect.
+    #[test]
+    fn build_session_zero_prompt_carries_the_campaign_material_the_checklist_and_the_spoiler_ban() {
+        let prompt = build_session_zero_prompt(
+            "The party operates out of Vallaki, a walled town under a permanent overcast.",
+            "Chapter 3 reveals that the burgomaster has been dead for a year.",
+            "House rule: no critical fumbles.",
+        );
+        assert!(prompt.contains("Vallaki"), "campaign lore has to reach the prompt");
+        assert!(prompt.contains("burgomaster"), "module plot is passed for grounding");
+        assert!(prompt.contains("no critical fumbles"), "house rules reach the prompt");
+        assert!(prompt.contains("must not spoil"), "the spoiler ban is the one rule that can't be dropped");
+        assert!(prompt.contains("tie to another player's character"), "party ties come from the checklist");
+        assert!(prompt.contains("Lines and veils"), "the checklist topics are inlined");
+        assert!(prompt.contains("do not invent a rule"), "an unestablished creation rule must be deferred, not guessed");
+    }
+
+    /// A campaign established from a thin intake has no module and no lore. The
+    /// prompt must still be answerable rather than interpolating empty strings
+    /// that read as "the campaign lore is: " followed by nothing.
+    #[test]
+    fn build_session_zero_prompt_labels_missing_sources_rather_than_leaving_them_blank() {
+        let prompt = build_session_zero_prompt("", "", "");
+        assert!(prompt.contains("hasn't established this"));
+        assert!(!prompt.contains(":\n\n\n"), "an empty section must not collapse into blank lines");
     }
 
     #[test]

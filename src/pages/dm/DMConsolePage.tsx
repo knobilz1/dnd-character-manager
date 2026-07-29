@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { writeFile } from '@tauri-apps/plugin-fs';
+import { writeFile, writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
@@ -948,6 +948,41 @@ export function DMConsolePage() {
    *  the backend (see MapProgress). Its whole job is to prove the thing is
    *  still alive while one silent model call runs for minutes. */
   const [mapProgress, setMapProgress] = React.useState<{ phase: string; elapsed_s: number } | null>(null);
+  // Session Zero handout (campaign.rs's suggest_session_zero) — a different
+  // document for a different reader than the session plan above. The plan is
+  // for the DM, about what happens next; this is the spoiler-free thing you
+  // hand the PLAYERS before session one, mostly about writing a background
+  // that fits the campaign. Cached campaign-level, so it survives chapter
+  // advances and re-opening the dialog never rewrites what's already been sent
+  // out. Starts collapsed when cached (it's two or three pages) and opens
+  // itself right after a generate, when the DM obviously wants to read it.
+  const [sessionZeroText, setSessionZeroText] = React.useState('');
+  const [sessionZeroLoading, setSessionZeroLoading] = React.useState(false);
+  const [sessionZeroExpanded, setSessionZeroExpanded] = React.useState(false);
+  const [sessionZeroCopied, setSessionZeroCopied] = React.useState(false);
+  // Roster editing (campaign.rs's list_party_members / upsert_party_member /
+  // remove_party_member). party.md fills itself when players connect over LAN,
+  // which covers the table that's already sitting down — this covers the two
+  // things that happen BETWEEN sessions, which is why it's on this dialog:
+  // someone new joins next week, and someone has stopped coming.
+  const [partyRoster, setPartyRoster] = React.useState<{ name: string; description: string }[]>([]);
+  const [rosterBusy, setRosterBusy] = React.useState<string | null>(null);
+  const [rosterNotice, setRosterNotice] = React.useState<string | null>(null);
+  const [addPlayerOpen, setAddPlayerOpen] = React.useState(false);
+  const [addPlayerName, setAddPlayerName] = React.useState('');
+  const [addPlayerNotes, setAddPlayerNotes] = React.useState('');
+  /** Name of the member whose removal is being confirmed, or null. The reason
+   *  box IS the confirmation step — writing a character out edits several
+   *  memory files, so it shouldn't happen on a single stray click. */
+  const [removingMember, setRemovingMember] = React.useState<string | null>(null);
+  const [removeReason, setRemoveReason] = React.useState('');
+  /** The last session's recap (campaign.rs's read_last_session_recap), or null
+   *  when there isn't one. Two consumers: the header's "Recap" button, which
+   *  speaks it to the table at the top of the night, and the Plan dialog, which
+   *  shows it as the context you're planning from. Refreshed on campaign switch
+   *  and after "End session" writes a new one. */
+  const [lastRecap, setLastRecap] = React.useState<{ date: string; recap: string } | null>(null);
+  const [recapSpeaking, setRecapSpeaking] = React.useState(false);
   const [planMapCards, setPlanMapCards] = React.useState<MapCard[]>([]);
   const [adHocMapCards, setAdHocMapCards] = React.useState<MapCard[]>([]);
   const [artPickerCard, setArtPickerCard] = React.useState<MapCard | null>(null);
@@ -1609,6 +1644,10 @@ export function DMConsolePage() {
     // active campaign, so this catch-up is what guarantees the DM knows the
     // whole table's backstories regardless of join-vs-select order.
     partyRef.current.forEach(syncPartyMemberToCampaign);
+
+    // What the "Recap" button will read aloud — per campaign, so switching
+    // campaigns must never leave the previous one's "previously on" in place.
+    void refreshLastRecap(activeCampaignId);
 
     // Fire-and-forget: pays turn 1's real extra cold-start cost (live-
     // measured ~11s to first spoken word vs ~3-4s steady-state) the moment a
@@ -2566,6 +2605,9 @@ export function DMConsolePage() {
         await invoke('invalidate_session_plan', { id: campaignId }).catch((e) =>
           console.warn('Failed to invalidate the cached session plan:', e)
         );
+        // Tonight's recap is now the one the "Recap" button should read at the
+        // top of NEXT session.
+        await refreshLastRecap(campaignId);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -3798,7 +3840,18 @@ export function DMConsolePage() {
     setPlanMapCards([]);
     setAdHocMapCards([]);
     setFailedMaps([]);
+    setSessionZeroText('');
+    setSessionZeroExpanded(false);
+    setSessionZeroCopied(false);
     try {
+      // Cheap disk read, no model call — same rule the rest of this open
+      // follows: the dialog shows what's already been made and generates
+      // nothing until a button is pressed.
+      setSessionZeroText((await invoke<string | null>('read_cached_session_zero', { id: activeCampaignId })) ?? '');
+      setRosterNotice(null);
+      setRemovingMember(null);
+      setAddPlayerOpen(false);
+      await refreshPartyRoster();
       const cached = await invoke<SessionPlanResult | null>('read_cached_session_plan', { id: activeCampaignId });
       const planned = cached?.maps ?? [];
       if (cached) {
@@ -3844,6 +3897,213 @@ export function DMConsolePage() {
     } finally {
       setPlanLoading(false);
       setPlanProgress(null);
+    }
+  }
+
+  async function refreshLastRecap(campaignId: string | null = activeCampaignId) {
+    if (!campaignId) { setLastRecap(null); return; }
+    try {
+      setLastRecap(await invoke<{ date: string; recap: string } | null>('read_last_session_recap', { id: campaignId }));
+    } catch {
+      setLastRecap(null);
+    }
+  }
+
+  /** "Previously, on…" — the opening bookend to End session. Speaks the stored
+   *  recap to the table through the same voice pipeline a turn uses, in the
+   *  campaign's narrator voice.
+   *
+   *  Deliberately NOT a model call: the recap was already written (and already
+   *  reviewed) when the last session ended, so re-generating it at the table
+   *  would cost a minute of everyone's evening to say the same thing with
+   *  different words — and would work differently offline. It also can't touch
+   *  the DM's conversation: this is the app reading a file aloud, not a turn,
+   *  so nothing here is appended to memory or the --resume chain. */
+  async function handleSpeakRecap() {
+    const recap = lastRecap;
+    if (!recap || recapSpeaking) return;
+    setRecapSpeaking(true);
+    try {
+      const line = `Previously, on ${activeCampaignName ?? 'our campaign'}. ${recap.recap}`;
+      setTurns((t) => [...t, { who: 'dm', text: line }]);
+      // Same reset the canned-message path does — an untagged read-aloud must
+      // never inherit a sticky NPC voice left over from the last turn.
+      currentSpeakerRef.current = null;
+      quoteOpenRef.current = false;
+      recentNarrationRef.current = '';
+      lastTaggedSpeakerRef.current = null;
+      autoRevertedRef.current = false;
+      suppressNarrationRef.current = false;
+      // A trailing space makes the last sentence a complete one to the
+      // streaming splitter; anything it still holds back gets spoken as-is.
+      const { sentences, remainder } = extractCompleteSentences(`${line} `);
+      for (const s of sentences) enqueueSentence(s);
+      if (remainder.trim()) enqueueSentence(remainder);
+    } finally {
+      setRecapSpeaking(false);
+    }
+  }
+
+  async function refreshPartyRoster() {
+    if (!activeCampaignId) return;
+    try {
+      setPartyRoster(await invoke<{ name: string; description: string }[]>('list_party_members', { id: activeCampaignId }));
+    } catch {
+      setPartyRoster([]);
+    }
+  }
+
+  /** Everything a newly-added character needs before the DM can play off them:
+   *  a personal hook tying their backstory to established lore (the same pass
+   *  "End session" runs), and a cache bust, because a plan written for four
+   *  characters is the wrong plan for five. Best-effort — a failed hook pass
+   *  means the DM relies on live improv, which is where it was anyway. */
+  async function weaveInRoster() {
+    if (!activeCampaignId) return;
+    await invoke('reconcile_campaign_hooks', { id: activeCampaignId }).catch((e) =>
+      console.warn('Campaign-hooks reconciliation failed (new PCs will rely on live improv only):', e),
+    );
+    await invoke('invalidate_session_plan', { id: activeCampaignId }).catch(() => {});
+    setPlanText('');
+  }
+
+  /** Import a character the player exported from their own copy of the app
+   *  (the sheet's Export button — `{tavernSheet, version, character, snapshots}`,
+   *  or a bare character from older exports). This is the good path: it runs
+   *  the SAME buildPartyMemberSummary a LAN connect does, so the DM gets the
+   *  full background, bond, flaw and backstory rather than a line the DM
+   *  operator retyped from memory. */
+  async function importPlayerCharacter() {
+    if (!activeCampaignId) return;
+    const path = await open({ multiple: false, filters: [{ name: 'Character', extensions: ['json'] }] });
+    if (!path || typeof path !== 'string') return;
+    setRosterBusy('Reading character…');
+    setRosterNotice(null);
+    try {
+      const parsed = JSON.parse(await readTextFile(path));
+      const character: Character = parsed?.tavernSheet === true && parsed?.character ? parsed.character : parsed;
+      if (!character?.name || !character.classes || !character.baseAbilityScores) {
+        throw new Error("That file isn't a Tavern Sheet character export.");
+      }
+      await invoke('upsert_party_member', {
+        id: activeCampaignId,
+        name: character.name,
+        description: buildPartyMemberSummary(character),
+      });
+      setRosterBusy('Tying them into the story…');
+      await weaveInRoster();
+      await refreshPartyRoster();
+      setRosterNotice(`${character.name} added — the DM has their backstory.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRosterBusy(null);
+    }
+  }
+
+  /** For a player who hasn't built a character in the app yet. Free text, so
+   *  "Jo's playing a half-elf ranger who grew up in the docks" is a perfectly
+   *  good entry — the hook pass works off whatever's here. */
+  async function addPlayerManually() {
+    if (!activeCampaignId || !addPlayerName.trim()) return;
+    setRosterBusy('Adding…');
+    setRosterNotice(null);
+    try {
+      await invoke('upsert_party_member', {
+        id: activeCampaignId,
+        name: addPlayerName.trim(),
+        description: addPlayerNotes.trim() || 'A new party member — no details given yet.',
+      });
+      setRosterBusy('Tying them into the story…');
+      await weaveInRoster();
+      await refreshPartyRoster();
+      setRosterNotice(`${addPlayerName.trim()} added.`);
+      setAddPlayerName('');
+      setAddPlayerNotes('');
+      setAddPlayerOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRosterBusy(null);
+    }
+  }
+
+  /** Writes a character out of the story — see campaign.rs's
+   *  remove_party_member_at for where the pieces land. Shows the DM the
+   *  departure it wrote, since that's the thing they'll narrate. */
+  async function confirmRemovePlayer(name: string) {
+    if (!activeCampaignId) return;
+    if (!(await ensureClaudeConnected())) return;
+    setRosterBusy(`Writing ${name} out…`);
+    setRosterNotice(null);
+    try {
+      const departure = await withClaudeReconnect(() =>
+        invoke<string>('remove_party_member', {
+          id: activeCampaignId,
+          name,
+          reason: removeReason.trim(),
+          date: new Date().toISOString().slice(0, 10),
+        }),
+      );
+      // remove_party_member_at already invalidated the cached plan; clear the
+      // copy on screen so it can't keep showing a plan built around them.
+      setPlanText('');
+      await refreshPartyRoster();
+      setRosterNotice(departure);
+      setRemovingMember(null);
+      setRemoveReason('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRosterBusy(null);
+    }
+  }
+
+  /** The player handout. Two model calls (draft + a spoiler-hunting review),
+   *  so like generatePlan it only ever runs from an explicit button press.
+   *  `force` is Regenerate — the backend is otherwise cache-first, which is
+   *  what stops a second open from producing a different handout than the one
+   *  the DM already sent to their table. */
+  async function generateSessionZero(force: boolean) {
+    if (!activeCampaignId) return;
+    if (!(await ensureClaudeConnected())) return;
+    setSessionZeroLoading(true);
+    try {
+      const text = await withClaudeReconnect(() =>
+        invoke<string>('suggest_session_zero', { id: activeCampaignId, force }),
+      );
+      setSessionZeroText(text);
+      setSessionZeroExpanded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSessionZeroLoading(false);
+    }
+  }
+
+  /** Straight to the clipboard, because handing it out means pasting it into
+   *  whatever the group already uses — a chat, an email, a doc. */
+  async function copySessionZero() {
+    try {
+      await navigator.clipboard.writeText(sessionZeroText);
+      setSessionZeroCopied(true);
+      window.setTimeout(() => setSessionZeroCopied(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Saves the handout as a markdown file — for a DM who'd rather print it or
+   *  drop it in a shared folder than paste it. */
+  async function saveSessionZero() {
+    try {
+      const path = await save({
+        defaultPath: `${activeCampaignName || 'campaign'}-session-zero.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (path) await writeTextFile(path, sessionZeroText);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -3949,7 +4209,24 @@ export function DMConsolePage() {
             <ArrowLeft size={18} /> Home
           </button>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">🧙 DM Console</h1>
-          <Button variant="outline" size="sm" onClick={handleEndSession} disabled={busy}>End session</Button>
+          {/* The two bookends of a night, together: this reads last week's
+              recap aloud at the top of the session, End session writes this
+              week's at the bottom. Hidden with no recap to read rather than
+              shown disabled — a new campaign has no "previously". */}
+          <div className="flex items-center gap-2">
+            {lastRecap && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSpeakRecap}
+                disabled={busy || recapSpeaking}
+                title={`Read last session's recap aloud (${lastRecap.date})`}
+              >
+                <ScrollText size={14} /> Recap
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={handleEndSession} disabled={busy}>End session</Button>
+          </div>
         </div>
 
         {/* Campaign picker */}
@@ -4668,6 +4945,178 @@ export function DMConsolePage() {
         <p className="text-xs text-slate-400 mb-2">
           Cached once generated — reopening this shows the same plan (and the same battle maps) until you Regenerate or the party advances a chapter, based on the upcoming chapter, the campaign's arc plan, recent memory, and your terrain catalog.
         </p>
+
+        {/* What you're planning FROM. No button and no call — it's the same
+            recap the header's "Recap" reads aloud, shown here because "what
+            happened last time" is the first thing you want in front of you when
+            deciding what happens next. */}
+        {lastRecap && (
+          <div className="mb-3 border border-slate-700 rounded-lg bg-slate-900/40 px-3 py-2">
+            <p className="text-xs text-slate-400 mb-1">Last session ({lastRecap.date})</p>
+            <p className="text-sm text-slate-200 whitespace-pre-wrap max-h-[18vh] overflow-y-auto">{lastRecap.recap}</p>
+          </div>
+        )}
+
+        {/* Session Zero — the other document this dialog can make, and the one
+            that comes FIRST in a campaign's life: written for the players, not
+            the DM, and handed out before session one. Sits above the plan
+            because that's the order they're used in, and stays visible after
+            play starts so a DM onboarding a new player can hand out the same
+            handout again. */}
+        <div className="mb-3 border border-slate-700 rounded-lg bg-slate-900/40">
+          <div className="flex items-start justify-between gap-3 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm text-slate-200">Session Zero handout</p>
+              <p className="text-xs text-slate-400">
+                A spoiler-free guide to hand your players before the first session — what this campaign is, what to
+                agree on together, and mostly how to write a background that actually fits it.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {sessionZeroText && !sessionZeroLoading && (
+                <>
+                  <Button size="sm" variant="outline" onClick={copySessionZero}>{sessionZeroCopied ? 'Copied' : 'Copy'}</Button>
+                  <Button size="sm" variant="outline" onClick={saveSessionZero}>Save…</Button>
+                  <Button size="sm" variant="outline" onClick={() => generateSessionZero(true)}>Regenerate</Button>
+                </>
+              )}
+              {!sessionZeroText && (
+                <Button size="sm" onClick={() => generateSessionZero(false)} disabled={sessionZeroLoading}>
+                  {sessionZeroLoading ? 'Writing…' : 'Plan Session Zero'}
+                </Button>
+              )}
+            </div>
+          </div>
+          {sessionZeroLoading && (
+            <div className="px-3 pb-3">
+              <p className="text-xs text-slate-400 mb-1">Writing the handout, then checking it for spoilers…</p>
+              <div className="h-1.5 w-full bg-slate-800 rounded overflow-hidden">
+                <div className="h-full w-1/4 bg-red-600 animate-pulse" />
+              </div>
+            </div>
+          )}
+          {sessionZeroText && !sessionZeroLoading && (
+            <div className="px-3 pb-3">
+              <button
+                type="button"
+                onClick={() => setSessionZeroExpanded((v) => !v)}
+                className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                {sessionZeroExpanded ? '▾ Hide handout' : '▸ Read handout'}
+              </button>
+              {sessionZeroExpanded && (
+                <div className="mt-2 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap max-h-[40vh] overflow-y-auto">
+                  {sessionZeroText}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Who's at the table. Fills itself when players connect over LAN; this
+            is for the changes that happen between sessions, when nobody's
+            connected to sync from. */}
+        <div className="mb-3 border border-slate-700 rounded-lg bg-slate-900/40 px-3 py-2">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0">
+              <p className="text-sm text-slate-200">Party ({partyRoster.length})</p>
+              <p className="text-xs text-slate-400">
+                Who the DM knows about. Adding someone ties their backstory into the campaign's established lore;
+                removing someone writes their character out of the story.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button size="sm" variant="outline" onClick={importPlayerCharacter} disabled={!!rosterBusy}>
+                <Upload size={14} /> Import character…
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setAddPlayerOpen((v) => !v)} disabled={!!rosterBusy}>
+                <Plus size={14} /> Add manually
+              </Button>
+            </div>
+          </div>
+
+          {rosterBusy && <p className="text-xs text-sky-400 mb-2">{rosterBusy}</p>}
+          {rosterNotice && !rosterBusy && (
+            <p className="text-xs text-emerald-400 mb-2 whitespace-pre-wrap">{rosterNotice}</p>
+          )}
+
+          {addPlayerOpen && (
+            <div className="mb-2 bg-slate-900 border border-slate-700 rounded-lg p-2 space-y-2">
+              <input
+                type="text"
+                value={addPlayerName}
+                onChange={(e) => setAddPlayerName(e.target.value)}
+                placeholder="Character name"
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
+              />
+              <textarea
+                value={addPlayerNotes}
+                onChange={(e) => setAddPlayerNotes(e.target.value)}
+                rows={3}
+                placeholder={'Who they are, in whatever detail you have — e.g. "Played by Jo. Half-elf ranger who grew up on the Vallaki docks; looking for the sister who left."'}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
+              />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={() => setAddPlayerOpen(false)}>Cancel</Button>
+                <Button size="sm" onClick={addPlayerManually} disabled={!addPlayerName.trim() || !!rosterBusy}>Add</Button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                If the player has a character in Tavern Sheet, "Import character…" is better — it brings their full
+                background, bond, flaw and backstory across instead of a summary you retyped.
+              </p>
+            </div>
+          )}
+
+          {partyRoster.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              Nobody yet. Characters appear here automatically when players connect over LAN, or add them above.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {partyRoster.map((m) => (
+                <div key={m.name} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-100">{m.name}</p>
+                      <p className="text-xs text-slate-400 line-clamp-2">{m.description}</p>
+                    </div>
+                    {removingMember !== m.name && (
+                      <button
+                        type="button"
+                        onClick={() => { setRemovingMember(m.name); setRemoveReason(''); setRosterNotice(null); }}
+                        disabled={!!rosterBusy}
+                        className="shrink-0 text-xs text-slate-500 hover:text-red-400 transition-colors disabled:opacity-40"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  {removingMember === m.name && (
+                    <div className="mt-2 space-y-2">
+                      <input
+                        type="text"
+                        value={removeReason}
+                        onChange={(e) => setRemoveReason(e.target.value)}
+                        placeholder="Why are they leaving? (optional — e.g. Jo moved away)"
+                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        The DM writes them out using what's already established, and leaves the door open for them to
+                        come back — unless your reason says otherwise.
+                      </p>
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setRemovingMember(null)}>Cancel</Button>
+                        <Button size="sm" onClick={() => confirmRemovePlayer(m.name)} disabled={!!rosterBusy}>
+                          Write them out
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {planLoading ? (
           <div className="py-2">
             <p className="text-sm text-slate-400 mb-1">
