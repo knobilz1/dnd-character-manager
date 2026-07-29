@@ -8872,7 +8872,13 @@ fn build_module_decisions_prompt(module_title: &str, chapter_index: &str, plan: 
         exactly what the DM should write down the moment it happens.\n\n\
         The kinds of thing that qualify:\n\
         - a reading, roll, or random draw that fixes where things or people are\n\
-        - a party choice in an early chapter that changes a later one\n\
+        - a party choice in one chapter that changes a later one\n\
+        - a permanent change a CHARACTER can take on and then carry for the rest of the module — a boon with a price, \
+        a curse, an affliction, a corruption, a pact. Do not skip these because they happen late or because they are \
+        optional: once taken they never stop applying, which makes them the easiest of all to lose track of. The \
+        chapter that offers them is usually the only place they are described.\n\
+        - something the party can permanently gain or lose — an ally killed, a faction turned hostile, a resource \
+        destroyed — that a later chapter assumes is still available\n\
         - a villain's or faction's standing goals that drive scenes across the whole module\n\
         - a table or roster used campaign-wide rather than in one chapter\n\n\
         Two rules, and the first one is the important one:\n\n\
@@ -12061,6 +12067,20 @@ Tactics:
         assert!(p.contains("WRITE TIGHT"), "verbosity is what crowded out real entries on the live run");
         assert!(p.contains("five to eight"));
         assert!(p.contains("Tser Pool, ch 14"), "the terse-vs-verbose example is the instruction that lands");
+    }
+
+    /// The category the first two live runs both missed: Curse of Strahd's Amber
+    /// Temple dark gifts. They're not a roll, not early, and their consequence
+    /// isn't "a later chapter" — it's the character, permanently — so every
+    /// shape the prompt listed excluded them. Lycanthropy and curses are the
+    /// same shape, which is why this is a taxonomy hole rather than one module's
+    /// quirk.
+    #[test]
+    fn build_module_decisions_prompt_asks_for_permanent_character_changes() {
+        let p = build_module_decisions_prompt("Curse of Strahd", "1. Into the Mists", "");
+        assert!(p.contains("a curse, an affliction"));
+        assert!(p.contains("Do not skip these because they happen late"));
+        assert!(p.contains("permanently gain or lose"), "a dead ally a later chapter still expects counts too");
     }
 
     /// The single most damaging thing this pass could do is invent an answer to
