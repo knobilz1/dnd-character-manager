@@ -113,6 +113,8 @@ pub fn run() {
       campaign::list_party_members,
       campaign::remove_party_member,
       campaign::read_last_session_recap,
+      campaign::reconcile_module_decisions,
+      campaign::read_module_decisions,
       campaign::generate_battle_map,
       campaign::regenerate_one_plan_map,
       campaign::list_battle_maps,

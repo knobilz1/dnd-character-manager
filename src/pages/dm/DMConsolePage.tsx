@@ -1155,6 +1155,11 @@ export function DMConsolePage() {
   // handleReconcileCampaignHooks) — cleared each time the Lore dialog reopens
   // so a stale result from a previous visit never lingers.
   const [campaignHooksResult, setCampaignHooksResult] = React.useState<string | null>(null);
+  // The active module's standing-decisions register (campaign.rs's
+  // reconcile_module_decisions) — the cross-chapter dependencies the DM would
+  // otherwise only ever see while holding the one chapter that sets them.
+  const [standingText, setStandingText] = React.useState('');
+  const [standingResult, setStandingResult] = React.useState<string | null>(null);
 
   const sessionIdRef = React.useRef<string | undefined>(undefined);
   const processingRef = React.useRef(false);
@@ -2989,9 +2994,42 @@ export function DMConsolePage() {
         setCurrentChapterId(null);
       }
       setModulePlan(await invoke<string>('read_campaign_plan', { id: activeCampaignId }).catch(() => ''));
+      setStandingText(
+        campaignModules.active_id
+          ? await invoke<string>('read_module_decisions', { id: activeCampaignId, moduleId: campaignModules.active_id }).catch(() => '')
+          : '',
+      );
+      setStandingResult(null);
       setModuleOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Builds the active module's standing-decisions register. Runs over the
+   *  already-imported module (its chapter index + arc plan), so it costs one
+   *  call rather than re-chaptering the book — which is also what lets it be
+   *  added to a campaign imported before this existed. Same manual-trigger
+   *  shape as handleReconcileCampaignHooks. */
+  async function handleReconcileModuleDecisions() {
+    if (!activeCampaignId || !activeModuleId) return;
+    if (!(await ensureClaudeConnected())) return;
+    setStandingResult(null);
+    setModuleBusy('Looking for what this module decides once and uses later…');
+    try {
+      const found = await withClaudeReconnect(() =>
+        invoke<number>('reconcile_module_decisions', { id: activeCampaignId, moduleId: activeModuleId }),
+      );
+      setStandingText(await invoke<string>('read_module_decisions', { id: activeCampaignId, moduleId: activeModuleId }));
+      setStandingResult(
+        found === 0
+          ? 'No cross-chapter dependencies found — this module is self-contained chapter to chapter.'
+          : `Registered ${found} cross-chapter dependenc${found === 1 ? 'y' : 'ies'}.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setModuleBusy(null);
     }
   }
 
@@ -4870,6 +4908,30 @@ export function DMConsolePage() {
           <div className="mb-3 border border-slate-700 rounded-lg p-2.5 bg-slate-900/60">
             <p className="text-xs font-bold text-slate-300 mb-1">Campaign-arc plan</p>
             <p className="text-xs text-slate-400 whitespace-pre-wrap">{modulePlan}</p>
+          </div>
+        )}
+        {/* Cross-chapter dependencies. Only the current chapter is loaded each
+            turn, so anything this module decides once and pays off five chapters
+            later has nothing carrying it — this register is what does. */}
+        {activeModuleId && (
+          <div className="mb-3 border border-slate-700 rounded-lg p-2.5 bg-slate-900/60">
+            <div className="flex items-start justify-between gap-3 mb-1">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-300">Standing decisions</p>
+                <p className="text-xs text-slate-400">
+                  Things this module decides once and depends on chapters later — a card reading that fixes where
+                  treasures are, an early choice that changes a later chapter. Holds the questions, not the answers;
+                  the DM records each outcome when it actually happens at your table.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" onClick={handleReconcileModuleDecisions} disabled={!!moduleBusy}>
+                {moduleBusyLabel ?? (standingText.trim() ? 'Rebuild' : 'Find them')}
+              </Button>
+            </div>
+            {standingResult && <p className="text-xs text-emerald-400 mb-1">{standingResult}</p>}
+            {standingText.trim() && (
+              <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 whitespace-pre-wrap max-h-[28vh] overflow-y-auto mt-1">{standingText}</pre>
+            )}
           </div>
         )}
         {modules.length ? (

@@ -446,7 +446,7 @@ fn dm_rules_for_mode(mode: &str) -> String {
     out.join("\n")
 }
 
-const MODULE_IMPORT_BLOCK: &str = "\n## Imported modules\nThis campaign has one or more imported modules — self-contained adventures/side-quests, each broken into chapters so only the relevant part loads each turn. modules_index.md lists every imported module with a one-line summary and marks which one is active. Only the ACTIVE module's chapters are loaded: active_module/index.md lists that module's chapters and marks which one is current; active_module/current.md has the FULL TEXT of the current chapter only — treat it as your primary source material for this part of the adventure. See the dm-actions `advanceToChapter` key above for moving to the next chapter within the active module, and `switchActiveModule` for moving the party to a different already-imported module entirely. (Each module's own arc plan — plus this campaign's overarching lore, if established — is sent to you periodically in the turn message itself, not as a standing import here — see the \"Campaign-arc plan check-ins\" section above.)\n\n@modules_index.md\n@active_module/index.md\n@active_module/current.md\n";
+const MODULE_IMPORT_BLOCK: &str = "\n## Imported modules\nThis campaign has one or more imported modules — self-contained adventures/side-quests, each broken into chapters so only the relevant part loads each turn. modules_index.md lists every imported module with a one-line summary and marks which one is active. Only the ACTIVE module's chapters are loaded: active_module/index.md lists that module's chapters and marks which one is current; active_module/current.md has the FULL TEXT of the current chapter only — treat it as your primary source material for this part of the adventure. See the dm-actions `advanceToChapter` key above for moving to the next chapter within the active module, and `switchActiveModule` for moving the party to a different already-imported module entirely. (Each module's own arc plan — plus this campaign's overarching lore, if established — is sent to you periodically in the turn message itself, not as a standing import here — see the \"Campaign-arc plan check-ins\" section above.)\n\nactive_module/standing.md is a short register of things this module decides ONCE and then depends on chapters later — a card reading that fixes where treasures are, an early choice that changes a later chapter. It holds the QUESTIONS, not the answers: the answers happen at your table. When one of them comes up in play, record the outcome with `remember` so it survives past the current chapter.\n\n@modules_index.md\n@active_module/index.md\n@active_module/standing.md\n@active_module/current.md\n";
 
 fn format_campaign_setting(intake: &CampaignIntake) -> String {
     let mut s = String::from("\n## Campaign setting\n");
@@ -8805,6 +8805,198 @@ fn sync_active_module_indirection_at(root: &Path, id: &str, module_id: &str) -> 
     write_atomic(&active_dir.join("index.md"), &read_optional(&module_dir.join("index.md")))?;
     write_atomic(&active_dir.join("current.md"), &read_optional(&module_dir.join("current.md")))?;
     write_atomic(&active_dir.join("plan.md"), &read_optional(&module_dir.join("plan.md")))?;
+    // Empty for a module that hasn't had its register built (or genuinely has no
+    // cross-chapter dependencies) — an empty standing import costs nothing, and
+    // a stale one from the PREVIOUS module would be actively wrong.
+    write_atomic(&active_dir.join("standing.md"), &read_optional(&module_dir.join("standing.md")))?;
+    Ok(())
+}
+
+// ── Standing decisions (cross-chapter dependencies) ─────────────────────────
+//
+// Only the CURRENT chapter is loaded each turn, and index.md gives one sentence
+// per chapter. That is a good trade for prose, and a bad one for the class of
+// content a module decides ONCE and then consumes chapters later: a card
+// reading that fixes where four treasures are, a roll that picks which noble is
+// the traitor, a villain's standing goals parked in an appendix.
+//
+// The DM has, in principle, everything it needs to notice — and in practice no
+// reason to, since at the moment the decision happens it is holding chapter 1
+// and nothing else. This is the same argument reconcile_campaign_hooks_at makes
+// about PC backstories, and it has the same answer: one deliberate pass beats
+// hoping the improv lands.
+//
+// The important realisation is that ingestion CANNOT know the answers — the
+// cards get turned at the table. What it can know, from the book, is that the
+// question will be asked and where the answer will be needed. So this writes a
+// register of PENDING decisions, not facts. The answers arrive later through the
+// existing `remember` action, into flagged_facts.md, which is already
+// always-loaded and never compacted.
+
+/// Trims the markdown code fences a model sometimes wraps JSON in, despite being
+/// told not to. Same tolerance the older reply parsers hand-roll inline; new
+/// parsers should call this rather than adding a fifth copy.
+fn strip_code_fences(reply: &str) -> &str {
+    let s = reply.trim();
+    let s = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")).unwrap_or(s);
+    s.strip_suffix("```").unwrap_or(s).trim()
+}
+
+/// Cap on the always-loaded register. It rides every single turn for the whole
+/// module, so it lives under the same budget discipline that drove
+/// MAX_CHAPTER_CHARS down: ~3k chars is well under a thousand tokens, enough for
+/// a dozen entries, and small enough that nobody has to think about it again.
+const MAX_STANDING_CHARS: usize = 3_000;
+
+const STANDING_IMPORT_LINE: &str = "\n@active_module/standing.md\n";
+
+/// Asks what this module decides once and uses later.
+///
+/// Fed the chapter index and arc plan, NOT the full text — a register of
+/// cross-chapter links is a structural question, and the structure is exactly
+/// what those two artifacts already are. That keeps this to one call over a few
+/// thousand tokens instead of a second pass over a whole book.
+///
+/// The instruction to return the QUESTION rather than an answer is the one that
+/// matters. Asked loosely, a model will happily invent "the Tome is in the
+/// chapel" — a specific, plausible, entirely fabricated answer to something the
+/// dice have not decided yet, which then rides along in context every turn as
+/// though it were established.
+fn build_module_decisions_prompt(module_title: &str, chapter_index: &str, plan: &str) -> String {
+    format!(
+        "Below is the chapter structure and arc plan for the Dungeons & Dragons module \"{module_title}\".\n\n\
+        A Dungeon Master running this only has ONE chapter in front of them at a time. So anything this module \
+        decides at one point and then depends on much later is easy to lose — by the time it matters, the chapter \
+        that set it is long closed.\n\n\
+        Find those. For each one, give: what it is, where it gets decided, which later chapters depend on it, and \
+        exactly what the DM should write down the moment it happens.\n\n\
+        The kinds of thing that qualify:\n\
+        - a reading, roll, or random draw that fixes where things or people are\n\
+        - a party choice in an early chapter that changes a later one\n\
+        - a villain's or faction's standing goals that drive scenes across the whole module\n\
+        - a table or roster used campaign-wide rather than in one chapter\n\n\
+        Two rules, and the first one is the important one:\n\n\
+        1. Record the QUESTION, never an answer. These are decided at the table, by dice and by players — they have \
+        not happened yet and you cannot know them. Write \"record which card came up and what it points to\", never \
+        a guess at which card it was. An invented answer here would be repeated to the DM as established fact on \
+        every turn for the rest of the campaign.\n\n\
+        2. Only things that genuinely cross chapters. Something set up and paid off inside one chapter needs no \
+        register entry — the chapter text is right there. If this module has no cross-chapter dependencies at all, \
+        return an empty list; that is a perfectly good answer and much better than padding.\n\n\
+        Aim for the handful that really matter, not everything that could conceivably recur. This list is re-read \
+        by the DM on every single turn, so each entry has to earn its place.\n\n\
+        Chapter index:\n{chapter_index}\n\n\
+        Arc plan:\n{}\n\n\
+        Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
+        {{\"decisions\": [{{\"name\": \"<short name>\", \"decided\": \"<where/when it gets decided>\", \"matters_in\": \"<which later chapters or situations depend on it>\", \"record\": \"<what the DM should write down when it happens>\"}}]}}",
+        if plan.trim().is_empty() { "(none)" } else { plan.trim() },
+    )
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct StandingDecision {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    decided: String,
+    #[serde(default)]
+    matters_in: String,
+    #[serde(default)]
+    record: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+struct StandingDecisionsReply {
+    #[serde(default)]
+    decisions: Vec<StandingDecision>,
+}
+
+/// Renders the register, dropping entries with no name and stopping before
+/// MAX_STANDING_CHARS. Truncating by whole entries rather than mid-line: half a
+/// dependency ("record which card came up and what it") is worse than one fewer,
+/// because it still reads as an instruction.
+fn render_standing_decisions(decisions: &[StandingDecision]) -> String {
+    let mut out = String::from(
+        "# Standing decisions\n\n\
+        _Things this module decides ONCE and depends on chapters later. The answers are not here — they happen at \
+        the table. When one of these comes up in play, record the outcome with `remember` so it survives past this \
+        chapter._\n\n",
+    );
+    for d in decisions.iter().filter(|d| !d.name.trim().is_empty()) {
+        let entry = format!(
+            "- **{}** — decided: {} · matters in: {}\n  - RECORD: {}\n",
+            d.name.trim(),
+            if d.decided.trim().is_empty() { "—" } else { d.decided.trim() },
+            if d.matters_in.trim().is_empty() { "—" } else { d.matters_in.trim() },
+            if d.record.trim().is_empty() { "the outcome, in one line" } else { d.record.trim() },
+        );
+        if out.chars().count() + entry.chars().count() > MAX_STANDING_CHARS {
+            break;
+        }
+        out.push_str(&entry);
+    }
+    out
+}
+
+/// Builds (or rebuilds) one module's standing-decisions register.
+///
+/// Deliberately callable against an ALREADY-IMPORTED module rather than only as
+/// part of the import: re-chaptering a 900k-character book to gain a 2k-character
+/// file would be an absurd trade, and it means this can be added to campaigns
+/// that were imported before it existed. Same manual-trigger shape as
+/// reconcile_campaign_hooks.
+///
+/// Returns how many decisions were registered. Zero is a real answer — plenty of
+/// modules are chapter-local all the way through.
+fn reconcile_module_decisions_at(root: &Path, id: &str, module_id: &str) -> Result<usize, String> {
+    let dir = root.join(id);
+    let module_dir = dir.join("modules").join(module_id);
+    if !module_dir.is_dir() {
+        return Err(format!("No imported module with id \"{module_id}\"."));
+    }
+    let chapter_index = read_optional(&module_dir.join("index.md"));
+    if chapter_index.trim().is_empty() {
+        return Err("That module has no chapter index to work from.".into());
+    }
+    let plan = read_optional(&module_dir.join("plan.md"));
+    // The human-readable title lives in the campaign-level manifest, not beside
+    // the chapters — fall back to the id, which is a slug of that same title.
+    let title = fs::read_to_string(dir.join("modules_manifest.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<ModuleSummary>>(&s).ok())
+        .and_then(|mods| mods.into_iter().find(|m| m.id == module_id).map(|m| m.title))
+        .unwrap_or_else(|| module_id.to_string());
+
+    let reply = crate::local_llm::ask_ingest_once(
+        build_module_decisions_prompt(&title, &chapter_index, &plan),
+        Some("opus"),
+        true,
+    )?;
+    let parsed: StandingDecisionsReply = serde_json::from_str(strip_code_fences(&reply))
+        .map_err(|e| format!("Couldn't parse the standing-decisions reply: {e}. Raw: {reply}"))?;
+    let kept = parsed.decisions.iter().filter(|d| !d.name.trim().is_empty()).count();
+
+    write_atomic(&module_dir.join("standing.md"), &render_standing_decisions(&parsed.decisions))?;
+    // Only mirror into the always-loaded path if THIS module is the active one —
+    // otherwise reconciling a background module would silently hand the DM
+    // another adventure's dependencies.
+    if read_optional(&dir.join("modules").join("active_id.txt")).trim() == module_id {
+        sync_active_module_indirection_at(root, id, module_id)?;
+    }
+    sync_standing_import_at(root, id)?;
+    Ok(kept)
+}
+
+/// Adds the `@active_module/standing.md` import to a campaign that predates this
+/// register, idempotently. Only for campaigns that actually have the module
+/// block — a campaign with no imported module has nothing to stand on.
+fn sync_standing_import_at(root: &Path, id: &str) -> Result<(), String> {
+    let claude_path = root.join(id).join("CLAUDE.md");
+    let mut claude_md = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
+    if claude_md.contains("@active_module/current.md") && !claude_md.contains("@active_module/standing.md") {
+        claude_md.push_str(STANDING_IMPORT_LINE);
+        write_atomic(&claude_path, &claude_md)?;
+    }
     Ok(())
 }
 
@@ -9536,6 +9728,30 @@ pub async fn reconcile_campaign_hooks(app: AppHandle, id: String) -> Result<usiz
     })
     .await
     .map_err(|e| format!("Campaign-hooks reconciliation task failed: {e}"))?
+}
+
+/// Builds a module's standing-decisions register — the cross-chapter
+/// dependencies the DM would otherwise only see while holding the one chapter
+/// that sets them. Runs against an ALREADY-IMPORTED module, so it can be added
+/// to a campaign imported before this existed without re-chaptering the book.
+///
+/// Returns how many entries were registered; 0 is a real answer for a module
+/// that's chapter-local throughout.
+#[tauri::command]
+pub async fn reconcile_module_decisions(app: AppHandle, id: String, module_id: String) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = campaigns_root(&app)?;
+        reconcile_module_decisions_at(&root, &id, &module_id)
+    })
+    .await
+    .map_err(|e| format!("Standing-decisions task failed: {e}"))?
+}
+
+/// The register as it stands, for the Module dialog to show. Empty string when
+/// none has been built.
+#[tauri::command]
+pub fn read_module_decisions(app: AppHandle, id: String, module_id: String) -> Result<String, String> {
+    Ok(read_optional(&campaign_dir(&app, &id)?.join("modules").join(module_id).join("standing.md")))
 }
 
 /// Reads the entities registry — feeds the History dialog. See
@@ -11707,6 +11923,105 @@ Tactics:
         assert!(result.plan_text.contains("Bridge Ambush"));
         assert_eq!(result.maps.len(), 1);
         assert_eq!(result.maps[0].slug, "bridge-ambush");
+    }
+
+    fn decision(name: &str) -> StandingDecision {
+        StandingDecision {
+            name: name.into(),
+            decided: "Chapter 1, the card reading".into(),
+            matters_in: "Chapters 4, 8, 9".into(),
+            record: "which card came up and what it points to".into(),
+        }
+    }
+
+    /// The register is re-read every turn for a whole module, so the cap is not
+    /// decorative — and it has to drop WHOLE entries. Half a line still reads as
+    /// an instruction, which is worse than one fewer entry.
+    #[test]
+    fn render_standing_decisions_caps_by_whole_entries_and_skips_nameless_ones() {
+        let many: Vec<StandingDecision> = (0..200).map(|i| decision(&format!("Decision {i}"))).collect();
+        let out = render_standing_decisions(&many);
+        assert!(out.chars().count() <= MAX_STANDING_CHARS, "got {} chars", out.chars().count());
+        assert!(out.contains("Decision 0"), "it should fit at least the first entries");
+        assert!(!out.contains("Decision 199"));
+        // No entry may be cut mid-way: every RECORD line that started must have
+        // finished.
+        assert_eq!(out.matches("- RECORD:").count(), out.matches("· matters in:").count());
+
+        let mut nameless = decision("");
+        nameless.record = "should never appear".into();
+        let out = render_standing_decisions(&[nameless, decision("Real one")]);
+        assert!(!out.contains("should never appear"));
+        assert!(out.contains("Real one"));
+    }
+
+    /// An empty list is a legitimate answer — plenty of modules are chapter-local
+    /// all the way through — and must still produce a valid file rather than
+    /// something that reads as broken.
+    #[test]
+    fn render_standing_decisions_of_nothing_is_still_a_sensible_file() {
+        let out = render_standing_decisions(&[]);
+        assert!(out.starts_with("# Standing decisions"));
+        assert!(!out.contains("- **"));
+    }
+
+    /// The single most damaging thing this pass could do is invent an answer to
+    /// something the dice haven't decided, because it then rides in context every
+    /// turn as established fact.
+    #[test]
+    fn build_module_decisions_prompt_demands_questions_not_answers() {
+        let p = build_module_decisions_prompt(
+            "Curse of Strahd",
+            "1. Into the Mists — the party enters Barovia.\n2. The Town of Vallaki",
+            "The party is drawn in by the Mists.",
+        );
+        assert!(p.contains("Curse of Strahd"));
+        assert!(p.contains("Into the Mists"), "the chapter index reaches the prompt");
+        assert!(p.contains("drawn in by the Mists"), "the arc plan reaches the prompt");
+        assert!(p.contains("QUESTION, never an answer"));
+        assert!(p.contains("cannot know them"));
+        assert!(p.contains("return an empty list"), "no cross-chapter deps must be an allowed answer");
+    }
+
+    #[test]
+    fn strip_code_fences_tolerates_the_wrappers_models_add_anyway() {
+        assert_eq!(strip_code_fences("```json\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(strip_code_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(strip_code_fences("  {\"a\":1}  "), "{\"a\":1}");
+    }
+
+    #[test]
+    fn reconcile_module_decisions_at_errors_on_an_unknown_module_without_calling_a_model() {
+        let root = Scratch::new("standing-unknown");
+        let meta = create_campaign_at(&root.0, &intake("Standing")).unwrap();
+        let err = reconcile_module_decisions_at(&root.0, &meta.id, "no-such-module").unwrap_err();
+        assert!(err.contains("no-such-module"));
+    }
+
+    /// Old campaigns gain the import; campaigns with no module never do, and it
+    /// can't accumulate.
+    #[test]
+    fn sync_standing_import_at_is_idempotent_and_skips_module_less_campaigns() {
+        let root = Scratch::new("standing-import");
+        let meta = create_campaign_at(&root.0, &intake("Standing")).unwrap();
+        let claude_path = root.0.join(&meta.id).join("CLAUDE.md");
+
+        sync_standing_import_at(&root.0, &meta.id).unwrap();
+        assert!(
+            !fs::read_to_string(&claude_path).unwrap().contains("@active_module/standing.md"),
+            "a campaign with no imported module has nothing to stand on",
+        );
+
+        let mut claude = fs::read_to_string(&claude_path).unwrap();
+        claude.push_str("\n@active_module/current.md\n");
+        write_atomic(&claude_path, &claude).unwrap();
+        sync_standing_import_at(&root.0, &meta.id).unwrap();
+        sync_standing_import_at(&root.0, &meta.id).unwrap();
+        assert_eq!(
+            fs::read_to_string(&claude_path).unwrap().matches("@active_module/standing.md").count(),
+            1,
+            "import must not accumulate",
+        );
     }
 
     #[test]
