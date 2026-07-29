@@ -1366,15 +1366,23 @@ fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Resul
 ///    ever ADDS a line, never rewrites CLAUDE.md's body, so the DM's own
 ///    hand-edits (Notes dialog) survive untouched.
 ///
-/// A missing CLAUDE.md is an error rather than a silent skip — that would mean
-/// a corrupt campaign folder, and swallowing it would leave the DM reading no
-/// rules at all with nothing to show for it.
+/// 3. Re-state the dm-actions contract lines from the current BASE_CLAUDE_MD
+///    (`refresh_stale_contract_lines`), since those DO go stale in a file
+///    written once at creation.
+///
+/// A folder that has LOST its CLAUDE.md or memory scaffolding is healed first
+/// (`heal_campaign_scaffolding_at`) instead of erroring. That is not the silent
+/// skip this used to guard against — it restores the rules rather than dropping
+/// them — and a read that still fails afterwards is a hard error as before.
 fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
     let dir = root.join(id);
+    // Before anything reads CLAUDE.md: put back whatever the folder has lost.
+    // Create-only, so a healthy campaign is untouched.
+    heal_campaign_scaffolding_at(root, id)?;
     write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(&read_battle_mode_at(root, id)))?;
     let claude_path = dir.join("CLAUDE.md");
     let original = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
-    let mut claude_md = strip_superseded_positioning(&original);
+    let mut claude_md = refresh_stale_contract_lines(&strip_superseded_positioning(&original));
     if !claude_md.contains("@memory/dm_rules.md") {
         claude_md.push_str(DM_RULES_IMPORT_LINE);
     }
@@ -1436,6 +1444,94 @@ fn strip_superseded_positioning(claude_md: &str) -> String {
         joined = joined.replace("\n\n\n", "\n\n");
     }
     joined
+}
+
+/// The current text of the BASE_CLAUDE_MD line starting with `prefix`.
+///
+/// Read out of the const itself rather than duplicated, so a repair built on it
+/// can never disagree with what new campaigns are given. Duplicating the text
+/// here would recreate the very staleness this whole mechanism exists to fix.
+fn base_claude_line(prefix: &str) -> Option<&'static str> {
+    BASE_CLAUDE_MD.lines().find(|l| l.starts_with(prefix))
+}
+
+/// Prefixes of the dm-actions contract lines that go stale in an old CLAUDE.md.
+/// Each names exactly one line, and BASE_CLAUDE_MD holds its current wording.
+const REFRESHABLE_CONTRACT_PREFIXES: &[&str] =
+    &["Valid keys (all optional):", "Only include this block when something actually changed"];
+
+/// Re-states the dm-actions contract lines in an old CLAUDE.md from the current
+/// BASE_CLAUDE_MD.
+///
+/// CLAUDE.md is written ONCE at creation, so every campaign keeps whatever
+/// contract shipped that day — and BOTH of these lines have since changed in
+/// ways that actively fight newer features. Measured 2026-07-28 across every
+/// campaign on this machine: 4 of 4 still carried the pre-battleLog key list
+/// (no `battleLog`, `removeCombatant`, `endBattle`, `battleResult`, `makeMap`)
+/// and the absolute sentence "Only include this block when something actually
+/// changed." — which tells the DM NOT to emit a block for a pure request, the
+/// exact shape `makeMap`/`recallMap`/`recallSession` need.
+///
+/// DM_RULES already declares itself authoritative over stale CLAUDE.md copies,
+/// and in practice that clause plus dmPrompt.ts's per-turn nudge is enough —
+/// all three engines emit `makeMap` today. This closes the contradiction at the
+/// source anyway: the supersede clause is a tiebreak the model has to apply,
+/// and defence that only works when something else also works isn't defence.
+///
+/// Line-anchored and idempotent: a line already matching the current text is
+/// replaced by itself. Everything else survives byte-for-byte, including the
+/// DM's Notes-dialog edits — the same contract `strip_superseded_positioning`
+/// keeps, and why both patch known text instead of regenerating the file.
+fn refresh_stale_contract_lines(claude_md: &str) -> String {
+    claude_md
+        .split('\n')
+        .map(|line| {
+            REFRESHABLE_CONTRACT_PREFIXES
+                .iter()
+                .find(|p| line.starts_with(**p))
+                .and_then(|p| base_claude_line(p))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Writes any standard campaign file that is MISSING, from the same defaults
+/// `create_campaign_at` uses. Never touches a file that already exists.
+///
+/// Without this a folder that loses its CLAUDE.md is permanently dead: every
+/// `sync_*_at` hard-errors on a missing CLAUDE.md (deliberately — a silent skip
+/// would leave the DM reading no rules with nothing to show for it), and there
+/// is no recovery path in the UI. Live 2026-07-28: `zz-gloam` had lost
+/// CLAUDE.md and its whole memory/ scaffolding but still held two finished
+/// battle maps, and `sync_dm_rules` failed with a bare "cannot find the file
+/// specified" — the campaign could not be opened at all.
+///
+/// Recreating is not the "silent skip" that error guards against: it restores
+/// the rules rather than dropping them. Create-only is what makes it safe —
+/// an existing CLAUDE.md, with whatever the DM wrote in it, is never rewritten
+/// here (`refresh_stale_contract_lines` handles updating one that IS present).
+fn heal_campaign_scaffolding_at(root: &Path, id: &str) -> Result<(), String> {
+    let dir = root.join(id);
+    let memory = dir.join("memory");
+    fs::create_dir_all(memory.join(BATTLE_MAPS_DIR)).map_err(|e| e.to_string())?;
+    let files: [(PathBuf, &str); 9] = [
+        (dir.join("CLAUDE.md"), BASE_CLAUDE_MD),
+        (dir.join("name.txt"), id),
+        (memory.join("MEMORY.md"), DEFAULT_MEMORY_MD),
+        (memory.join("flagged_facts.md"), DEFAULT_FLAGGED_FACTS_MD),
+        (memory.join("entities.md"), DEFAULT_ENTITIES_MD),
+        (memory.join("locations.md"), DEFAULT_LOCATIONS_MD),
+        (memory.join("party.md"), DEFAULT_PARTY_MD),
+        (memory.join("full_history.md"), DEFAULT_HISTORY_MD),
+        (memory.join(BATTLE_MAPS_DIR).join("index.md"), DEFAULT_BATTLE_MAPS_INDEX_MD),
+    ];
+    for (path, contents) in files {
+        if !path.exists() {
+            write_atomic(&path, contents)?;
+        }
+    }
+    Ok(())
 }
 
 /// Brings a campaign created before the session-index/retrieval system existed
@@ -9962,6 +10058,72 @@ Tactics:
         // And a already-clean (new) campaign is untouched.
         let clean = "# DM\n\n## How to DM\n- go\n";
         assert_eq!(strip_superseded_positioning(clean), clean);
+    }
+
+    /// The two dm-actions contract lines that went stale in every campaign made
+    /// before battleLog/makeMap existed. Asserts against the CONTRACT (the line
+    /// now matches BASE_CLAUDE_MD, and names keys it didn't before) rather than
+    /// against a copy of the expected text — a test holding its own duplicate
+    /// of that wording would pass just as happily if both went stale together.
+    #[test]
+    fn refresh_stale_contract_lines_restates_the_old_key_list_and_the_absolute_sentence() {
+        let stale = "# You are the Dungeon Master\n\n## Reporting state changes\nValid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp [{name,amount}], addCondition [{name,condition}], removeCondition [{name,condition}], exhaustion [{name,level}], inspiration [{name,value: true|false}].\n- `remember`: keep me.\nOnly include this block when something actually changed. Never mention the block itself in your spoken narration.\n\n## Campaign setting\n_(my own hand-written note)_\n";
+        assert!(!stale.contains("makeMap"), "fixture must start stale");
+        let out = refresh_stale_contract_lines(stale);
+
+        // Both lines now ARE the current ones, whatever those currently say.
+        for prefix in REFRESHABLE_CONTRACT_PREFIXES {
+            let current = base_claude_line(prefix).expect("BASE_CLAUDE_MD must still carry this line");
+            assert!(out.contains(current), "line for {prefix:?} was not refreshed:\n{out}");
+        }
+        // The specific regressions that motivated this: a key list that omits
+        // the request actions, and a sentence forbidding a request-only block.
+        assert!(out.contains("makeMap"), "refreshed key list must advertise makeMap:\n{out}");
+        assert!(!out.contains("Only include this block when something actually changed. "),
+            "the absolute sentence must be gone, not merely appended to:\n{out}");
+
+        // Nothing else moves, including the DM's own authored content.
+        assert!(out.contains("- `remember`: keep me."), "{out}");
+        assert!(out.contains("_(my own hand-written note)_"), "{out}");
+        assert_eq!(out.lines().count(), stale.lines().count(), "line count must not change:\n{out}");
+        assert_eq!(refresh_stale_contract_lines(&out), out, "must be idempotent");
+        // A campaign already on the current text is untouched, byte-for-byte.
+        assert_eq!(refresh_stale_contract_lines(BASE_CLAUDE_MD), BASE_CLAUDE_MD);
+    }
+
+    /// A folder that lost CLAUDE.md used to be permanently unopenable, because
+    /// every sync_*_at hard-errors on it and nothing recreates it. Live case:
+    /// zz-gloam, which still held two finished battle maps.
+    #[test]
+    fn heal_campaign_scaffolding_revives_a_gutted_campaign_without_touching_what_survived() {
+        let root = Scratch::new("heal_scaffolding");
+        let meta = create_campaign_at(&root.0, &intake("Gutted")).unwrap();
+        let dir = root.0.join(&meta.id);
+
+        // Gut it the way the live one was: no CLAUDE.md, no memory registries,
+        // but a real battle map and a hand-edited party file still present.
+        let kept_party = "# Party\n- **Vex:** Level 3 Rogue, owes the guild money.\n";
+        fs::write(dir.join("memory").join("party.md"), kept_party).unwrap();
+        fs::write(dir.join("memory").join(BATTLE_MAPS_DIR).join("keep.md"), "# Keep\n").unwrap();
+        for gone in ["CLAUDE.md", "memory/MEMORY.md", "memory/entities.md", "memory/locations.md"] {
+            fs::remove_file(dir.join(gone)).unwrap();
+        }
+        assert!(sync_dm_rules_at(&root.0, &meta.id).is_ok(), "a gutted campaign must open again");
+
+        // Recreated...
+        assert!(dir.join("CLAUDE.md").exists() && dir.join("memory").join("entities.md").exists());
+        let claude = fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("You are the Dungeon Master"), "{claude}");
+        assert!(claude.contains("@memory/dm_rules.md"), "healed file still needs its imports: {claude}");
+        // ...without clobbering what was still there.
+        assert_eq!(fs::read_to_string(dir.join("memory").join("party.md")).unwrap(), kept_party);
+        assert!(dir.join("memory").join(BATTLE_MAPS_DIR).join("keep.md").exists());
+
+        // And a healthy campaign is left alone entirely.
+        let healthy = create_campaign_at(&root.0, &intake("Healthy")).unwrap();
+        let before = fs::read_to_string(root.0.join(&healthy.id).join("CLAUDE.md")).unwrap();
+        heal_campaign_scaffolding_at(&root.0, &healthy.id).unwrap();
+        assert_eq!(fs::read_to_string(root.0.join(&healthy.id).join("CLAUDE.md")).unwrap(), before);
     }
 
     #[test]
