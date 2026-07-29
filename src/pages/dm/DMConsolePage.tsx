@@ -738,15 +738,29 @@ export function DMConsolePage() {
   const lastCampaignSelectionRef = React.useRef<number | null>(null);
   const [newCampaignOpen, setNewCampaignOpen] = React.useState(false);
   const [newCampaign, setNewCampaign] = React.useState<CampaignIntake>(BLANK_INTAKE);
-  const [pendingModuleFile, setPendingModuleFile] = React.useState<{ name: string; text: string } | null>(null);
-  const [pendingLoreFile, setPendingLoreFile] = React.useState<{ name: string; text: string } | null>(null);
+  /** The adventure/campaign book attached in the New Campaign dialog, feeding
+   *  BOTH ingestion paths (see handleCreateCampaign).
+   *
+   *  This used to be two separate attach buttons — "Attach official campaign
+   *  PDF…" and "Import module file…" — and the pair was a trap. Given an
+   *  official campaign book the first one is named after your file, and it is
+   *  the one that summarizes: establish_campaign_lore compresses whatever it's
+   *  given into a ~8k-char frame. Measured live, Curse of Strahd went in at
+   *  931,877 chars and came out as 7,988 — a 117:1 loss of the actual adventure,
+   *  with nothing saying so. The module path is the one that keeps the text
+   *  verbatim as chapters, and for a published adventure you always want both.
+   *
+   *  One control, both pipelines. Typed notes in the lore textarea still go to
+   *  the frame alone, which is right — nobody types 60k characters. */
+  const [pendingBookFile, setPendingBookFile] = React.useState<{ name: string; text: string } | null>(null);
   const [moduleBusy, setModuleBusy] = React.useState<string | null>(null);
   /** Step progress for the currently-running module import ONLY — see
    *  campaign.rs's IngestProgress ("ingest-progress" event). The other
    *  moduleBusy consumers (attach lore, reconcile NPC voices/hooks, create
    *  campaign) are single opaque calls with nothing to report, so they stay
    *  on the plain elapsed-time ticker below; this is layered on top just for
-   *  handleImportModuleForNewCampaign/handleImportModuleForExisting. */
+   *  the chapterize leg of handleCreateCampaign, and
+   *  handleImportModuleForExisting. */
   const [ingestProgress, setIngestProgress] = React.useState<{ phase: string; done: number; total: number } | null>(null);
   // Elapsed-time ticker for moduleBusy — one-shot Opus ingestion calls
   // (establish_campaign_lore, chapterize_and_import_module, update_campaign_lore)
@@ -2775,7 +2789,7 @@ export function DMConsolePage() {
       // as the module-import step below.
       setModuleBusy('Establishing your campaign’s overarching story…');
       try {
-        const combinedLore = [newCampaign.lore.trim(), pendingLoreFile?.text].filter(Boolean).join('\n\n');
+        const combinedLore = [newCampaign.lore.trim(), pendingBookFile?.text].filter(Boolean).join('\n\n');
         await withClaudeReconnect(() =>
           invoke<string>('establish_campaign_lore', { id: meta.id, intake: { ...newCampaign, lore: combinedLore } })
         );
@@ -2785,14 +2799,16 @@ export function DMConsolePage() {
         setModuleBusy(null);
       }
 
-      // A module was picked before the campaign existed to write it into —
-      // chapterize it now that we have a real campaign id.
-      if (pendingModuleFile) {
-        setModuleBusy('Reading your module and building a chapter breakdown + campaign plan… this can take a few minutes for long documents.');
+      // Second pass over the SAME book, and the one that keeps it: the lore
+      // call above summarized it into a frame, this one chapterizes the full
+      // text so the adventure itself survives. Runs after, so the module's arc
+      // plan is synthesized against the frame that was just established.
+      if (pendingBookFile) {
+        setModuleBusy('Breaking your book into chapters and building its arc plan… this is the long one — several minutes for a full campaign book.');
         setIngestProgress(null);
         try {
           const result = await withClaudeReconnect(() =>
-            invoke<ChapterizeImportResult>('chapterize_and_import_module', { id: meta.id, text: pendingModuleFile.text })
+            invoke<ChapterizeImportResult>('chapterize_and_import_module', { id: meta.id, text: pendingBookFile.text })
           );
           if (result.concerns.length) setWarning(result.concerns.join(' '));
         } catch (e) {
@@ -2812,8 +2828,7 @@ export function DMConsolePage() {
       await refreshCampaignPlan(meta.id);
       turnsSincePlanCheckRef.current = Infinity;
       setNewCampaign(BLANK_INTAKE);
-      setPendingModuleFile(null);
-      setPendingLoreFile(null);
+      setPendingBookFile(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -2867,36 +2882,16 @@ export function DMConsolePage() {
     }
   }
 
-  /** "Import module file…" inside the New Campaign dialog — just extracts and
-   *  stashes the text; chapterizing needs a real campaign id, so that happens
-   *  in handleCreateCampaign right after the campaign is actually created. */
-  async function handleImportModuleForNewCampaign() {
+  /** The New Campaign dialog's single "attach your book" control — extracts and
+   *  stashes the text. Both ingestion passes need a real campaign id, so they
+   *  run in handleCreateCampaign once the campaign actually exists. */
+  async function handleAttachBookFile() {
     setModuleBusy('Reading file…');
     try {
       const picked = await pickAndExtractModuleFile();
       if (!picked) return;
-      setPendingModuleFile(picked);
+      setPendingBookFile(picked);
       setNewCampaign((n) => ({ ...n, module: n.module || picked.name.replace(/\.[^.]+$/, '') }));
-      if (picked.concern) setWarning(picked.concern);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setModuleBusy(null);
-    }
-  }
-
-  /** "Attach campaign PDF" — same extraction pipeline as module files (PDF
-   *  text-extraction is generic, nothing module-specific about it). The
-   *  extracted text isn't dumped into the visible lore textarea (could be a
-   *  whole published campaign book); it's stashed alongside whatever's typed
-   *  and combined in handleCreateCampaign before the establish_campaign_lore
-   *  call — same "chip below the button" pattern as pendingModuleFile. */
-  async function handleAttachLoreFile() {
-    setModuleBusy('Reading file…');
-    try {
-      const picked = await pickAndExtractModuleFile();
-      if (!picked) return;
-      setPendingLoreFile(picked);
       if (picked.concern) setWarning(picked.concern);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -4286,7 +4281,7 @@ export function DMConsolePage() {
             {showCampaignManagerEntry && <option value="__manage__">Manage campaigns…</option>}
           </select>
 
-          <Button size="sm" variant="outline" onClick={() => { setNewCampaign(BLANK_INTAKE); setPendingModuleFile(null); setPendingLoreFile(null); setNewCampaignOpen(true); }}>
+          <Button size="sm" variant="outline" onClick={() => { setNewCampaign(BLANK_INTAKE); setPendingBookFile(null); setNewCampaignOpen(true); }}>
             <Plus size={14} /> New campaign
           </Button>
 
@@ -4668,19 +4663,6 @@ export function DMConsolePage() {
             </div>
           </div>
 
-          <div>
-            <Button size="sm" variant="outline" onClick={handleImportModuleForNewCampaign} disabled={!!moduleBusy}>
-              <Upload size={14} /> {moduleBusyLabel ?? 'Import module file (PDF or text)…'}
-            </Button>
-            {pendingModuleFile && (
-              <p className="text-xs text-emerald-400 mt-1">
-                ✓ {pendingModuleFile.name} ({pendingModuleFile.text.length.toLocaleString()} characters) — will be chapterized automatically once the campaign is created.
-                <button type="button" onClick={() => setPendingModuleFile(null)} className="ml-2 text-slate-500 hover:text-red-400">
-                  ✕ remove
-                </button>
-              </p>
-            )}
-          </div>
 
           <div>
             <label className="block text-xs text-slate-400 mb-1">Players &amp; characters</label>
@@ -4715,14 +4697,25 @@ export function DMConsolePage() {
               placeholder={'e.g. "The party is based out of Phandalin, hired for odd jobs by the Adventurer\'s Guild. A cult of dragon-worshippers works in the shadows..." or just "Homebrew — figure it out from the notes above."'}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-red-600"
             />
-            <div className="mt-1.5">
-              <Button size="sm" variant="outline" onClick={handleAttachLoreFile} disabled={!!moduleBusy}>
-                <Upload size={14} /> {moduleBusyLabel ?? 'Attach official campaign PDF…'}
+            {/* ONE attach point, sitting with the box it's the alternative to.
+                Two used to exist — see pendingBookFile's doc comment for the
+                trap that made. */}
+            <div className="mt-2 border border-slate-700 rounded-lg p-2.5 bg-slate-900/40">
+              <p className="text-xs font-bold text-slate-300 mb-0.5">…or attach the book itself</p>
+              <p className="text-xs text-slate-400 mb-2">
+                PDF, markdown or text — a published adventure or your own. Kept two ways: summarized into a short
+                frame the DM holds in mind throughout, <em>and</em> split into chapters with the full text intact, one
+                loaded per turn as you play. The box above is for your own notes and flavour; this is for a book you
+                intend to play through.
+              </p>
+              <Button size="sm" variant="outline" onClick={handleAttachBookFile} disabled={!!moduleBusy}>
+                <Upload size={14} /> {moduleBusyLabel ?? 'Attach your book…'}
               </Button>
-              {pendingLoreFile && (
+              {pendingBookFile && (
                 <p className="text-xs text-emerald-400 mt-1">
-                  ✓ {pendingLoreFile.name} ({pendingLoreFile.text.length.toLocaleString()} characters) — will be combined with the text above.
-                  <button type="button" onClick={() => setPendingLoreFile(null)} className="ml-2 text-slate-500 hover:text-red-400">
+                  ✓ {pendingBookFile.name} ({pendingBookFile.text.length.toLocaleString()} characters) — a frame and a
+                  full chapter breakdown are both built once the campaign is created.
+                  <button type="button" onClick={() => setPendingBookFile(null)} className="ml-2 text-slate-500 hover:text-red-400">
                     ✕ remove
                   </button>
                 </p>
