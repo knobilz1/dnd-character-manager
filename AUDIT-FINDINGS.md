@@ -283,6 +283,17 @@ get a counter that can only ever count down. Ring of Three Wishes is correct per
 permanently), so that one is fine — **Scarab of Protection is a real bug**: the DMG says it regains
 4d6 expended charges daily at dawn, so it should be `recharge: 'dawn'`.
 
+### R6b — charge COUNTS are clean (47 items), and the "recharge wording" check is a FALSE POSITIVE
+- **Charge count vs description: 0 mismatches.** Every item carrying `maxCharges: N` has a description
+  opening `"N charges."` and the numbers agree in all 47 cases. Real population, real check, clean result.
+- **Recharge wording: not a bug.** A check flagged 38 items as `recharge: 'dawn'` with no "dawn" in the
+  text. Item descriptions are **deliberately terse** — e.g.
+  `'3 charges. Reaction: succeed on a failed Dex save. Rare. Requires attunement.'` — and only **8 of 47**
+  restate recharge timing at all. `recharge` is supplementary structured data, not contradicted by the
+  text. **All 38 are fine; recorded so they are not "fixed".**
+- Confirmed real and still open: **Scarab of Protection** needs `recharge: 'dawn'` (DMG: 4d6 regained
+  daily at dawn). **Ring of Three Wishes** correctly has none — the DMG expends it permanently.
+
 The 39 untracked include: Alchemy Jug, Gem of Brightness, Cape of the Mountebank, Chime of Opening,
 Cloak of Invisibility, Cloak of the Bat, Helm of Teleportation, Hat of Vermin, Staff of Birdcalls,
 Staff of Flowers, Wand of Pyrotechnics/Scowls/Smiles, Bell Branch, Blood Fury Tattoo, Crook of Rao,
