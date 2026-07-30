@@ -109,6 +109,11 @@ export interface ClassFeature {
   level: number;
   description: string;
   isASI?: boolean;
+  /** The level grants a FEAT only, with no option to take +2 ability points instead —
+   *  PHB 2024's level-19 Epic Boon works this way ("Epic Boon feat or another feat"),
+   *  unlike a normal Ability Score Improvement. Set alongside `isASI`, which is what
+   *  drives the level-up dialog into its feat/ASI step in the first place. */
+  featOnly?: boolean;
 }
 
 export interface ClassResourceDefinition {

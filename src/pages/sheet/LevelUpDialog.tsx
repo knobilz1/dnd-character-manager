@@ -300,6 +300,14 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     : [];
 
   const isASI = newFeatures.some(f => (f as any).isASI);
+  // PHB 2024's level-19 Epic Boon reaches this step like an ASI but grants a FEAT only —
+  // there is no "+2 ability points" alternative. Without this the dialog offered one.
+  const featOnly = newFeatures.some(f => (f as any).featOnly);
+  // Both places that reset the dialog default asiMode to 'asi'. Rather than special-case
+  // each of them, hold the invariant in one effect: a feat-only level is always in feat mode.
+  React.useEffect(() => {
+    if (featOnly) setASIMode('feat');
+  }, [featOnly]);
 
   // hpRoll is the raw die result (before Con mod) stored in hitPointsRolled history.
   // For average, this is always floor(hitDie/2)+1 — never derived from the clamped
@@ -809,9 +817,15 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
         {isASI && (
           <section>
             <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
-              Ability Score Improvement or Feat
+              {featOnly ? 'Epic Boon Feat' : 'Ability Score Improvement or Feat'}
             </h3>
 
+            {featOnly ? (
+              <p className="text-xs text-slate-400 mb-4">
+                This level grants a feat — an Epic Boon feat is recommended. There is no
+                ability score increase to take instead.
+              </p>
+            ) : (
             <div className="grid grid-cols-2 gap-2 mb-4">
               <button
                 onClick={() => setASIMode('asi')}
@@ -836,6 +850,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                 </p>
               </button>
             </div>
+            )}
 
             {asiMode === 'asi' && (
               <div>
