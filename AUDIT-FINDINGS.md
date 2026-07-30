@@ -139,11 +139,55 @@ Wild Shape 2 uses, `rechargeOn: 'short'` ✅, `20:'unlimited'` ✅. `CANTRIPS_KN
   use on a short rest, all on a long rest). The single `rechargeOn` enum can't express "one on short, all on
   long" — likely a second instance of the A4-shaped gap.
 
+### ROUND 4 — all 25 class resource definitions swept at once
+
+#### MISSING RESOURCES — confirmed against the book, high value
+| Class | Feature | Book says | App |
+|---|---|---|---|
+| `fighter-2024` | **Indomitable** | 1 use @9, 2 @13, 3 @17 (PHB24 Fighter table) | **absent** |
+| `wizard-2024` | **Arcane Recovery** | lv1, once per Long Rest, recover slots ≤ half wizard level on a Short Rest | **absent — wizard-2024 has NO resources at all** |
+| `ranger-2024` | **Favored Enemy** (free *Hunter's Mark* casts) | 2 @1, 3 @5, 4 @9, 5 @13, 6 @17; all back on a Long Rest | **absent — ranger-2024 has NO resources at all** |
+| `warlock` (2014) | **Mystic Arcanum** | four separate 6th/7th/8th/9th spells, each 1/Long Rest | absent |
+| `warlock` (2014) | **Eldritch Master** (lv20) | regain all Pact slots, 1/Long Rest | absent |
+| `rogue` (2014 + 2024) | **Stroke of Luck** (lv20) | 1 per Short or Long Rest | absent |
+| `artificer` | **Spell-Storing Item** | 2× INT mod casts, refreshed on a Long Rest | absent |
+
+#### C1 — `cleric-2024` Channel Divinity recharges too generously (CONFIRMED)
+App has `rechargeOn: 'short'`, which restores **all** uses on a short rest. PHB 2024 (Level 2: Channel
+Divinity) says *"2 uses; regain 1 on Short Rest, all on Long Rest."* Another R4 instance, and a real
+over-generosity bug, not just a modelling nit.
+The **uses table itself is correct** — app `{1:2,2:2,3:2,4:2,5:3,…,17:3,18:4,19:4,20:4}` matches the 2024
+Cleric table's Channel Divinity column exactly. ⚠️ One thing to re-check against the **PDF**: the markdown
+extract shows `2` uses at level 1 while the feature text says "Level 2: Channel Divinity". App follows the
+extract. Possible extract artifact — do not "fix" without the PDF.
+
+#### C2 — `warlock-2024` represents Pact Magic slots TWICE (my round-2 fix made this worse)
+`classes/phb2024.ts` declares a `pact_slots` **resource**, but `LevelUpDialog.tsx:405,421-422` already
+assumed `warlock-2024` uses the `pactMagic` object + `PACT_MAGIC_TABLE`. Commit `7247716` aligned the
+creator and store with LevelUpDialog by granting `pactMagic` to `warlock-2024` — which is consistent with
+LevelUpDialog but now means slots exist in **two** places at once.
+Pick one representation in the fix pass. The `pactMagic` object is the one the spell UI and level-up
+already use, so `pact_slots` is the likely thing to drop. **Flagging honestly: this duplication is partly
+mine.** Before `7247716` a 2024 warlock had `pact_slots` only — and no working slots anywhere else.
+
+#### Confirmed correct — do not touch
+`barbarian-2024` rage · `bard-2024` inspiration die + CHA-mod override · `druid-2024` Wild Shape uses
+(2@2, 3@6, 4@17) · `fighter-2024` Action Surge (1@2, 2@17) and Second Wind (2/3/4 @1/4/10) ·
+`monk-2024` Focus = monk level · `paladin-2024` Lay on Hands 5×level and Channel Divinity (2@3, 3@11) ·
+`sorcerer-2024` Sorcery Points = level · `warlock-2024` pact slot counts.
+`ranger` and `rogue` (2014) correctly have no per-rest resources apart from the Stroke of Luck gap.
+
+#### `druid-2024` — R4 again
+Wild Shape uses are right, but 2024 says *"regain one expended use on a Short Rest, all on a Long Rest"*;
+`rechargeOn: 'short'` restores all. Same shape as C1.
+
 ---
 
 # QUEUE
 Phase A: [x] barbarian [x] barbarian-2024 [x] bard [x] bard-2024 [x] cleric [x] druid
-[ ] cleric-2024 [ ] druid-2024 [ ] fighter [ ] fighter-2024 [ ] monk [ ] monk-2024
+[x] cleric-2024 [x] druid-2024 [x] fighter-2024 [x] ranger-2024 [x] wizard-2024 [x] warlock-2024
+(resource layer swept for ALL 25; per-class **feature-by-feature** passes still owed for:)
+[ ] fighter [ ] monk [ ] monk-2024
 [ ] paladin [ ] paladin-2024 [ ] ranger [ ] ranger-2024 [ ] rogue [ ] rogue-2024 [ ] sorcerer
 [ ] sorcerer-2024 [ ] warlock [ ] warlock-2024 [ ] wizard [ ] wizard-2024 [ ] artificer
 
@@ -163,7 +207,7 @@ The enum is `'short' | 'long' | 'dawn'`. It cannot express:
 Expect more instances. Collect them all before designing the widening.
 
 ## Defect rate
-Entities audited 6 / 336. With ≥1 finding: 4 (bard, cleric, druid clean on data). Running 67%.
+Entities audited: resource layer swept for all 25 classes; feature-level passes done for 6. Of 336 total: 12.
 Caveat: inflated by R1, one systemic cause touching nearly every class. Per-class **data** errors are so far
 rare — bard, cleric and druid numbers were all perfect against the book. The real defects are structural:
 R1 (2024 blindness), R2 (caps not enforced), R3 (races untrackable), R4 (recharge enum too narrow).
