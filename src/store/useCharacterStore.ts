@@ -95,6 +95,10 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['runic_shield'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'the-genie' && cl.level >= 6))
     overrides['elemental_gift'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'rune-knight' && cl.level >= 3))
+    overrides['giants_might'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon' && cl.level >= 3))
+    overrides['breath_of_the_dragon'] = profBonus;
   // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
   if (c.classes.some(cl => cl.subclassId === 'light-domain'))
     overrides['warding_flare'] = Math.max(1, abilityMod(score('wis')));

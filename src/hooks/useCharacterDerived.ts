@@ -400,6 +400,12 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'the-genie' && c.level >= 6)) {
       resourceMaxOverrides['elemental_gift'] = profBonus;
     }
+    if (character.classes.some(c => c.subclassId === 'rune-knight' && c.level >= 3)) {
+      resourceMaxOverrides['giants_might'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'way-of-the-ascendant-dragon' && c.level >= 3)) {
+      resourceMaxOverrides['breath_of_the_dragon'] = profBonus;
+    }
     // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
     if (character.classes.some(c => c.subclassId === 'light-domain')) {
       resourceMaxOverrides['warding_flare'] = Math.max(1, mods.wis);

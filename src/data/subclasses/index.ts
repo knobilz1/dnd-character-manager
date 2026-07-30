@@ -919,8 +919,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // TCE p.47: Runic Shield — prof-bonus uses per long rest (override below).
     // NOT modelled: rune invocations themselves (once each per short rest, twice from 15th).
     // Those need a per-rune counter keyed on which runes the player chose — a D4 build choice.
-    resources: [{ name: 'Runic Shield', key: 'runic_shield', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+    resources: [
+      { name: 'Runic Shield', key: 'runic_shield', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // TCE p.46: Giant's Might — proficiency bonus uses per long rest.
+      { name: "Giant's Might", key: 'giants_might', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
   },
 
   // ── TCE: MONK ────────────────────────────────────────────────────────
@@ -1105,8 +1110,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // TCE p.75: Elemental Gift — the flight is prof-bonus uses per long rest (override below).
     // NOT modelled: Limited Wish (14th) recharges "after 1d4 long rests", which rechargeOn
     // cannot express — logged under R4.
-    resources: [{ name: 'Elemental Gift', key: 'elemental_gift', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+    resources: [
+      { name: 'Elemental Gift', key: 'elemental_gift', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // TCE p.73: the limited part of Genie's Vessel is Bottled Respite — "can't enter
+      // again until long rest". Genie's Wrath is a once-per-turn rider with no daily cap.
+      { name: 'Genie\'s Vessel: Bottled Respite', key: 'bottled_respite', rechargeOn: 'long',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
 
   // ── TCE: WIZARD ──────────────────────────────────────────────────────
@@ -1152,6 +1163,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
       // bonus at each monk level (0 before the feature unlocks).
       { name: 'Wings Unfurled', key: 'wings_unfurled', rechargeOn: 'long' as const,
         maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+      // FToD p.20: Breath of the Dragon is prof-bonus uses per long rest, with 2 ki as the
+      // fallback once they run out (an alternative cost, not a recharge — ki is tracked).
+      // Draconic Presence, the reroll buried inside Draconic Disciple, is once per long rest.
+      { name: 'Breath of the Dragon', key: 'breath_of_the_dragon', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+      { name: 'Draconic Presence', key: 'draconic_presence', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
       { name: 'Aspect of the Wyrm', key: 'aspect_of_the_wyrm', rechargeOn: 'long' as const,
         maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
     ],
@@ -1175,8 +1193,10 @@ export const ALL_SUBCLASSES: Subclass[] = [
     resources: [
       { name: 'Perfected Bond', key: 'perfected_bond', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } },
-      // FToD p.28: Drake's Breath — once per long rest (or a spell slot of 1st level or
-      // higher to use it again, which is an alternative cost rather than a recharge).
+      // FToD p.28: Drake Companion is summoned once per long rest (or a 1st-level+ slot to
+      // resummon); Drake's Breath is once per long rest on the same alternative-cost terms.
+      { name: 'Drake Companion', key: 'drake_companion', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
       { name: "Drake's Breath", key: 'drakes_breath', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
     ],
@@ -1273,6 +1293,9 @@ export const ALL_SUBCLASSES: Subclass[] = [
     resources: [
       { name: 'Momentary Stasis', key: 'momentary_stasis', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // EGtW p.184: Arcane Abeyance (10th) — once per short or long rest.
+      { name: 'Arcane Abeyance', key: 'arcane_abeyance', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
       // EGtW p.184: Chronal Shift — a flat 2 uses per long rest, not an ability modifier.
       { name: 'Chronal Shift', key: 'chronal_shift', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },

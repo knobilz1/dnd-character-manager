@@ -62,6 +62,11 @@ EXPECT = dict(
     chronal_shift='chronurgy-magic', hidden_paths='circle-of-dreams',
     glorious_defense='oath-of-glory', misty_wanderer='fey-wanderer',
     restorative_reagents='alchemist', drakes_breath='drakewarden',
+    # final triage batch
+    giants_might='rune-knight', bottled_respite='the-genie',
+    breath_of_the_dragon='way-of-the-ascendant-dragon',
+    draconic_presence='way-of-the-ascendant-dragon',
+    drake_companion='drakewarden', arcane_abeyance='chronurgy-magic',
 )
 bad = 0
 for k, want in EXPECT.items():
