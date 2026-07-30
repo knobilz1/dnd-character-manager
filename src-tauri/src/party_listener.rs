@@ -409,14 +409,24 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         // `who` is optional and additive: an older player build that doesn't
         // send it still gets its narration, it just doesn't register presence.
         let who = parse_query_param(&request_line, "who");
-        let proxy_for: Vec<String> = match who.as_deref() {
-            Some(name) if !name.trim().is_empty() => {
-                let key = name_key(name);
-                presence().lock().unwrap().insert(key.clone(), std::time::Instant::now());
-                proxy_assignments().lock().unwrap().get(&key).cloned().unwrap_or_default()
-            }
-            _ => Vec::new(),
-        };
+        let mut proxy_for: Vec<String> = Vec::new();
+        // When the DM's copy of the asking player's own character was saved
+        // more recently than theirs, their device offers to pull it down. One
+        // integer, on a poll that already runs — comparing any other way would
+        // mean shipping the whole portrait-carrying sheet every few seconds
+        // just to find out it hadn't changed.
+        let mut your_sheet_updated_at: Option<i64> = None;
+        if let Some(name) = who.as_deref().filter(|n| !n.trim().is_empty()) {
+            let key = name_key(name);
+            presence().lock().unwrap().insert(key.clone(), std::time::Instant::now());
+            proxy_for = proxy_assignments().lock().unwrap().get(&key).cloned().unwrap_or_default();
+            your_sheet_updated_at = shared_characters()
+                .lock()
+                .unwrap()
+                .get(&key)
+                .and_then(|c| c.get("updatedAt"))
+                .and_then(serde_json::Value::as_i64);
+        }
         let log = narration_log().lock().unwrap();
         let entries = entries_since(&log.entries, since);
         let latest = log.entries.back().map(|e| e.seq).unwrap_or(since);
@@ -425,7 +435,13 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         // getting its own loop — it's a handful of bytes. The heavy part (the
         // sheet itself, which carries a data-URL portrait) is a separate
         // one-shot GET /character the device only makes when this list changes.
-        let body = serde_json::json!({ "entries": entries, "latest": latest, "proxyFor": proxy_for }).to_string();
+        let body = serde_json::json!({
+            "entries": entries,
+            "latest": latest,
+            "proxyFor": proxy_for,
+            "yourSheetUpdatedAt": your_sheet_updated_at,
+        })
+        .to_string();
         return write_response(&mut stream, 200, &body, "application/json");
     }
     if request_line.starts_with("GET /character") {

@@ -93,7 +93,7 @@ export async function fetchNarrationSince(
   since: number,
   ip: string,
   who?: string,
-): Promise<{ entries: NarrationEntry[]; latest: number; proxyFor: string[] }> {
+): Promise<{ entries: NarrationEntry[]; latest: number; proxyFor: string[]; yourSheetUpdatedAt: number | null }> {
   // `who` turns a poll this device was making anyway into presence for the
   // DM's roll call — there's no separate heartbeat and no announce. It also
   // brings back `proxyFor`: the absent characters this device has been asked
@@ -102,8 +102,15 @@ export async function fetchNarrationSince(
   const suffix = who?.trim() ? `&who=${encodeURIComponent(who.trim())}` : '';
   const res = await tauriFetch(`${dmBaseUrl(ip)}/narration?since=${since}${suffix}`, { method: 'GET', connectTimeout: 5000 });
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
-  const j = (await res.json()) as { entries?: NarrationEntry[]; latest?: number; proxyFor?: string[] };
-  return { entries: j.entries ?? [], latest: j.latest ?? since, proxyFor: j.proxyFor ?? [] };
+  const j = (await res.json()) as {
+    entries?: NarrationEntry[]; latest?: number; proxyFor?: string[]; yourSheetUpdatedAt?: number | null;
+  };
+  return {
+    entries: j.entries ?? [],
+    latest: j.latest ?? since,
+    proxyFor: j.proxyFor ?? [],
+    yourSheetUpdatedAt: j.yourSheetUpdatedAt ?? null,
+  };
 }
 
 /** Pull one character's full sheet from the DM.

@@ -24,7 +24,7 @@ import { DmNarrationLog } from '../../components/DmNarrationLog';
 import { DmMapView } from '../../components/DmMapView';
 import { TableCameraButton } from '../../components/TableCameraButton';
 import { SendToDmButton } from '../../components/SendToDmButton';
-import { PullFromDmButton } from '../../components/PullFromDmButton';
+import { PullFromDmButton, DmHasNewerSheetBanner } from '../../components/PullFromDmButton';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
@@ -559,6 +559,11 @@ export function SheetPage() {
 
         {/* Main content — shrinks when sidebar is open */}
         <div className="flex-1 overflow-y-auto scrollbar-thin p-4 min-w-0">
+          {/* "The DM has a newer copy of you" — the week after a missed
+              session, where someone else's device holds everything that
+              happened to this character. Never shown on a borrowed sheet:
+              that IS the DM's copy. */}
+          {!isBorrowed && <DmHasNewerSheetBanner character={character} />}
           <Tabs
             tabs={[
               { id: 'combat', label: 'Combat' },

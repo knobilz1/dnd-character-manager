@@ -2,6 +2,7 @@ import React from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { fetchNarrationSince, fetchSharedCharacter, type NarrationEntry } from '../utils/dmConnect';
 import { useBorrowedStore } from '../store/useBorrowedStore';
+import { useDmSheetOfferStore } from '../store/useDmSheetOfferStore';
 
 const POLL_MS = 3000;
 
@@ -32,8 +33,12 @@ export function useDmNarrationFeed(characterName?: string): NarrationEntry[] {
     let cancelled = false;
     const poll = async () => {
       try {
-        const { entries: fresh, proxyFor } = await fetchNarrationSince(sinceRef.current, dmIp, characterName);
+        const { entries: fresh, proxyFor, yourSheetUpdatedAt } = await fetchNarrationSince(sinceRef.current, dmIp, characterName);
         if (cancelled) return;
+        // Whether the DM's copy of THIS character is newer than the one on
+        // this device — the returning-from-a-missed-session case. Just a
+        // number; the sheet decides whether to offer the pull.
+        if (characterName) useDmSheetOfferStore.getState().setRemote(characterName, yourSheetUpdatedAt);
         // Whoever the DM has asked this device to run tonight (an absent
         // player's character — see the roll call in DMConsolePage). Handled
         // here rather than in a hook of its own because this poll is the only
