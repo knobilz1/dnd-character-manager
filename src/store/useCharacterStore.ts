@@ -45,6 +45,11 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   // Psi Warrior / Soulknife (TCE): Psionic Energy pool = 2 x proficiency bonus.
   if (c.classes.some(cl => cl.subclassId === 'psi-warrior' || cl.subclassId === 'soulknife'))
     overrides['psionic_energy'] = profBonus * 2;
+  // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
+  if (c.classes.some(cl => cl.subclassId === 'phantom' && cl.level >= 3))
+    overrides['wails_from_the_grave'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-wildfire' && cl.level >= 10))
+    overrides['cauterizing_flames'] = profBonus;
   // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
   {
     const palLvl = classLevel(c.classes, 'paladin');

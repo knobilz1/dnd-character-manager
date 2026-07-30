@@ -326,6 +326,14 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'psi-warrior' || c.subclassId === 'soulknife')) {
       resourceMaxOverrides['psionic_energy'] = profBonus * 2;
     }
+    // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
+    // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.
+    if (character.classes.some(c => c.subclassId === 'phantom' && c.level >= 3)) {
+      resourceMaxOverrides['wails_from_the_grave'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'circle-of-wildfire' && c.level >= 10)) {
+      resourceMaxOverrides['cauterizing_flames'] = profBonus;
+    }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
       resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);

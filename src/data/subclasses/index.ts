@@ -691,7 +691,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Enhanced Bond', level: 6, description: 'When you cast a fire or healing spell, you can have it originate from your wildfire spirit. Damage spells deal +1d8 fire; healing spells heal +1d8.' },
     { name: 'Cauterizing Flames', level: 10, description: 'When a Small or larger creature dies within 30 feet of you or your wildfire spirit, a spectral flame appears in its space for 1 minute. Reaction when a creature you can see enters that space — extinguish the flame to either heal the creature or deal fire damage to it: 2d10 + Wis modifier. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Blazing Revival', level: 14, description: 'If you drop to 0 HP, your wildfire spirit is destroyed and you regain HP equal to half your max. Once per long rest.' },
-  ]},
+  ],
+    resources: [
+      // Cauterizing Flames (10th): proficiency-bonus uses per long rest — real max via override.
+      { name: 'Cauterizing Flames', key: 'cauterizing_flames', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // Blazing Revival (14th): once per long rest.
+      { name: 'Blazing Revival', key: 'blazing_revival', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: FIGHTER ─────────────────────────────────────────────────────
   { id: 'psi-warrior', name: 'Psi Warrior', classId: 'fighter', sourceBook: 'TCE', description: 'A Psi Warrior is a fighter who augments their physical might with the psionic power of their mind.', features: [
@@ -778,7 +787,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Tokens of the Departed', level: 9, description: 'As a reaction when a creature you can see dies within 30 feet, you can open your free hand and cause a Tiny soul trinket to appear there. You can hold a maximum number of soul trinkets equal to your proficiency bonus. Soul trinkets can be used in three ways: (1) While a trinket is on your person, you have advantage on death saving throws and Constitution saving throws. (2) When you deal Sneak Attack damage on your turn, you can destroy a trinket on your person to immediately use Wails from the Grave without expending a use. (3) As an action, destroy any soul trinket to ask the spirit one question; the spirit answers truthfully in a language it knew in life, as concisely as possible.' },
     { name: 'Ghost Walk', level: 13, description: 'As a bonus action, assume a spectral form for 10 minutes: flying speed 10 feet (hover), attack rolls against you have disadvantage, and you can move through creatures and objects as difficult terrain (take 1d10 force if you end a turn inside). Costs one Soul Trinket (or long rest to reuse).' },
     { name: 'Death\'s Friend', level: 17, description: 'Wails from the Grave now also deals necrotic damage to the first target (in addition to the second). At the end of a long rest, if you have no soul trinkets, one appears in your hand.' },
-  ]},
+  ],
+    // Wails from the Grave (3rd): proficiency-bonus uses per long rest — real max via override.
+    resources: [{ name: 'Wails from the Grave', key: 'wails_from_the_grave', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
   { id: 'soulknife', name: 'Soulknife', classId: 'rogue', sourceBook: 'TCE', description: 'A Soulknife strikes with imaginary blades formed of psionic energy that pierce mind and body.', features: [
     { name: 'Psionic Power', level: 3, description: 'You have a pool of Psionic Energy dice = 2 × proficiency bonus (d6; d8 at 5th, d10 at 11th, d12 at 17th); regain all on long rest or one die as bonus action (not until next rest). Use for Psi-Bolstered Knack (add a die to a failed proficient skill/tool check, expend only if it succeeds) or Psychic Whispers (action; for die-roll hours, telepathy within 1 mile among chosen creatures).' },
     { name: 'Psychic Blades', level: 3, description: 'When you take the Attack action, manifest a psychic blade as part of that attack — simple finesse melee weapon, thrown (range 60 ft, no disadvantage at long range), 1d6 psychic damage. After the attack, make one additional psychic blade attack as a bonus action (same turn, other hand free): deals 1d4 psychic instead of 1d6.' },
