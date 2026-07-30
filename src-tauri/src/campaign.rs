@@ -1204,6 +1204,12 @@ fn digest_session_at(root: &Path, id: &str, date: &str, transcript: &str) -> Res
     if transcript.trim().is_empty() {
         return Err("Nothing to digest — the session transcript is empty.".into());
     }
+    // Land this sitting's deferred memory before the digest runs, so the
+    // digest's own (LLM-extracted, usually richer) version of an NPC wins the
+    // upsert rather than being overwritten by the terser live one.
+    if let Err(e) = flush_pending_memory_at(root, id) {
+        crate::maplog::log("PENDING MEMORY FLUSH FAILED AT SESSION END", &e);
+    }
     let records_dir = root.join(id).join(SESSION_RECORDS_DIR);
     fs::create_dir_all(&records_dir).map_err(|e| e.to_string())?;
     let session_id = next_session_id_at(root, id);
@@ -1390,12 +1396,171 @@ fn read_session_record_at(root: &Path, id: &str, session_id: &str) -> Result<Str
 /// which loads every turn regardless of which module chapter is currently
 /// active, and is never handed to compact_memory_if_needed_at.
 fn append_memory_note_at(root: &Path, id: &str, date: &str, note: &str) -> Result<(), String> {
+    write_flagged_fact_at(root, id, date, note)?;
+    let _ = append_to_history_at(root, id, &format!("[{date}] Remembered: {}", note.trim()));
+    Ok(())
+}
+
+/// The registry write on its own, without the full_history.md line. Split out
+/// for the deferred path (see PENDING_MEMORY_FILE), which logs to history at
+/// the moment the DM says it — so the history stays in chronological order —
+/// but doesn't touch flagged_facts.md until the buffer flushes.
+fn write_flagged_fact_at(root: &Path, id: &str, date: &str, note: &str) -> Result<(), String> {
     let path = root.join(id).join("memory").join("flagged_facts.md");
     let mut existing = read_optional(&path);
     existing.push_str(&format!("- **{date}:** {}\n", note.trim()));
-    write_atomic(&path, &existing)?;
-    let _ = append_to_history_at(root, id, &format!("[{date}] Remembered: {}", note.trim()));
+    write_atomic(&path, &existing)
+}
+
+/// Live-turn memory writes are queued here instead of landing straight in
+/// entities.md / locations.md / flagged_facts.md.
+///
+/// All three are `@import`ed by CLAUDE.md, so every write moves the cached
+/// prompt prefix and forces the DM's *next* turn to re-write the whole ~28k
+/// standing block. Measured across two 40-turn runs: six memory writes, six
+/// cache misses on the turn after, no exceptions — about 22% of a sitting's
+/// bill (numbers in docs/session-roll-spec.md).
+///
+/// Nothing is lost by waiting. Within a sitting the DM's own transcript still
+/// holds every fact it just registered, verbatim, because it wrote it. The
+/// registries exist so it remembers NEXT week, and they are rebuilt before
+/// then: flushed at End Session (`digest_session_at`) and again on every
+/// campaign load (`sync_dm_rules_at`). The queue is a file, not memory, so a
+/// crash mid-sitting costs nothing either — the next load picks it up.
+///
+/// Deliberately NOT deferred:
+/// - `resolveFact`, which REMOVES a fact. Defer that and the DM keeps seeing
+///   an obligation the party already discharged, and may nag them about it —
+///   a visible regression, for something rare enough that its one
+///   invalidation doesn't matter.
+/// - npc_voices.json, which isn't imported at all (so it costs no cache) and
+///   is needed live, for that NPC's very next spoken line.
+const PENDING_MEMORY_FILE: &str = "_pending.jsonl";
+
+/// Safety valve. A sitting long enough to introduce this many named things is
+/// also long enough for the CLI to begin compacting its own transcript — and a
+/// compacted transcript is no longer the lossless copy this deferral leans on.
+/// Flushing costs one cache miss; a normal sitting never reaches it (the
+/// measured 40-turn run queued five entries in total).
+const PENDING_MEMORY_FLUSH_AFTER: usize = 25;
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+enum PendingKind {
+    Entity,
+    Location,
+    Fact,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PendingMemoryEntry {
+    kind: PendingKind,
+    /// Empty for `Fact` — flagged facts are append-only, not upserted by name.
+    name: String,
+    description: String,
+    /// Only meaningful for `Fact`; the other two aren't dated in their files.
+    date: String,
+}
+
+fn pending_memory_path(root: &Path, id: &str) -> PathBuf {
+    root.join(id).join("memory").join(PENDING_MEMORY_FILE)
+}
+
+/// Drains the queue before a UI read of the registries, so the History dialog
+/// never shows one that's missing tonight's entries. Costs nothing in the
+/// common case: an empty queue writes no files, so the DM's cached prompt is
+/// untouched — it only pays when showing stale data would have been wrong.
+/// Best-effort; a failed flush must not stop a dialog from opening.
+fn flush_before_registry_read(app: &AppHandle, id: &str) {
+    if let Ok(root) = campaigns_root(app) {
+        if let Err(e) = flush_pending_memory_at(&root, id) {
+            crate::maplog::log("PENDING MEMORY FLUSH FAILED BEFORE READ", &e);
+        }
+    }
+}
+
+/// Serializes queue access. Tauri commands run concurrently, and two flushes
+/// racing would each read the same queue and each apply it: harmless for
+/// entities and locations (upsert-by-name is idempotent) but flagged facts
+/// APPEND, so the campaign would end up with duplicates of every fact. Also
+/// stops an append landing between a flush's read and its delete, which would
+/// drop that entry silently.
+static PENDING_FLUSH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Appends one entry to the queue, flushing if it has grown past the valve.
+///
+/// JSONL rather than the registries' own markdown line format because a
+/// description can contain anything a DM might write, newlines included, and
+/// the queue has to round-trip it byte-exact.
+fn queue_pending_memory_at(root: &Path, id: &str, entry: &PendingMemoryEntry) -> Result<(), String> {
+    // Scoped so the guard is released before the flush below re-takes it.
+    let over_valve = {
+        let _guard = PENDING_FLUSH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let path = pending_memory_path(root, id);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut existing = read_optional(&path);
+        existing.push_str(&serde_json::to_string(entry).map_err(|e| e.to_string())?);
+        existing.push('\n');
+        write_atomic(&path, &existing)?;
+        existing.lines().filter(|l| !l.trim().is_empty()).count() >= PENDING_MEMORY_FLUSH_AFTER
+    };
+    if over_valve {
+        flush_pending_memory_at(root, id)?;
+    }
     Ok(())
+}
+
+/// Applies every queued entry to the real registries and clears the queue,
+/// returning how many landed. Order is preserved, so a name registered twice
+/// in one sitting still resolves last-write-wins exactly as it did when the
+/// writes were immediate.
+///
+/// Entries that fail are kept in the queue rather than dropped, so a transient
+/// write error retries on the next load instead of silently losing an NPC. A
+/// line that won't even parse is logged and discarded — it can never succeed,
+/// and stranding the whole queue behind it would be worse.
+fn flush_pending_memory_at(root: &Path, id: &str) -> Result<usize, String> {
+    let _guard = PENDING_FLUSH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let path = pending_memory_path(root, id);
+    let raw = read_optional(&path);
+    if raw.trim().is_empty() {
+        if path.exists() {
+            let _ = fs::remove_file(&path);
+        }
+        return Ok(0);
+    }
+    let mut applied = 0usize;
+    let mut retry: Vec<&str> = Vec::new();
+    for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+        let entry: PendingMemoryEntry = match serde_json::from_str(line) {
+            Ok(e) => e,
+            Err(e) => {
+                crate::maplog::log("PENDING MEMORY LINE UNREADABLE", &format!("dropped ({e}): {line}"));
+                continue;
+            }
+        };
+        let wrote = match entry.kind {
+            PendingKind::Entity => upsert_named_fact_at(root, id, "entities.md", &entry.name, &entry.description),
+            PendingKind::Location => upsert_named_fact_at(root, id, "locations.md", &entry.name, &entry.description),
+            PendingKind::Fact => write_flagged_fact_at(root, id, &entry.date, &entry.description),
+        };
+        match wrote {
+            Ok(()) => applied += 1,
+            Err(e) => {
+                crate::maplog::log("PENDING MEMORY WRITE FAILED", &format!("kept for retry ({e}): {line}"));
+                retry.push(line);
+            }
+        }
+    }
+    // Only give up the queue once its contents are actually in the registries.
+    if retry.is_empty() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    } else {
+        write_atomic(&path, &format!("{}\n", retry.join("\n")))?;
+    }
+    Ok(applied)
 }
 
 /// Brings any campaign — including one created many app versions ago — up to
@@ -1423,6 +1588,13 @@ fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
     // Before anything reads CLAUDE.md: put back whatever the folder has lost.
     // Create-only, so a healthy campaign is untouched.
     heal_campaign_scaffolding_at(root, id)?;
+    // Drain any memory deferred by the last sitting (see PENDING_MEMORY_FILE).
+    // Normally End Session already did this and it's a no-op; it matters when
+    // the app died mid-sitting, which is the case that would otherwise lose
+    // every NPC met that night. Never fatal to opening the campaign.
+    if let Err(e) = flush_pending_memory_at(root, id) {
+        crate::maplog::log("PENDING MEMORY FLUSH FAILED ON LOAD", &e);
+    }
     write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(&read_battle_mode_at(root, id)))?;
     let claude_path = dir.join("CLAUDE.md");
     let original = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
@@ -9591,6 +9763,7 @@ pub fn read_last_session_recap(app: AppHandle, id: String) -> Result<Option<Last
 /// compaction. Feeds the History dialog alongside read_campaign_memory.
 #[tauri::command]
 pub fn read_campaign_flagged_facts(app: AppHandle, id: String) -> Result<String, String> {
+    flush_before_registry_read(&app, &id);
     fs::read_to_string(campaign_dir(&app, &id)?.join("memory").join("flagged_facts.md")).map_err(|e| e.to_string())
 }
 
@@ -9639,7 +9812,17 @@ pub fn read_session_record(app: AppHandle, id: String, session_id: String) -> Re
 /// DMConsolePage's runTurn.
 #[tauri::command]
 pub fn append_memory_note(app: AppHandle, id: String, date: String, note: String) -> Result<(), String> {
-    append_memory_note_at(&campaigns_root(&app)?, &id, &date, &note)
+    let root = campaigns_root(&app)?;
+    // The history line lands NOW so full_history.md keeps the order things
+    // actually happened in; only the flagged_facts.md write waits. history
+    // isn't imported by CLAUDE.md, so writing it costs no cache.
+    let _ = append_to_history_at(&root, &id, &format!("[{date}] Remembered: {}", note.trim()));
+    queue_pending_memory_at(&root, &id, &PendingMemoryEntry {
+        kind: PendingKind::Fact,
+        name: String::new(),
+        description: note,
+        date,
+    })
 }
 
 /// The three combat-positioning styles a campaign can be played in, chosen per
@@ -9702,14 +9885,24 @@ pub fn set_battle_mode(app: AppHandle, id: String, mode: String) -> Result<Strin
 /// `rememberEntity` array — see DMConsolePage's runTurn.
 #[tauri::command]
 pub fn append_entity_fact(app: AppHandle, id: String, name: String, description: String) -> Result<(), String> {
-    upsert_named_fact_at(&campaigns_root(&app)?, &id, "entities.md", &name, &description)
+    queue_pending_memory_at(&campaigns_root(&app)?, &id, &PendingMemoryEntry {
+        kind: PendingKind::Entity,
+        name,
+        description,
+        date: String::new(),
+    })
 }
 
 /// Upserts one named place from a turn's dm-actions `rememberLocation` array
 /// — see DMConsolePage's runTurn.
 #[tauri::command]
 pub fn append_location_fact(app: AppHandle, id: String, name: String, description: String) -> Result<(), String> {
-    upsert_named_fact_at(&campaigns_root(&app)?, &id, "locations.md", &name, &description)
+    queue_pending_memory_at(&campaigns_root(&app)?, &id, &PendingMemoryEntry {
+        kind: PendingKind::Location,
+        name,
+        description,
+        date: String::new(),
+    })
 }
 
 /// Upserts one player character's identity + backstory summary into
@@ -9923,12 +10116,14 @@ pub fn read_module_decisions(app: AppHandle, id: String, module_id: String) -> R
 /// read_campaign_memory for the equivalent over the session-recap log.
 #[tauri::command]
 pub fn read_campaign_entities(app: AppHandle, id: String) -> Result<String, String> {
+    flush_before_registry_read(&app, &id);
     Ok(read_optional(&campaign_dir(&app, &id)?.join("memory").join("entities.md")))
 }
 
 /// Reads the locations registry — feeds the History dialog.
 #[tauri::command]
 pub fn read_campaign_locations(app: AppHandle, id: String) -> Result<String, String> {
+    flush_before_registry_read(&app, &id);
     Ok(read_optional(&campaign_dir(&app, &id)?.join("memory").join("locations.md")))
 }
 
@@ -12197,6 +12392,134 @@ Tactics:
         assert_eq!(strip_code_fences("```json\n{\"a\":1}\n```"), "{\"a\":1}");
         assert_eq!(strip_code_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
         assert_eq!(strip_code_fences("  {\"a\":1}  "), "{\"a\":1}");
+    }
+
+    /// The whole point of the deferral: the @imported registries must not move
+    /// mid-sitting, because every write to one costs the DM's next turn a full
+    /// re-write of the ~28k standing block (measured six writes, six misses —
+    /// see docs/session-roll-spec.md).
+    #[test]
+    fn queued_memory_leaves_the_imported_registries_untouched_until_flushed() {
+        let root = Scratch::new("pending-defer");
+        let meta = create_campaign_at(&root.0, &intake("Pending")).unwrap();
+        let entities = root.0.join(&meta.id).join("memory").join("entities.md");
+        let before = read_optional(&entities);
+
+        queue_pending_memory_at(&root.0, &meta.id, &PendingMemoryEntry {
+            kind: PendingKind::Entity,
+            name: "Ismark Kolyanovich".into(),
+            description: "The burgomaster's son.".into(),
+            date: String::new(),
+        })
+        .unwrap();
+
+        assert_eq!(read_optional(&entities), before, "queuing must not move the cached prefix");
+        assert_eq!(flush_pending_memory_at(&root.0, &meta.id).unwrap(), 1);
+        assert!(read_optional(&entities).contains("Ismark Kolyanovich"), "the flush must land it");
+        assert!(!pending_memory_path(&root.0, &meta.id).exists(), "a clean flush clears the queue");
+    }
+
+    /// The fidelity claim, stated as an equality: deferring changes WHEN a fact
+    /// lands, never WHAT lands. Same writes, one deferred and one immediate,
+    /// must produce byte-identical registries — including the re-registration
+    /// that has to still resolve last-write-wins.
+    #[test]
+    fn deferred_and_immediate_writes_produce_identical_registries() {
+        let deferred = Scratch::new("pending-equiv-deferred");
+        let dm = create_campaign_at(&deferred.0, &intake("Equiv")).unwrap();
+        let immediate = Scratch::new("pending-equiv-immediate");
+        let im = create_campaign_at(&immediate.0, &intake("Equiv")).unwrap();
+
+        for (name, desc) in [
+            ("Ismark Kolyanovich", "The burgomaster's son."),
+            ("Bildrath", "A greedy \"merchant\" — charges five times list."),
+            ("Ismark Kolyanovich", "Now travelling with the party."),
+        ] {
+            queue_pending_memory_at(&deferred.0, &dm.id, &PendingMemoryEntry {
+                kind: PendingKind::Entity,
+                name: name.into(),
+                description: desc.into(),
+                date: String::new(),
+            })
+            .unwrap();
+            upsert_named_fact_at(&immediate.0, &im.id, "entities.md", name, desc).unwrap();
+        }
+        flush_pending_memory_at(&deferred.0, &dm.id).unwrap();
+
+        assert_eq!(
+            read_optional(&deferred.0.join(&dm.id).join("memory").join("entities.md")),
+            read_optional(&immediate.0.join(&im.id).join("memory").join("entities.md")),
+            "deferring must change when a fact lands, never what lands",
+        );
+    }
+
+    /// The crash case. Immediate writes used to make memory crash-proof; the
+    /// queue keeps that by draining on campaign load, not only at End Session.
+    #[test]
+    fn a_sitting_that_never_ended_is_recovered_on_the_next_campaign_load() {
+        let root = Scratch::new("pending-crash");
+        let meta = create_campaign_at(&root.0, &intake("Pending")).unwrap();
+        queue_pending_memory_at(&root.0, &meta.id, &PendingMemoryEntry {
+            kind: PendingKind::Location,
+            name: "Tser Pool".into(),
+            description: "Vistani camp an hour up the north road.".into(),
+            date: String::new(),
+        })
+        .unwrap();
+
+        // No End Session — the app died. The next load runs sync_dm_rules_at.
+        sync_dm_rules_at(&root.0, &meta.id).unwrap();
+        assert!(
+            read_optional(&root.0.join(&meta.id).join("memory").join("locations.md")).contains("Tser Pool"),
+            "an interrupted sitting must not lose the places it visited",
+        );
+    }
+
+    /// Safety valve: a sitting long enough that the CLI may start compacting
+    /// its own transcript stops leaning on that transcript and writes through.
+    #[test]
+    fn the_valve_drains_the_queue_once_a_sitting_gets_long() {
+        let root = Scratch::new("pending-valve");
+        let meta = create_campaign_at(&root.0, &intake("Pending")).unwrap();
+        for i in 0..PENDING_MEMORY_FLUSH_AFTER {
+            queue_pending_memory_at(&root.0, &meta.id, &PendingMemoryEntry {
+                kind: PendingKind::Entity,
+                name: format!("Villager {i}"),
+                description: "Met in passing.".into(),
+                date: String::new(),
+            })
+            .unwrap();
+        }
+        assert!(!pending_memory_path(&root.0, &meta.id).exists(), "the valve must have drained the queue");
+        let entities = read_optional(&root.0.join(&meta.id).join("memory").join("entities.md"));
+        assert!(entities.contains("Villager 0"), "the valve must not drop the oldest entry");
+        assert!(entities.contains(&format!("Villager {}", PENDING_MEMORY_FLUSH_AFTER - 1)));
+    }
+
+    /// A line that can never parse is dropped rather than stranding everything
+    /// queued behind it, and the good entries either side still land.
+    #[test]
+    fn an_unreadable_queue_line_does_not_strand_the_rest() {
+        let root = Scratch::new("pending-corrupt");
+        let meta = create_campaign_at(&root.0, &intake("Pending")).unwrap();
+        for name in ["Ireena", "Donavich"] {
+            queue_pending_memory_at(&root.0, &meta.id, &PendingMemoryEntry {
+                kind: PendingKind::Entity,
+                name: name.into(),
+                description: "Met in Barovia.".into(),
+                date: String::new(),
+            })
+            .unwrap();
+        }
+        let path = pending_memory_path(&root.0, &meta.id);
+        let mut raw = read_optional(&path);
+        raw.push_str("{ this is not json\n");
+        write_atomic(&path, &raw).unwrap();
+
+        assert_eq!(flush_pending_memory_at(&root.0, &meta.id).unwrap(), 2, "both good entries must land");
+        let entities = read_optional(&root.0.join(&meta.id).join("memory").join("entities.md"));
+        assert!(entities.contains("Ireena") && entities.contains("Donavich"));
+        assert!(!path.exists(), "an unparseable line is discarded, not retried forever");
     }
 
     #[test]
