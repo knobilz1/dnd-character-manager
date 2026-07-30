@@ -7,6 +7,7 @@ import { useBorrowedStore } from './useBorrowedStore';
 import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
 import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
+import { getSpell } from '../data/spells';
 
 /** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
  *  Mirrors the logic in useCharacterDerived.ts so the store can apply correct maxes
@@ -109,7 +110,9 @@ interface CharacterState {
   restorePactSlots: () => void;
 
   // Spells
-  toggleSpellPrepared: (spellId: string) => void;
+  /** maxPrepared: the derived prepared-spell cap, or null/undefined when no cap applies
+   *  (known casters, spellbook casters). Passed in because the caller has the authoritative value. */
+  toggleSpellPrepared: (spellId: string, maxPrepared?: number | null) => void;
   addSpellToBook: (spellId: string) => void;
   removeSpellFromBook: (spellId: string) => void;
   startConcentration: (spellId: string) => void;
@@ -446,9 +449,30 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, pactMagic: { ...s.character.pactMagic, slotsUsed: 0 } } };
     }),
 
-  toggleSpellPrepared: (spellId) =>
+  toggleSpellPrepared: (spellId, maxPrepared) =>
     set((s) => {
       if (!s.character) return s;
+      const entry = s.character.spellbook.find((sp) => sp.spellId === spellId);
+      if (!entry) return s;
+
+      // Enforce the prepared-spell cap HERE rather than in the panel: this action is the single
+      // chokepoint every preparation path funnels through, so a future caller can't bypass it.
+      // The cap is passed in rather than recomputed — the caller derives it from the full ability
+      // pipeline (base + racial + feats + ASI), which this store does not reproduce faithfully.
+      // Un-preparing is always allowed, and cantrips/always-prepared spells never count (PHB: domain
+      // and other always-prepared spells "don't count against the number of spells you can prepare").
+      if (!entry.isPrepared && maxPrepared != null && maxPrepared > 0) {
+        const spell = getSpell(spellId);
+        if (spell && spell.level > 0) {
+          const preparedCount = s.character.spellbook.filter((sp) => {
+            if (!sp.isPrepared || sp.isAlwaysPrepared) return false;
+            const sp2 = getSpell(sp.spellId);
+            return sp2 && sp2.level > 0;
+          }).length;
+          if (preparedCount >= maxPrepared) return s; // at the cap — refuse
+        }
+      }
+
       const spellbook = s.character.spellbook.map((sp) =>
         sp.spellId === spellId ? { ...sp, isPrepared: !sp.isPrepared } : sp
       );

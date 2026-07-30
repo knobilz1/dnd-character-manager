@@ -18,7 +18,7 @@ const SCHOOL_COLORS: Record<string, string> = {
 interface SpellPanelProps {
   character: Character;
   derived: any;
-  toggleSpellPrepared: (id: string) => void;
+  toggleSpellPrepared: (id: string, maxPrepared?: number | null) => void;
   startConcentration: (id: string) => void;
   endConcentration: () => void;
   addSpellToBook: (id: string) => void;
@@ -173,8 +173,8 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                     {/* Prepared toggle — only for prepared casters, not cantrips */}
                     {lvl > 0 && isPreparedCaster && (
                       <button
-                        onClick={() => !alwaysPrepared && toggleSpellPrepared(spell.id)}
-                        disabled={alwaysPrepared}
+                        onClick={() => !alwaysPrepared && toggleSpellPrepared(spell.id, maxPreparedSpells)}
+                        disabled={alwaysPrepared || (!prepared && maxPreparedSpells != null && maxPreparedSpells > 0 && preparedCount >= maxPreparedSpells)}
                         className={cn(
                           'w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition-all',
                           prepared ? 'border-green-500 bg-green-500/20' : 'border-slate-500',
