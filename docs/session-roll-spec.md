@@ -81,18 +81,51 @@ So if rolling is ever needed for a *non-cost* reason — context-window limits o
 a very long session — the continuity design below is validated and can be built
 as written.
 
-## What the numbers actually point at
+## What the numbers pointed at instead — deferred memory writes (SHIPPED)
 
-Cache misses are ~67% of the bill ($2.50 of $3.71 over 40 turns, 10 misses at
-$0.15–0.35). Miss *cost* is proportional to the prefix being rewritten, which
-is standing block + history. Of the 27,784-token standing block,
-`active_module/current.md` alone is 14,861 tokens — more than half.
+Cache misses are ~67% of the bill ($2.50 of $3.71 over 40 turns). Rolling
+attacked the *history* half of the rewritten prefix and lost. The other half is
+the standing block — and the finding that mattered is that **it was moving.**
 
-Making that chapter recall-on-demand instead of always-loaded would cut ~20% of
-the bill, roughly twice what rolling could deliver, with no continuity risk.
-**But it is the chapter the DM is actively running**, so it is a straight
-fidelity trade, and the standing instruction is lose no fidelity. Not proposed
-— recorded because it is where the arithmetic leads.
+`entities.md`, `locations.md` and `flagged_facts.md` are all `@import`ed, so
+every `rememberEntity`/`rememberLocation`/`remember` changed the cached prefix
+and forced a full re-write on the DM's next turn. Across the control and rolled
+runs: **six memory writes, six misses on the following turn, no exceptions.**
+
+Fixed by queueing live-turn writes into a non-imported `memory/_pending.jsonl`
+and flushing at End Session, on campaign load, and before any UI read of the
+registries. Re-measured over the same 40 messages:
+
+| | writes immediate | deferred |
+|---|---|---|
+| writes followed by a miss | **3/3** | **0/3** |
+| standing-block drift over 40 turns | +259 tokens | **+0** |
+| total misses | 10 | 6 |
+| settled tail (last 10 turns) | $0.089/msg | **$0.053/msg** |
+| total | $3.71 | $2.67 |
+
+Read the top two rows, not the bottom one. Run-to-run noise on a *total* is
+±39% (see above), so −28% overall is inside the noise. The paired
+write→next-turn observation and the byte-exact standing-block drift are
+within-run and deterministic — those are the evidence that the mechanism is
+gone. The tail figure is the one to quote for a real sitting, since that is the
+regime a session spends most of its time in.
+
+No fidelity traded: within a sitting the transcript still holds every deferred
+fact verbatim, and the registries are rebuilt before the next one. `resolveFact`
+stays immediate — it *removes* a fact, and deferring that means the DM keeps
+raising an obligation the party already discharged.
+
+**Misses at turns 7, 15, 23 and 38 survived the fix**, on roughly the same 5–8
+turn cadence as before. Whatever causes those is not memory writes and not
+pacing; best guess is the CLI moving its own cache breakpoints as the
+conversation grows. Nothing in this app controls it — don't spend more on it.
+
+Still on the table and still declined: `active_module/current.md` is 14,861 of
+the 27,784-token standing block, and making it recall-on-demand would cut the
+cold-start cost proportionally. It is the chapter the DM is actively running,
+so it is a straight fidelity trade. Recorded because it is where the arithmetic
+leads, not proposed.
 
 ## Harness caveat found while doing this
 
