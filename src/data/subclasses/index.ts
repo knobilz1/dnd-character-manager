@@ -698,7 +698,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Cosmic Omen', level: 6, description: 'After a long rest, roll a die. Until next long rest, reaction when a creature within 30 ft makes an attack, ability check, or saving throw: Weal (even roll) add 1d6 to the total; Woe (odd roll) subtract 1d6 from the total. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Twinkling Constellations', level: 10, description: 'Starry Form effects improve, and as a bonus action while in Starry Form, you can change which form you have and gain a flying speed of 20 feet.' },
     { name: 'Full of Stars', level: 14, description: 'While in Starry Form, you become partially incorporeal: resistance to bludgeoning, piercing, and slashing.' },
-  ]},
+  ],
+    resources: [
+      // Star Map (2nd) — Guiding Bolt free casts, and Cosmic Omen (6th): both prof bonus per long rest.
+      { name: 'Star Map', key: 'star_map', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Cosmic Omen', key: 'cosmic_omen', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
   { id: 'circle-of-wildfire', name: 'Circle of Wildfire', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Wildfire understand that destruction sometimes paves the way for greater growth.', features: [
     { name: 'Circle Spells', level: 2, description: 'You always have these spells prepared: 1st — Burning Hands, Cure Wounds; 3rd — Flaming Sphere, Scorching Ray; 5th — Plant Growth, Revivify; 7th — Aura of Life, Fire Shield; 9th — Flame Strike, Mass Cure Wounds.' },
     { name: 'Summon Wildfire Spirit', level: 2, description: 'As an action, expend a Wild Shape use to summon a wildfire spirit (Small elemental) in an unoccupied space within 30 feet. It can use Fiery Teleportation to teleport and deal fire damage.' },
@@ -938,7 +946,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Extra Attack', level: 5, description: 'You can attack twice when you take the Attack action.' },
     { name: 'Armor Modifications', level: 9, description: 'You learn to extend infusion magic to your Arcane Armor. You can have up to 4 infusions in armor pieces. The number of infused items doesn\'t count against your max.' },
     { name: 'Perfected Armor', level: 15, description: 'Guardian: As a reaction when a Huge or smaller creature ends its turn within 30 feet of you, force it to make a Strength save (vs your spell save DC) or be pulled up to 30 feet toward you; if it ends within 5 feet, you can make one melee attack against it. You can use this reaction a number of times equal to your proficiency bonus, regaining all uses on a long rest. Infiltrator: Creatures hit by your Lightning Launcher shed dim light in a 5-foot radius, have disadvantage on their next attack roll against you, and the next attack roll against them has advantage (plus an extra 1d6 lightning damage on a hit), until the start of your next turn.' },
-  ]},
+  ],
+    // Perfected Armor (15th): proficiency-bonus uses, all back on a long rest.
+    resources: [{ name: 'Perfected Armor', key: 'perfected_armor', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
   { id: 'artillerist', name: 'Artillerist', classId: 'artificer', sourceBook: 'TCE', description: 'An Artillerist specializes in using magic to hurl energy, projectiles, and explosions on a battlefield.', features: [
     { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with woodcarver\'s tools. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
     { name: 'Artillerist Spells', level: 3, description: 'You always have certain spells prepared: Shield, Thunderwave (3rd), Scorching Ray, Shatter (5th), Fireball, Wind Wall (9th), Ice Storm, Wall of Fire (13th), Cone of Cold, Wall of Force (17th).' },

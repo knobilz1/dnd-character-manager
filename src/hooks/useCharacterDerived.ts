@@ -346,6 +346,15 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'swarmkeeper' && c.level >= 15)) {
       resourceMaxOverrides['swarming_dispersal'] = profBonus;
     }
+    if (character.classes.some(c => c.subclassId === 'circle-of-stars' && c.level >= 2)) {
+      resourceMaxOverrides['star_map'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'circle-of-stars' && c.level >= 6)) {
+      resourceMaxOverrides['cosmic_omen'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'armorer' && c.level >= 15)) {
+      resourceMaxOverrides['perfected_armor'] = profBonus;
+    }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
       resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);

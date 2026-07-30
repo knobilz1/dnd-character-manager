@@ -58,6 +58,12 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['writhing_tide'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'swarmkeeper' && cl.level >= 15))
     overrides['swarming_dispersal'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-stars' && cl.level >= 2))
+    overrides['star_map'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-stars' && cl.level >= 6))
+    overrides['cosmic_omen'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'armorer' && cl.level >= 15))
+    overrides['perfected_armor'] = profBonus;
   // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
   {
     const palLvl = classLevel(c.classes, 'paladin');
