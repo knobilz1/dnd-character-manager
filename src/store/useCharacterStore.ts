@@ -1061,9 +1061,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         : s.character.maxHP;
       // Re-apply ability-mod / prof-bonus overrides so the stored max stays accurate
       // even if the character's stats changed since the last level-up.
+      // Keys whose rule is not a rest at all (Divine Intervention's 7-day cooldown, the
+      // Genie's 1d4-long-rests Limited Wish). A long rest must NOT hand these back — that
+      // is the whole reason 'special' exists. The player resets them by hand.
+      const specialKeys = new Set<string>();
+      for (const cl of s.character.classes) {
+        const def = getClass(cl.classId);
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        for (const rd of [...(def?.resources ?? []), ...(sub?.resources ?? [])]) {
+          if (rd.rechargeOn === 'special') specialKeys.add(rd.key);
+        }
+      }
+      for (const rd of (getRace(s.character.raceId)?.resources ?? [])) {
+        if (rd.rechargeOn === 'special') specialKeys.add(rd.key);
+      }
       const overrides = computeResourceMaxOverrides(s.character);
       const resources = s.character.resources.map((r) => {
         const correctMax = overrides[r.key] ?? r.max;
+        if (specialKeys.has(r.key)) return { ...r, max: correctMax };
         return { ...r, max: correctMax, current: correctMax };
       });
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;

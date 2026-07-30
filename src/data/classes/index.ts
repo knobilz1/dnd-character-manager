@@ -127,6 +127,16 @@ export const ALL_CLASSES: DClass[] = [
         rechargeOn: 'short',
         maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:3,19:3,20:3 },
       },
+      {
+        // PHB p.59. The recharge depends on the OUTCOME: a failed percentile roll means you
+        // can try again after a long rest, but a success locks it for 7 days. No rest rule
+        // covers that, so 'long' would quietly restore it the morning after it worked.
+        name: 'Divine Intervention',
+        key: 'divine_intervention',
+        rechargeOn: 'special',
+        rechargeNote: 'Long rest if the roll failed; 7 days if your deity intervened',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
     ],
     subclassLabel: 'Divine Domain',
     subclassLevel: 1,

@@ -114,7 +114,17 @@ export interface ClassFeature {
 export interface ClassResourceDefinition {
   name: string;
   key: string;
-  rechargeOn: 'short' | 'long' | 'dawn';
+  /** 'special' = the rule is not a rest at all, so NO rest restores it and the player
+   *  resets it by hand when the fiction says so. Required for the shapes the other three
+   *  cannot express: an in-game cooldown measured in days (Cleric Divine Intervention is
+   *  7 days after a *successful* use, but a long rest after a failed one), and a randomly
+   *  rolled number of long rests (the Genie's Limited Wish, 1d4). Modelling either as
+   *  'long' would silently hand the feature back every night. Always pair with
+   *  `rechargeNote`, or the card has nothing to tell the player. */
+  rechargeOn: 'short' | 'long' | 'dawn' | 'special';
+  /** Human-readable recharge rule, shown in place of "Recharges on X rest". Only meaningful
+   *  for `rechargeOn: 'special'`. */
+  rechargeNote?: string;
   maxPerLevel: Record<number, number | 'unlimited'>;
   /** Maps class level to die size for resources with a scaling die (e.g. Bardic Inspiration d6→d12).
    *  Sparse — the last entry at or below the current level applies. */

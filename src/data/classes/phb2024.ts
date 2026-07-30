@@ -122,6 +122,12 @@ export const PHB2024_CLASSES: DClass[] = [
       // PHB 2024: "2 uses; regain 1 on Short Rest, all on Long Rest." It was rechargeOn 'short', which
       // refilled every use on a short rest — strictly more generous than the book.
       { name: 'Channel Divinity', key: 'channel_divinity', rechargeOn: 'long', shortRestRegain: 1, maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:4,19:4,20:4} },
+      // PHB 2024 p.68: plainly "Once per Long Rest" — unlike the 2014 version, which is
+      // outcome-dependent and needs 'special'. The 2d4-Long-Rest lock at 20th applies only
+      // if you spend it on Wish via Greater Divine Intervention: a consequence of that
+      // choice, not this feature's recharge, so it stays out of rechargeOn.
+      { name: 'Divine Intervention', key: 'divine_intervention', rechargeOn: 'long',
+        maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
     ],
     subclassLabel: 'Divine Domain',
     subclassLevel: 3,

@@ -2267,7 +2267,15 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                           <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">d{resourceDieSz}</span>
                         )}
                       </div>
-                      {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
+                      {resourceDef && (
+                        <p className="text-xs text-slate-500">
+                          {resourceDef.rechargeOn === 'special'
+                            // No rest restores these, so saying "recharges on special rest"
+                            // would be worse than saying nothing — state the real rule.
+                            ? (resourceDef.rechargeNote ?? 'Recharges under a special rule — reset by hand')
+                            : `Recharges on ${resourceDef.rechargeOn} rest`}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {sustained && r.current > 0 && (

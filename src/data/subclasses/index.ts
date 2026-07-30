@@ -1108,8 +1108,8 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Limited Wish', level: 14, description: 'Action — speak to your Genie\'s Vessel to duplicate the effect of any spell of 6th level or lower with a 1-action casting time (from any class spell list, no requirements). Recharges after 1d4 long rests.' },
   ],
     // TCE p.75: Elemental Gift — the flight is prof-bonus uses per long rest (override below).
-    // NOT modelled: Limited Wish (14th) recharges "after 1d4 long rests", which rechargeOn
-    // cannot express — logged under R4.
+    // Limited Wish (14th) is the reason rechargeOn grew a 'special' member: "after 1d4 long
+    // rests" is not a rest rule, and marking it 'long' would return it every night.
     resources: [
       { name: 'Elemental Gift', key: 'elemental_gift', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
@@ -1117,6 +1117,9 @@ export const ALL_SUBCLASSES: Subclass[] = [
       // again until long rest". Genie's Wrath is a once-per-turn rider with no daily cap.
       { name: 'Genie\'s Vessel: Bottled Respite', key: 'bottled_respite', rechargeOn: 'long',
         maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Limited Wish', key: 'limited_wish', rechargeOn: 'special',
+        rechargeNote: 'Recharges after 1d4 long rests — roll and reset by hand',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
     ],
   },
 
