@@ -39,6 +39,12 @@ EXPECT = dict(
     # batch 13 (TCE remainder)
     hand_of_ultimate_mercy='way-of-mercy', living_legend='oath-of-glory',
     mortal_bulwark='oath-of-the-watchers', elemental_gift='the-genie',
+    # batch 14 (newly surfaced by the widened sweep)
+    wrath_of_the_storm='tempest-domain', war_priest='war-domain',
+    eyes_of_the_grave='grave-domain', sentinel_at_deaths_door='grave-domain',
+    hunters_sense='monster-slayer', arcane_jolt='battle-smith',
+    infectious_inspiration='college-of-eloquence', embodiment_of_the_law='order-domain',
+    fungal_infestation='circle-of-spores',
 )
 bad = 0
 for k, want in EXPECT.items():

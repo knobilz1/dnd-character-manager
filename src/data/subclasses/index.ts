@@ -300,7 +300,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Thunderbolt Strike', level: 6, description: 'When you deal lightning damage to a Large or smaller creature, you can also push it up to 10 feet away.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 thunder damage (2d8 at 14th).' },
     { name: 'Stormborn', level: 17, description: 'You have a flying speed equal to your walking speed when not underground or indoors.' },
-  ], alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }},
+  ],
+    // PHB p.62: Wrath of the Storm — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: 'Wrath of the Storm', key: 'wrath_of_the_storm', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }},
   { id: 'trickery-domain', name: 'Trickery Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods of trickery are mischief-makers and instigators who stand as a constant challenge to the accepted order among both gods and mortals.', features: [
     { name: 'Blessing of the Trickster', level: 1, description: 'You can use your action to touch a willing creature other than yourself to give it advantage on Dex (Stealth) checks for 1 hour.' },
     { name: 'Channel Divinity: Invoke Duplicity', level: 2, description: 'You create a perfect illusion of yourself within 30 feet that lasts for 1 minute. As a bonus action, you can move it up to 30 feet. You can cast spells through it and gain advantage on attacks against creatures within 5 feet of both you and the illusion.' },
@@ -315,7 +319,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Channel Divinity: War God\'s Blessing', level: 6, description: 'As a reaction when a creature within 30 feet makes an attack roll, you can use Channel Divinity to grant a +10 bonus to the roll.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 damage of the weapon\'s type (2d8 at 14th).' },
     { name: 'Avatar of Battle', level: 17, description: 'You gain resistance to bludgeoning, piercing, and slashing damage from nonmagical attacks.' },
-  ], alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }},
+  ],
+    // PHB p.63: War Priest — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: 'War Priest', key: 'war_priest', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }},
 
   // ── PHB: DRUID CIRCLES ────────────────────────────────────────────────
   { id: 'circle-of-the-land', name: 'Circle of the Land', classId: 'druid', sourceBook: 'PHB', description: 'The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites through a vast oral tradition.',
@@ -453,7 +461,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Sentinel at Death\'s Door', level: 6, description: 'When a creature you can see within 30 feet would suffer a critical hit, you can use your reaction to make it a normal hit. Wis modifier uses per long rest.' },
     { name: 'Potent Spellcasting', level: 8, description: 'You add your Wisdom modifier to damage from cleric cantrips.' },
     { name: 'Keeper of Souls', level: 17, description: 'When an enemy you can see within 60 feet dies, you or a creature within 60 feet regains HP equal to the dying creature\'s HD.' },
-  ], alwaysPreparedSpells: { 1: ['bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
+  ],
+    // XGtE p.19: Eyes of the Grave (1st) and Sentinel at Death's Door (6th) are each
+    // Wisdom modifier uses (min 1) per long rest.
+    resources: [
+      { name: 'Eyes of the Grave', key: 'eyes_of_the_grave', rechargeOn: 'long',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: "Sentinel at Death's Door", key: 'sentinel_at_deaths_door', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    alwaysPreparedSpells: { 1: ['bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
 
   // ── XGtE: DRUID ──────────────────────────────────────────────────────
   { id: 'circle-of-dreams', name: 'Circle of Dreams', classId: 'druid', sourceBook: 'XGtE', description: 'Druids who are members of the Circle of Dreams hail from regions that have strong ties to the Feywild and its dreamlike realms.', features: [
@@ -594,7 +611,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Supernatural Defense', level: 7, description: 'Whenever the target of your Slayer\'s Prey forces you to make a save, or you make an ability check to escape it, add 1d6 to your roll.' },
     { name: 'Magic-User\'s Nemesis', level: 11, description: 'When you see a creature within 60 feet casting a spell or teleporting, use your reaction to force a Wisdom save or its casting/teleportation fails.' },
     { name: 'Slayer\'s Counter', level: 15, description: 'If your Slayer\'s Prey forces you to make a save, you can use your reaction to make one weapon attack against it. If you hit, the save automatically succeeds.' },
-  ]},
+  ],
+    // XGtE p.42: Hunter's Sense — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: "Hunter's Sense", key: 'hunters_sense', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── XGtE: ROGUE ──────────────────────────────────────────────────────
   { id: 'inquisitive', name: 'Inquisitive', classId: 'rogue', sourceBook: 'XGtE', description: 'Inquisitives excel at rooting out secrets and unraveling mysteries. They rely on their sharp instincts, eye for detail, and forensic mind.', features: [
@@ -758,7 +779,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Unfailing Inspiration', level: 6, description: 'When a creature uses a Bardic Inspiration die from you and fails the roll, they keep the die.' },
     { name: 'Universal Speech', level: 6, description: 'As an action, choose up to Cha-mod creatures within 60 feet. They understand every language you speak for 1 hour.' },
     { name: 'Infectious Inspiration', level: 14, description: 'When a creature within 60 feet uses your Bardic Inspiration die and succeeds, use your reaction to inspire another creature within 60 feet (no action by them required). Cha-mod uses per long rest.' },
-  ]},
+  ],
+    // TCE p.20: Infectious Inspiration — Charisma modifier uses (min 1) per long rest.
+    resources: [{ name: 'Infectious Inspiration', key: 'infectious_inspiration', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── TCE: CLERIC ──────────────────────────────────────────────────────
   { id: 'order-domain', name: 'Order Domain', classId: 'cleric', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'The Order Domain represents discipline, dedication to a just cause, and devotion to a well-organized society.', features: [
@@ -768,7 +793,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Embodiment of the Law', level: 6, description: 'If you cast an enchantment spell, you can do so as a bonus action instead of an action. Wis-mod uses per long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 psychic damage (2d8 at 14th).' },
     { name: "Order's Wrath", level: 17, description: 'When you deal Divine Strike damage to a creature on your turn, that creature is cursed until the start of your next turn. The next time an ally hits the cursed creature with an attack, it takes an extra 2d8 psychic damage and the curse ends. Once per turn.' },
-  ], alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compulsion', 'locate-creature'], 9: ['commune', 'dominate-person'] }},
+  ],
+    // TCE p.32: Embodiment of the Law — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: 'Embodiment of the Law', key: 'embodiment_of_the_law', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compulsion', 'locate-creature'], 9: ['commune', 'dominate-person'] }},
   { id: 'peace-domain', name: 'Peace Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The teachings of the gods of the Peace Domain unite people of all sorts to live with one another in tranquility.', features: [
     { name: 'Implement of Peace', level: 1, description: 'You gain proficiency in Insight, Performance, or Persuasion (your choice).' },
     { name: 'Emboldening Bond', level: 1, description: 'As an action, choose up to your proficiency bonus willing creatures within 30 feet of you (including yourself). A magical bond forms between them for 10 minutes or until you use this feature again. While a bonded creature is within 30 feet of another bonded creature, it can roll a d4 and add the number rolled to an attack roll, ability check, or saving throw (once per turn). You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
@@ -803,7 +832,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Fungal Infestation', level: 6, description: 'When a Small or Medium beast or humanoid within 10 feet dies, you can use your reaction to animate it as a zombie under your control for 1 hour. Wis-mod uses per long rest.' },
     { name: 'Spreading Spores', level: 10, description: 'As a bonus action while Symbiotic Entity is active, create a 10-foot cube of spores within 30 feet for 1 minute. Creatures entering or starting their turn take Halo of Spores damage.' },
     { name: 'Fungal Body', level: 14, description: 'You are immune to being blinded, deafened, frightened, or poisoned. Any crit against you counts as a normal hit instead.' },
-  ]},
+  ],
+    // TCE p.36: Fungal Infestation — Wisdom modifier uses (min 1) per long rest.
+    // (Symbiotic Entity spends Wild Shape uses, which the druid class resource already tracks.)
+    resources: [{ name: 'Fungal Infestation', key: 'fungal_infestation', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'circle-of-stars', name: 'Circle of Stars', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Stars draw power from starlight. They glimpse the future in the stars\' radiance.', features: [
     { name: 'Star Map', level: 2, description: 'You create a star chart that serves as your druid spellcasting focus. You know the Guidance cantrip and Guiding Bolt is always prepared (doesn\'t count against spell limit). You can cast Guiding Bolt without expending a spell slot a number of times equal to your proficiency bonus per long rest.' },
     { name: 'Starry Form', level: 2, description: 'As a bonus action, expend a Wild Shape use to take on Starry Form for 10 minutes. Choose a constellation: Archer (bonus action ranged spell attack, 1d8 + Wis radiant), Chalice (when casting a healing spell using a slot, you or a creature within 30 ft regains 1d8 + Wis HP), or Dragon (Int and Wis checks, and Con saves to maintain concentration treat d20 ≤ 9 as 10).' },
@@ -1150,7 +1184,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Extra Attack', level: 5, description: 'You can attack twice when you take the Attack action.' },
     { name: 'Arcane Jolt', level: 9, description: 'When you hit a target with a magic weapon attack or your steel defender hits, you can channel magical energy: deal an extra 2d6 force damage, or restore 2d6 HP to one creature within 30 feet. Int-mod uses per long rest.' },
     { name: 'Improved Defender', level: 15, description: 'Your Arcane Jolt damage/healing increases to 4d6. When your steel defender uses its Deflect Attack reaction, the attacker takes force damage equal to 1d4 + Int mod.' },
-  ]},
+  ],
+    // TCE p.16: Arcane Jolt — Intelligence modifier uses (min 1) per long rest.
+    resources: [{ name: 'Arcane Jolt', key: 'arcane_jolt', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── EGtW: Explorer's Guide to Wildemount ────────────────────────────────
   { id: 'echo-knight', name: 'Echo Knight', classId: 'fighter', sourceBook: 'EGtW', description: 'A mysterious and feared frontline warrior of the Kryn Dynasty, the Echo Knight has mastered the art of using dunamis to summon the fading shades of unrealized timelines to aid them in battle. Passing through the shades of history, an Echo Knight can shroud themselves in the memory of conflict.', features: [

@@ -404,6 +404,25 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'light-domain')) {
       resourceMaxOverrides['warding_flare'] = Math.max(1, mods.wis);
     }
+    // Wisdom-modifier-per-long-rest features (PHB / XGtE / TCE), minimum 1 use each.
+    {
+      const wisUses = Math.max(1, mods.wis);
+      const has = (id: string, lvl = 1) => character.classes.some(c => c.subclassId === id && c.level >= lvl);
+      if (has('tempest-domain')) resourceMaxOverrides['wrath_of_the_storm'] = wisUses;
+      if (has('war-domain')) resourceMaxOverrides['war_priest'] = wisUses;
+      if (has('grave-domain')) resourceMaxOverrides['eyes_of_the_grave'] = wisUses;
+      if (has('grave-domain', 6)) resourceMaxOverrides['sentinel_at_deaths_door'] = wisUses;
+      if (has('monster-slayer', 3)) resourceMaxOverrides['hunters_sense'] = wisUses;
+      if (has('order-domain', 6)) resourceMaxOverrides['embodiment_of_the_law'] = wisUses;
+      if (has('circle-of-spores', 6)) resourceMaxOverrides['fungal_infestation'] = wisUses;
+    }
+    // Battle Smith Arcane Jolt (TCE): Int modifier; Eloquence Infectious Inspiration: Cha modifier.
+    if (character.classes.some(c => c.subclassId === 'battle-smith' && c.level >= 9)) {
+      resourceMaxOverrides['arcane_jolt'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'college-of-eloquence' && c.level >= 14)) {
+      resourceMaxOverrides['infectious_inspiration'] = Math.max(1, mods.cha);
+    }
     // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
     if (character.classes.some(c => c.subclassId === 'school-of-abjuration')) {
       resourceMaxOverrides['arcane_ward'] = classLevel(character.classes, 'wizard') * 2 + mods.int;

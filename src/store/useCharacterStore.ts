@@ -98,6 +98,23 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
   if (c.classes.some(cl => cl.subclassId === 'light-domain'))
     overrides['warding_flare'] = Math.max(1, abilityMod(score('wis')));
+  // Wisdom-modifier-per-long-rest features (PHB / XGtE / TCE), minimum 1 use each.
+  {
+    const wisUses = Math.max(1, abilityMod(score('wis')));
+    const has = (id: string, lvl = 1) => c.classes.some(cl => cl.subclassId === id && cl.level >= lvl);
+    if (has('tempest-domain')) overrides['wrath_of_the_storm'] = wisUses;
+    if (has('war-domain')) overrides['war_priest'] = wisUses;
+    if (has('grave-domain')) overrides['eyes_of_the_grave'] = wisUses;
+    if (has('grave-domain', 6)) overrides['sentinel_at_deaths_door'] = wisUses;
+    if (has('monster-slayer', 3)) overrides['hunters_sense'] = wisUses;
+    if (has('order-domain', 6)) overrides['embodiment_of_the_law'] = wisUses;
+    if (has('circle-of-spores', 6)) overrides['fungal_infestation'] = wisUses;
+  }
+  // Battle Smith Arcane Jolt (TCE): Int modifier; Eloquence Infectious Inspiration: Cha modifier.
+  if (c.classes.some(cl => cl.subclassId === 'battle-smith' && cl.level >= 9))
+    overrides['arcane_jolt'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'college-of-eloquence' && cl.level >= 14))
+    overrides['infectious_inspiration'] = Math.max(1, abilityMod(score('cha')));
   // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
   if (c.classes.some(cl => cl.subclassId === 'school-of-abjuration'))
     overrides['arcane_ward'] = classLevel(c.classes, 'wizard') * 2 + abilityMod(score('int'));
