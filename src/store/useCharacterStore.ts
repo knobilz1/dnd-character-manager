@@ -76,6 +76,12 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['momentary_stasis'] = Math.max(1, abilityMod(score('int')));
   if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 14))
     overrides['deprive_the_unworthy'] = Math.max(1, abilityMod(score('int')));
+  // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
+  if (c.classes.some(cl => cl.subclassId === 'light-domain'))
+    overrides['warding_flare'] = Math.max(1, abilityMod(score('wis')));
+  // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
+  if (c.classes.some(cl => cl.subclassId === 'school-of-abjuration'))
+    overrides['arcane_ward'] = classLevel(c.classes, 'wizard') * 2 + abilityMod(score('int'));
   // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
   {
     const palLvl = classLevel(c.classes, 'paladin');
@@ -218,7 +224,17 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     // class/subclass definitions at the character's current level. For classes with
     // genuinely no tracked resources (Ranger, Rogue), the loop produces nothing and
     // the empty array remains — so the migration is safe for all classes.
-    let resources = c.resources ?? [];
+    // Copy, don't alias: the insertion passes below push into this array, and pushing into
+    // c.resources mutates the caller's character. That aliasing made load() non-idempotent —
+    // a second load saw the freshly-pushed pre-override entries as if they had been saved,
+    // took the Math.min branch, and clamped every override-managed resource back down.
+    let resources = [...(c.resources ?? [])];
+    // Keys the character actually arrived with. Everything else in `resources` after the
+    // insertion passes below is brand new, and a brand-new resource must start full.
+    // This matters because override-managed keys (ability-mod / prof-bonus maxes) carry a
+    // placeholder of 1 in maxPerLevel, so inserting them at the table value and then
+    // clamping with Math.min left e.g. a Wis 18 Light Domain cleric on 1/4 Warding Flares.
+    const preexisting = new Set(resources.map(r => r.key));
     if (resources.length === 0 && (c.classes?.length ?? 0) > 0) {
       for (const cl of c.classes!) {
         const def = getClass(cl.classId);
@@ -307,11 +323,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     });
 
     // Apply overrides last so they are never overwritten by the re-sync pass above.
-    resources = resources.map(r =>
-      loadOverrides[r.key] != null
-        ? { ...r, max: loadOverrides[r.key]!, current: Math.min(r.current, loadOverrides[r.key]!) }
-        : r
-    );
+    resources = resources.map(r => {
+      const ov = loadOverrides[r.key];
+      if (ov == null) return r;
+      // Newly inserted this load → start full. Already-saved → clamp, so a stat drop
+      // (or a level loss) lowers the max without silently refilling spent uses.
+      return { ...r, max: ov, current: preexisting.has(r.key) ? Math.min(r.current, ov) : ov };
+    });
 
     set({
       // Defensive defaults for characters created before fields like

@@ -64,7 +64,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Improved Flare', level: 6, description: 'Starting at 6th level, you can also use your Warding Flare feature when a creature that you can see within 30 feet of you attacks a creature other than you.' },
     { name: 'Potent Spellcasting', level: 8, description: 'Starting at 8th level, you add your Wisdom modifier to the damage you deal with any cleric cantrip.' },
     { name: 'Corona of Light', level: 17, description: 'Starting at 17th level, you can use your action to activate an aura of sunlight that lasts for 1 minute or until you dismiss it using another action. While active, bright light shines from you in a 60-foot radius, and dim light shines 30 feet beyond that. Enemies in the bright light have disadvantage on saving throws against any spell that deals fire or radiant damage.' },
-  ], alwaysPreparedSpells: { 1: ['burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
+  ],
+    // PHB p.61: "You can use this feature a number of times equal to your Wisdom
+    // modifier (minimum once). You regain all expended uses when you finish a long rest."
+    resources: [{ name: 'Warding Flare', key: 'warding_flare', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
   // Fighter
   { id: 'champion', name: 'Champion', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypal Champion focuses on the development of raw physical power honed to deadly perfection.', features: [
     { name: 'Improved Critical', level: 3, description: 'Beginning when you choose this archetype at 3rd level, your weapon attacks score a critical hit on a roll of 19 or 20.' },
@@ -126,14 +131,26 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aura of Devotion', level: 7, description: 'Starting at 7th level, you and friendly creatures within 10 feet of you can\'t be charmed while you are conscious.' },
     { name: 'Purity of Spirit', level: 15, description: 'Beginning at 15th level, you are always under the effects of a protection from evil and good spell.' },
     { name: 'Holy Nimbus', level: 20, description: 'At 20th level, as an action, you can emanate an aura of sunlight. For 1 minute, bright light shines from you in a 30-foot radius, and dim light shines 30 feet beyond that. Any enemy that starts its turn in the bright light takes 10 radiant damage. You also have advantage on saving throws against spells cast by fiends or undead. Once per long rest.' },
-  ], alwaysPreparedSpells: { 3: ['protection-from-evil-good', 'sanctuary'], 5: ['lesser-restoration', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] }},
+  ],
+    // PHB p.86: Holy Nimbus — "Once you use this feature, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Holy Nimbus', key: 'holy_nimbus', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['protection-from-evil-good', 'sanctuary'], 5: ['lesser-restoration', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-ancients', name: 'Oath of the Ancients', classId: 'paladin', sourceBook: 'PHB', description: 'The Oath of the Ancients is as old as the race of elves and the rituals of the druids.', features: [
     { name: "Nature's Wrath", level: 3, description: 'You can use your Channel Divinity to invoke primeval forces to ensnare a foe. As an action, you can cause spectral vines to spring up and reach for a creature within 10 feet of you that you can see. The creature must succeed on a Strength or Dexterity saving throw (its choice) or be restrained. While restrained by the vines, the creature repeats the saving throw at the end of each of its turns. On a success, it frees itself and the vines vanish.' },
     { name: 'Turn the Faithless', level: 3, description: 'You can use your Channel Divinity to utter ancient words that are painful for fey and fiends to hear. Each fey or fiend that can see or hear you within 30 feet must make a Wisdom saving throw. On a failed save, the creature is turned for 1 minute or until it takes any damage. A turned creature must spend its turns trying to move as far away as possible and can\'t willingly move to a space within 30 feet of you. Creatures immune to the charmed condition are immune to this feature.' },
     { name: 'Aura of Warding', level: 7, description: 'Beginning at 7th level, ancient magic lies so heavily upon you that it creates an aegis around you. You and friendly creatures within 10 feet of you have resistance to damage from spells.' },
     { name: 'Undying Sentinel', level: 15, description: 'Starting at 15th level, when you are reduced to 0 hit points and are not killed outright, you can choose to drop to 1 hit point instead. Once you use this ability, you can\'t use it again until you finish a long rest.' },
     { name: 'Elder Champion', level: 20, description: 'At 20th level, as an action you can assume the form of an ancient force of nature for 1 minute. For the duration: you regain 10 hit points at the start of each of your turns; whenever you cast a paladin spell with a casting time of 1 action, you can cast it using a bonus action instead; hostile creatures within 10 feet have disadvantage on saving throws against your paladin spells and Channel Divinity options. Once per long rest.' },
-  ], alwaysPreparedSpells: { 3: ['ensnaring-strike', 'speak-with-animals'], 5: ['moonbeam', 'misty-step'], 9: ['plant-growth', 'protection-from-energy'], 13: ['ice-storm', 'stoneskin'], 17: ['commune-with-nature', 'tree-stride'] }},
+  ],
+    // PHB p.87: Undying Sentinel (15th) and Elder Champion (20th) are each once per long rest.
+    resources: [
+      { name: 'Undying Sentinel', key: 'undying_sentinel', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Elder Champion', key: 'elder_champion', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } },
+    ],
+    alwaysPreparedSpells: { 3: ['ensnaring-strike', 'speak-with-animals'], 5: ['moonbeam', 'misty-step'], 9: ['plant-growth', 'protection-from-energy'], 13: ['ice-storm', 'stoneskin'], 17: ['commune-with-nature', 'tree-stride'] }},
   // Ranger
   { id: 'hunter', name: 'Hunter', classId: 'ranger', sourceBook: 'PHB', description: 'Emulating the Hunter archetype means accepting your place as a bulwark between civilization and the terrors of the wilderness.', features: [
     { name: 'Hunter\'s Prey', level: 3, description: 'At 3rd level, you gain one of the following features of your choice: Colossus Slayer (deal extra d8 damage to creatures below their max HP), Giant Killer (reaction attack on large+ creature missing you), Horde Breaker (attack another creature within 5 ft. of target).' },
@@ -206,13 +223,28 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Entropic Ward', level: 6, description: 'At 6th level, when a creature makes an attack roll against you, you can use your reaction to impose disadvantage on that roll. If the attack misses you, your next attack roll against that creature has advantage, and you can reroll one of the dice once. Once per short or long rest.' },
     { name: 'Thought Shield', level: 10, description: 'Starting at 10th level, your thoughts can\'t be read by telepathy or other means unless you allow it. You also have resistance to psychic damage, and whenever a creature deals psychic damage to you, that creature takes the same amount of damage.' },
     { name: 'Create Thrall', level: 14, description: 'At 14th level, you can touch an incapacitated humanoid to infect its mind. After you spend 1 minute doing so, the creature is charmed by you until a remove curse spell is cast on it, the charmed condition is removed from it, or you use this feature again. You can communicate telepathically with the thrall as long as you are on the same plane of existence.' },
-  ], expandedSpells: { 1: ['dissonant-whispers', 'tashas-hideous-laughter'], 3: ['detect-thoughts', 'phantasmal-force'], 5: ['clairvoyance', 'sending'], 7: ['dominate-beast', 'evards-black-tentacles'], 9: ['dominate-person', 'telekinesis'] }},
+  ],
+    // PHB p.110: Entropic Ward — "Once you use this feature, you can't use it again until you finish a short or long rest."
+    resources: [{ name: 'Entropic Ward', key: 'entropic_ward', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    expandedSpells: { 1: ['dissonant-whispers', 'tashas-hideous-laughter'], 3: ['detect-thoughts', 'phantasmal-force'], 5: ['clairvoyance', 'sending'], 7: ['dominate-beast', 'evards-black-tentacles'], 9: ['dominate-person', 'telekinesis'] }},
   { id: 'the-archfey', name: 'The Archfey', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a lord or lady of the fey, a creature of legend who holds secrets that were forgotten before the mortal races were born.', features: [
     { name: 'Fey Presence', level: 1, description: 'Starting at 1st level, your patron bestows upon you the ability to project the fearsome presence of the Fey. As an action, you can cause each creature in a 10-foot cube originating from you to make a Wisdom saving throw against your warlock spell save DC. The creatures that fail their saving throws are all charmed or frightened by you (your choice) until the end of your next turn. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Misty Escape', level: 6, description: 'Starting at 6th level, you can vanish in a puff of mist in response to harm. When you take damage, you can use your reaction to turn invisible and teleport up to 60 feet to an unoccupied space you can see. You remain invisible until the start of your next turn or until you attack or cast a spell. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Beguiling Defenses', level: 10, description: 'Beginning at 10th level, your mind is not easily beguiled. You are immune to being charmed. When another creature attempts to charm you, you can use your reaction to turn the effect back on that creature if it fails a Wisdom saving throw against your warlock spell save DC. The creature is then charmed by you for 1 minute or until the creature takes any damage.' },
-    { name: 'Dark Delirium', level: 14, description: 'Starting at 14th level, as an action, choose a creature that you can see within 60 feet of you. It must make a Wisdom saving throw against your spell save DC or be charmed or frightened by you (your choice) for 1 minute or until your concentration is broken. This spell has no effect if the creature is immune to being charmed or frightened. The creature can repeat the saving throw at the end of each of its turns, ending the effect on a success. Once per short or long rest.' },
-  ], expandedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['calm-emotions', 'phantasmal-force'], 5: ['blink', 'plant-growth'], 7: ['dominate-beast', 'greater-invisibility'], 9: ['dominate-person', 'seeming'] }},
+    { name: 'Dark Delirium', level: 14, description: 'Starting at 14th level, you can plunge a creature into an illusory realm. As an action, choose a creature that you can see within 60 feet of you. It must make a Wisdom saving throw against your warlock spell save DC. On a failed save, it is charmed or frightened by you (your choice) for 1 minute or until your concentration is broken (as if you are concentrating on a spell). This effect ends early if the creature takes any damage. Until this illusion ends, the creature thinks it is lost in a misty realm, the appearance of which you choose. The creature can see and hear only itself, you, and the illusion. You must finish a short or long rest before you can use this feature again.' },
+  ],
+    // PHB p.109: Fey Presence (1st), Misty Escape (6th) and Dark Delirium (14th) are each
+    // "once you use this feature, you can't use it again until you finish a short or long rest".
+    resources: [
+      { name: 'Fey Presence', key: 'fey_presence', rechargeOn: 'short',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Misty Escape', key: 'misty_escape', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Dark Delirium', key: 'dark_delirium', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    expandedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['calm-emotions', 'phantasmal-force'], 5: ['blink', 'plant-growth'], 7: ['dominate-beast', 'greater-invisibility'], 9: ['dominate-person', 'seeming'] }},
   // Wizard
   { id: 'school-of-evocation', name: 'School of Evocation', classId: 'wizard', sourceBook: 'PHB', description: 'You focus your study on magic that creates powerful elemental effects such as bitter cold, searing flame, rolling thunder, crackling lightning, and burning acid.', features: [
     { name: 'Evocation Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an evocation spell into your spellbook is halved.' },
@@ -223,11 +255,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'school-of-abjuration', name: 'School of Abjuration', classId: 'wizard', sourceBook: 'PHB', description: 'The School of Abjuration emphasizes magic that blocks, banishes, or protects. Detractors of this school say that its tradition is about denial, negation rather than positive assertion.', features: [
     { name: 'Abjuration Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an abjuration spell into your spellbook is halved.' },
-    { name: 'Arcane Ward', level: 2, description: 'Starting at 2nd level, you can weave magic around yourself for protection. When you cast an abjuration spell of 1st level or higher, you can simultaneously use a strand of the spell\'s magic to create a magical ward on yourself that lasts until you finish a long rest. The ward has hit points equal to twice your wizard level + your Intelligence modifier.' },
+    { name: 'Arcane Ward', level: 2, description: 'Starting at 2nd level, you can weave magic around yourself for protection. When you cast an abjuration spell of 1st level or higher, you can simultaneously use a strand of the spell\'s magic to create a magical ward on yourself that lasts until you finish a long rest. The ward has hit points equal to twice your wizard level + your Intelligence modifier. Whenever you take damage while the ward has hit points, the ward takes the damage instead; if this reduces the ward to 0 hit points, you take any remaining damage. While the ward has 0 hit points it can\'t absorb damage, but its magic remains: whenever you cast an abjuration spell of 1st level or higher, the ward regains hit points equal to twice the level of the spell. Once you create the ward, you can\'t create it again until you finish a long rest.' },
     { name: 'Projected Ward', level: 6, description: 'Starting at 6th level, when a creature that you can see within 30 feet of you takes damage, you can use your reaction to cause your Arcane Ward to absorb that damage.' },
     { name: 'Improved Abjuration', level: 10, description: 'Beginning at 10th level, when you cast an abjuration spell that requires you to make an ability check as a part of casting that spell (as in counterspell and dispel magic), you add your proficiency bonus to that ability check.' },
     { name: 'Spell Resistance', level: 14, description: 'Starting at 14th level, you have advantage on saving throws against spells. Furthermore, you have resistance against the damage of spells.' },
-  ]},
+  ],
+    // PHB p.115: the ward is a hit point pool, not a use counter — max = 2x wizard level +
+    // Int modifier (overridden below), created at full strength and lasting until a long rest.
+    resources: [{ name: 'Arcane Ward', key: 'arcane_ward', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'school-of-illusion', name: 'School of Illusion', classId: 'wizard', sourceBook: 'PHB', description: 'You focus your studies on magic that dazzles the senses, befuddles the mind, and tricks even the wisest folk.', features: [
     { name: 'Illusion Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an illusion spell into your spellbook is halved.' },
     { name: 'Improved Minor Illusion', level: 2, description: 'When you choose this school at 2nd level, you learn the minor illusion cantrip. If you already know this cantrip, you learn a different wizard cantrip of your choice. The cantrip doesn\'t count against your number of cantrips known. When you cast minor illusion, you can create both a sound and an image with a single casting of the spell.' },
