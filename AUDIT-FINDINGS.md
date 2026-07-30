@@ -88,11 +88,31 @@ covers bard/cleric/druid/paladin/ranger/wizard-2024). This is the user's named c
 prepared caster. Sweep for the same display-without-enforcement shape on spells known, cantrips known,
 Expertise picks, invocations, metamagic, maneuvers, infusions.
 
-## ROOT CAUSE R3 — racial traits cannot be tracked at all
-No `resources` on `Race`, no racial-resource plumbing anywhere. Every limited-use racial trait is
-text-only: Breath Weapon (1/short), Relentless Endurance (1/long), Stone's Endurance, Fey Step,
-Hidden Step, Lucky, Healing Hands, aasimar transformations, Rabbit Hop, Goring Rush, and so on.
-This is a build, not a bug fix. Scope it when Phase C completes and the full list of affected traits exists.
+## ROOT CAUSE R3 — racial NON-SPELL abilities cannot be tracked (CORRECTED, Phase C)
+**Correction to the earlier claim.** I first wrote "no racial trait can ever be tracked". That was too
+broad. Racial *spells* **are** tracked: `Character.innateSpellUses` (`types/index.ts:527`) is maintained on
+load and on rest (`useCharacterStore.ts:290, 701`), and `InnateSpell.recharge` is `'cantrip'|'long'|'short'`.
+What has no home is a limited-use racial ability that **isn't a spell**.
+
+Measured:
+| Measure | Count |
+|---|---|
+| Races with ≥1 limited-use trait | 76 |
+| …of which have an `innateSpells` path (tracked) | 45 |
+| **Races whose limited-use trait has NO tracking path at all** | **31** |
+| Total limited-use racial traits | 91 |
+
+The 31 are the common, heavily-played ones:
+`dragonborn` + all 5 variants (**Breath Weapon**, 1/short rest) · `half-orc` (**Relentless Endurance**,
+1/long) · `goliath` (**Stone's Endurance**, 1/short) · `shifter` + all 4 subraces (**Shifting**) ·
+`aasimar-2024` (Healing Hands, Celestial Revelation) · `eladrin` (**Fey Step**) · `goblin` · `kobold` ·
+`harengon` · `hobgoblin` · `lizardfolk` · `sea-elf` · `shadar-kai` · `duergar` · `deep-gnome` · `leonin` ·
+`vedalken` · `autognome` · `astral-elf` · `hadozee` · `erlw-aberrant-dragonmark`.
+
+Fix shape: either add `resources?: ClassResourceDefinition[]` to `Race` (mirrors the subclass field
+exactly, and the load/levelUp/rest plumbing already loops class + subclass + feat — adding race is a fourth
+loop in the same places), or generalise `innateSpellUses` into a non-spell "trait uses" map. The first is
+closer to what already exists. Same build as R5.
 
 ---
 
