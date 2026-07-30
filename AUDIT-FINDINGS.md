@@ -460,6 +460,37 @@ clean** (67/67 resolve).
 not spell ids — the regex matched every quoted string inside the block, not just spell ids. **No feat
 finding should be drawn from it.** Redo with a parser that reads only the array contents.
 
+### G3 — DUPLICATE ID: a 2024 Druid picking Circle of Stars silently receives the **TCE** subclass
+- `src/data/subclasses/index.ts:677` — `circle-of-stars`, TCE, `classId: 'druid'`
+- `src/data/subclasses/phb2024.ts:172` — `circle-of-stars`, PHB2024, `classId: 'druid-2024'`
+
+Same id in both files. `getSubclass()` (`subclasses/index.ts:1236`) is `.find()` — **first match wins**,
+and the TCE entry comes first.
+
+The failure is worse than "unreachable", because the two lookups disagree:
+- `getSubclassesForClass('druid-2024')` filters on `classId`, so the **picker correctly offers the 2024
+  Circle of Stars**.
+- `getSubclass('circle-of-stars')` then returns the **TCE** one.
+
+So a 2024 Druid selects Circle of Stars and is given the 2014 TCE features, at TCE levels, with no error.
+Fix: give the 2024 entry a distinct id (`circle-of-stars-2024`), matching how every other 2024 subclass and
+class is namespaced.
+
+### G4 — DUPLICATE ID: the 2024 version of Mind Sliver is dead data
+- `src/data/spells/index.ts:554` — `mind-sliver`, TCE
+- `src/data/spells/phb2024.ts:10` — `mind-sliver`, PHB2024
+
+`getSpell()` (`spells/index.ts:674`) is `.find()`, so the TCE entry always wins and the PHB2024 entry can
+never be returned. Its text and mechanics are unreachable.
+
+**Duplicate-id sweep results:** subclasses **1** (`circle-of-stars`), spells **1** (`mind-sliver`),
+races **0**, classes **0**. This also explains the subclass count reading 188 rather than 141+48=189.
+
+### Checked and NOT a bug — `parentRaceId`
+Four values (`dwarf`, `elf`, `gnome`, `halfling`) have no matching race entry, but `parentRaceId` is used
+**only as a grouping key** in `StepRace.tsx:33,90` to cluster subraces under a heading — it is never passed
+to `getRace()`. No lookup breaks. Recorded so it is not "fixed" later.
+
 ### Still to check in Phase G
 `subclass.classId` → real class · `race.parentRaceId` → real race · `spell.classes[]` → real class ids ·
 `startingEquipment` → real item names · `subclassTips` keys → real subclass ids · duplicate ids within
