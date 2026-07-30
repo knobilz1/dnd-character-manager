@@ -896,7 +896,7 @@ This is why R7's fix alone still rendered 1/4. Fixed by copying the array.
 Both are in the single highest-traffic function in the store, both survived every static
 sweep, and R8 in particular can only be seen by loading the same character twice.
 
-### R9 — OPEN: the resource pip row is hard-capped at 20, with no numeric readout
+### R9 — FIXED in `3543da1`, and it was NOT cosmetic (see correction below)
 `SheetPage.tsx:2182` and `:2204` both do `Math.min(displayMax === 99 ? 20 : displayMax, 20)`.
 There is no number anywhere in the card — the pip count *is* the readout. So a level-20
 paladin's Lay on Hands pool (100 hit points, data is correct) renders as **20 pips**, and
@@ -1120,3 +1120,45 @@ short two rows. It typechecks because `BOOKS` is `Book[]`, not an exhaustive
 **Worth considering:** changing `BOOKS` to a `Record<BookId, Book>` (or adding a
 `satisfies` exhaustiveness check) would turn this class of bug into a compile error. That is
 a code change rather than a data fix, so it is recorded here rather than made.
+
+---
+
+## ✏️ CORRECTION — R9 was misclassified as cosmetic. It was silent data loss.
+
+I logged R9 under "display only — clicking still decrements from the true `current`, so the
+underlying value is fine". **That was wrong, and it was wrong because I read only one of the
+two branches.** The active branch does derive from `r.current`. The inactive branch — which
+is the one ordinary resources like Lay on Hands actually render through — derived the next
+stored value from the clamped display number:
+
+```ts
+const cappedCurrent = Math.min(r.current, cappedMax);   // 100 -> 20
+onClick={() => setResource(r.key, available ? cappedCurrent - 1 : cappedCurrent + 1)}
+```
+
+Measured on a level-20 paladin: pool 100/100, one click, stored value **19**.
+
+**Scope was also understated.** I described it as a level-20 problem. Lay on Hands is
+5 × paladin level, so the pool passes 20 at **level 5** — every paladin from 5th up was
+exposed, and the sheet showed a full-looking row of 20 dots the whole time.
+
+Fixed by replacing both call sites with one `ResourceCounter` component. The invariant it
+enforces is the general lesson: **a display may be summarised; a value written back never
+may be.** Pips ≤ 20 (unchanged), numeric stepper above, "∞ — no limit" for the sentinel.
+
+### Why the audit's own methods missed it
+
+Every earlier check read the resource *data* and asked whether the numbers matched the book.
+Lay on Hands' data was correct at every level — `maxPerLevel` says 100 at 20th, and I had
+verified exactly that. The defect was entirely in the render path, and it only becomes
+visible if you **click** rather than read.
+
+That is a gap in the verification habit, not a one-off. Every R5 batch this session was
+"verified at localhost:5173" by *reading* the rendered counter. Reading proves the max is
+right; it cannot prove that using the resource does the right thing. Two of the three
+most serious bugs found today — this one and the `load()` idempotence bug (R8) — required
+an interaction, not an observation.
+
+**Change to the method going forward: after seeding a sheet, spend one use of at least one
+resource and re-read, rather than only reading the initial state.** It costs one extra
+click per batch and it is the only thing that would have caught either bug.
