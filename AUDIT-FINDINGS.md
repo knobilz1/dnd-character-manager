@@ -1064,3 +1064,59 @@ and would not have been found by any sweep over the app's own data, which was in
 consistent and typechecked clean. It is the second fabricated feature the audit has found,
 after the Drakewarden mislabel. **Both were caught by checking a feature NAME against the
 book.** That check deserves to be its own pass over all 141 subclasses, and is not yet done.
+
+---
+
+## Feature-name verification pass — 730 names across all 141 subclasses
+
+Run because the two fabricated features found so far (Graviturgy's "Deprive the
+Unworthy", Drakewarden's mislabelled "Reflexive Resistance") were each caught by checking
+a NAME against the book, and neither was reachable by any sweep over the app's own data —
+which was internally consistent and typechecked clean. Two hits in roughly fifteen
+subclasses read closely by hand looked like a rate worth measuring across all of them.
+
+Tool: `tools/audit/namecheck.py`. Normalises apostrophe styles, dashes and whitespace, and
+asserts a feature-level control plus a per-entry positive control (the subclass's own name
+should appear in its own book).
+
+### Result: no new fabricated features. 57 misses, all explained.
+
+| Cause | Count | Verdict |
+|---|---|---|
+| App prefixes `Channel Divinity: ` where the book uses a bare name under a heading | ~12 | naming convention |
+| App-invented progression labels (`Additional Arcane Shot`, `X Improvement`, `Fighting Spirit Improvement`) for "you learn another at level N" table rows | ~14 | naming convention |
+| SCAG entries reprinted in XGtE — the SCAG extract says so explicitly and does not repeat them (Mastermind, Swashbuckler) | 10 | source-extract gap |
+| SCAG extract omits Arcana Domain and the Elk/Tiger totem options entirely | 11 | source-extract gap |
+| Sub-labels (`Eyes of the Dark: Darkness Spell`, `Expanded Spell List`, totem `— Elk` suffixes) | ~9 | naming convention |
+| **cobalt-soul** | 7 | **see below** |
+
+This is a genuine negative result and it bounds the risk: the two known fabrications were
+isolated, not the tip of a pattern. Feature names across the codebase are trustworthy.
+
+### It did find two real things
+
+**1. `cobalt-soul` is attributed to the wrong book.** The EGtW extract states plainly:
+*"Cobalt Soul Monk subclass is NOT in EGtW. The Cobalt Soul is only a faction/background
+flavor. The playable monk subclass is from Tal'Dorei Campaign Setting Reborn."* The app
+ships it as `sourceBook: 'EGtW'`. Consequence: a player who owns EGtW and enables it gets a
+subclass their book does not contain, and cannot find it when they go looking.
+
+Not fixed — there is no `TDCSR` BookId, so the fix is either a new book entry or a
+re-attribution, and that is a product decision rather than a correction. (An earlier session
+already recorded Cobalt Soul as "memory-only, EGtW missing"; this pass explains *why*.)
+
+**2. ToB and AcqInc were in the `BookId` union but absent from the `BOOKS` registry**,
+making 65 content entries permanently unreachable — 22 ToB subclasses, 22 ToB spells,
+8 ToB backgrounds, 7 AcqInc spells, 5 AcqInc backgrounds, 1 AcqInc race. Fixed in
+`2dda1a4`. This includes the nine ToB subclasses R5 had just finished giving resources to.
+
+**Why no sweep would have caught #2 either.** Every check the audit runs starts from the
+data files and asks whether the data is right. This bug is a broken join *between* two files
+that are each internally correct: `BookId` is a valid union, `BOOKS` is a valid array, and
+every `sourceBook: 'ToB'` is a valid BookId. Nothing is malformed; the registry is simply
+short two rows. It typechecks because `BOOKS` is `Book[]`, not an exhaustive
+`Record<BookId, Book>` — a type that would have made this impossible to write.
+
+**Worth considering:** changing `BOOKS` to a `Record<BookId, Book>` (or adding a
+`satisfies` exhaustiveness check) would turn this class of bug into a compile error. That is
+a code change rather than a data fix, so it is recorded here rather than made.
