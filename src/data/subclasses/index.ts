@@ -460,8 +460,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Balm of the Summer Court', level: 2, description: 'You have a pool of d6s equal to your druid level. As a bonus action, you can choose a creature within 120 feet and spend dice from the pool: heal HP equal to total + grant temp HP.' },
     { name: 'Hearth of Moonlight and Shadow', level: 6, description: 'When you start a short or long rest, you touch a point to create an invisible 30-foot-radius sphere for the rest\'s duration. While inside, you and allies gain +5 to Dexterity (Stealth) and Wisdom (Perception) checks; light from open flames inside is invisible from outside.' },
     { name: 'Hidden Paths', level: 10, description: 'You can use a bonus action to teleport up to 60 feet to an unoccupied space you can see, or teleport a willing creature within 30 feet up to 60 feet. Wis modifier uses per long rest.' },
-    { name: 'Walker in Dreams', level: 14, description: 'You can cast Dream, Scrying, or Teleportation Circle as a 1-minute action, once per long rest.' },
-  ]},
+    { name: 'Walker in Dreams', level: 14, description: 'When you finish a short rest, you can cast Dream (with yourself as the messenger), Scrying, or Teleportation Circle, without expending a spell slot or providing material components. The Teleportation Circle variant opens a portal to the last location where you finished a long rest on your current plane; if you have not taken a long rest on this plane, the spell fails but is not wasted. Once you use this feature, you can\'t use it again until you finish a long rest.' },
+  ],
+    // XGtE p.22: Walker in Dreams — recharges on a long rest (the *trigger* is finishing a
+    // short rest, which is not the same thing and is why the counter is 'long').
+    resources: [{ name: 'Walker in Dreams', key: 'walker_in_dreams', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'circle-of-the-shepherd', name: 'Circle of the Shepherd', classId: 'druid', sourceBook: 'XGtE', description: 'Druids of the Circle of the Shepherd commune with the spirits of nature, especially the spirits of beasts and the fey, and call to those spirits for aid.', features: [
     { name: 'Speech of the Woods', level: 2, description: 'You can understand and verbally communicate with beasts, and you learn Sylvan.' },
     { name: 'Spirit Totem', level: 2, description: 'As a bonus action, you summon a 30-foot-aura spirit (Bear: temp HP and advantage on Str checks/saves; Hawk: reaction grants advantage on attacks within 30 ft; Unicorn: detect enemies, healing).' },
@@ -620,7 +625,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Panache', level: 9, description: 'As an action, make a Cha (Persuasion) check contested by a creature\'s Wis (Insight). On success vs hostile: it has disadvantage on attacks against others until you damage it. Vs non-hostile: it becomes charmed for 1 minute.' },
     { name: 'Elegant Maneuver', level: 13, description: 'As a bonus action, gain advantage on the next Acrobatics or Athletics check this turn.' },
     { name: 'Master Duelist', level: 17, description: 'If you miss with an attack roll, you can roll it again with advantage. Once per short or long rest.' },
-  ]},
+  ],
+    // XGtE p.47: Master Duelist — "you can't use this feature again until you finish a short or long rest."
+    resources: [{ name: 'Master Duelist', key: 'master_duelist', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── XGtE: SORCERER ───────────────────────────────────────────────────
   { id: 'divine-soul', name: 'Divine Soul', classId: 'sorcerer', sourceBook: 'XGtE', description: 'Sometimes the spark of magic that fuels a sorcerer comes from a divine source. Such blessed individuals are known as Divine Souls.', features: [
@@ -646,7 +655,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Hound of Ill Omen', level: 6, description: 'Spend 3 sorcery points as a bonus action to summon a hound (dire wolf stats, Medium monstrosity) targeting one creature within 120 feet. The hound has temp HP equal to half your sorcerer level, can move through creatures/objects, and automatically tracks the target. While the hound is within 5 feet of the target, the target has disadvantage on saving throws against your spells. Lasts 5 minutes or until you or the target drop to 0 HP.' },
     { name: 'Shadow Walk', level: 14, description: 'While in dim light or darkness, use a bonus action to teleport up to 120 feet to an unoccupied space you can see in dim light or darkness.' },
     { name: 'Umbral Form', level: 18, description: 'Spend 6 sorcery points to become shadow form: resistance to all damage except force/radiant, and you can move through occupied spaces. Lasts 1 minute.' },
-  ]},
+  ],
+    // XGtE p.50: Strength of the Grave — "you can't use it again until you finish a long rest."
+    resources: [{ name: 'Strength of the Grave', key: 'strength_of_the_grave', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'storm-sorcery', name: 'Storm Sorcery', classId: 'sorcerer', sourceBook: 'XGtE', description: 'Your innate magic comes from the power of elemental air. Many with this power can trace their magic back to a near-death experience caused by the Great Rain.', features: [
     { name: 'Wind Speaker', level: 1, description: 'You can speak, read, and write Primordial (Aquan, Auran, Ignan, Terran).' },
     { name: 'Tempestuous Magic', level: 1, description: 'Whenever you cast a spell of 1st level or higher, you can use a bonus action to fly up to 10 feet without provoking opportunity attacks.' },
@@ -1407,7 +1420,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Divine Allegiance', level: 7, description: 'Starting at 7th level, when a creature within 5 feet of you takes damage, you can use your reaction to magically substitute your own health for that of the target creature, causing that creature not to take the damage. Instead, you take the damage. This damage to you can\'t be reduced or prevented in any way.' },
     { name: 'Unyielding Spirit', level: 15, description: 'Starting at 15th level, you have advantage on saving throws to avoid becoming paralyzed or stunned.' },
     { name: 'Exalted Champion', level: 20, description: 'At 20th level, your presence on the field of battle is an inspiration to those dedicated to your cause. You can use your action to gain the following benefits for 1 hour: resistance to bludgeoning, piercing, and slashing damage from nonmagical weapons; your allies have advantage on death saving throws while within 30 feet of you; you have advantage on Wisdom saving throws, as do your allies within 30 feet of you. Once used, you can\'t use it again until you finish a long rest.' },
-  ], alwaysPreparedSpells: { 3: ['command', 'compelled-duel'], 5: ['warding-bond', 'zone-of-truth'], 9: ['aura-of-vitality', 'spirit-guardians'], 13: ['banishment', 'guardian-of-faith'], 17: ['circle-of-power', 'geas'] }},
+  ],
+    // SCAG p.87: Exalted Champion — once per long rest.
+    resources: [{ name: 'Exalted Champion', key: 'exalted_champion', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['command', 'compelled-duel'], 5: ['warding-bond', 'zone-of-truth'], 9: ['aura-of-vitality', 'spirit-guardians'], 13: ['banishment', 'guardian-of-faith'], 17: ['circle-of-power', 'geas'] }},
 
   // Rogue: Mastermind
   { id: 'scag-mastermind', name: 'Mastermind', classId: 'rogue', sourceBook: 'SCAG', description: 'Your focus is on people and on the influence and secrets they have. Many spies, courtiers, and schemers follow this archetype, leading lives of intrigue.', features: [
@@ -1425,7 +1442,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Panache', level: 9, description: 'At 9th level, your charm becomes extraordinarily beguiling. As an action, you can make a Charisma (Persuasion) check contested by a creature\'s Wisdom (Insight) check. If you succeed and the creature is hostile, it has disadvantage on attack rolls against targets other than you for 1 minute. If you succeed and the creature isn\'t hostile, it is charmed by you for 1 minute.' },
     { name: 'Elegant Maneuver', level: 13, description: 'Starting at 13th level, you can use a bonus action on your turn to gain advantage on the next Dexterity (Acrobatics) or Strength (Athletics) check you make during the same turn.' },
     { name: 'Master Duelist', level: 17, description: 'Beginning at 17th level, your mastery of the blade lets you turn failure into success in combat. If you miss with an attack roll, you can roll it again with advantage. Once you do so, you can\'t use this feature again until you finish a short or long rest.' },
-  ]},
+  ],
+    // Same subclass as the XGtE Swashbuckler (SCAG itself says it was reprinted there with
+    // identical mechanics), so it shares the master_duelist key — a character can only pick one.
+    resources: [{ name: 'Master Duelist', key: 'master_duelist', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } }],
+  },
 
   // Sorcerer: Storm Sorcery
   { id: 'scag-storm-sorcery', name: 'Storm Sorcery', classId: 'sorcerer', sourceBook: 'SCAG', description: 'Your innate magic comes from the power of elemental air. Many with this power can trace their magic back to a near-death experience caused by the Great Rain, or your lineage might include the influence of potent air creatures such as vaati or djinn.', features: [
@@ -1444,7 +1466,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Defy Death', level: 6, description: 'Starting at 6th level, you can give yourself vitality when you cheat death or when you help someone else cheat it. You can regain hit points equal to 1d8 + your Constitution modifier (minimum of 1 hit point) when you succeed on a death saving throw or when you stabilize a creature with Spare the Dying. Once you use this feature, you can\'t use it again until you finish a long rest.' },
     { name: 'Undying Nature', level: 10, description: 'Beginning at 10th level, you can hold your breath indefinitely, and you don\'t require food, water, or sleep, although you still require rest to reduce exhaustion and still benefit from finishing short and long rests. In addition, you age at a slower rate. For every 10 years that pass, your body ages only 1 year, and you are immune to being magically aged.' },
     { name: 'Indestructible Life', level: 14, description: 'When you reach 14th level, you partake of some of the true secrets of the Undying. On your turn, you can use a bonus action to regain hit points equal to 1d8 + your warlock level. Additionally, if you put a severed body part of yours back in place when you use this feature, the part reattaches. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
-  ]},
+  ],
+    // SCAG p.139: Defy Death (6th) is once per long rest; Indestructible Life (14th) recharges
+    // on a short or long rest.
+    resources: [
+      { name: 'Defy Death', key: 'defy_death', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Indestructible Life', key: 'indestructible_life', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Wizard: Bladesinging
   { id: 'scag-bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'SCAG', description: 'Bladesingers are elves who bravely defend their people and lands. They are elf wizards who master a school of sword fighting grounded in a tradition of arcane magic. Note: Only elves and half-elves can choose this tradition in the Forgotten Realms.',
