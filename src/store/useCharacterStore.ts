@@ -71,6 +71,11 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   // Echo Knight Unleash Incarnation (EGtW): Constitution modifier uses, minimum 1.
   if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 3))
     overrides['unleash_incarnation'] = Math.max(1, abilityMod(score('con')));
+  // Dunamancy (EGtW): both are Intelligence modifier uses, minimum 1.
+  if (c.classes.some(cl => cl.subclassId === 'chronurgy-magic' && cl.level >= 6))
+    overrides['momentary_stasis'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 14))
+    overrides['deprive_the_unworthy'] = Math.max(1, abilityMod(score('int')));
   // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
   {
     const palLvl = classLevel(c.classes, 'paladin');

@@ -365,6 +365,13 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'echo-knight' && c.level >= 3)) {
       resourceMaxOverrides['unleash_incarnation'] = Math.max(1, mods.con);
     }
+    // Dunamancy (EGtW): both are Intelligence modifier uses, minimum 1.
+    if (character.classes.some(c => c.subclassId === 'chronurgy-magic' && c.level >= 6)) {
+      resourceMaxOverrides['momentary_stasis'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'graviturgy-magic' && c.level >= 14)) {
+      resourceMaxOverrides['deprive_the_unworthy'] = Math.max(1, mods.int);
+    }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
       resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);
