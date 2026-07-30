@@ -668,7 +668,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Protective Bond', level: 6, description: 'When a bonded creature is about to take damage, another bonded creature within 30 feet can use its reaction to teleport to an unoccupied space within 5 feet and take the damage instead.' },
     { name: 'Potent Spellcasting', level: 8, description: 'You add your Wisdom modifier to damage from cleric cantrips.' },
     { name: 'Expansive Bond', level: 17, description: 'Emboldening Bond and Protective Bond now work at 60 feet instead of 30. When a creature uses Protective Bond to take damage for another, it has resistance to that damage.' },
-  ], alwaysPreparedSpells: { 1: ['heroism', 'sanctuary'], 3: ['aid', 'warding-bond'], 5: ['beacon-of-hope', 'sending'], 7: ['otilukes-resilient-sphere', 'aura-of-purity'], 9: ['rarys-telepathic-bond', 'greater-restoration'] }},
+  ], alwaysPreparedSpells: { 1: ['heroism', 'sanctuary'], 3: ['aid', 'warding-bond'], 5: ['beacon-of-hope', 'sending'], 7: ['otilukes-resilient-sphere', 'aura-of-purity'], 9: ['rarys-telepathic-bond', 'greater-restoration'] },
+    // Emboldening Bond (1st): proficiency-bonus uses per long rest. Its "prof bonus creatures" clause
+    // is the number of TARGETS bonded, which is separate — only the uses are tracked here.
+    resources: [{ name: 'Emboldening Bond', key: 'emboldening_bond', rechargeOn: 'long',
+      maxPerLevel: { 1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
   { id: 'twilight-domain', name: 'Twilight Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The Twilight Domain represents the night sky, the protective veil of dusk, and the encroaching twilight.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with martial weapons and heavy armor.' },
     { name: 'Eyes of Night', level: 1, description: 'You have darkvision 300 feet. As an action, you can grant this darkvision to willing creatures within 10 feet for 1 hour.' },
@@ -791,7 +796,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Writhing Tide', level: 7, description: 'As a bonus action, gain a flying speed of 10 feet for 1 minute. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Mighty Swarm', level: 11, description: 'Gathered Swarm damage increases to 1d8. Push effect also knocks Medium or smaller targets prone, and move effect makes you difficult to hit.' },
     { name: 'Swarming Dispersal', level: 15, description: 'When you take damage, use your reaction to gain resistance against it and teleport up to 30 feet. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
-  ]},
+  ],
+    resources: [
+      // Writhing Tide (7th) and Swarming Dispersal (15th): each proficiency-bonus uses per long rest.
+      { name: 'Writhing Tide', key: 'writhing_tide', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Swarming Dispersal', key: 'swarming_dispersal', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
 
   // ── TCE: ROGUE ───────────────────────────────────────────────────────
   { id: 'phantom', name: 'Phantom', classId: 'rogue', sourceBook: 'TCE', description: 'Some rogues remain tied to the realms of the living and the dead through powerful trauma or ritual.', features: [

@@ -337,6 +337,15 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'college-of-creation' && c.level >= 3)) {
       resourceMaxOverrides['performance_of_creation'] = profBonus;
     }
+    if (character.classes.some(c => c.subclassId === 'peace-domain')) {
+      resourceMaxOverrides['emboldening_bond'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'swarmkeeper' && c.level >= 7)) {
+      resourceMaxOverrides['writhing_tide'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'swarmkeeper' && c.level >= 15)) {
+      resourceMaxOverrides['swarming_dispersal'] = profBonus;
+    }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
       resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);
