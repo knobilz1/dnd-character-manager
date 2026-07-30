@@ -556,6 +556,34 @@ intentional placeholders, not item references.
 Given the 2014 priority this is low urgency — 2014 coverage is 141/141 — but it is a complete gap for the
 2024 half of the picker.
 
+### G11 — CLEAN: feat-granted spells (earlier false positive now resolved)
+`grantedSpells` holds **objects**, not strings:
+`grantedSpells: [{ spellId: 'misty-step', recharge: 'short', ability: 'int' }]`.
+The earlier "broken refs" of `cha int long short wis` were the `ability` and `recharge` values being
+scraped by a regex that grabbed every quoted string in the block. Re-run extracting only `spellId`:
+**4 refs, all resolve. 0 broken.** Positive control passed. **The G-pass feat finding is formally
+retracted.**
+
+### G12 — SYSTEMIC FRAGILITY: 12 first-wins `.find()` lookups, no uniqueness guard anywhere
+Every accessor resolves an id with `.find()`, so a duplicate id silently shadows — exactly how G3 and G4
+hide. There is **no uniqueness check anywhere in the codebase or build**.
+
+`backgrounds.ts:815` · `classes/index.ts:626` · `feats.ts:613` · `fightingStyles.ts:26` ·
+`infusions.ts:25` · `invocations.ts:66` · `maneuvers.ts:33` · `metamagic.ts:22` · `pactBoons.ts:11` ·
+`races/index.ts:2257` · `spells/index.ts:675` · `subclasses/index.ts:1237`
+
+**Duplicate-id sweep across every data file — complete:**
+| File group | Duplicates |
+|---|---|
+| subclasses | **1** (`circle-of-stars` → G3) |
+| spells | **1** (`mind-sliver` → G4) |
+| classes, races | 0 |
+| feats, feats-phb2024, invocations, infusions, metamagic, maneuvers, pactBoons, fightingStyles, backgrounds, backgrounds-ggr, backgrounds-phb2024, optionalClassFeatures | 0 |
+
+So only 2 of the 12 lookups are currently compromised — but nothing **prevents** the next one. Recommend a
+cheap unit test asserting id uniqueness per collection; it would have caught G3 and G4 at commit time and
+costs one test file. Add it during the fix phase.
+
 ### Still to check in Phase G
 `subclass.classId` → real class · `race.parentRaceId` → real race · `spell.classes[]` → real class ids ·
 `startingEquipment` → real item names · `subclassTips` keys → real subclass ids · duplicate ids within
