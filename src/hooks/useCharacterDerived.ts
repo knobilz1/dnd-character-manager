@@ -326,6 +326,11 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'psi-warrior' || c.subclassId === 'soulknife')) {
       resourceMaxOverrides['psionic_energy'] = profBonus * 2;
     }
+    // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
+    if (paladinLevel > 0) {
+      resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);
+      if (paladinLevel >= 14) resourceMaxOverrides['cleansing_touch'] = Math.max(1, mods.cha);
+    }
     // Way of the Ascendant Dragon (FToD): Wings Unfurled (lv6) and Aspect of the
     // Wyrm (lv11) both have proficiency-bonus uses per long rest. Level-gated so the
     // resource only exists once the feature is actually unlocked.

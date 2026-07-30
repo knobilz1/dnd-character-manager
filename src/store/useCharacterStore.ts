@@ -45,6 +45,14 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   // Psi Warrior / Soulknife (TCE): Psionic Energy pool = 2 x proficiency bonus.
   if (c.classes.some(cl => cl.subclassId === 'psi-warrior' || cl.subclassId === 'soulknife'))
     overrides['psionic_energy'] = profBonus * 2;
+  // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
+  {
+    const palLvl = classLevel(c.classes, 'paladin');
+    if (palLvl > 0) {
+      overrides['divine_sense'] = Math.max(1, 1 + abilityMod(score('cha')));
+      if (palLvl >= 14) overrides['cleansing_touch'] = Math.max(1, abilityMod(score('cha')));
+    }
+  }
   // Way of the Ascendant Dragon: Wings Unfurled (monk 6) + Aspect of the Wyrm
   // (monk 11) — proficiency-bonus uses per long rest, level-gated.
   if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon')) {

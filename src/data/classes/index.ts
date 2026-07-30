@@ -336,6 +336,21 @@ export const ALL_CLASSES: DClass[] = [
         rechargeOn: 'short',
         maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
       },
+      {
+        // PHB 1st: "Uses = 1 + Cha mod; regain all on long rest." Cha-based, so the real max comes from
+        // the divine_sense override; this table is the mirroring fallback (assumes +0 Cha).
+        name: 'Divine Sense',
+        key: 'divine_sense',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        // PHB 14th: "Uses = Cha mod (min 1); regain on long rest." Level-gated to 14+.
+        name: 'Cleansing Touch',
+        key: 'cleansing_touch',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
     ],
     subclassLabel: 'Sacred Oath',
     subclassLevel: 3,
