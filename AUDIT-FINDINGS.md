@@ -1005,3 +1005,62 @@ Running tally of sweeps that reported a clean or complete result and were wrong:
 Every one of them under-reported. None has ever over-reported. Treat any "nothing found"
 from a hand-written sweep over this codebase as unproven until it has a control at the level
 that does the filtering.
+
+---
+
+## R5 final phase — triage of the 24 features inside already-done subclasses
+
+Source-checked one at a time. The question for each: does it have its own limit, or does
+it spend a pool the sheet already tracks?
+
+### Needs its own resource — CONFIRMED against the book (13)
+
+| Subclass | Feature | Lvl | Limit |
+|---|---|---|---|
+| the-fiend | Hurl Through Hell | 14 | 1 / long |
+| circle-of-dreams | Hidden Paths | 10 | Wis mod (min 1) / long |
+| hexblade | Accursed Specter | 6 | 1 / long |
+| psi-warrior | Bulwark of Force | 15 | 1 / long |
+| oath-of-glory | Glorious Defense | 15 | Cha mod (min 1) / long |
+| fey-wanderer | Misty Wanderer | 15 | Wis mod (min 1) / long |
+| soulknife | Psychic Veil | 13 | 1 / long |
+| soulknife | Rend Mind | 17 | 1 / long |
+| alchemist | Restorative Reagents | 9 | Int mod (min 1) / long |
+| echo-knight | Shadow Martyr | 10 | 1 / short |
+| echo-knight | Reclaim Potential | 15 | Con mod (min 1) / long |
+| chronurgy-magic | Chronal Shift | 2 | 2 / long |
+| drakewarden | Drake's Breath | 11 | 1 / long |
+
+Note the recurring shape in TCE psionics: Bulwark of Force, Psychic Veil and Rend Mind are
+each *once per long rest, **or** spend Psionic Energy dice to use again*. The dice are
+already tracked, so only the rest-limited use gets a counter — the die spend is an
+alternative cost, the same call made for Warping Implosion and Living Legend.
+
+### Correctly needs nothing (3)
+- **graviturgy Adjust Density** and **Event Horizon** — concentration effects with no use
+  limit. They matched the sweep on incidental wording.
+- **tide-watchers Pull of the Tides** — picks a tidal aspect at the end of each long rest;
+  a per-rest choice, not a counter. Already annotated in the entry so a later pass does not
+  re-add it.
+
+### Still to verify (7)
+- **rune-knight Giant's Might** — extract landed on Runic Juggernaut's text; needs a clean read.
+- **rune-knight Master of Runes** — not a counter itself; it upgrades rune invocations from
+  once to twice each. The invocations are untracked and belong to **D4** (per-rune, depends
+  on which runes were chosen).
+- **way-of-the-ascendant-dragon Draconic Disciple** — contains a "once per long rest" reroll
+  buried as a sub-bullet (Draconic Presence); confirm before adding.
+- **way-of-the-ascendant-dragon Breath of the Dragon** — free uses vs the ki spend need separating.
+- **drakewarden Drake Companion** — summon limit vs the spell-slot alternative.
+- **the-genie Genie's Vessel** — the wish-like effect recharges after **1d4 long rests**;
+  blocked on **R4** like Limited Wish.
+- **chronurgy Arcane Abeyance** — recharge clause not yet read in full.
+
+### What this phase already produced
+Checking *Violent Attraction's level* against EGtW — a step taken only because it appeared on
+this triage list — uncovered that the whole **Graviturgy Magic** subclass sat a tier early
+with a fabricated 14th-level feature (`8e6f343`). That bug had nothing to do with resources
+and would not have been found by any sweep over the app's own data, which was internally
+consistent and typechecked clean. It is the second fabricated feature the audit has found,
+after the Drakewarden mislabel. **Both were caught by checking a feature NAME against the
+book.** That check deserves to be its own pass over all 141 subclasses, and is not yet done.
