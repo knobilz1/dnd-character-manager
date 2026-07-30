@@ -302,6 +302,44 @@ race text for MMoM, VGM, GGR, ERLW, EGtW, FToD, SCoC, MToF and PHB (memory `audi
 
 ---
 
+## PHASE D — LEVEL-UP AUDIT (user reports "LOTS of bugs" here)
+
+### Verified CORRECT — do not re-flag
+- **ASI levels, all 25 classes.** Standard 4/8/12/16/19; Fighter 4/6/8/12/14/16/19; Rogue 4/8/10/12/16/19;
+  Artificer 4/8/12/16/19. Every one matches its book.
+- **Subclass levels, all 25.** 2014: Cleric 1, Sorcerer 1, Warlock 1, Druid 2, Wizard 2, all others 3.
+  2024: all 3 (correctly standardised).
+
+### D1 — HIGH, affects 2014 — subclass prompt uses `===`, so it can be missed permanently
+`LevelUpDialog.tsx:293`
+```ts
+const needsSubclass = newLevel === classDef.subclassLevel && !primary?.subclassId;
+```
+Strict equality. If a character ever passes their subclass level without one — multiclass entry, a
+character created above that level, a cancelled dialog, an import — they are **never prompted again**, at
+any level. A subclass-less Barbarian at 7 stays subclass-less forever, silently losing every subclass
+feature.
+The file itself uses `>=` for every analogous gate (`needsPactBoon` `newLevel >= 3` at :501,
+`needsTotemSpirit` `>= 3` at :509, `needsAspectTotem` `>= 6` at :510), so `===` here is inconsistent as
+well as wrong. Should be `>=`.
+
+### D2 — MEDIUM, 2024 — Bard and Ranger are treated as KNOWN casters but became PREPARED in 2024
+`LevelUpDialog.tsx:455` lists `bard-2024` and `ranger-2024` in `isKnownCaster`, and `:458`'s
+`isPreparedCaster` omits them. But PHB 2024 made **both prepared casters**, and `mechanics.ts`
+already agrees — `PREPARED_SPELLS_2024` has entries for `bard-2024` and `ranger-2024`.
+So the data layer and the level-up dialog contradict each other. Level-up offers a 2024 Bard/Ranger a
+known-spells pick when it should be managing a prepared list.
+
+### D3 — MEDIUM, 2024 — Epic Boon is flagged as an ASI
+All 12 2024 classes have `{ name: 'Epic Boon', level: 19, isASI: true }`. The name is right, the flag is
+not: in PHB 2024 an Epic Boon is a **feat chosen from the Epic Boon category**, not a +2/+1 ability bump.
+`LevelUpDialog.tsx:298` keys the ASI UI off `isASI`, so level 19 presents an ability-score picker instead
+of an Epic Boon feat list.
+
+### Still owed in Phase D
+Per-subclass level-up options (does each subclass's choice-bearing feature actually prompt at its level),
+and racial level-gating (`InnateSpell.minCharLevel` — does a race's level-gated spell appear on level-up).
+
 # EDITION PRIORITY — 2014 (user plays it more)
 Measured, not assumed. The headline findings are **overwhelmingly 2014**, not 2024:
 | Finding | 2014 | 2024 |
