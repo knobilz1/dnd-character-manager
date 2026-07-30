@@ -431,7 +431,7 @@ const CONSUMABLES: ItemTemplate[] = [
 
 const MAGIC_ITEMS: ItemTemplate[] = [
   // Common
-  { name: 'Alchemy Jug', category: 'magic', weight: 12, description: 'Once per day, produces up to 2 gallons of a chosen liquid (acid, basic poison, beer, honey, mayonnaise, oil, poison, vinegar, water, or wine). Uncommon.' },
+  { name: 'Alchemy Jug', category: 'magic', weight: 12, description: 'Once per day, produces up to 2 gallons of a chosen liquid (acid, basic poison, beer, honey, mayonnaise, oil, poison, vinegar, water, or wine). Uncommon.', maxCharges: 1, recharge: 'dawn' },
   { name: 'Bag of Holding', category: 'magic', weight: 15, description: 'An interior space of 4 ft. wide × 8 ft. deep. Holds up to 500 lb. and 64 cubic feet. Always weighs 15 lb. Breathing creatures inside have air for 10 minutes. Uncommon.' },
   { name: 'Boots of Elvenkind', category: 'magic', weight: 1, description: 'Your steps make no sound, giving advantage on Dexterity (Stealth) checks relying on sound. Uncommon.' },
   { name: 'Boots of Speed', category: 'magic', weight: 1, description: 'Bonus action to activate: double walking speed, opportunity attacks against you are made with disadvantage. Deactivate as a bonus action. 10 minutes total, then unusable until you finish a long rest. Rare.', maxCharges: 1, recharge: 'long' },
@@ -692,7 +692,7 @@ const DMG_EXTRA: ItemTemplate[] = [
   { name: 'Figurine of Wondrous Power (Obsidian Steed)', category: 'magic', weight: 0, description: 'Becomes a nightmare for 24 hours (recharge: 5 days). 10% chance it is evil and serves a fiend. Very rare.' },
   { name: 'Figurine of Wondrous Power (Onyx Dog)', category: 'magic', weight: 0, description: 'Becomes a mastiff with darkvision 60 ft. for 6 hours (recharge: 7 days). Rare.' },
   { name: 'Figurine of Wondrous Power (Serpentine Owl)', category: 'magic', weight: 0, description: 'Becomes a giant owl for 8 hours; grants advantage on Wisdom (Perception) checks while in range. Rare.' },
-  { name: 'Helm of Teleportation', category: 'magic', weight: 3, description: '3 charges. Use 1 charge to cast teleport. Recharge: 1d3 at dawn. Rare. Requires attunement.' },
+  { name: 'Helm of Teleportation', category: 'magic', weight: 3, description: '3 charges. Use 1 charge to cast teleport. Recharge: 1d3 at dawn. Rare. Requires attunement.', maxCharges: 3, recharge: 'dawn' },
   { name: 'Horseshoes of Speed', category: 'magic', weight: 4, description: 'Set of 4. A horse wearing all four gains +30 ft. movement speed. Rare.' },
   { name: 'Horseshoes of a Zephyr', category: 'magic', weight: 4, description: 'Set of 4. A horse can walk on air, water, and leaves no tracks; floats above surfaces up to 4 in. Very rare.' },
   { name: "Instrument of the Bards (Doss Lute)", category: 'magic', weight: 2, description: 'Bard spellcasting focus. Spells: fly, invisibility, levitate, protection from evil and good (each 1/day). Uncommon. Requires attunement (bard).' },

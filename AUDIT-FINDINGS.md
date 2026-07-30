@@ -301,6 +301,27 @@ permanently), so that one is fine — **Scarab of Protection is a real bug**: th
   **Both items with `maxCharges` and no `recharge` are correct**: Ring of Three Wishes (expended
   permanently) and Scarab of Protection (destroyed at 0). **Zero bugs in that category.**
 
+### ⛔ R6 IS BLOCKED ON SOURCE — the DMG markdown extract omits recharge clauses
+Attempted to complete R6 and got 2 of 39. The item **counts** are recoverable from the app's own
+descriptions (most open `"N charges."`), but the **recharge rule** is not, and guessing it would inject
+bugs into working data — exactly the Scarab of Protection mistake, which was a guess that the DMG
+contradicted.
+
+Checked 10 items against `reference-books/md/dmg-dungeon-masters-guide.md`; it records a recharge clause
+for only **2**:
+| Item | DMG says | Applied |
+|---|---|---|
+| Helm of Teleportation | "3 charges. Regains 1d3/dawn." | `maxCharges: 3, recharge: 'dawn'` ✅ |
+| Alchemy Jug | "dawn" | `maxCharges: 1, recharge: 'dawn'` ✅ |
+| Gem of Brightness | "50 charges" — **no recharge clause recorded** | not applied |
+| Chime of Opening, Hat of Vermin, Staff of Birdcalls, Staff of Flowers, Wand of Pyrotechnics, Wand of Scowls, Wand of Smiles | **nothing recorded** | not applied |
+
+**To finish R6 someone must read the DMG PDF** (`reference-books/D&D 5E - Dungeon Master's Guide.pdf`)
+per item, or the markdown extract must be regenerated to include recharge sentences. Note Gem of
+Brightness in particular is a trap: it may legitimately have **no** recharge (it becomes a nonmagical
+jewel at 0 charges), like Ring of Three Wishes and Scarab of Protection — so a blanket `'dawn'` sweep
+across these 39 would be wrong, not merely unverified.
+
 The 39 untracked include: Alchemy Jug, Gem of Brightness, Cape of the Mountebank, Chime of Opening,
 Cloak of Invisibility, Cloak of the Bat, Helm of Teleportation, Hat of Vermin, Staff of Birdcalls,
 Staff of Flowers, Wand of Pyrotechnics/Scowls/Smiles, Bell Branch, Blood Fury Tattoo, Crook of Rao,
