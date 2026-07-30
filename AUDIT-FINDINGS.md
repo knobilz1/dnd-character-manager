@@ -700,6 +700,30 @@ check must be **written fresh** and carry a positive control (a pattern that mus
 population) and a negative control (a pattern that must match nothing). That is what caught the four
 first-pass parser failures, and what validated these two numbers.
 
+## Round 2: R6 and R2
+
+| Finding | First pass | Second pass | Verdict |
+|---|---|---|---|
+| **R6** items with charge text but no `maxCharges` | 39 | **39** | ✅ reproduces, **set diff empty** |
+| **R6** item templates total | 692 | **692** | ✅ |
+| **R6** items carrying `maxCharges` | 48 | **47** | ⚠️ **corrected — see below** |
+| **R2** no cap guard in the store | asserted | **confirmed** | ✅ |
+
+Controls: R6 nonsense pattern → **0**; match-everything pattern → **645**, exactly `692 − 47`, which both
+proves the parser sees every template and independently confirms the corrected 47.
+
+### ✏️ CORRECTION — 47 item templates carry `maxCharges`, not 48
+The first pass ran `grep -c 'maxCharges:'` over the **whole file**, which included the type definition at
+`items.ts:9` (`maxCharges?: number;`). Counting only item lines gives **47**. Everything derived from it
+is unaffected — the 39 gap items and the 2 no-recharge items are unchanged — but the ratio is
+**47 tracked of 692**, not 48.
+
+### R2 re-confirmed directly
+`useCharacterStore.toggleSpellPrepared` (:449-456) and `addSpellToBook` (:458-462) were re-read in full and
+grepped for any `max` / `limit` / `cap` / `>=` / `length` comparison. **There is none in either.** The
+sheet genuinely cannot refuse an over-cap pick. This was the user's originally reported bug and it is
+verified twice by different means.
+
 ## Still to re-verify in the second pass
 R6 (39 items) · R2 cap sites · D4 (103 subclass choices — needs hand triage anyway) · Phase G's G1–G4
 (already high-confidence: each was confirmed by direct `grep` of the specific line, not by a sweep).
