@@ -771,7 +771,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Beguiling Twist', level: 7, description: 'Advantage on saves vs being charmed and frightened. When you or an ally within 120 feet succeeds on a save vs charm/fright, use your reaction to force a creature within 120 feet to make a Wis save or be charmed/frightened by you for 1 minute.' },
     { name: 'Fey Reinforcements', level: 11, description: 'You learn Summon Fey. You can cast it without a material component or expending a slot, once per long rest.' },
     { name: 'Misty Wanderer', level: 15, description: 'You can cast Misty Step a number of times per long rest equal to your Wis mod. You can take a willing creature within 5 feet with you.' },
-  ]},
+  ],
+    // Fey Reinforcements (11th): cast Summon Fey once per long rest without a slot.
+    resources: [{ name: 'Fey Reinforcements', key: 'fey_reinforcements', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'swarmkeeper', name: 'Swarmkeeper', classId: 'ranger', sourceBook: 'TCE', description: 'Magic intermingles with the bond that an archetypal ranger shares with nature — but the Swarmkeeper bonds with a swarm of nature spirits.', features: [
     { name: 'Gathered Swarm', level: 3, description: 'A swarm of nature spirits aids you. When you hit with an attack, choose: +1d6 piercing damage, push target 15 feet, or move yourself 5 feet without provoking opportunity attacks.' },
     { name: 'Swarmkeeper Magic', level: 3, description: 'You learn additional spells, starting with Mage Hand.' },
@@ -899,7 +903,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Alchemical Savant', level: 5, description: 'When you cast a spell using alchemist\'s supplies as a focus, you add your Intelligence modifier to one healing or acid/fire/necrotic/poison damage roll of the spell.' },
     { name: 'Restorative Reagents', level: 9, description: 'When a creature drinks one of your elixirs, it gains temporary HP equal to 2d6 + your Intelligence modifier. You can also cast Lesser Restoration without expending a spell slot, a number of times equal to your Int modifier per long rest.' },
     { name: 'Chemical Mastery', level: 15, description: 'You gain resistance to acid and poison damage and are immune to the poisoned condition. You can cast Greater Restoration and Heal once per long rest each without expending a spell slot.' },
-  ]},
+  ],
+    // Chemical Mastery (15th): the two free castings, one each per long rest.
+    resources: [{ name: 'Chemical Mastery', key: 'chemical_mastery', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:2,16:2,17:2,18:2,19:2,20:2 } }],
+  },
   { id: 'armorer', name: 'Armorer', classId: 'artificer', sourceBook: 'TCE', description: 'An artificer who specializes as an Armorer modifies armor to function almost like a second skin.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with heavy armor and smith\'s tools.' },
     { name: 'Armorer Spells', level: 3, description: 'You always have certain spells prepared: Magic Missile, Thunderwave (3rd), Mirror Image, Shatter (5th), Hypnotic Pattern, Lightning Bolt (9th), Fire Shield, Greater Invisibility (13th), Passwall, Wall of Force (17th).' },
@@ -916,7 +924,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Arcane Firearm', level: 5, description: 'You can turn a wand, staff, or rod into an arcane firearm — a magical conduit for your artificer spells. When you cast an artificer spell through it, you add 1d8 to the spell\'s damage roll.' },
     { name: 'Explosive Cannon', level: 9, description: 'Each cannon\'s damage increases by 1d8 (Flamethrower 3d8, Force Ballista 3d8, Protector 2d8). As an action (within 60 ft), command cannon to detonate: destroyed, each creature within 20 ft makes Dex save or takes 3d8 force (half on success).' },
     { name: 'Fortified Position', level: 15, description: 'You and your allies have half cover while within 10 feet of a cannon you create. You can have two cannons at the same time.' },
-  ]},
+  ],
+    // Eldritch Cannon (3rd): one per long rest without a spell slot (a slot may be spent for more).
+    resources: [{ name: 'Eldritch Cannon', key: 'eldritch_cannon', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'battle-smith', name: 'Battle Smith', classId: 'artificer', sourceBook: 'TCE', description: 'Armies require protection, and someone has to put things back together if defenses fail. A combination of protector and medic, a Battle Smith is an expert at defending allies and repairing both materiel and personnel.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with martial weapons and smith\'s tools.' },
     { name: 'Battle Smith Spells', level: 3, description: 'You always have certain spells prepared: Heroism, Shield (3rd), Branding Smite, Warding Bond (5th), Aura of Vitality, Conjure Barrage (9th), Aura of Purity, Fire Shield (13th), Banishing Smite, Mass Cure Wounds (17th).' },
