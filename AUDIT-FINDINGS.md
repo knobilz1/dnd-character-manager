@@ -378,6 +378,33 @@ Regenerate the full list with the awk in commit for D4.
 Per-subclass level-up options (does each subclass's choice-bearing feature actually prompt at its level),
 and racial level-gating (`InnateSpell.minCharLevel` — does a race's level-gated spell appear on level-up).
 
+## PHASE F — SPELLS (536 in the 2014 file) — STRUCTURALLY CLEAN
+
+Five internal-consistency checks across every spell. **All five passed with zero defects.**
+
+| # | Check | Population | Defects |
+|---|---|---|---|
+| 1 | `concentration: true` flag ⟷ `duration` text containing "Concentration" | 238 flagged | **0** |
+| 2 | `'M'` in `components` ⟹ `materialComponent` present | 280 | **0** |
+| 3 | `materialComponent` present ⟹ `'M'` in `components` | 280 | **0** |
+| 4 | cantrips (level 0) must not have `atHigherLevels` | 49 cantrips, 158 spells with atHL | **0** |
+| 5 | `classes` array must not be empty | 536 | **0** |
+
+**Methodology note — this result is verified, not assumed.** The first attempt used a multi-line awk block
+parser and returned "no defects" because spell entries are **one per line**; the parser matched nothing.
+A silent empty result is indistinguishable from a clean one, so every check was re-run with its population
+counted and a positive control: spells with `'M'` **and** `materialComponent` = 280, exactly equal to the
+280 with `'M'`, proving the check fires. Apply the same discipline to every future sweep in this file.
+
+Checks 2 and 3 together mean the M/materialComponent relationship is a perfect 1:1 across all 280 — a
+strong signal that the May/June 2026 text audits (which fixed several fabricated material components in
+TCE, XGtE and FToD) were applied consistently.
+
+**Not yet covered in Phase F:** per-spell numeric/mechanical accuracy vs the books (damage dice, ranges,
+durations, save types, atHigherLevels scaling). Note the prior text audits already covered spell
+descriptions for PHB (362 spells, 12 bugs), XGtE (95, 3 bugs), TCE, EGtW, FToD and SCoC — see memory
+`audit_status.md`. The remaining gap is 2024 spells and cross-book numeric spot-checks.
+
 # EDITION PRIORITY — 2014 (user plays it more)
 Measured, not assumed. The headline findings are **overwhelmingly 2014**, not 2024:
 | Finding | 2014 | 2024 |
