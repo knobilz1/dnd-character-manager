@@ -877,7 +877,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Physician\'s Touch', level: 6, description: 'When you use Hand of Healing, end one of: blinded, deafened, paralyzed, poisoned, stunned. When you use Hand of Harm, target is poisoned until end of next turn.' },
     { name: 'Flurry of Healing and Harm', level: 11, description: 'When you use Flurry of Blows, you can replace each unarmed strike with Hand of Healing without spending ki.' },
     { name: 'Hand of Ultimate Mercy', level: 17, description: 'Spend 5 ki to touch a corpse dead no more than 24 hours and return it to life with 4d10 + your Wisdom modifier hit points (also ending blinded, deafened, paralyzed, poisoned, or stunned). Once per long rest.' },
-  ]},
+  ],
+    // TCE p.53: Hand of Ultimate Mercy — once per long rest. (It also costs 5 ki, which the
+    // ki pool already tracks; this counter is the separate once-a-day limit.)
+    resources: [{ name: 'Hand of Ultimate Mercy', key: 'hand_of_ultimate_mercy', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'way-of-the-astral-self', name: 'Way of the Astral Self', classId: 'monk', sourceBook: 'TCE', description: 'A monk who follows the Way of the Astral Self believes their body is an illusion, and that their consciousness can manifest a visible astral form.', features: [
     { name: 'Arms of the Astral Self', level: 3, description: 'As a bonus action, spend 1 ki to summon spectral arms for 10 minutes; a creature within 10 ft must make a Dex save or take force damage equal to two rolls of your Martial Arts die. While present, you use Wis for Strength checks/saves, and the arms\' unarmed strikes have +5 ft reach, use Wis for attack/damage, and deal force damage (Martial Arts die).' },
     { name: 'Visage of the Astral Self', level: 6, description: 'As a bonus action (or as part of summoning Arms), spend 1 ki to summon the visage for 10 minutes: Astral Sight (see in magical/nonmagical darkness out to 120 ft), Wisdom of the Spirit (advantage on Insight and Intimidation checks), and Word of the Spirit (speak privately to a creature within 60 ft, or amplify your voice to 600 ft).' },
@@ -893,7 +898,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Glorious Defense', level: 15, description: 'When you or an ally within 10 feet are hit by an attack, use your reaction to grant +Cha-mod AC against that attack. If the attack misses, make one weapon attack against the attacker. Cha-mod uses per long rest.' },
     { name: 'Aura of Alacrity Improvement', level: 18, description: 'At 18th level, the range of your Aura of Alacrity increases to 10 feet.' },
     { name: 'Living Legend', level: 20, description: 'As a bonus action for 1 minute: advantage on all Charisma checks; once per turn when you miss with a weapon attack, that attack hits instead; reaction when you fail a saving throw to reroll it (must use new roll). Once per long rest; can use again by expending a 5th-level spell slot.' },
-  ], alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'flame-strike'] }},
+  ],
+    // TCE p.54: Living Legend — once per long rest. The "spend a 5th-level slot to use it
+    // again" clause is an alternative cost, not a recharge, so it is not modelled here (same
+    // call as Warping Implosion's 5-sorcery-point reuse).
+    resources: [{ name: 'Living Legend', key: 'living_legend', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-watchers', name: 'Oath of the Watchers', classId: 'paladin', sourceBook: 'TCE', description: 'The Oath of the Watchers binds paladins to protect mortals from the dangers posed by extraplanar entities.', features: [
     { name: 'Channel Divinity: Watcher\'s Will', level: 3, description: 'As an action, choose up to Cha-mod creatures within 30 feet. They gain advantage on Int, Wis, and Cha saves for 1 minute.' },
     { name: 'Channel Divinity: Abjure the Extraplanar', level: 3, description: 'Each aberration, celestial, elemental, fey, or fiend within 30 feet must make a Wis save or be turned for 1 minute.' },
@@ -901,7 +912,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Vigilant Rebuke', level: 15, description: 'When you or a creature within 30 feet succeeds on an Int, Wis, or Cha save, use your reaction to deal 2d8 + Cha mod force damage to the source.' },
     { name: 'Aura of the Sentinel Improvement', level: 18, description: 'At 18th level, the range of your Aura of the Sentinel increases to 30 feet.' },
     { name: 'Mortal Bulwark', level: 20, description: 'As a bonus action for 1 minute: truesight 120 ft, advantage on attacks vs aberrations/celestials/elementals/fey/fiends, and banish them on a hit (Cha save). Once per long rest.' },
-  ], alwaysPreparedSpells: { 3: ['alarm', 'detect-magic'], 5: ['moonbeam', 'see-invisibility'], 9: ['counterspell', 'nondetection'], 13: ['aura-of-purity', 'banishment'], 17: ['hold-monster', 'scrying'] }},
+  ],
+    // TCE p.56: Mortal Bulwark — once per long rest, with the same 5th-level-slot
+    // alternative cost as Living Legend (not modelled, it is not a recharge).
+    resources: [{ name: 'Mortal Bulwark', key: 'mortal_bulwark', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['alarm', 'detect-magic'], 5: ['moonbeam', 'see-invisibility'], 9: ['counterspell', 'nondetection'], 13: ['aura-of-purity', 'banishment'], 17: ['hold-monster', 'scrying'] }},
 
   // ── TCE: RANGER ──────────────────────────────────────────────────────
   { id: 'fey-wanderer', name: 'Fey Wanderer', classId: 'ranger', sourceBook: 'TCE', description: 'Mysterious wardens of the Feywild, Fey Wanderers are infused with otherworldly magic.', features: [
@@ -1013,7 +1029,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Elemental Gift', level: 6, description: 'You gain resistance to a damage type based on your genie kind: bludgeoning (Dao), thunder (Djinni), fire (Efreeti), cold (Marid). As a bonus action, you gain a flying speed of 30 feet and can hover for 10 minutes. You can use this flight a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Sanctuary Vessel', level: 10, description: 'When entering the vessel via Bottled Respite, you can bring up to 5 willing creatures within 30 feet. Anyone inside who spends 10+ minutes gains a short rest benefit; they can add your proficiency bonus to HP regained from spending Hit Dice.' },
     { name: 'Limited Wish', level: 14, description: 'Action — speak to your Genie\'s Vessel to duplicate the effect of any spell of 6th level or lower with a 1-action casting time (from any class spell list, no requirements). Recharges after 1d4 long rests.' },
-  ]},
+  ],
+    // TCE p.75: Elemental Gift — the flight is prof-bonus uses per long rest (override below).
+    // NOT modelled: Limited Wish (14th) recharges "after 1d4 long rests", which rechargeOn
+    // cannot express — logged under R4.
+    resources: [{ name: 'Elemental Gift', key: 'elemental_gift', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
 
   // ── TCE: WIZARD ──────────────────────────────────────────────────────
   { id: 'bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'TCE', description: 'Bladesingers are elves who use their wizardly training to perfect a deadly art that combines swordplay with magic.',
