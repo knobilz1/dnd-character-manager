@@ -405,6 +405,86 @@ durations, save types, atHigherLevels scaling). Note the prior text audits alrea
 descriptions for PHB (362 spells, 12 bugs), XGtE (95, 3 bugs), TCE, EGtW, FToD and SCoC — see memory
 `audit_status.md`. The remaining gap is 2024 spells and cross-book numeric spot-checks.
 
+## PHASE B — SUBCLASS FEATURE LEVELS — CLEAN (959 features checked)
+Checked every subclass feature against the legal feature levels for its class
+(Barbarian 3/6/10/14 · Bard 3/6/14 · Cleric 1/2/6/8/17 · Druid 2/6/10/14 · Fighter 3/7/10/15/18 ·
+Monk 3/6/11/17 · Paladin 3/7/15/18/20 · Ranger 3/7/11/15 · Rogue 3/9/13/17 · Sorcerer 1/6/14/18 ·
+Warlock 1/6/10/14 · Wizard 2/6/10/14 · Artificer 3/5/9/15).
+
+**959 examined, 0 skipped. Every apparent anomaly resolved to correct-per-book:**
+- `circle-of-the-land` Circle Spells at 3 — **correct**, the Land circle-spells table starts at 3rd.
+- `shadow-magic` Eyes of the Dark → Darkness at 3 — **correct**, a sub-part of the level-1 XGtE feature.
+- `tob-path-of-the-kraken` In the Dark Below at 15 — **correct per the ToB PDF** (3rd-party, non-standard).
+- Paladin oath auras improving at 18 — **correct**, the aura range goes 10→30 ft at 18.
+- All `circle-of-stars` features are at 2/2/6/10/14 — **correct** (TCE).
+
+### ⚠️ METHODOLOGY WARNING — three parser bugs produced three false results here
+This check reported a wrong answer **three times** before it was right. Recorded because the same traps
+will recur in the second pass:
+1. **Off-by-one substr offsets** on `classId` → 959 features silently skipped, reported as "0 defects".
+2. **`'\''` shell escaping inside a heredoc'd awk file** → the regex looked for three literal quotes and
+   matched nothing. Shell quoting rules do not apply once the program is in a file.
+3. **Greedy `sub(/.*level: /)`** took the *last* number on a line instead of the first, producing 46
+   phantom offenders including "circle-of-stars at level 3" (it is at 2).
+
+**Rule going forward: every sweep needs a positive control** — deliberately narrow the expected set and
+confirm the check flags the entries it should. A bare "0 defects" is worthless without it. This is the
+second time (see Phase F) a broken parser masqueraded as a clean result.
+
+Also note `sc` (subclass label) can go stale in these awk sweeps while `cid`/`level` stay correct, so
+**trust the class and level columns, verify the subclass name** before acting on any row.
+
+---
+
+# FIX PLAN (for the fixing phase)
+
+Ordered by severity × blast radius. Each item names the chokepoint, because per-call-site patching is what
+made R1 take two commits instead of one.
+
+### Tier 1 — silently destroys a character sheet
+1. **D1 subclass prompt** — `LevelUpDialog.tsx:293`, change `===` to `>=`. One character. Highest
+   value-per-byte in the whole audit. Verify: level a subclass-less character past its subclass level.
+2. **D4 subclass build choices** — 103 candidates across 70 subclasses, **triage by hand first** to
+   separate build choices from use-time choices. Needs a `subclassOptions` store slice mirroring
+   `classOptions`, plus prompts in `LevelUpDialog` and the creator. Start with Circle of the Land
+   (blocks spell granting entirely), Arcane Archer (5 points), Hunter, Champion.
+
+### Tier 2 — rules are wrong at the table
+3. **R2 cap enforcement** — guard in the **store**, not the panels: `useCharacterStore.toggleSpellPrepared`
+   (:449) and `addSpellToBook` (:458) are the chokepoints. Covers prepared, spells known, and cantrips.
+4. **C1 cleric-2024 Channel Divinity** — restores all on a short rest; should restore one.
+   Blocked on R4.
+5. **R4 recharge enum widening** — `'short'|'long'|'dawn'` cannot express "one on short, all on long"
+   (2024 Wild Shape, 2024 Focus, C1) or multi-day cooldowns (Divine Intervention, 7 days).
+   Design once, then C1 and druid-2024 fall out of it.
+
+### Tier 3 — features exist but cannot be tracked
+6. **R5 subclass resources** — 102 features / 70 subclasses. `Subclass.resources` **already exists**; only
+   8 of 141 use it. Mostly data entry, no new plumbing. 52 of 70 are 2014.
+7. **R3 race resources** — 31 races. Add `resources?: ClassResourceDefinition[]` to `Race`, then extend the
+   class+subclass+feat loops in `load`/`levelUp`/`shortRest`/`longRest` to a fourth source. 30 of 31 are 2014.
+8. **Missing class resources** — fighter-2024 Indomitable, wizard-2024 Arcane Recovery, ranger-2024
+   Favored Enemy, warlock Mystic Arcanum + Eldritch Master, rogue Stroke of Luck, artificer
+   Spell-Storing Item, paladin Divine Sense + Cleansing Touch, wizard Signature Spells, druid-2024
+   Wild Resurgence.
+9. **R6 item charges** — 39 items need `maxCharges`/`recharge`; **Scarab of Protection** needs
+   `recharge: 'dawn'` (Ring of Three Wishes is correctly permanent).
+
+### Tier 4 — 2024-only
+10. **R1 remaining sites** — the 7 in the R1 table. Use `baseClassId()`/`classLevel()`, already added.
+11. **D2** bard-2024 / ranger-2024 are prepared casters, not known — `LevelUpDialog.tsx:455,458`.
+12. **D3** Epic Boon flagged `isASI: true` on all 12 2024 classes.
+13. **A3** ghost `rage_damage` on pre-`74eb1ad` 2024 Barbarians; needs a prune that spares feat-granted
+    and disabled-sourcebook resources.
+
+### Tier 5 — cosmetic
+14. **A1** level-20 Rage shows `99/99` rather than unlimited.
+15. **B1** Berserker Intimidating Presence missing the 24-hour clause.
+
+### Verify-before-merge debt
+The AC fix in `74eb1ad` is **typechecked only** — CDP would not attach through `tauri dev` or a second
+instance. Confirm a PHB 2024 Barbarian's AC includes CON before merging.
+
 # EDITION PRIORITY — 2014 (user plays it more)
 Measured, not assumed. The headline findings are **overwhelmingly 2014**, not 2024:
 | Finding | 2014 | 2024 |
