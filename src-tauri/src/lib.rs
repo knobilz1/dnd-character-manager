@@ -115,6 +115,7 @@ pub fn run() {
       campaign::read_last_session_recap,
       campaign::reconcile_module_decisions,
       campaign::read_module_decisions,
+      campaign::read_chapter_text,
       campaign::generate_battle_map,
       campaign::regenerate_one_plan_map,
       campaign::list_battle_maps,

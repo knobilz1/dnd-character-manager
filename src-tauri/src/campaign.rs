@@ -104,7 +104,8 @@ Valid keys (all optional): damage [{name,amount}], heal [{name,amount}], tempHp 
 - `recallSession`: a `session-NN` id copied exactly from session_index.md above. session_index.md gives you a one-line map of every past session, but not the detail — when a player references something specific from an earlier session and the one-liner (plus entities.md/locations.md/flagged_facts.md) isn't enough to answer confidently, set this to that session's id. The full verbatim record of that session is loaded into your NEXT turn's prompt, so you can answer accurately instead of guessing. Use it sparingly — only when you actually need the detail — and never invent an id that isn't listed in session_index.md. It's a read, not a story change: including it never alters anything, it just fetches your own past record.
 - `recallMap`: a battle-map slug copied exactly from battle_maps/index.md above. The index lists each prepared map's name and size but not its layout — when a fight is about to happen on a location you have a map for, set this to that map's slug and its full grid + tactics loads into your NEXT turn so you can place enemies on the real cells (see "Prepared battle maps" in the DM rules). Like `recallSession` it's a read that changes nothing; never invent a slug that isn't in the index.
 - `battleLog` / `removeCombatant` / `endBattle` / `battleResult`: how you keep the Active Battle Log current during a fight, and save only the outcome when it ends — see "Running combat & positioning" in the DM rules for the full protocol.
-Only include this block when something actually changed OR when you are asking for something — `recallMap`, `recallSession`, `makeMap` and the other requests are not state changes, and a turn whose only reason to emit the block is one of them still emits it. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
+- `recallChapter`: a chapter id copied exactly from active_module/index.md above. The index lists every chapter including ones marked [REFERENCE] — appendices of stat blocks, item tables, handouts — which are kept in full but never loaded, because they are far too big to carry every turn and far too useful to discard. Set this to a chapter's id and its full text arrives in your NEXT turn: use it when you need a monster's actual stat block, an item's real rules, or a detail from a chapter the party has already left. Same read-only shape as `recallSession` and `recallMap` — it changes nothing and moves nobody. NEVER use `advanceToChapter` on a [REFERENCE] chapter; the party cannot walk into an appendix. Never invent an id that isn't in the index.
+Only include this block when something actually changed OR when you are asking for something — `recallMap`, `recallSession`, `recallChapter`, `makeMap` and the other requests are not state changes, and a turn whose only reason to emit the block is one of them still emits it. Never mention the block itself in your spoken narration — it is stripped before anyone hears it.
 
 ## Campaign-arc plan check-ins
 Most turns you'll just see the active module's current chapter text (if any) and won't see the overarching campaign lore or the active module's own arc plan — that's intentional, it's not repeated every turn. Every so often (session start, right after a chapter or module change, and periodically otherwise) your prompt will start with a "Campaign-arc plan check-in" section containing the campaign's overarching lore and/or the active module's arc plan again. When you see it, use it to steer pacing, keep foreshadowed threads and NPCs consistent with the wider story, and then continue narrating normally — don't call attention to it or treat it as new information from the players.
@@ -233,6 +234,13 @@ pub struct ChapterSummary {
     pub id: String,
     pub title: String,
     pub summary: String,
+    /// Look-up material (an appendix, a stat-block list, a table) rather than a
+    /// scene the party plays through. Kept in full, listed in the index, never
+    /// an `advanceToChapter` target, loaded only when `recallChapter` asks for
+    /// it. `#[serde(default)]` so manifests written before this existed still
+    /// parse — they're all narrative.
+    #[serde(default)]
+    pub reference: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -8153,8 +8161,10 @@ fn build_chapterize_prompt(candidates: &[(usize, &str)]) -> String {
         About the line index: it is a mechanical shortlist of every line in the document that looked like it might be a heading, so most of its entries are NOT chapter starts — subsection titles, table headers, stat-block labels and running page headers all end up in it. Two things to watch for. A running page header repeats many times, once per page of the chapter it belongs to, often garbled differently each time; the chapter really starts at the first of them that is actually followed by the start of that chapter's text, NOT simply the first one that appears. And the same heading text can legitimately occur several times as genuinely different sections (six episodes may each end with a \"Conclusion\"); those are separate real boundaries, not duplicates. The surrounding document text is below the index — use it to tell these apart.\n\n\
         3. Self-audit your own breakdown above and list any STRUCTURAL concerns as short strings — e.g. a heading you weren't fully confident matched a unique exact point in the source text, or narrative chapters that still came out very uneven in size. The person reading this may be a PLAYER in the game, not the DM, so these strings must never reveal plot content, twists, names of secrets, or anything that would spoil the adventure — describe only the structural problem itself. If you have no concerns, return an empty array.\n\n\
         Reply with ONLY a JSON object, no other text, no markdown code fences:\n\
-        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"line\": <line number>, \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"narrative_ends_at_line\": <line number or null>, \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
-        \"narrative_ends_at_line\" is the line where the pure-reference material at the BACK of the document begins — the first stat-block appendix, item table, or index. The last chapter stops there instead of running to the end of the document, so leaving those sections out of the chapter list above is not enough on its own; without this they all get swallowed into the final chapter. Use null if the document is narrative all the way to the end.\n\n\
+        {{\"module_title\": \"<short title>\", \"chapters\": [{{\"title\": \"<clean readable chapter title>\", \"line\": <line number>, \"summary\": \"<one clean, readable sentence describing what happens in this section>\"}}], \"narrative_ends_at_line\": <line number or null>, \"reference_sections\": [{{\"title\": \"<e.g. Appendix D: Monsters>\", \"line\": <line number>, \"summary\": \"<what you'd look up in here>\"}}], \"concerns\": [\"<short structural concern, no spoilers>\"]}}\n\n\
+        \"narrative_ends_at_line\" is the line where the material you PLAY THROUGH IN ORDER stops and the material you LOOK THINGS UP IN begins — the first stat-block appendix, item table, or index. Use null if the document is narrative all the way to the end.\n\n\
+        \"reference_sections\" is that back matter, listed out: one entry per appendix or reference section, same title/line/summary shape as a chapter. It is KEPT — listed in the chapter index and pulled up on demand — so leaving something out here loses it. List every distinct back section you can see.\n\n\
+        One thing to get right: back matter sometimes contains an entire self-contained ADVENTURE — a starter dungeon, a side quest, a one-shot — printed as an appendix. That is played, not looked up, so it belongs in \"chapters\" above, NOT in \"reference_sections\". Judge by whether a party would play through it scene by scene, not by whether it is printed at the back.\n\n\
         If the document has no clear internal chapter structure, still return a single chapters entry pointing at line 1, whose title is a short readable name for the whole document and whose summary describes the whole document.\n\n\
         LINE INDEX (candidate headings, numbered — pick from these):\n{index}"
     )
@@ -8466,6 +8476,23 @@ struct ChapterizeReply {
     /// slice. `None` means the document is narrative all the way down.
     #[serde(default)]
     narrative_ends_at_line: Option<usize>,
+    /// The back-matter sections themselves, so they can be KEPT instead of
+    /// dropped on the floor.
+    ///
+    /// `narrative_ends_at_line` alone made this binary — everything past the
+    /// line vanished. Measured on Curse of Strahd that discarded 169,591
+    /// characters, and the back matter turned out not to be uniform: appendix B
+    /// is Death House, a 45k-character playable adventure, sitting between
+    /// character options and stat blocks. No single cut line can express "keep
+    /// B, drop the rest".
+    ///
+    /// So nothing is dropped now. These become chapters flagged `reference`:
+    /// listed in the index, never advanced into, pulled on demand with
+    /// `recallChapter`. A section that's actually playable goes in `chapters`
+    /// instead — and getting that call wrong is no longer destructive, which is
+    /// the whole reason it's safe to ask.
+    #[serde(default)]
+    reference_sections: Vec<ChapterHeading>,
 }
 
 /// Parses Claude's combined chapterize+plan reply, tolerating stray markdown
@@ -8733,8 +8760,9 @@ fn coverage_concern(source_len_chars: usize, covered_chars: usize) -> Option<Str
         return None;
     }
     Some(format!(
-        "Only about {:.0}% of the source document ended up inside a chapter. This is often expected now — reference/appendix material (stat blocks, item tables) is intentionally left out of the chapter list — but it can also mean front matter before the first detected heading, or a heading that didn't match exactly, was left out unintentionally. Content between matched headings is never lost, so if the missing part was meant to be a chapter, check the very start of the source or the chapter list above.",
-        ratio * 100.0
+        "{:.0}% of the source document ended up inside a chapter — about {} characters did not. Appendices no longer explain this: reference sections are kept as [REFERENCE] chapters now, so a real gap usually means front matter before the first detected heading, or a heading that didn't match and left a run of text belonging to nobody. Content BETWEEN matched headings is never lost, so check the very start of the source first, then the chapter list.",
+        ratio * 100.0,
+        (source_len_chars.saturating_sub(covered_chars)).to_string(),
     ))
 }
 
@@ -8742,7 +8770,16 @@ fn build_index_md(manifest: &[ChapterSummary], current_id: &str) -> String {
     let mut s = String::from("# Module chapters\n\n");
     for (i, c) in manifest.iter().enumerate() {
         let marker = if c.id == current_id { " ← CURRENT CHAPTER" } else { "" };
-        s.push_str(&format!("{}. **{}** (`{}`){marker} — {}\n", i + 1, c.title, c.id, c.summary));
+        let kind = if c.reference { " [REFERENCE — recall only, never advance here]" } else { "" };
+        s.push_str(&format!("{}. **{}** (`{}`){marker}{kind} — {}\n", i + 1, c.title, c.id, c.summary));
+    }
+    if manifest.iter().any(|c| c.reference) {
+        s.push_str(
+            "\n_Chapters marked REFERENCE are look-up material — stat blocks, item tables, handouts. They are not \
+             scenes and the party never moves into them, so never use `advanceToChapter` on one. When you need what \
+             is in one (a monster's stats, an item's rules), use `recallChapter` with its id and its full text \
+             arrives in your next turn._\n",
+        );
     }
     s
 }
@@ -9059,10 +9096,15 @@ fn sync_standing_import_at(root: &Path, id: &str) -> Result<(), String> {
 /// references the standing module-import block, but only the first time
 /// (idempotent `.contains()` check — a campaign that never imports a module
 /// never gets this block at all).
+/// `reference_from` is the index at which reference (look-up) chapters begin —
+/// they're always appended after the narrative ones, so one boundary is enough
+/// and the 3-tuple the whole split/subdivide pipeline passes around doesn't
+/// have to grow a field. Pass `chapters.len()` when there are none.
 fn write_chapters_to_disk(
     root: &Path,
     id: &str,
     chapters: &[(String, String, String)],
+    reference_from: usize,
     plan: &str,
     module_title: &str,
 ) -> Result<(String, Vec<ChapterSummary>), String> {
@@ -9080,7 +9122,12 @@ fn write_chapters_to_disk(
     for (i, (title, summary, content)) in chapters.iter().enumerate() {
         let chapter_id = format!("chapter-{:02}-{}", i + 1, slugify(title));
         write_atomic(&module_dir.join(format!("{chapter_id}.md")), content)?;
-        summaries.push(ChapterSummary { id: chapter_id, title: title.clone(), summary: summary.clone() });
+        summaries.push(ChapterSummary {
+            id: chapter_id,
+            title: title.clone(),
+            summary: summary.clone(),
+            reference: i >= reference_from,
+        });
     }
 
     write_atomic(
@@ -9308,7 +9355,27 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     // Break up anything too big to sit in `current.md` on every turn. Done
     // before extraction so each scene is extracted and named in its own right.
     on_progress("chapterizing", 0, 0);
-    let chapters = subdivide_oversized_chapters(&module_title, chapters);
+    let mut chapters = subdivide_oversized_chapters(&module_title, chapters);
+
+    // Then the back matter, appended and marked. Everything from here on is
+    // reference: kept in full, never advanced into, pulled by `recallChapter`.
+    //
+    // Deliberately NOT subdivided, and that's a cost decision rather than an
+    // oversight. A reference chapter's SIZE is free — it never sits in
+    // current.md — so the only thing it costs per turn is its one line in the
+    // always-loaded index. Splitting Curse of Strahd's appendix D at every
+    // monster heading would have traded one index line for thirty, paid on
+    // every single turn, to solve a problem (chapter too big for a turn) that
+    // reference chapters don't have.
+    //
+    // Guarded on non-empty because split_by_headings with no headings returns
+    // the WHOLE document as one chapter — which here would duplicate the
+    // entire book.
+    let reference_from = chapters.len();
+    if !parsed.reference_sections.is_empty() {
+        chapters.extend(split_by_headings(raw_text, &candidates, &parsed.reference_sections, None));
+    }
+    let chapters = chapters;
 
     let mut concerns = parsed.concerns.clone();
     let covered_chars: usize = chapters.iter().map(|(_, _, body)| body.chars().count()).sum();
@@ -9375,7 +9442,7 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
         .filter(|s| !s.is_empty())
         .unwrap_or(draft_plan);
 
-    let (module_id, summaries) = write_chapters_to_disk(root, id, &chapters, &plan, &module_title)?;
+    let (module_id, summaries) = write_chapters_to_disk(root, id, &chapters, reference_from, &plan, &module_title)?;
 
     // Register the module's cross-chapter dependencies while we're here.
     //
@@ -9819,6 +9886,30 @@ pub async fn reconcile_module_decisions(app: AppHandle, id: String, module_id: S
     })
     .await
     .map_err(|e| format!("Standing-decisions task failed: {e}"))?
+}
+
+/// The full text of ONE chapter, without making it current — what the
+/// `recallChapter` dm-action reads.
+///
+/// The point of this is reference chapters: an appendix of stat blocks is far
+/// too big to sit in `current.md` every turn, and far too useful to throw away,
+/// which is exactly the shape `recallMap` and `recallSession` already solve.
+/// Nothing about it is reference-only though — recalling an earlier narrative
+/// chapter to check a detail the party is asking about is just as valid.
+#[tauri::command]
+pub fn read_chapter_text(app: AppHandle, id: String, module_id: String, chapter_id: String) -> Result<String, String> {
+    read_chapter_text_at(&campaigns_root(&app)?, &id, &module_id, &chapter_id)
+}
+
+/// Both ids cross the IPC boundary and land in a path, so both are validated —
+/// the chapter id by the same `[a-z0-9-]` guard map slugs use, since chapter
+/// ids come from the same slugify.
+fn read_chapter_text_at(root: &Path, id: &str, module_id: &str, chapter_id: &str) -> Result<String, String> {
+    if !is_valid_map_slug(chapter_id) || !is_valid_map_slug(module_id) {
+        return Err(format!("Invalid chapter id \"{chapter_id}\"."));
+    }
+    let path = root.join(id).join("modules").join(module_id).join(format!("{chapter_id}.md"));
+    fs::read_to_string(&path).map_err(|_| format!("No chapter \"{chapter_id}\" in module \"{module_id}\"."))
 }
 
 /// The register as it stands, for the Module dialog to show. Empty string when
@@ -12368,7 +12459,7 @@ Tactics:
     fn advance_chapter_at_invalidates_the_cached_session_plan() {
         let root = Scratch::new("advance-invalidates-plan");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
-        let (_, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.", "Lost Mine").unwrap();
+        let (_, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Test plan.", "Lost Mine").unwrap();
         write_session_plan_at(&root.0, &meta.id, "## Encounters\n1. [combat] Stale Fight — old chapter.\n").unwrap();
         assert!(read_session_plan_at(&root.0, &meta.id).is_some());
 
@@ -13031,7 +13122,7 @@ Tactics:
     fn reconcile_module_plan_at_is_a_free_no_op_when_the_active_module_has_no_plan() {
         let root = Scratch::new("reconcile-no-plan");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
-        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "", "Lost Mine").unwrap();
+        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "", "Lost Mine").unwrap();
         assert!(!reconcile_module_plan_at(&root.0, &meta.id, "Stuff happened.").unwrap());
     }
 
@@ -14157,6 +14248,81 @@ A HEADING LINE
         assert_eq!(parsed2.concerns, vec!["Chapter 2 came out much shorter than the others."]);
     }
 
+    /// The defect this whole change exists for: Curse of Strahd's back matter
+    /// was 169,591 characters including Death House, an entire playable
+    /// adventure, and `narrative_ends_at_line` dropped all of it on the floor.
+    /// Reference sections are kept and flagged now, so the index can point at
+    /// them and `recallChapter` can fetch them.
+    #[test]
+    fn write_chapters_to_disk_flags_everything_past_reference_from_and_the_index_says_so() {
+        let root = Scratch::new("reference-chapters");
+        let meta = create_campaign_at(&root.0, &intake("Reference")).unwrap();
+        let chapters = vec![
+            ("Chapter 1".to_string(), "The road.".to_string(), "Narrative body.".to_string()),
+            ("Appendix D: Monsters".to_string(), "Stat blocks.".to_string(), "AC 16, HP 144.".to_string()),
+        ];
+        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &chapters, 1, "plan", "Test Module").unwrap();
+
+        assert!(!summaries[0].reference, "narrative chapters are advanceable");
+        assert!(summaries[1].reference, "everything from reference_from on is look-up material");
+
+        let index = fs::read_to_string(root.0.join(&meta.id).join("modules").join(&module_id).join("index.md")).unwrap();
+        assert!(index.contains("[REFERENCE — recall only, never advance here]"));
+        assert!(index.contains("recallChapter"), "the index has to say how to reach them");
+        // The content is KEPT — that's the entire point.
+        let body = read_chapter_text_at(&root.0, &meta.id, &module_id, &summaries[1].id).unwrap();
+        assert!(body.contains("AC 16, HP 144."));
+    }
+
+    /// A module with no back matter must not gain a reference note or a stray
+    /// flag — most modules are narrative all the way down.
+    #[test]
+    fn write_chapters_to_disk_marks_nothing_when_there_is_no_back_matter() {
+        let root = Scratch::new("no-reference");
+        let meta = create_campaign_at(&root.0, &intake("Narrative")).unwrap();
+        let (module_id, summaries) =
+            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "plan", "Test Module").unwrap();
+        assert!(summaries.iter().all(|c| !c.reference));
+        let index = fs::read_to_string(root.0.join(&meta.id).join("modules").join(&module_id).join("index.md")).unwrap();
+        assert!(!index.contains("REFERENCE"));
+    }
+
+    #[test]
+    fn read_chapter_text_at_rejects_a_traversing_id_and_reports_a_missing_one() {
+        let root = Scratch::new("chapter-read");
+        let meta = create_campaign_at(&root.0, &intake("Read")).unwrap();
+        let (module_id, summaries) =
+            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "plan", "Test Module").unwrap();
+
+        assert!(read_chapter_text_at(&root.0, &meta.id, &module_id, &summaries[0].id).is_ok());
+        assert!(read_chapter_text_at(&root.0, &meta.id, &module_id, "../../../CLAUDE").is_err());
+        assert!(read_chapter_text_at(&root.0, &meta.id, &module_id, "chapter-99-nope").is_err());
+    }
+
+    /// The chapterize prompt has to ask for the back matter, and has to say that
+    /// a playable adventure printed as an appendix is a CHAPTER — that exact
+    /// case (Death House) is what the old cut destroyed.
+    #[test]
+    fn build_chapterize_prompt_asks_for_reference_sections_and_rescues_playable_appendices() {
+        let prompt = build_chapterize_prompt(&[(0, "APPENDIX B: DEATH HOUSE")]);
+        assert!(prompt.contains("reference_sections"));
+        assert!(prompt.contains("It is KEPT"));
+        assert!(prompt.contains("self-contained ADVENTURE"));
+        assert!(prompt.contains("belongs in \"chapters\""));
+    }
+
+    #[test]
+    fn parse_chapterize_reply_defaults_reference_sections_to_empty_for_older_replies() {
+        let parsed = parse_chapterize_reply(r#"{"chapters":[{"title":"C1","line":1,"summary":"s"}]}"#).unwrap();
+        assert!(parsed.reference_sections.is_empty());
+        let with = parse_chapterize_reply(
+            r#"{"chapters":[{"title":"C1","line":1,"summary":"s"}],"reference_sections":[{"title":"Appendix D","line":90,"summary":"stats"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(with.reference_sections.len(), 1);
+        assert_eq!(with.reference_sections[0].line, 90);
+    }
+
     #[test]
     fn coverage_concern_is_none_when_most_of_the_source_is_covered() {
         assert_eq!(coverage_concern(1000, 950), None);
@@ -14414,7 +14580,7 @@ A HEADING LINE
         let root = Scratch::new("write-chapters");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
         let plan = "# Campaign Arc\nThe goblins lead to Cragmaw Castle.";
-        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), plan, "Lost Mine of Phandelver").unwrap();
+        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, plan, "Lost Mine of Phandelver").unwrap();
 
         assert_eq!(module_id, "lost-mine-of-phandelver");
         assert_eq!(summaries.len(), 2);
@@ -14446,7 +14612,7 @@ A HEADING LINE
 
         // Importing a SECOND module coexists with the first (no wipe), and
         // the standing-import block still isn't duplicated.
-        let (module_id_2, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), plan, "A Different Module").unwrap();
+        let (module_id_2, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, plan, "A Different Module").unwrap();
         assert_ne!(module_id, module_id_2);
         assert!(root.0.join(&meta.id).join("modules").join(&module_id).join("manifest.json").exists(), "first module must still exist");
         assert!(root.0.join(&meta.id).join("modules").join(&module_id_2).join("manifest.json").exists());
@@ -14624,7 +14790,7 @@ The climax of this module is the confrontation with **Captain Aldric Renn** at t
         let root = Scratch::new("reconcile-e2e");
         let meta = create_campaign_at(&root.0, &intake("Redstone")).unwrap();
         let (module_id, _) =
-            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), E2E_STALE_PLAN, "Redstone Conspiracy").unwrap();
+            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, E2E_STALE_PLAN, "Redstone Conspiracy").unwrap();
 
         // The party goes completely off-plan: Renn dies on the road, nowhere near
         // the Gilded Eel, and the Gilded Eel itself burns down. Every load-bearing
@@ -14816,7 +14982,7 @@ The player playing Thorin says: Hang on — remind me exactly who poisoned the w
         let root = Scratch::new("reconcile-e2e-noop");
         let meta = create_campaign_at(&root.0, &intake("Redstone")).unwrap();
         let (module_id, _) =
-            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), E2E_STALE_PLAN, "Redstone Conspiracy").unwrap();
+            write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, E2E_STALE_PLAN, "Redstone Conspiracy").unwrap();
 
         // A session that goes entirely TO plan: Renn is alive, the Gilded Eel
         // stands, the new moon hasn't come. Nothing is resolved or invalidated.
@@ -14853,7 +15019,7 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
     fn advance_chapter_updates_current_pointer_and_index_marker() {
         let root = Scratch::new("advance");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
-        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.", "Lost Mine").unwrap();
+        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Test plan.", "Lost Mine").unwrap();
         let second_id = summaries[1].id.clone();
 
         advance_chapter_at(&root.0, &meta.id, &second_id).unwrap();
@@ -14876,7 +15042,7 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
     fn advance_chapter_rejects_unknown_id() {
         let root = Scratch::new("advance-bad");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
-        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.", "Lost Mine").unwrap();
+        write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Test plan.", "Lost Mine").unwrap();
         let err = advance_chapter_at(&root.0, &meta.id, "chapter-99-nonexistent").unwrap_err();
         assert!(err.contains("Unknown chapter id"));
     }
@@ -14898,7 +15064,7 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
         assert!(chapters.is_empty());
         assert!(current.is_none());
 
-        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Test plan.", "Lost Mine").unwrap();
+        let (module_id, summaries) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Test plan.", "Lost Mine").unwrap();
         let (chapters2, current2) = get_module_chapters_at(&root.0, &meta.id, &module_id).unwrap();
         assert_eq!(chapters2.len(), 2);
         assert_eq!(current2, Some(summaries[0].id.clone()));
@@ -14913,8 +15079,8 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
         assert!(empty.modules.is_empty());
         assert!(empty.active_id.is_none());
 
-        let (id1, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Plan 1.", "Module One").unwrap();
-        let (id2, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Plan 2.", "Module Two").unwrap();
+        let (id1, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Plan 1.", "Module One").unwrap();
+        let (id2, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Plan 2.", "Module Two").unwrap();
 
         let both = list_campaign_modules_at(&root.0, &meta.id).unwrap();
         assert_eq!(both.modules.len(), 2);
@@ -14927,7 +15093,7 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
     fn set_active_module_at_rejects_unknown_id_without_writing_anything() {
         let root = Scratch::new("set-active-bad");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
-        let (real_id, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Plan.", "Real Module").unwrap();
+        let (real_id, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Plan.", "Real Module").unwrap();
 
         let err = set_active_module_at(&root.0, &meta.id, "does-not-exist").unwrap_err();
         assert!(err.contains("Unknown module id"));
@@ -14939,8 +15105,8 @@ DM: You reach the outskirts of Redstone by dusk. Across the square, the Gilded E
     fn set_active_module_at_preserves_each_modules_own_chapter_progress_across_switches() {
         let root = Scratch::new("set-active-progress");
         let meta = create_campaign_at(&root.0, &intake("Lost Mine")).unwrap();
-        let (id_a, chapters_a) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Plan A.", "Module A").unwrap();
-        let (id_b, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), "Plan B.", "Module B").unwrap();
+        let (id_a, chapters_a) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Plan A.", "Module A").unwrap();
+        let (id_b, _) = write_chapters_to_disk(&root.0, &meta.id, &sample_chapters(), usize::MAX, "Plan B.", "Module B").unwrap();
 
         // Module B is active after import; switch back to A and advance a chapter in it.
         set_active_module_at(&root.0, &meta.id, &id_a).unwrap();

@@ -204,6 +204,10 @@ export interface DmActionSet {
    *  and stashes it for the next buildTurnPrompt). A pure read, like
    *  recallSession — never changes campaign state. */
   recallMap?: string;
+  /** A chapter id from active_module/index.md whose full text should load into
+   *  the NEXT turn — usually a [REFERENCE] appendix (stat blocks, item tables)
+   *  that is kept but never carried every turn. Read-only, same as recallMap. */
+  recallChapter?: string;
   /** A one-line description of a fight the DM can see coming ("goblin ambush on
    *  the rope bridge over the gorge"), asking for a battle map to be BUILT for
    *  it now. Distinct from recallMap, which pulls up one that already exists.
@@ -418,6 +422,8 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   if (recallSession !== undefined) actions.recallSession = recallSession;
   const recallMap = sanitizeScalar(raw.recallMap, 'recallMap', isStr, warnings);
   if (recallMap !== undefined) actions.recallMap = recallMap;
+  const recallChapter = sanitizeScalar(raw.recallChapter, 'recallChapter', isStr, warnings);
+  if (recallChapter !== undefined) actions.recallChapter = recallChapter;
   const makeMap = sanitizeScalar(raw.makeMap, 'makeMap', isStr, warnings);
   if (makeMap !== undefined) actions.makeMap = makeMap;
   const endBattle = sanitizeScalar(raw.endBattle, 'endBattle', isBool, warnings);

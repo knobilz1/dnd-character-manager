@@ -119,10 +119,11 @@ export function buildTurnPrompt(opts: {
   planCheckIn?: string;
   recalledSession?: { id: string; record: string };
   recalledMap?: { slug: string; spec: string };
+  recalledChapter?: { id: string; text: string };
   battleLog?: BattleLog | null;
   interruption?: { heard: string };
 }): string {
-  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, battleLog, interruption } = opts;
+  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, recalledChapter, battleLog, interruption } = opts;
   const parts: string[] = [];
   if (interruption) {
     parts.push(interruption.heard
@@ -134,6 +135,10 @@ export function buildTurnPrompt(opts: {
   }
   if (recalledSession) {
     parts.push(`Recalled record of ${recalledSession.id} (you asked to pull this up last turn — the full verbatim transcript of that past session, for your reference only; use it to answer accurately, don't read it aloud):\n${recalledSession.record}`);
+  }
+  if (recalledChapter) {
+    parts.push(`Recalled chapter "${recalledChapter.id}" (you asked to pull this up last turn — its full text, for your reference only; the party has NOT moved here, so don't narrate it as a scene change):
+${recalledChapter.text}`);
   }
   if (recalledMap) {
     parts.push(`Recalled battle map "${recalledMap.slug}" (you asked to pull this up last turn — its full layout and tactics, for your reference; place enemies on these cells and describe positions by them, don't read the raw grid aloud):\n${recalledMap.spec}`);

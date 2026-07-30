@@ -1212,6 +1212,10 @@ export function DMConsolePage() {
   // Same one-shot pattern for a battle map the DM asked to pull up (recallMap
   // dm-action) — the full spec is injected into the next turn once, then cleared.
   const pendingRecalledMapRef = React.useRef<{ slug: string; spec: string } | null>(null);
+  /** A chapter the DM asked for with `recallChapter`, held for exactly one turn.
+   *  Same one-shot shape as the session/map recalls above: an appendix of stat
+   *  blocks is far too big to carry every turn and far too useful to discard. */
+  const pendingRecalledChapterRef = React.useRef<{ id: string; text: string } | null>(null);
   // name (lowercased) → voice assignment for this campaign's NPCs (see
   // campaign.rs's npc_voices.json) — fetched once per campaign switch, same
   // "not re-read every turn" shape as campaignPlanRef, and updated locally
@@ -2113,6 +2117,9 @@ export function DMConsolePage() {
       // Same one-shot consume for a recalled battle map.
       const recalledMap = pendingRecalledMapRef.current ?? undefined;
       pendingRecalledMapRef.current = null;
+      // And for a recalled chapter — reference material the DM pulled up.
+      const recalledChapter = pendingRecalledChapterRef.current ?? undefined;
+      pendingRecalledChapterRef.current = null;
       const prompt = buildTurnPrompt({
         party: partyRef.current,
         spokenText,
@@ -2121,6 +2128,7 @@ export function DMConsolePage() {
         planCheckIn: dueForPlanCheck ? campaignPlanRef.current : undefined,
         recalledSession,
         recalledMap,
+        recalledChapter,
         battleLog: battleLogRef.current,
         interruption,
       });
@@ -2337,6 +2345,22 @@ export function DMConsolePage() {
             return '';
           });
           if (spec) pendingRecalledMapRef.current = { slug: actions.recallMap, spec };
+        }
+        if (campaignId && actions.recallChapter && activeModuleIdRef.current) {
+          // Same fetch-and-stash, for a chapter the DM isn't in — usually a
+          // [REFERENCE] appendix of stat blocks or item rules, which is kept in
+          // full precisely because it's too big to carry every turn. Non-fatal
+          // like the other two: a bad id just means the DM answers from what it
+          // already had.
+          const text = await invoke<string>('read_chapter_text', {
+            id: campaignId,
+            moduleId: activeModuleIdRef.current,
+            chapterId: actions.recallChapter,
+          }).catch((e) => {
+            console.warn('Failed to read a recalled chapter:', e);
+            return '';
+          });
+          if (text) pendingRecalledChapterRef.current = { id: actions.recallChapter, text };
         }
         // Grid only, enforced here rather than trusted to the prompt — the same
         // gate plan_next_session_at applies. Theater has no grid and Hex uses
