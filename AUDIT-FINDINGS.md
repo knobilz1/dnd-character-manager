@@ -491,6 +491,34 @@ Four values (`dwarf`, `elf`, `gnome`, `halfling`) have no matching race entry, b
 **only as a grouping key** in `StepRace.tsx:33,90` to cluster subraces under a heading — it is never passed
 to `getRace()`. No lookup breaks. Recorded so it is not "fixed" later.
 
+### G5 — CLEAN: spell→class refs and resource-key collisions
+- All 16 distinct `spell.classes[]` values resolve to real class ids. **0 broken.**
+- **0 resource-key collisions** between the 14 class keys and the 8 subclass keys — no subclass silently
+  overwrites a class resource. (Worth knowing: `channel_divinity` is shared by cleric *and* paladin, but
+  that is two classes, not a class/subclass clash, and is correct.)
+- Positive control passed.
+
+### G6 — `spellsKnownFor` returns 0 for 2024 known-casters — the exact consequence of R1
+`LevelUpDialog.tsx:463` computes newly-learned spells as
+`spellsKnownFor(classId, newLevel) - spellsKnownFor(classId, currentLevel)` using the **raw** classId.
+`SPELLS_KNOWN` (`mechanics.ts:214`) has **no `-2024` keys**, so both terms are 0.
+**A 2024 Sorcerer or Warlock is never offered new spells on level-up — the pick simply doesn't appear.**
+(Bard-2024 and Ranger-2024 became prepared casters so are unaffected here, but see D2 — the dialog still
+misclassifies them as known casters.)
+Contrast `cantripsKnownFor` at `:433,436`, which works because `CANTRIPS_KNOWN` **does** carry 2024 keys.
+So one table was updated for 2024 and its neighbour was not.
+
+### G7 — `getSpellsByClass` is dead code
+`spells/index.ts:678` is defined and **never called anywhere**. Harmless now, but it is the obvious helper
+for a future spell-list feature and would silently return `[]` for any 2024 class id, since
+`spell.classes[]` tags 2024 ids only on the 11 PHB2024-exclusive spells. Either delete it or make it
+route through `baseClassId()`.
+
+### To verify (not yet a finding)
+`ranger-2024` is the **only** 2024 caster absent from `spell.classes[]` (bard/cleric/druid/paladin/
+sorcerer/warlock/wizard-2024 all appear). Likely benign — those tags come from the 11 PHB2024-exclusive
+spells and Ranger simply gets none of them — but confirm against the 2024 Ranger spell list.
+
 ### Still to check in Phase G
 `subclass.classId` → real class · `race.parentRaceId` → real race · `spell.classes[]` → real class ids ·
 `startingEquipment` → real item names · `subclassTips` keys → real subclass ids · duplicate ids within
