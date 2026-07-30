@@ -357,6 +357,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     // Skip keys managed by loadOverrides — their max is not level-table-based.
     resources = resources.map(r => {
       if (loadOverrides[r.key] != null) return r; // handled in override pass below
+      // Race resources first, and keyed on TOTAL character level rather than class level.
+      // This loop used to consider only classes, so a race max never moved after creation —
+      // a Shifter going 4 -> 5 kept 2 uses of Shifting instead of gaining the 3rd, and every
+      // proficiency-bonus race trait was frozen at its level-1 value for the whole campaign.
+      {
+        const rd = (getRace(c.raceId)?.resources ?? []).find(x => x.key === r.key);
+        if (rd) {
+          const rawMax = rd.maxPerLevel[totalCharacterLevel(c.classes ?? [])] ?? 0;
+          const normMax = rawMax === 'unlimited' ? 99 : rawMax as number;
+          if (normMax !== r.max) {
+            const newCurrent = r.max > 0
+              ? Math.min(Math.round(r.current / r.max * normMax), normMax)
+              : normMax;
+            return { ...r, max: normMax, current: newCurrent };
+          }
+          return r;
+        }
+      }
       for (const cl of (c.classes ?? [])) {
         const def = getClass(cl.classId);
         const classDef = def?.resources.find(rd => rd.key === r.key);

@@ -7,6 +7,21 @@ import { PHB2024_RACES } from './phb2024';
 const atEveryLevel = (n: number): Record<number, number> =>
   Object.fromEntries(Array.from({ length: 20 }, (_, i) => [i + 1, n]));
 
+/** Same, but the trait only comes online at `min` character level — Chromatic Warding,
+ *  Gem Flight and Metallic Breath Weapon are all "5th level+". Levels below `min` get 0,
+ *  which keeps the resource off the sheet until the character actually has the trait. */
+const fromLevel = (min: number, n: number): Record<number, number> =>
+  Object.fromEntries(Array.from({ length: 20 }, (_, i) => [i + 1, i + 1 >= min ? n : 0]));
+
+/** Proficiency-bonus-per-long-rest is the dominant shape in MMoM and SJA races. The real max
+ *  comes from the override in computeResourceMaxOverrides / useCharacterDerived; this table
+ *  mirrors PB by character level so the value is still sane if an override is ever missed. */
+const profBonusByLevel = (): Record<number, number> =>
+  Object.fromEntries(Array.from({ length: 20 }, (_, i) => {
+    const lvl = i + 1;
+    return [lvl, lvl >= 17 ? 6 : lvl >= 13 ? 5 : lvl >= 9 ? 4 : lvl >= 5 ? 3 : 2];
+  }));
+
 export const ALL_RACES: Race[] = [
   // Human
   {
@@ -313,6 +328,10 @@ export const ALL_RACES: Race[] = [
   // ── VGM RACES ──────────────────────────────────────────────────────────
   {
     id: 'aasimar-protector',
+    // VGM p.104: Healing Hands — once per long rest.
+    resources: [
+      { name: 'Healing Hands', key: 'healing_hands', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Protector Aasimar',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -335,6 +354,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'aasimar-scourge',
+    // VGM p.105: Healing Hands — once per long rest.
+    resources: [
+      { name: 'Healing Hands', key: 'healing_hands', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Scourge Aasimar',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -357,6 +380,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'aasimar-fallen',
+    // VGM p.104: Healing Hands — once per long rest.
+    resources: [
+      { name: 'Healing Hands', key: 'healing_hands', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Fallen Aasimar',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -379,6 +406,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'firbolg',
+    // VGM p.107: Hidden Step — once per short or long rest.
+    resources: [
+      { name: 'Hidden Step', key: 'hidden_step', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Firbolg',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -399,6 +430,11 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'goliath',
+    // VGM p.109: Stone's Endurance — once per short or long rest. (MMoM reprints it as
+    // proficiency-bonus uses; this entry is sourceBook VGM, so the VGM rule is the right one.)
+    resources: [
+      { name: "Stone's Endurance", key: 'stones_endurance', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Goliath',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -430,6 +466,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'lizardfolk',
+    // VGM p.113: Hungry Jaws — once per short or long rest.
+    resources: [
+      { name: 'Hungry Jaws', key: 'hungry_jaws', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Lizardfolk',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -450,6 +490,12 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'tabaxi',
+    // VGM p.115: Feline Agility recharges by moving 0 feet on one of your turns — not a rest,
+    // so 'special' keeps a long rest from silently handing it back.
+    resources: [
+      { name: 'Feline Agility', key: 'feline_agility', rechargeOn: 'special',
+      rechargeNote: 'Recharges when you move 0 feet on one of your turns', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Tabaxi',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -511,6 +557,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'goblin',
+    // VGM p.119: Fury of the Small — once per short or long rest.
+    resources: [
+      { name: 'Fury of the Small', key: 'fury_of_the_small', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Goblin',
     sourceBook: 'VGM',
     size: 'Small',
@@ -527,6 +577,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'hobgoblin',
+    // VGM p.119: Saving Face — once per short or long rest.
+    resources: [
+      { name: 'Saving Face', key: 'saving_face', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Hobgoblin',
     sourceBook: 'VGM',
     size: 'Medium',
@@ -543,6 +597,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'kobold',
+    // VGM p.119: Grovel, Cower, and Beg — once per short or long rest.
+    resources: [
+      { name: 'Grovel, Cower, and Beg', key: 'grovel_cower_beg', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Kobold',
     sourceBook: 'VGM',
     size: 'Small',
@@ -652,6 +710,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'deep-gnome',
+    // MMoM p.16: Svirfneblin Camouflage — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Svirfneblin Camouflage', key: 'svirfneblin_camouflage', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Deep Gnome',
     sourceBook: 'MMoM',
     size: 'Small',
@@ -689,6 +751,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'eladrin',
+    // MMoM p.19: Fey Step — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Fey Step', key: 'fey_step', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Eladrin',
     sourceBook: 'MMoM',
     size: 'Medium',
@@ -865,6 +931,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'harengon',
+    // MMoM p.21: Rabbit Hop — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Rabbit Hop', key: 'rabbit_hop', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Harengon',
     sourceBook: 'MMoM',
     size: 'Medium',
@@ -882,6 +952,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'leonin',
+    // MMoM p.23: Daunting Roar — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Daunting Roar', key: 'daunting_roar', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Leonin',
     sourceBook: 'MMoM',
     size: 'Medium',
@@ -954,6 +1028,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'shadar-kai',
+    // MMoM p.27: Blessing of the Raven Queen — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Blessing of the Raven Queen', key: 'raven_queen_blessing', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Shadar-kai',
     sourceBook: 'MMoM',
     size: 'Medium',
@@ -975,6 +1053,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'shifter',
+    // MMoM p.28: Shifting — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Shifting', key: 'shifting', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Shifter',
     sourceBook: 'MMoM',
     size: 'Medium',
@@ -1013,6 +1095,12 @@ export const ALL_RACES: Race[] = [
   // ── FToD: Dragonborn Variants ──────────────────────────────────────────
   {
     id: 'dragonborn-chromatic',
+    // FToD p.11: Breath Weapon is proficiency bonus uses per long rest (NOT the PHB
+    // dragonborn 1/short); Chromatic Warding is once per long rest from 5th.
+    resources: [
+      { name: 'Breath Weapon', key: 'breath_weapon_ftod', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+      { name: 'Chromatic Warding', key: 'chromatic_warding', rechargeOn: 'long', maxPerLevel: fromLevel(5, 1) },
+    ],
     name: 'Chromatic Dragonborn',
     sourceBook: 'FToD',
     size: 'Medium',
@@ -1030,6 +1118,12 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'dragonborn-metallic',
+    // FToD p.13: Breath Weapon is proficiency bonus uses per long rest; the second
+    // Metallic Breath Weapon is once per long rest from 5th.
+    resources: [
+      { name: 'Breath Weapon', key: 'breath_weapon_ftod', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+      { name: 'Metallic Breath Weapon', key: 'metallic_breath_weapon', rechargeOn: 'long', maxPerLevel: fromLevel(5, 1) },
+    ],
     name: 'Metallic Dragonborn',
     sourceBook: 'FToD',
     size: 'Medium',
@@ -1047,6 +1141,12 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'dragonborn-gem',
+    // FToD p.12: Breath Weapon is proficiency bonus uses per long rest; Gem Flight is
+    // once per long rest from 5th.
+    resources: [
+      { name: 'Breath Weapon', key: 'breath_weapon_ftod', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+      { name: 'Gem Flight', key: 'gem_flight', rechargeOn: 'long', maxPerLevel: fromLevel(5, 1) },
+    ],
     name: 'Gem Dragonborn',
     sourceBook: 'FToD',
     size: 'Medium',
@@ -1431,6 +1531,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'vedalken',
+    // GGR p.19: Partially Amphibious — once per long rest.
+    resources: [
+      { name: 'Partially Amphibious', key: 'partially_amphibious', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Vedalken',
     sourceBook: 'GGR',
     size: 'Medium',
@@ -1468,6 +1572,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'autognome',
+    // SJA p.10: Built for Success — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Built for Success', key: 'built_for_success', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Autognome',
     sourceBook: 'SJA',
     size: 'Small',
@@ -1486,6 +1594,11 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'giff',
+    // SJA p.11: Percussive Repair — once per day, i.e. back on a long rest. (Firearms Expert
+    // recharges "when you reload", which is not a rest and not a daily budget, so it gets no counter.)
+    resources: [
+      { name: 'Percussive Repair', key: 'percussive_repair', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Giff',
     sourceBook: 'SJA',
     size: 'Medium',
@@ -1504,6 +1617,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'hadozee',
+    // SJA p.12: Hadozee Resilience — proficiency bonus uses per long rest.
+    resources: [
+      { name: 'Hadozee Resilience', key: 'hadozee_resilience', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
+    ],
     name: 'Hadozee',
     sourceBook: 'SJA',
     size: 'Medium',
@@ -1675,6 +1792,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'erlw-shifter-beasthide',
+    // ERLW p.35: Shifting — once per short or long rest (MMoM reprints it as PB/long).
+    resources: [
+      { name: 'Shifting', key: 'shifting', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Beasthide',
     sourceBook: 'ERLW',
     size: 'Medium',
@@ -1695,6 +1816,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'erlw-shifter-longtooth',
+    // ERLW p.35: Shifting — once per short or long rest.
+    resources: [
+      { name: 'Shifting', key: 'shifting', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Longtooth',
     sourceBook: 'ERLW',
     size: 'Medium',
@@ -1713,6 +1838,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'erlw-shifter-swiftstride',
+    // ERLW p.35: Shifting — once per short or long rest.
+    resources: [
+      { name: 'Shifting', key: 'shifting', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Swiftstride',
     sourceBook: 'ERLW',
     size: 'Medium',
@@ -1733,6 +1862,10 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'erlw-shifter-wildhunt',
+    // ERLW p.35: Shifting — once per short or long rest.
+    resources: [
+      { name: 'Shifting', key: 'shifting', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) },
+    ],
     name: 'Wildhunt',
     sourceBook: 'ERLW',
     size: 'Medium',
