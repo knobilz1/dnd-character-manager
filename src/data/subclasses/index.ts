@@ -696,14 +696,32 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Bestial Soul', level: 6, description: 'Attacks with natural weapons count as magical. After each short or long rest, choose one benefit: swimming speed = walking speed + breathe underwater, climbing speed = walking speed (including ceilings without checks), or make a Str (Athletics) check when you jump and extend the jump by the roll in feet.' },
     { name: 'Infectious Fury', level: 10, description: 'When you hit a creature with your natural weapon while raging, force a Wis save (DC 8 + Con modifier + proficiency bonus) or it must use its reaction to make a melee attack against another creature you can see, or take 2d12 psychic damage. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Call the Hunt', level: 14, description: 'When you enter your rage, choose up to Con modifier (min 1) willing creatures within 30 feet. You gain 5 temp HP per accepting creature. Until your rage ends, each chosen creature can once per turn deal extra d6 damage when they hit with an attack. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
-  ]},
+  ],
+    // TCE p.24: Infectious Fury (10th) and Call the Hunt (14th) are both prof-bonus uses
+    // per long rest (overrides below).
+    resources: [
+      { name: 'Infectious Fury', key: 'infectious_fury', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Call the Hunt', key: 'call_the_hunt', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
   { id: 'path-of-wild-magic', name: 'Path of Wild Magic', classId: 'barbarian', sourceBook: 'TCE', description: 'Barbarians who tread the Path of Wild Magic perceive the magical energies that suffuse the multiverse and learn to channel them in battle.', features: [
     { name: 'Magic Awareness', level: 3, description: 'As an action, sense the presence of magic within 60 feet. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Wild Surge', level: 3, description: 'When you enter your rage, roll a d8 (save DC = 8 + proficiency + Con modifier): 1 — Chosen creatures within 30 ft make Con save or take 1d12 necrotic; you gain 1d12 temp HP. 2 — Teleport up to 30 ft (repeatable as bonus action each turn). 3 — A tiny spirit appears near a creature of your choice within 30 ft; at end of turn it explodes, each creature within 5 ft makes Dex save or takes 1d6 force (repeatable as bonus action). 4 — One held weapon deals force damage and gains the thrown property (range 20/60 ft) until rage ends. 5 — Creatures that hit you take 1d6 force damage until rage ends. 6 — You and allies within 10 ft gain +1 AC until rage ends. 7 — Ground within 15 ft becomes difficult terrain for your enemies until rage ends. 8 — A creature within 30 ft makes a Con save or takes 1d6 radiant and is blinded until the start of your next turn (repeatable as bonus action).' },
     { name: 'Bolstering Magic', level: 6, description: 'As an action, touch a creature: 1d3 bonus on attacks/checks for 10 minutes, or roll 1d3 to regain a spell slot of that level. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Unstable Backlash', level: 10, description: 'When you take damage or fail a save during rage, use your reaction to roll a new effect on the Wild Magic table.' },
     { name: 'Controlled Surge', level: 14, description: 'When you roll on the Wild Magic table, you can roll twice and use either result.' },
-  ]},
+  ],
+    // TCE p.25: Magic Awareness (3rd) and Bolstering Magic (6th) are both prof-bonus uses
+    // per long rest (overrides below).
+    resources: [
+      { name: 'Magic Awareness', key: 'magic_awareness', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Bolstering Magic', key: 'bolstering_magic', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
 
   // ── TCE: BARD ────────────────────────────────────────────────────────
   { id: 'college-of-creation', name: 'College of Creation', classId: 'bard', sourceBook: 'TCE', description: 'A bard who walks the College of Creation\'s path views themselves as an extension of the Song of Creation, the great musical effort that gave birth to all that exists.', features: [
@@ -759,7 +777,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Steps of Night', level: 6, description: 'In dim light or darkness, as a bonus action, gain a flying speed equal to your walking speed for 1 minute. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 radiant damage (2d8 at 14th).' },
     { name: 'Twilight Shroud', level: 17, description: 'Allies in your Twilight Sanctuary have half cover.' },
-  ], alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomund-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
+  ],
+    // TCE p.33: Steps of Night — prof-bonus uses per long rest (override below).
+    resources: [{ name: 'Steps of Night', key: 'steps_of_night', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+    alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomund-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
 
   // ── TCE: DRUID ───────────────────────────────────────────────────────
   { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
@@ -826,7 +848,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Great Stature', level: 10, description: 'Your height increases by 3d4 inches. The extra damage you deal with Giant\'s Might increases to 1d8.' },
     { name: 'Master of Runes', level: 15, description: 'You can use each rune twice per short or long rest.' },
     { name: 'Runic Juggernaut', level: 18, description: 'Giant\'s Might extra damage increases to 1d10. You can now become Huge (not just Large), and you have a reach of +5 ft while Huge.' },
-  ]},
+  ],
+    // TCE p.47: Runic Shield — prof-bonus uses per long rest (override below).
+    // NOT modelled: rune invocations themselves (once each per short rest, twice from 15th).
+    // Those need a per-rune counter keyed on which runes the player chose — a D4 build choice.
+    resources: [{ name: 'Runic Shield', key: 'runic_shield', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
 
   // ── TCE: MONK ────────────────────────────────────────────────────────
   { id: 'way-of-mercy', name: 'Way of Mercy', classId: 'monk', sourceBook: 'TCE', description: 'Monks of the Way of Mercy learn to manipulate the life force of others to bring aid to those in need.', features: [
@@ -955,7 +983,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Guardian Coil', level: 6, description: 'As a reaction when you or a creature within 10 feet of your tentacle takes damage, reduce it by 1d8 (2d8 at 10th).' },
     { name: 'Grasping Tentacles', level: 10, description: 'You learn Evard\'s Black Tentacles. You can cast it once per long rest without a slot, and gain temporary HP equal to your warlock level when you cast it.' },
     { name: 'Fathomless Plunge', level: 14, description: 'As an action, teleport yourself and up to 5 willing creatures within 30 feet through a portal to a body of water you have seen, up to 1 mile away. Once per short or long rest.' },
-  ], expandedSpells: { 1: ['create-or-destroy-water', 'thunderwave'], 3: ['gust-of-wind', 'silence'], 5: ['lightning-bolt', 'sleet-storm'], 7: ['control-water', 'summon-elemental'], 9: ['bigbys-hand', 'cone-of-cold'] }},
+  ],
+    // TCE p.71: Tentacle of the Deeps is prof-bonus uses per long rest (override below);
+    // Grasping Tentacles is one free casting per long rest; Fathomless Plunge is short rest.
+    resources: [
+      { name: 'Tentacle of the Deeps', key: 'tentacle_of_the_deeps', rechargeOn: 'long',
+        maxPerLevel: { 1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Grasping Tentacles', key: 'grasping_tentacles', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Fathomless Plunge', key: 'fathomless_plunge', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    expandedSpells: { 1: ['create-or-destroy-water', 'thunderwave'], 3: ['gust-of-wind', 'silence'], 5: ['lightning-bolt', 'sleet-storm'], 7: ['control-water', 'summon-elemental'], 9: ['bigbys-hand', 'cone-of-cold'] }},
   { id: 'the-genie', name: 'The Genie', classId: 'warlock', sourceBook: 'TCE', description: 'You have made a pact with one of the rarest kinds of genie, a noble genie of an exotic court.', features: [
     { name: 'Genie\'s Vessel', level: 1, description: 'Your patron gifts you a Tiny vessel (an oil lamp, urn, ring, bottle, hollow statuette, or lantern) that serves as your spellcasting focus.\n\nBottled Respite: As an action, you magically vanish into the vessel. The interior is a 20-foot-radius, 20-foot-high extradimensional cylinder. While inside, you can hear the surroundings outside the vessel. You can remain inside for up to twice your proficiency bonus hours. You exit as a bonus action, or automatically if you die or the vessel is destroyed. You can\'t enter again until you finish a long rest.\n\nGenie\'s Wrath: Once per turn when you hit with an attack, you deal extra damage equal to your proficiency bonus. The type is bludgeoning (Dao), thunder (Djinni), fire (Efreeti), or cold (Marid).' },
     { name: 'Elemental Gift', level: 6, description: 'You gain resistance to a damage type based on your genie kind: bludgeoning (Dao), thunder (Djinni), fire (Efreeti), cold (Marid). As a bonus action, you gain a flying speed of 30 feet and can hover for 10 minutes. You can use this flight a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
@@ -984,7 +1023,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Manifest Mind', level: 6, description: 'As a bonus action, project the consciousness of your spellbook as a luminous, incorporeal image within 60 feet for 1 hour. Cast spells through it. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Master Scrivener', level: 10, description: 'After a long rest, create a single Spell Scroll containing one wizard spell of 1st or 2nd level from your spellbook.' },
     { name: 'One with the Word', level: 14, description: 'While spellbook is on your person: advantage on Int (Arcana) checks. Reaction when taking damage while spectral mind is manifested — dismiss the mind, prevent ALL that damage, then roll 3d6; your spellbook loses spells of your choice with combined level ≥ roll (you can\'t cast them for 1d6 long rests). Once per long rest.' },
-  ]},
+  ],
+    // TCE p.78: Manifest Mind is prof-bonus uses per long rest (override below). The other two
+    // are single long-rest uses — Awakened Spellbook's limited part is the ritual-without-the-
+    // extra-10-minutes casting, so the counter is named for that rather than the whole feature.
+    resources: [
+      { name: 'Awakened Spellbook: Ritual', key: 'awakened_spellbook_ritual', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Manifest Mind', key: 'manifest_mind', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'One with the Word', key: 'one_with_the_word', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── FToD: MONK ───────────────────────────────────────────────────────
   { id: 'way-of-the-ascendant-dragon', name: 'Way of the Ascendant Dragon', classId: 'monk', sourceBook: 'FToD',

@@ -372,6 +372,31 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'graviturgy-magic' && c.level >= 14)) {
       resourceMaxOverrides['deprive_the_unworthy'] = Math.max(1, mods.int);
     }
+    // TCE prof-bonus-per-long-rest features.
+    if (character.classes.some(c => c.subclassId === 'the-fathomless')) {
+      resourceMaxOverrides['tentacle_of_the_deeps'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'order-of-scribes' && c.level >= 6)) {
+      resourceMaxOverrides['manifest_mind'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-wild-magic' && c.level >= 3)) {
+      resourceMaxOverrides['magic_awareness'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-wild-magic' && c.level >= 6)) {
+      resourceMaxOverrides['bolstering_magic'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-the-beast' && c.level >= 10)) {
+      resourceMaxOverrides['infectious_fury'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-the-beast' && c.level >= 14)) {
+      resourceMaxOverrides['call_the_hunt'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'twilight-domain' && c.level >= 6)) {
+      resourceMaxOverrides['steps_of_night'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'rune-knight' && c.level >= 7)) {
+      resourceMaxOverrides['runic_shield'] = profBonus;
+    }
     // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
     if (character.classes.some(c => c.subclassId === 'light-domain')) {
       resourceMaxOverrides['warding_flare'] = Math.max(1, mods.wis);

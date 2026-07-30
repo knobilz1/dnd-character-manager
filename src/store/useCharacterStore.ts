@@ -76,6 +76,23 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['momentary_stasis'] = Math.max(1, abilityMod(score('int')));
   if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 14))
     overrides['deprive_the_unworthy'] = Math.max(1, abilityMod(score('int')));
+  // TCE prof-bonus-per-long-rest features.
+  if (c.classes.some(cl => cl.subclassId === 'the-fathomless'))
+    overrides['tentacle_of_the_deeps'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'order-of-scribes' && cl.level >= 6))
+    overrides['manifest_mind'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-wild-magic' && cl.level >= 3))
+    overrides['magic_awareness'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-wild-magic' && cl.level >= 6))
+    overrides['bolstering_magic'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-the-beast' && cl.level >= 10))
+    overrides['infectious_fury'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-the-beast' && cl.level >= 14))
+    overrides['call_the_hunt'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'twilight-domain' && cl.level >= 6))
+    overrides['steps_of_night'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'rune-knight' && cl.level >= 7))
+    overrides['runic_shield'] = profBonus;
   // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
   if (c.classes.some(cl => cl.subclassId === 'light-domain'))
     overrides['warding_flare'] = Math.max(1, abilityMod(score('wis')));
