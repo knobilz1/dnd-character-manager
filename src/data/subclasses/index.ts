@@ -196,7 +196,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Dark One\'s Own Luck', level: 6, description: 'Starting at 6th level, you can call on your patron to alter fate in your favor. When you make an ability check or a saving throw, you can use this feature to add a d10 to your roll. You can do so after seeing the initial roll but before any of the roll\'s effects occur. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Fiendish Resilience', level: 10, description: 'Starting at 10th level, you can choose one damage type when you finish a short or long rest. You gain resistance to that damage type until you choose a different one with this feature.' },
     { name: 'Hurl Through Hell', level: 14, description: 'Starting at 14th level, when you hit a creature with an attack, you can use this feature to instantly transport the target through the lower planes. The creature disappears and hurtles through a nightmare landscape. At the end of your next turn, the target returns to the space it previously occupied or the nearest unoccupied space. If the target is not a fiend, it takes 10d10 psychic damage as it reels from its horrific experience. Once you use this feature, you can\'t use it again until you finish a long rest.' },
-  ], expandedSpells: { 1: ['burning-hands', 'command'], 3: ['blindness-deafness', 'scorching-ray'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['flame-strike', 'hallow'] }},
+  ],
+    // PHB p.109: "Once you use this feature, you can't use it again until you finish a short or long rest."
+    resources: [{ name: "Dark One's Own Luck", key: 'dark_ones_own_luck', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    expandedSpells: { 1: ['burning-hands', 'command'], 3: ['blindness-deafness', 'scorching-ray'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['flame-strike', 'hallow'] }},
   { id: 'the-great-old-one', name: 'The Great Old One', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a mysterious entity whose nature is utterly foreign to the fabric of reality. It might come from the Far Realm, the space beyond reality, or it could be one of the elder gods known only in legends.', features: [
     { name: 'Awakened Mind', level: 1, description: 'Starting at 1st level, your alien knowledge gives you the ability to touch the minds of other creatures. You can communicate telepathically with any creature you can see within 30 feet of you.' },
     { name: 'Entropic Ward', level: 6, description: 'At 6th level, when a creature makes an attack roll against you, you can use your reaction to impose disadvantage on that roll. If the attack misses you, your next attack roll against that creature has advantage, and you can reroll one of the dice once. Once per short or long rest.' },
@@ -696,7 +700,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Guarded Mind', level: 10, description: 'You have resistance to psychic damage. If you start your turn frightened or charmed, you can spend 1 energy die to end the conditions.' },
     { name: 'Bulwark of Force', level: 15, description: 'As a bonus action, choose up to Int-mod creatures within 30 feet. They each gain half cover for 1 minute. Once per long rest.' },
     { name: 'Telekinetic Master', level: 18, description: 'You can cast Telekinesis without spell components, expending no spell slot. While concentrating, you can make one attack as a bonus action.' },
-  ]},
+  ],
+    // TCE: pool = 2 x proficiency bonus, all back on a long rest (plus a bonus-action single regain,
+    // which is a use-time action rather than a rest and so isn't modelled here). The maxPerLevel table
+    // mirrors 2 x PB as a fallback; the real max comes from the psionic_energy override.
+    resources: [{
+      name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+      resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+    }],
+  },
   { id: 'rune-knight', name: 'Rune Knight', classId: 'fighter', sourceBook: 'TCE', description: 'Rune Knights are fighters who enhance their gear with potent runes, fragments of giants\' lost rune magic.', features: [
     { name: 'Bonus Proficiencies', level: 3, description: 'You gain proficiency with smith\'s tools and can speak, read, and write Giant.' },
     { name: 'Rune Carver', level: 3, description: 'You learn two runes of your choice (Cloud, Fire, Frost, Stone, Hill, Storm). Inscribed on gear, each rune grants a passive benefit and a usable property.' },
@@ -772,7 +785,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Soul Blades', level: 9, description: 'You learn Homing Strikes (spend an energy die to turn a missed Psychic Blade attack into a hit) and Psychic Teleportation (spend a die to teleport up to 30 ft).' },
     { name: 'Psychic Veil', level: 13, description: 'As an action, become invisible for 1 hour or until you deal damage to a creature or force a save. Once per long rest, or spend an energy die.' },
     { name: 'Rend Mind', level: 17, description: 'When you use Psychic Blades for Sneak Attack damage, force a Wis save (DC 8 + proficiency + Dex modifier) or be stunned for 1 minute (repeats save at end of each turn). Once per long rest; expending three Psionic Energy dice lets you use it again.' },
-  ]},
+  ],
+    // Same Psionic Energy pool as Psi Warrior (TCE): 2 x proficiency bonus, all back on a long rest.
+    resources: [{
+      name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+      resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+    }],
+  },
 
   // ── TCE: SORCERER ────────────────────────────────────────────────────
   { id: 'aberrant-mind', name: 'Aberrant Mind', classId: 'sorcerer', sourceBook: 'TCE', description: 'An alien influence has wrapped its tendrils around your mind, giving you psionic power.', features: [

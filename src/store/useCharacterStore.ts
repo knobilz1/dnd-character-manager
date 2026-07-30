@@ -42,6 +42,9 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['bladesong'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'samurai'))
     overrides['fighting_spirit'] = 3;
+  // Psi Warrior / Soulknife (TCE): Psionic Energy pool = 2 x proficiency bonus.
+  if (c.classes.some(cl => cl.subclassId === 'psi-warrior' || cl.subclassId === 'soulknife'))
+    overrides['psionic_energy'] = profBonus * 2;
   // Way of the Ascendant Dragon: Wings Unfurled (monk 6) + Aspect of the Wyrm
   // (monk 11) — proficiency-bonus uses per long rest, level-gated.
   if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon')) {

@@ -321,6 +321,11 @@ export function computeCharacterDerived(character: Character) {
       // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)
       resourceMaxOverrides['fighting_spirit'] = 3;
     }
+    // Psi Warrior / Soulknife (TCE): Psionic Energy pool = 2 x proficiency bonus.
+    // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.
+    if (character.classes.some(c => c.subclassId === 'psi-warrior' || c.subclassId === 'soulknife')) {
+      resourceMaxOverrides['psionic_energy'] = profBonus * 2;
+    }
     // Way of the Ascendant Dragon (FToD): Wings Unfurled (lv6) and Aspect of the
     // Wyrm (lv11) both have proficiency-bonus uses per long rest. Level-gated so the
     // resource only exists once the feature is actually unlocked.
