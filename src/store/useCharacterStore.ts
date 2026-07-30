@@ -64,6 +64,13 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['cosmic_omen'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'armorer' && cl.level >= 15))
     overrides['perfected_armor'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'clockwork-soul'))
+    overrides['restore_balance'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'drakewarden' && cl.level >= 15))
+    overrides['perfected_bond'] = profBonus;
+  // Echo Knight Unleash Incarnation (EGtW): Constitution modifier uses, minimum 1.
+  if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 3))
+    overrides['unleash_incarnation'] = Math.max(1, abilityMod(score('con')));
   // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
   {
     const palLvl = classLevel(c.classes, 'paladin');

@@ -355,6 +355,16 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'armorer' && c.level >= 15)) {
       resourceMaxOverrides['perfected_armor'] = profBonus;
     }
+    if (character.classes.some(c => c.subclassId === 'clockwork-soul')) {
+      resourceMaxOverrides['restore_balance'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'drakewarden' && c.level >= 15)) {
+      resourceMaxOverrides['perfected_bond'] = profBonus;
+    }
+    // Echo Knight Unleash Incarnation (EGtW): Constitution modifier uses, minimum 1.
+    if (character.classes.some(c => c.subclassId === 'echo-knight' && c.level >= 3)) {
+      resourceMaxOverrides['unleash_incarnation'] = Math.max(1, mods.con);
+    }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
       resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);

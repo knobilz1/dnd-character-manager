@@ -856,7 +856,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Bastion of Law', level: 6, description: 'Spend 1-5 sorcery points to grant a creature within 30 feet that many d8s, used to cancel damage taken.' },
     { name: 'Trance of Order', level: 14, description: 'As a bonus action, you become unflappable for 1 minute: attack rolls vs you don\'t have advantage, and your d20 rolls for attacks, ability checks, and saves treat 9 or lower as 10.' },
     { name: 'Clockwork Cavalcade', level: 18, description: 'As an action, summon spirits of order in a 30-foot cube within 30 feet. They heal up to 100 HP among creatures, end one spell of 6th level or lower on each creature, and repair damaged objects. Once per long rest.' },
-  ]},
+  ],
+    resources: [
+      // Restore Balance (1st): prof bonus uses per long rest. Clockwork Cavalcade (18th): once per long rest.
+      { name: 'Restore Balance', key: 'restore_balance', rechargeOn: 'long',
+        maxPerLevel: { 1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Clockwork Cavalcade', key: 'clockwork_cavalcade', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: WARLOCK ─────────────────────────────────────────────────────
   { id: 'the-fathomless', name: 'The Fathomless', classId: 'warlock', sourceBook: 'TCE', description: 'You have plumbed the ocean\'s deepest trenches and found a creature of the depths willing to make a pact with you.', features: [
@@ -923,7 +931,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Bond of Fang and Scale', level: 7, description: 'When summoned, your drake grows wings (flying speed = walking speed) and becomes Medium. You can ride it if Medium or smaller (no flying while riding). Magic Fang: drake\'s Bite deals +1d6 extra Draconic Essence damage. Resistance: while drake is summoned, you gain resistance to the drake\'s Draconic Essence damage type.' },
     { name: 'Drake\'s Breath', level: 11, description: 'As an action, you or your drake exhale a 30-ft cone of energy. All creatures in the area make a Dexterity save vs. your spell save DC — fail: 8d6 damage, success: half. Damage type can be any of acid/cold/fire/lightning/poison (need not match Draconic Essence). Increases to 10d6 at ranger level 15. Once per long rest; or expend a 3rd-level+ spell slot to use again.' },
     { name: 'Perfected Bond', level: 15, description: 'While drake is summoned: Empowered Bite — drake deals 2d6 extra Draconic Essence damage on its Bite. Large Drake — grows to Large; no longer prohibited from flying while you ride it. Reflexive Resistance — when you or the drake takes damage within 30 ft, you can use your reaction to give yourself or the drake resistance to that instance of damage. Uses = proficiency bonus; all regain on long rest.' },
-  ]},
+  ],
+    // Drakewarden Perfected Bond (15th): prof bonus uses, all back on a long rest.
+    resources: [{ name: 'Perfected Bond', key: 'perfected_bond', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
 
   // ── TCE: ARTIFICER SUBCLASSES ─────────────────────────────────────────
   { id: 'alchemist', name: 'Alchemist', classId: 'artificer', sourceBook: 'TCE', description: 'An Alchemist is an expert at combining reagents to produce mystical effects. Alchemists use their creations to give life and to leech it away.', features: [
@@ -981,7 +993,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Shadow Martyr', level: 10, description: 'You can make your echo throw itself in front of an attack directed at another creature that you can see. Before the attack roll is made, you can use your reaction to teleport the echo to an unoccupied space within 5 feet of the targeted creature. The attack roll that triggered the reaction is made against the echo instead. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Reclaim Potential', level: 15, description: 'You\'ve learned to absorb the fleeting magic of your echo. When an echo of yours is destroyed by an enemy\'s attack, you can gain a number of temporary hit points equal to 2d6 + your Constitution modifier, provided you don\'t already have temporary hit points.\n\nYou can use this feature a number of times equal to your Constitution modifier (minimum of once). You regain all expended uses when you finish a long rest.' },
     { name: 'Legion of One', level: 18, description: 'You can use a bonus action to create two echoes with your Manifest Echo feature, and these echoes can coexist. If you try to create a third echo, the previous two echoes are destroyed. Anything you can do from one echo\'s position can be done from the other\'s instead.\n\nIn addition, when you roll initiative and have no uses of Unleash Incarnation remaining, you regain one use of that feature.' },
-  ]},
+  ],
+    // Unleash Incarnation (3rd): Constitution modifier uses (min 1), all back on a long rest (EGtW).
+    resources: [{ name: 'Unleash Incarnation', key: 'unleash_incarnation', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   { id: 'chronurgy-magic', name: 'Chronurgy Magic', classId: 'wizard', sourceBook: 'EGtW', description: 'Focusing on the manipulation of time, those who follow the Chronurgy tradition learn to alter the pace of reality to their liking. Using the principles of dunamis, these mages can slow down or reverse time around a creature.', features: [
     { name: 'Chronal Shift', level: 2, description: 'You can magically exert limited control over the flow of time around a creature. As a reaction, after you or a creature you can see within 30 feet of you makes an attack roll, an ability check, or a saving throw, you can force the creature to reroll. You must use this ability before you know whether the roll succeeds or fails. The creature must use the second roll. You can use this ability twice, and you regain all expended uses when you finish a long rest.' },
