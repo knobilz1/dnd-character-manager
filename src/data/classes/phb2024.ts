@@ -18,7 +18,10 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'none',
     resources: [
       { name: 'Rages', key: 'rage', rechargeOn: 'long', maxPerLevel: {1:2,2:2,3:3,4:3,5:3,6:4,7:4,8:4,9:4,10:4,11:4,12:5,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:99} },
-      { name: 'Rage Damage Bonus', key: 'rage_damage', rechargeOn: 'long', maxPerLevel: {1:2,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:4,18:4,19:4,20:4} },
+      // Rage Damage is deliberately NOT a resource. It is a static scaling bonus (+2/+3/+4 at
+      // levels 1/9/16), not something you spend — as a resource it rendered with spend buttons
+      // and "recharges on a long rest". It is derived in useCharacterDerived (rageDamageBonus)
+      // and shown as a note under Rage, which is how the 2014 Barbarian has always done it.
     ],
     subclassLabel: 'Primal Path',
     subclassLevel: 3,

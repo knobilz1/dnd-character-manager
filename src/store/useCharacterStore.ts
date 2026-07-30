@@ -5,7 +5,7 @@ import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
 import { useBorrowedStore } from './useBorrowedStore';
 import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
-import { getClass } from '../data/classes';
+import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 
 /** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
@@ -33,9 +33,9 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   const score = (key: AbilityKey) => baseScores[key] ?? 10;
 
   const overrides: Record<string, number> = {};
-  if (c.classes.some(cl => cl.classId === 'bard'))
+  if (c.classes.some(cl => baseClassId(cl.classId) === 'bard'))
     overrides['bardic_inspiration'] = Math.max(1, abilityMod(score('cha')));
-  if (c.classes.some(cl => cl.classId === 'artificer'))
+  if (c.classes.some(cl => baseClassId(cl.classId) === 'artificer'))
     overrides['flash_of_genius'] = Math.max(1, abilityMod(score('int')));
   if (c.classes.some(cl => cl.subclassId === 'bladesinging'))
     overrides['bladesong'] = profBonus;
@@ -44,7 +44,7 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   // Way of the Ascendant Dragon: Wings Unfurled (monk 6) + Aspect of the Wyrm
   // (monk 11) — proficiency-bonus uses per long rest, level-gated.
   if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon')) {
-    const monkLvl = c.classes.find(cl => cl.classId === 'monk')?.level ?? 0;
+    const monkLvl = classLevel(c.classes, 'monk');
     if (monkLvl >= 6)  overrides['wings_unfurled']     = profBonus;
     if (monkLvl >= 11) overrides['aspect_of_the_wyrm'] = profBonus;
   }

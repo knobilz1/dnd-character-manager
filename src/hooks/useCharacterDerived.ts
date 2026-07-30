@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
 import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
-import { getClass } from '../data/classes';
+import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
@@ -32,12 +32,13 @@ export function computeCharacterDerived(character: Character) {
     const totalLevel = totalCharacterLevel(character.classes);
     const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;
 
-    // Hoist class levels — used throughout for features that scale with class level
-    const barbLevel    = character.classes.find(c => c.classId === 'barbarian')?.level ?? 0;
-    const bardLevel    = character.classes.find(c => c.classId === 'bard')?.level ?? 0;
-    const monkLevel    = character.classes.find(c => c.classId === 'monk')?.level ?? 0;
-    const rogueLevel   = character.classes.find(c => c.classId === 'rogue')?.level ?? 0;
-    const paladinLevel = character.classes.find(c => c.classId === 'paladin')?.level ?? 0;
+    // Hoist class levels — used throughout for features that scale with class level.
+    // classLevel() collapses the PHB 2024 ids, so a 2024 character still gets these.
+    const barbLevel    = classLevel(character.classes, 'barbarian');
+    const bardLevel    = classLevel(character.classes, 'bard');
+    const monkLevel    = classLevel(character.classes, 'monk');
+    const rogueLevel   = classLevel(character.classes, 'rogue');
+    const paladinLevel = classLevel(character.classes, 'paladin');
     const hasRemarkableAthlete = character.classes.some(cl => cl.subclassId === 'champion' && cl.level >= 7);
 
     // Final ability scores = base + racial + feat bonuses
@@ -107,11 +108,11 @@ export function computeCharacterDerived(character: Character) {
       // Unarmored: start at 10 + DEX, then apply any Unarmored Defense features
       ac = 10 + mods.dex;
       // Barbarian Unarmored Defense: +CON (applies regardless of which class is primary)
-      if (character.classes.some(c => c.classId === 'barbarian')) {
+      if (barbLevel > 0) {
         ac = Math.max(ac, 10 + mods.dex + mods.con);
       }
       // Monk Unarmored Defense: +WIS (only without a shield; applies regardless of primary class)
-      if (!equippedShield && character.classes.some(c => c.classId === 'monk')) {
+      if (!equippedShield && monkLevel > 0) {
         ac = Math.max(ac, 10 + mods.dex + mods.wis);
       }
     }
@@ -307,10 +308,10 @@ export function computeCharacterDerived(character: Character) {
 
     // Resource max overrides — ability-mod or prof-bonus based resources.
     const resourceMaxOverrides: Record<string, number> = {};
-    if (character.classes.some(c => c.classId === 'bard')) {
+    if (bardLevel > 0) {
       resourceMaxOverrides['bardic_inspiration'] = Math.max(1, mods.cha);
     }
-    if (character.classes.some(c => c.classId === 'artificer')) {
+    if (character.classes.some(c => baseClassId(c.classId) === 'artificer')) {
       resourceMaxOverrides['flash_of_genius'] = Math.max(1, mods.int);
     }
     if (character.classes.some(c => c.subclassId === 'bladesinging')) {

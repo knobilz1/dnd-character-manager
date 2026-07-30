@@ -625,3 +625,23 @@ export const ALL_CLASSES: DClass[] = [
 export function getClass(id: string): DClass | undefined {
   return ALL_CLASSES.find(c => c.id === id);
 }
+
+/** Collapse a PHB 2024 class id ('monk-2024') to its 2014 equivalent ('monk').
+ *
+ *  The 2024 classes are separate entries with their own ids, but their core mechanics —
+ *  Unarmored Defense, Sneak Attack dice, Martial Arts die, Rage damage, Bardic Inspiration
+ *  uses — are the same feature under the same name. Anything deriving those from a class id
+ *  must go through here, or a 2024 character is simply invisible to it (which is exactly what
+ *  happened: every such lookup matched 2014 ids only, so e.g. a 2024 Barbarian or Monk got no
+ *  Unarmored Defense and therefore the wrong AC).
+ *
+ *  Reuses the `spellListClassId` alias the 2024 defs already declare rather than string-munging
+ *  the suffix, so a class that ever needs a different mapping only declares it in one place. */
+export function baseClassId(id: string): string {
+  return getClass(id)?.spellListClassId ?? id;
+}
+
+/** Total level in a class, counting its PHB 2024 variant as the same class. */
+export function classLevel(classes: { classId: string; level: number }[], id: string): number {
+  return classes.reduce((n, c) => (baseClassId(c.classId) === id ? n + c.level : n), 0);
+}
