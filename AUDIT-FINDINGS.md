@@ -761,6 +761,21 @@ descriptions do not mark it. Any automated count is noise.
 and implement only the build ones. Start with the 17 above — `circle-of-the-land` first, since without a
 land type its Circle Spells cannot be granted at all.
 
+## Round 4: prerequisite references — CLEAN (new angle)
+Same silent-failure class as Phase G, not previously checked.
+
+- **`prerequisiteSpell`** (invocations): 2 refs, both resolve. ✅
+- **`prerequisitePact`** (15 uses): values are `blade` / `chain` / `talisman` / `tome`, while pact boon ids
+  are `pact-of-the-blade` etc. **This looked like a broken reference and is not.** The comparison sites
+  strip the prefix explicitly —
+  `i.prerequisitePact === (opts.pactBoon?.replace('pact-of-the-', ''))` at `StepClassOptions.tsx:180` and
+  `LevelUpDialog.tsx:604` — and `types/index.ts:290` types the field as the short form
+  `'blade' | 'chain' | 'tome' | 'talisman'`, so it is intentional and compiler-enforced.
+  **Recorded as correct so it is not "fixed" into breakage.**
+- **`prerequisite`** (50 uses): free text (e.g. "Strength 13 or higher"). **Not machine-checkable** — no
+  structured form exists, so nothing can validate it. Flagged as an untestable surface rather than a bug;
+  a future improvement would be structuring it, but that is a feature, not a fix.
+
 ## Still to re-verify in the second pass
 R6 (39 items) · R2 cap sites · D4 (103 subclass choices — needs hand triage anyway) · Phase G's G1–G4
 (already high-confidence: each was confirmed by direct `grep` of the specific line, not by a sweep).
