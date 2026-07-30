@@ -1,6 +1,7 @@
-import type { Character } from '../types';
+import type { BookId, Character } from '../types';
 import type { BattleLog, BattleMode } from './dmActions';
 import { BATTLE_MODE_LABELS } from './dmActions';
+import { BOOKS } from '../data/books';
 import { hasKnownHp } from './partyHp';
 
 /**
@@ -47,6 +48,35 @@ function statusLine(c: Character): string {
 export function partyStatusText(party: Character[]): string {
   if (party.length === 0) return 'No characters at the table yet.';
   return party.map(statusLine).join('\n');
+}
+
+/** Which sourcebooks this table actually plays with — the union of every
+ *  present character's own enabled-books list (the creator's StepBooks).
+ *
+ *  Sent so the DM improvises from shelves the table can open. A monster or
+ *  magic item pulled from a book nobody owns sounds every bit as authoritative
+ *  as one they can look up, which is exactly what makes it a problem. Derived
+ *  rather than asked for at campaign creation, so it can't drift as players
+ *  join, leave, or rebuild a sheet — and so there's nothing to migrate for
+ *  campaigns that already exist.
+ *
+ *  Returns '' when nobody carries a list (sheets predating `enabledBooks`):
+ *  saying nothing is better than telling the DM the table owns no books. Note
+ *  this constrains what the DM INVENTS, never the adventure — a published
+ *  module routinely uses monsters from books the table never bought, and its
+ *  own content stands regardless. */
+export function tableBooksText(party: Character[]): string {
+  const ids = new Set<BookId>();
+  for (const c of party) for (const b of c.enabledBooks ?? []) ids.add(b);
+  if (ids.size === 0) return '';
+  // Catalog order, so the list reads the same way twice; an id with no catalog
+  // entry is still named rather than silently dropped.
+  const known = BOOKS.filter((b) => ids.has(b.id));
+  const names = known.map((b) => b.shortName);
+  for (const id of ids) {
+    if (!known.some((b) => b.id === id)) names.push(id);
+  }
+  return names.join(', ');
 }
 
 /** Renders the Active Battle Log as ground truth fed back to the DM every turn
@@ -144,6 +174,10 @@ ${recalledChapter.text}`);
     parts.push(`Recalled battle map "${recalledMap.slug}" (you asked to pull this up last turn — its full layout and tactics, for your reference; place enemies on these cells and describe positions by them, don't read the raw grid aloud):\n${recalledMap.spec}`);
   }
   parts.push(`Current party status:\n${partyStatusText(party)}`);
+  const tableBooks = tableBooksText(party);
+  if (tableBooks) {
+    parts.push(`Books at this table: ${tableBooks}. When you improvise a monster, magic item or optional rule, prefer these — they're what the table can actually look up. The adventure's own content stands regardless of this list.`);
+  }
   parts.push(`Battle mode: ${BATTLE_MODE_LABELS[battleMode]}.`);
   if (battleMode === 'grid') {
     parts.push('Map readiness check: before replying, check battle_maps/index.md. If a real fight is taking shape here, use `recallMap` when a matching map exists; otherwise request one NOW by ending your reply with exactly ```dm-actions {"makeMap":"one-line fight and location description"} ```. Do not wait for initiative.');
