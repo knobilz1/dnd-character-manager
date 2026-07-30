@@ -941,3 +941,67 @@ the same scan (a `\n  {\n` entry pattern that matched nothing, and a regex that 
 compile) but could not catch this one, because the control subclasses were all found — the
 loss was inside the feature-level filter, one level below what the controls checked.
 **Controls must be placed at every level a sweep filters, not only at the outermost one.**
+
+---
+
+## SCOPE CORRECTION — R5 was under-counted by roughly half (2026-07-30)
+
+Found while adding ToB: Captain's Call is a textbook R5 resource (uses = 1 + Cha
+modifier, long rest, die scaling d6/d8/d10) that **every scan so far had reported as
+absent**. Chasing why exposed two more parser artifacts and one blind spot in the method.
+
+### Artifact #7 — features with an apostrophe in the NAME were dropped entirely
+The feature regex was `\{ name: '([^']+)', level: ...`. A name stored as `Captain\'s Call`
+terminates `[^']+` at the backslash, the following `', level:` doesn't match, and the whole
+feature — name, level and description — is silently skipped. Every possessive feature name
+in the file was invisible: Captain's Call, Sentinel at Death's Door, Hunter's Sense,
+Dark One's Own Luck, Hexblade's Curse, Giant's Might, Drake's Breath, Genie's Vessel.
+
+Note this is the *same class of bug* as artifact #6 (escaped apostrophes in descriptions)
+appearing in a different capture group. Fixing one did not fix the other, and the
+subclass-level controls passed throughout both.
+
+### Blind spot — the sweep only matched the phrasings I happened to think of
+`Uses = 1 + Charisma modifier per long rest` is a perfectly clear limit that matched none
+of the nine patterns, because they were all written from the PHB's phrasing
+("once per…", "regain all expended uses…", "can't use it again until…"). The data files
+paraphrase, and paraphrases vary by whoever entered them. Added `uses =`, `uses equal to`,
+`per short/long rest`, and `N/short rest`.
+
+### Artifact #8 — the gap checker read only one of three resource layouts
+`resources:` entries appear three ways in this file: name+key on one line single-quoted,
+the same double-quoted (`"Dark One's Own Luck"`, quoted that way to dodge escaping), and
+name/key on separate lines (battle-master). A single-layout regex reported the-fiend and
+hexblade as having *no resources at all*. Now sliced by bracket matching instead.
+
+### Revised numbers
+
+| | before | after |
+|---|---|---|
+| new subclasses still needing resources | 12 | **17** (23 features) |
+| limited-use features inside subclasses already marked done | not checked | **23** |
+
+The second row is the one that matters: the main scan skips any entry that already has a
+`resources` block, so a subclass counted as finished could still hide untracked features —
+and 23 do. Examples: the-fiend **Hurl Through Hell** (1/long), hexblade **Accursed Spectre**,
+rune-knight **Giant's Might** and **Master of Runes**, oath-of-glory **Glorious Defense**,
+echo-knight **Shadow Martyr** and **Reclaim Potential**, chronurgy **Chronal Shift** and
+**Arcane Abeyance**, graviturgy **Adjust Density** / **Violent Attraction** / **Event Horizon**.
+
+Those 23 need per-feature triage against the book, not bulk addition — an unknown fraction
+legitimately draw on a pool that is already tracked (Psi Warrior's Bulwark of Force spends
+Psionic Energy Dice; Ascendant Dragon's Breath of the Dragon spends ki) and correctly need
+nothing. Triage is R5 work, not a new root cause.
+
+### Method change
+The three scanners now live in `tools/audit/` instead of the scratchpad, so the next pass
+starts from the fixed versions rather than rewriting them and re-earning the same artifacts.
+`r5scan.py` now asserts **feature-level** controls — including one feature with an
+apostrophe in its name and one in its description, the two escaping shapes that have each
+broken it once. This is the concrete form of the lesson from artifact #6: controls belong at
+every level a sweep filters. Subclass-level controls passed during all four artifacts.
+
+Running tally of sweeps that reported a clean or complete result and were wrong: **8**.
+Every one of them under-reported. None has ever over-reported. Treat any "nothing found"
+from a hand-written sweep over this codebase as unproven until it has a control at the level
+that does the filtering.
