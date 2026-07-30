@@ -724,6 +724,43 @@ grepped for any `max` / `limit` / `cap` / `>=` / `length` comparison. **There is
 sheet genuinely cannot refuse an over-cap pick. This was the user's originally reported bug and it is
 verified twice by different means.
 
+## Round 3: D4 triage — **AUTOMATED CLASSIFICATION FAILED. D4 needs hand review.**
+
+Attempted to split the D4 list into *build* choices (persist on the sheet, must be prompted) and
+*use-time* choices (re-chosen each activation, correctly need no prompt) using targeting language as the
+discriminator. It produced `build=142, usetime=25` — already suspect, since 167 > the 103 of the first
+pass (a looser match pattern), and inspection of the "build" bucket shows it is **full of false
+positives**:
+
+| Wrongly classed as a build choice | Why it isn't |
+|---|---|
+| `berserker` Frenzy | "you **can choose** to go into a frenzy" — a per-rage decision |
+| `champion` Improved Critical | no choice at all; crits on 19–20 |
+| `school-of-evocation` Evocation Savant | no choice; halves gold/time to copy evocation spells |
+| `wild-magic` Wild Magic Surge | no choice |
+| `thief` Second-Story Work, `arcane-trickster` Mage Hand Legerdemain | no choice |
+| `oath-of-the-ancients` Undying Sentinel | no choice |
+| `the-fiend` Fiendish Resilience | a real choice, but **re-chosen each rest** — use-time |
+
+**Conclusion: no regex separates these.** The distinction is semantic — does the choice persist? — and the
+descriptions do not mark it. Any automated count is noise.
+
+**What D4 actually is, stated honestly:**
+- **103** subclass features contain choice language (first-pass figure, reproducible).
+- Of those, an **unknown but substantial minority** are true build choices.
+- **17 confirmed by hand** so far: `arcane-archer` ×5 (lv3/7/10/15/18) · `hunter` Hunter's Prey (3) +
+  Defensive Tactics (7) · `circle-of-the-land` Circle Spells (3) + Bonus Cantrip (2) · `champion`
+  Additional Fighting Style (10) · `draconic-bloodline` Dragon Ancestor (1) · `college-of-lore` Bonus
+  Proficiencies (3) + Additional Magical Secrets (6) · `knowledge-domain` Blessings of Knowledge (1) ·
+  `nature-domain` Acolyte of Nature (1) · `rune-knight` Rune Carver (3) · `armorer` Armor Model (3) ·
+  `beast-master` Ranger's Companion (3) · `bladesinging` Training in War and Song (2) · `drakewarden`
+  Draconic Gift (3).
+- Already handled by the app: `totem-warrior` ×3, `battle-master` maneuvers.
+
+**Fix-phase instruction: do NOT size D4 from a sweep.** Walk the 103 by hand, mark each build/use-time,
+and implement only the build ones. Start with the 17 above — `circle-of-the-land` first, since without a
+land type its Circle Spells cannot be granted at all.
+
 ## Still to re-verify in the second pass
 R6 (39 items) · R2 cap sites · D4 (103 subclass choices — needs hand triage anyway) · Phase G's G1–G4
 (already high-confidence: each was confirmed by direct `grep` of the specific line, not by a sweep).
