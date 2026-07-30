@@ -7,7 +7,7 @@ import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile, writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff, Users } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff, Users, UserCheck } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -1299,6 +1299,7 @@ export function DMConsolePage() {
   const rollCallTakenRef = React.useRef(rollCallTaken);
   rollCallTakenRef.current = rollCallTaken;
   const [rollCallOpen, setRollCallOpen] = React.useState(false);
+  const [partyOpen, setPartyOpen] = React.useState(false);
   // Character names whose device has polled the narration feed recently — i.e.
   // has their sheet open on the network. Shown as a dot beside each roll-call
   // row and nothing more: the DM is looking at actual humans, and someone
@@ -4078,8 +4079,9 @@ export function DMConsolePage() {
       // nothing until a button is pressed.
       setSessionZeroText((await invoke<string | null>('read_cached_session_zero', { id: activeCampaignId })) ?? '');
       setRosterNotice(null);
-      setRemovingMember(null);
-      setAddPlayerOpen(false);
+      // The roster editor moved to its own Party dialog (openParty resets its
+      // own state); the plan still re-reads the roster because it's generated
+      // around who's in the party.
       await refreshPartyRoster();
       const cached = await invoke<SessionPlanResult | null>('read_cached_session_plan', { id: activeCampaignId });
       const planned = cached?.maps ?? [];
@@ -4171,6 +4173,18 @@ export function DMConsolePage() {
     } finally {
       setRecapSpeaking(false);
     }
+  }
+
+  /** Opens the Party dialog on a clean slate — a half-typed "add" or an armed
+   *  "write them out" left over from last time must not be waiting when it
+   *  reopens. Re-reads the roster too, since a player may have connected since
+   *  the campaign was loaded. */
+  function openParty() {
+    setRosterNotice(null);
+    setRemovingMember(null);
+    setAddPlayerOpen(false);
+    setPartyOpen(true);
+    void refreshPartyRoster();
   }
 
   async function refreshPartyRoster() {
@@ -4560,6 +4574,12 @@ export function DMConsolePage() {
                 <ScrollText size={14} /> Recap
               </Button>
             )}
+            {activeCampaignId && (
+              <Button variant="outline" size="sm" onClick={openParty} title="Who's in this campaign">
+                <Users size={14} /> Party
+                {partyRoster.length > 0 && <span className="ml-1 text-[11px] text-slate-500">{partyRoster.length}</span>}
+              </Button>
+            )}
             {activeCampaignId && partyRoster.length > 0 && (
               <Button
                 variant="outline"
@@ -4567,7 +4587,7 @@ export function DMConsolePage() {
                 onClick={() => setRollCallOpen(true)}
                 title={rollCallTaken ? 'Change who\'s at the table tonight' : 'Who showed up tonight? (needed before the first turn)'}
               >
-                <Users size={14} /> Roll call
+                <UserCheck size={14} /> Roll call
                 {!rollCallTaken && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />}
                 {rollCallTaken && absentCount > 0 && (
                   <span className="ml-1 text-[11px] text-amber-400">{absentCount} out</span>
@@ -4941,16 +4961,133 @@ export function DMConsolePage() {
         </div>
 
         <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-slate-800 flex-wrap">
-          <p className="text-xs text-slate-500">
-            {absentCount === 0
-              ? 'Everyone marked here.'
-              : `${absentCount} away — the DM will be told on every turn.`}
-          </p>
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500">
+              {absentCount === 0
+                ? 'Everyone marked here.'
+                : `${absentCount} away — the DM will be told on every turn.`}
+            </p>
+            {/* The moment you notice the roster is wrong is while taking roll
+                call against it, so the fix is one click from here. */}
+            <button
+              type="button"
+              onClick={() => { setRollCallOpen(false); openParty(); }}
+              className="text-xs text-slate-500 hover:text-sky-400 underline underline-offset-2 transition-colors"
+            >
+              Someone missing? Manage party…
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={markEveryonePresent}>Everyone's here</Button>
             <Button size="sm" onClick={confirmRollCall}>Start the session</Button>
           </div>
         </div>
+      </Dialog>
+
+      {/* Who's in this campaign — the roster the DM is told about every turn,
+          and the list roll call takes attendance against.
+          Lived inside "Plan next session" until it turned out nobody could
+          find it, which matters more now that an empty roster is also why roll
+          call has nothing to show. It fills itself when players connect over
+          LAN; this is for the changes that happen BETWEEN sessions, when
+          nobody is connected to sync from. */}
+      <Dialog open={partyOpen} onClose={() => setPartyOpen(false)} title={`${activeCampaignName ?? 'Campaign'} — Party`} wide>
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <p className="text-xs text-slate-400 max-w-lg">
+            Who the DM knows about, and who roll call asks after. Adding someone ties their backstory into the
+            campaign's established lore; removing someone writes their character out of the story.
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="outline" onClick={importPlayerCharacter} disabled={!!rosterBusy}>
+              <Upload size={14} /> Import character…
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setAddPlayerOpen((v) => !v)} disabled={!!rosterBusy}>
+              <Plus size={14} /> Add manually
+            </Button>
+          </div>
+        </div>
+
+        {rosterBusy && <p className="text-xs text-sky-400 mb-2">{rosterBusy}</p>}
+        {rosterNotice && !rosterBusy && (
+          <p className="text-xs text-emerald-400 mb-2 whitespace-pre-wrap">{rosterNotice}</p>
+        )}
+
+        {addPlayerOpen && (
+          <div className="mb-2 bg-slate-900 border border-slate-700 rounded-lg p-2 space-y-2">
+            <input
+              type="text"
+              value={addPlayerName}
+              onChange={(e) => setAddPlayerName(e.target.value)}
+              placeholder="Character name"
+              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
+            />
+            <textarea
+              value={addPlayerNotes}
+              onChange={(e) => setAddPlayerNotes(e.target.value)}
+              rows={3}
+              placeholder={'Who they are, in whatever detail you have — e.g. "Played by Jo. Half-elf ranger who grew up on the Vallaki docks; looking for the sister who left."'}
+              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
+            />
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setAddPlayerOpen(false)}>Cancel</Button>
+              <Button size="sm" onClick={addPlayerManually} disabled={!addPlayerName.trim() || !!rosterBusy}>Add</Button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              If the player has a character in Tavern Sheet, "Import character…" is better — it brings their full
+              background, bond, flaw and backstory across instead of a summary you retyped.
+            </p>
+          </div>
+        )}
+
+        {partyRoster.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            Nobody yet. Characters appear here automatically when players connect over LAN, or add them above.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {partyRoster.map((m) => (
+              <div key={m.name} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm text-slate-100">{m.name}</p>
+                    <p className="text-xs text-slate-400 line-clamp-2">{m.description}</p>
+                  </div>
+                  {removingMember !== m.name && (
+                    <button
+                      type="button"
+                      onClick={() => { setRemovingMember(m.name); setRemoveReason(''); setRosterNotice(null); }}
+                      disabled={!!rosterBusy}
+                      className="shrink-0 text-xs text-slate-500 hover:text-red-400 transition-colors disabled:opacity-40"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {removingMember === m.name && (
+                  <div className="mt-2 space-y-2">
+                    <input
+                      type="text"
+                      value={removeReason}
+                      onChange={(e) => setRemoveReason(e.target.value)}
+                      placeholder="Why are they leaving? (optional — e.g. Jo moved away)"
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
+                    />
+                    <p className="text-[11px] text-slate-500">
+                      The DM writes them out using what's already established, and leaves the door open for them to
+                      come back — unless your reason says otherwise.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setRemovingMember(null)}>Cancel</Button>
+                      <Button size="sm" onClick={() => confirmRemovePlayer(m.name)} disabled={!!rosterBusy}>
+                        Write them out
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </Dialog>
 
       <Dialog open={!!boardRead} onClose={() => setBoardRead(null)} title={boardRead ? `Read the board — ${boardRead.name}` : ''} wide elevated>
@@ -5501,110 +5638,6 @@ export function DMConsolePage() {
           )}
         </div>
 
-        {/* Who's at the table. Fills itself when players connect over LAN; this
-            is for the changes that happen between sessions, when nobody's
-            connected to sync from. */}
-        <div className="mb-3 border border-slate-700 rounded-lg bg-slate-900/40 px-3 py-2">
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <div className="min-w-0">
-              <p className="text-sm text-slate-200">Party ({partyRoster.length})</p>
-              <p className="text-xs text-slate-400">
-                Who the DM knows about. Adding someone ties their backstory into the campaign's established lore;
-                removing someone writes their character out of the story.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <Button size="sm" variant="outline" onClick={importPlayerCharacter} disabled={!!rosterBusy}>
-                <Upload size={14} /> Import character…
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setAddPlayerOpen((v) => !v)} disabled={!!rosterBusy}>
-                <Plus size={14} /> Add manually
-              </Button>
-            </div>
-          </div>
-
-          {rosterBusy && <p className="text-xs text-sky-400 mb-2">{rosterBusy}</p>}
-          {rosterNotice && !rosterBusy && (
-            <p className="text-xs text-emerald-400 mb-2 whitespace-pre-wrap">{rosterNotice}</p>
-          )}
-
-          {addPlayerOpen && (
-            <div className="mb-2 bg-slate-900 border border-slate-700 rounded-lg p-2 space-y-2">
-              <input
-                type="text"
-                value={addPlayerName}
-                onChange={(e) => setAddPlayerName(e.target.value)}
-                placeholder="Character name"
-                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
-              />
-              <textarea
-                value={addPlayerNotes}
-                onChange={(e) => setAddPlayerNotes(e.target.value)}
-                rows={3}
-                placeholder={'Who they are, in whatever detail you have — e.g. "Played by Jo. Half-elf ranger who grew up on the Vallaki docks; looking for the sister who left."'}
-                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
-              />
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="outline" onClick={() => setAddPlayerOpen(false)}>Cancel</Button>
-                <Button size="sm" onClick={addPlayerManually} disabled={!addPlayerName.trim() || !!rosterBusy}>Add</Button>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                If the player has a character in Tavern Sheet, "Import character…" is better — it brings their full
-                background, bond, flaw and backstory across instead of a summary you retyped.
-              </p>
-            </div>
-          )}
-
-          {partyRoster.length === 0 ? (
-            <p className="text-xs text-slate-500">
-              Nobody yet. Characters appear here automatically when players connect over LAN, or add them above.
-            </p>
-          ) : (
-            <div className="space-y-1">
-              {partyRoster.map((m) => (
-                <div key={m.name} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-100">{m.name}</p>
-                      <p className="text-xs text-slate-400 line-clamp-2">{m.description}</p>
-                    </div>
-                    {removingMember !== m.name && (
-                      <button
-                        type="button"
-                        onClick={() => { setRemovingMember(m.name); setRemoveReason(''); setRosterNotice(null); }}
-                        disabled={!!rosterBusy}
-                        className="shrink-0 text-xs text-slate-500 hover:text-red-400 transition-colors disabled:opacity-40"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  {removingMember === m.name && (
-                    <div className="mt-2 space-y-2">
-                      <input
-                        type="text"
-                        value={removeReason}
-                        onChange={(e) => setRemoveReason(e.target.value)}
-                        placeholder="Why are they leaving? (optional — e.g. Jo moved away)"
-                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-red-600"
-                      />
-                      <p className="text-[11px] text-slate-500">
-                        The DM writes them out using what's already established, and leaves the door open for them to
-                        come back — unless your reason says otherwise.
-                      </p>
-                      <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setRemovingMember(null)}>Cancel</Button>
-                        <Button size="sm" onClick={() => confirmRemovePlayer(m.name)} disabled={!!rosterBusy}>
-                          Write them out
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
         {planLoading ? (
           <div className="py-2">
             <p className="text-sm text-slate-400 mb-1">
