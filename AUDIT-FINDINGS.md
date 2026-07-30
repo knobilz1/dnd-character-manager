@@ -81,7 +81,33 @@ but almost nothing used it. Affects nearly every 2024 class. **Partially fixed**
 - Artificer sites — there is no `artificer-2024`.
 - Subclass-gated sites (`path-of-the-beast`, `armorer`, `berserker`, `totem-warrior`) — 2014-only subclasses.
 
-## ROOT CAUSE R2 — caps are displayed but never enforced
+## ROOT CAUSE R2 — FULLY CHARACTERISED (Phase D): the creator enforces caps, the SHEET does not
+This is the user's named case, now proven exactly. The asymmetry is the whole bug.
+
+**Creator — enforces correctly ✅**
+- `StepSkills.tsx:103` — `else if (next.size < maxChoices)` blocks the pick.
+- `StepClassOptions.tsx:148` — `current.length < max ? [...current, id] : current` blocks the pick.
+  Covers fighting styles, invocations, metamagic, maneuvers, infusions.
+
+**Sheet — enforces nothing ❌**
+- `useCharacterStore.ts:449-456` `toggleSpellPrepared` is a bare toggle with **no cap check at all**.
+- `useCharacterStore.ts:458-462` `addSpellToBook` only de-duplicates — **no spells-known cap**, so a Bard,
+  Sorcerer or Warlock can exceed `SPELLS_KNOWN` without limit.
+- `SpellPanel.tsx:176` guards only `alwaysPrepared`, never the limit.
+- **No cantrip cap either** — `SpellPanel.tsx:101` displays `{cantripCount}/{cantripsKnown}` and nothing
+  stops you exceeding it.
+
+Caps **displayed** in 5 places (`StepClassOptions:62`, `StepSkills:120`, `InventoryPanel:331`,
+`SpellPanel:101`, `SpellPanel:108`); caps **enforced** in exactly 1 (`InventoryPanel:334`, and that is the
+charge +/- button, not a pick limit).
+
+Fix shape: guard in the **store**, not the panel — `toggleSpellPrepared` and `addSpellToBook` are the two
+chokepoints every path funnels through, exactly like `save()` was for the borrowed-character fix.
+Both need the derived max, which the store can compute (`maxPreparedSpellsFor`, `spellsKnownFor`,
+`cantripsKnownFor` all live in `data/mechanics.ts` and take plain args).
+
+### Original note
+
 `SpellPanel.tsx:106-108` renders `Prepared (n/max)` and turns it **red** when over the limit, but nothing
 prevents exceeding it. `maxPreparedSpellsFor` itself is correct and 2024-aware (`PREPARED_SPELLS_2024`
 covers bard/cleric/druid/paladin/ranger/wizard-2024). This is the user's named case. Applies to every
