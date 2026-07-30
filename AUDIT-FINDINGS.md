@@ -291,8 +291,15 @@ permanently), so that one is fine — **Scarab of Protection is a real bug**: th
   `'3 charges. Reaction: succeed on a failed Dex save. Rare. Requires attunement.'` — and only **8 of 47**
   restate recharge timing at all. `recharge` is supplementary structured data, not contradicted by the
   text. **All 38 are fine; recorded so they are not "fixed".**
-- Confirmed real and still open: **Scarab of Protection** needs `recharge: 'dawn'` (DMG: 4d6 regained
-  daily at dawn). **Ring of Three Wishes** correctly has none — the DMG expends it permanently.
+- ### ❌ RETRACTED — Scarab of Protection is CORRECT as-is
+  I logged that it "needs `recharge: 'dawn'`, DMG says 4d6 regained daily at dawn". **That is wrong.**
+  Checked against `reference-books/md/dmg-dungeon-masters-guide.md`:
+  *"12 charges. Reaction: turn a failed save vs necromancy/undead-effect into a success (1 charge);
+  **crumbles at 0 charges**."* It never recharges. The app's own description already says
+  "crumbles when the last charge is used".
+  Caught at the point of fixing — applying it would have introduced a bug into correct data.
+  **Both items with `maxCharges` and no `recharge` are correct**: Ring of Three Wishes (expended
+  permanently) and Scarab of Protection (destroyed at 0). **Zero bugs in that category.**
 
 The 39 untracked include: Alchemy Jug, Gem of Brightness, Cape of the Mountebank, Chime of Opening,
 Cloak of Invisibility, Cloak of the Bat, Helm of Teleportation, Hat of Vermin, Staff of Birdcalls,

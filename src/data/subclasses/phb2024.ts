@@ -169,7 +169,10 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     alwaysPreparedSpells: { 3: ['fog-cloud', 'gust-of-wind', 'ray-of-frost', 'shatter', 'thunderwave'], 5: ['lightning-bolt', 'water-breathing'], 7: ['control-water', 'ice-storm'], 9: ['conjure-elemental', 'hold-monster'] },
   },
 
-  { id: 'circle-of-stars', name: 'Circle of Stars', classId: 'druid-2024', sourceBook: 'PHB2024',
+  // id namespaced like every other 2024 entry: it previously collided with the TCE circle-of-stars, and
+  // getSubclass() is .find() so the TCE one always won — a 2024 Druid picking this silently received the
+  // 2014 features at 2014 levels.
+  { id: 'circle-of-stars-2024', name: 'Circle of Stars', classId: 'druid-2024', sourceBook: 'PHB2024',
     description: 'Tap into the magic of constellations and the night sky.',
     features: [
       { name: 'Star Map', level: 3, description: 'Hold star map (created on Long Rest): always have Guidance and Guiding Bolt prepared. Cast Guiding Bolt without slot = Wis mod (min 1) times per Long Rest.' },
@@ -286,7 +289,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
       { name: 'Smite of Protection', level: 15, description: 'When you cast Divine Smite: you and allies in your Aura of Protection gain Half Cover (+2 AC, +2 Dex saves) until the start of your next turn.' },
       { name: 'Holy Nimbus', level: 20, description: 'Bonus Action (once per Long Rest; restore with level 5 slot): imbue aura for 10 min. Holy Ward (Advantage on saves forced by Fiends/Undead); Radiant Damage (enemies starting turn in your aura take Radiant = Cha mod + Prof Bonus); Sunlight (aura filled with sunlight).' },
     ],
-    alwaysPreparedSpells: { 3: ['protection-from-evil-and-good', 'shield-of-faith'], 5: ['aid', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] },
+    alwaysPreparedSpells: { 3: ['protection-from-evil-good', 'shield-of-faith'], 5: ['aid', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] },
   },
 
   { id: 'oath-of-glory-2024', name: 'Oath of Glory', classId: 'paladin-2024', sourceBook: 'PHB2024',

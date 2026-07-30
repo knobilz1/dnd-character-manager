@@ -290,7 +290,11 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     ...(sub?.features ?? []).filter(f => f.level === newLevel).map(f => ({ source: sub!.name, ...f })),
   ];
 
-  const needsSubclass = newLevel === classDef.subclassLevel && !primary?.subclassId;
+  // >= not ===: a character who passed their subclass level without picking one — multiclass entry, a
+  // character created above that level, a cancelled dialog, an import — was never prompted again at any
+  // level, and silently lost every subclass feature forever. Every analogous gate in this file already
+  // uses >= (needsPactBoon, needsTotemSpirit, needsAspectTotem).
+  const needsSubclass = newLevel >= classDef.subclassLevel && !primary?.subclassId;
   const availableSubclasses = needsSubclass
     ? ALL_SUBCLASSES.filter(s => s.classId === classDef.id && bookEnabled(s, character.enabledBooks))
     : [];

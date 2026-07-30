@@ -664,7 +664,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Steps of Night', level: 6, description: 'In dim light or darkness, as a bonus action, gain a flying speed equal to your walking speed for 1 minute. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 radiant damage (2d8 at 14th).' },
     { name: 'Twilight Shroud', level: 17, description: 'Allies in your Twilight Sanctuary have half cover.' },
-  ], alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomunds-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
+  ], alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomund-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
 
   // ── TCE: DRUID ───────────────────────────────────────────────────────
   { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
