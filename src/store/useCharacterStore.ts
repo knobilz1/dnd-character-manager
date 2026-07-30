@@ -115,6 +115,18 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['arcane_jolt'] = Math.max(1, abilityMod(score('int')));
   if (c.classes.some(cl => cl.subclassId === 'college-of-eloquence' && cl.level >= 14))
     overrides['infectious_inspiration'] = Math.max(1, abilityMod(score('cha')));
+  // Features found by the second-pass gap check: limited uses inside subclasses that
+  // already had a resources block, so the main sweep skipped the whole entry.
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-dreams' && cl.level >= 10))
+    overrides['hidden_paths'] = Math.max(1, abilityMod(score('wis')));
+  if (c.classes.some(cl => cl.subclassId === 'fey-wanderer' && cl.level >= 15))
+    overrides['misty_wanderer'] = Math.max(1, abilityMod(score('wis')));
+  if (c.classes.some(cl => cl.subclassId === 'oath-of-glory' && cl.level >= 15))
+    overrides['glorious_defense'] = Math.max(1, abilityMod(score('cha')));
+  if (c.classes.some(cl => cl.subclassId === 'alchemist' && cl.level >= 9))
+    overrides['restorative_reagents'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 15))
+    overrides['reclaim_potential'] = Math.max(1, abilityMod(score('con')));
   // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
   if (c.classes.some(cl => cl.subclassId === 'tob-captain' && cl.level >= 3))
     overrides['captains_call'] = Math.max(1, 1 + abilityMod(score('cha')));

@@ -423,6 +423,23 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'college-of-eloquence' && c.level >= 14)) {
       resourceMaxOverrides['infectious_inspiration'] = Math.max(1, mods.cha);
     }
+    // Features found by the second-pass gap check: limited uses inside subclasses that
+    // already had a resources block, so the main sweep skipped the whole entry.
+    if (character.classes.some(c => c.subclassId === 'circle-of-dreams' && c.level >= 10)) {
+      resourceMaxOverrides['hidden_paths'] = Math.max(1, mods.wis);
+    }
+    if (character.classes.some(c => c.subclassId === 'fey-wanderer' && c.level >= 15)) {
+      resourceMaxOverrides['misty_wanderer'] = Math.max(1, mods.wis);
+    }
+    if (character.classes.some(c => c.subclassId === 'oath-of-glory' && c.level >= 15)) {
+      resourceMaxOverrides['glorious_defense'] = Math.max(1, mods.cha);
+    }
+    if (character.classes.some(c => c.subclassId === 'alchemist' && c.level >= 9)) {
+      resourceMaxOverrides['restorative_reagents'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'echo-knight' && c.level >= 15)) {
+      resourceMaxOverrides['reclaim_potential'] = Math.max(1, mods.con);
+    }
     // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
     if (character.classes.some(c => c.subclassId === 'tob-captain' && c.level >= 3)) {
       resourceMaxOverrides['captains_call'] = Math.max(1, 1 + mods.cha);

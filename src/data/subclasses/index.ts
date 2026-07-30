@@ -226,8 +226,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Hurl Through Hell', level: 14, description: 'Starting at 14th level, when you hit a creature with an attack, you can use this feature to instantly transport the target through the lower planes. The creature disappears and hurtles through a nightmare landscape. At the end of your next turn, the target returns to the space it previously occupied or the nearest unoccupied space. If the target is not a fiend, it takes 10d10 psychic damage as it reels from its horrific experience. Once you use this feature, you can\'t use it again until you finish a long rest.' },
   ],
     // PHB p.109: "Once you use this feature, you can't use it again until you finish a short or long rest."
-    resources: [{ name: "Dark One's Own Luck", key: 'dark_ones_own_luck', rechargeOn: 'short',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    resources: [
+      { name: "Dark One's Own Luck", key: 'dark_ones_own_luck', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // PHB p.109: Hurl Through Hell — once per long rest.
+      { name: 'Hurl Through Hell', key: 'hurl_through_hell', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
     expandedSpells: { 1: ['burning-hands', 'command'], 3: ['blindness-deafness', 'scorching-ray'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['flame-strike', 'hallow'] }},
   { id: 'the-great-old-one', name: 'The Great Old One', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a mysterious entity whose nature is utterly foreign to the fabric of reality. It might come from the Far Realm, the space beyond reality, or it could be one of the elder gods known only in legends.', features: [
     { name: 'Awakened Mind', level: 1, description: 'Starting at 1st level, your alien knowledge gives you the ability to touch the minds of other creatures. You can communicate telepathically with any creature you can see within 30 feet of you.' },
@@ -481,8 +486,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ],
     // XGtE p.22: Walker in Dreams — recharges on a long rest (the *trigger* is finishing a
     // short rest, which is not the same thing and is why the counter is 'long').
-    resources: [{ name: 'Walker in Dreams', key: 'walker_in_dreams', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    resources: [
+      { name: 'Walker in Dreams', key: 'walker_in_dreams', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // XGtE p.22: Hidden Paths — Wisdom modifier uses (min 1) per long rest.
+      { name: 'Hidden Paths', key: 'hidden_paths', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
   { id: 'circle-of-the-shepherd', name: 'Circle of the Shepherd', classId: 'druid', sourceBook: 'XGtE', description: 'Druids of the Circle of the Shepherd commune with the spirits of nature, especially the spirits of beasts and the fey, and call to those spirits for aid.', features: [
     { name: 'Speech of the Woods', level: 2, description: 'You can understand and verbally communicate with beasts, and you learn Sylvan.' },
@@ -695,6 +705,9 @@ export const ALL_SUBCLASSES: Subclass[] = [
     resources: [
       { name: "Hexblade's Curse", key: 'hexblade_curse', rechargeOn: 'short' as const,
         maxPerLevel: {1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
+      // XGtE p.55: Accursed Specter — "you can't use it again until you finish a long rest."
+      { name: 'Accursed Specter', key: 'accursed_specter', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
     ],
     features: [
     { name: 'Hexblade\'s Curse', level: 1, description: 'As a bonus action, curse a creature within 30 feet for 1 minute. You gain a bonus to damage rolls against it equal to your proficiency bonus, your attacks crit on 19-20 against it, and if it dies you regain HP. Use once per short or long rest.' },
@@ -881,11 +894,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // TCE: pool = 2 x proficiency bonus, all back on a long rest (plus a bonus-action single regain,
     // which is a use-time action rather than a rest and so isn't modelled here). The maxPerLevel table
     // mirrors 2 x PB as a fallback; the real max comes from the psionic_energy override.
-    resources: [{
-      name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
-      resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
-    }],
+    resources: [
+      {
+        name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+        resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+      },
+      // TCE p.42: Bulwark of Force — once per long rest, or spend a Psionic Energy die to use
+      // it again. The die spend is an alternative cost, not a recharge, so only the rest-limited
+      // use is counted here (the dice above already track the other half).
+      { name: 'Bulwark of Force', key: 'bulwark_of_force', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
   { id: 'rune-knight', name: 'Rune Knight', classId: 'fighter', sourceBook: 'TCE', description: 'Rune Knights are fighters who enhance their gear with potent runes, fragments of giants\' lost rune magic.', features: [
     { name: 'Bonus Proficiencies', level: 3, description: 'You gain proficiency with smith\'s tools and can speak, read, and write Giant.' },
@@ -936,8 +956,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // TCE p.54: Living Legend — once per long rest. The "spend a 5th-level slot to use it
     // again" clause is an alternative cost, not a recharge, so it is not modelled here (same
     // call as Warping Implosion's 5-sorcery-point reuse).
-    resources: [{ name: 'Living Legend', key: 'living_legend', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    resources: [
+      { name: 'Living Legend', key: 'living_legend', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } },
+      // TCE p.54: Glorious Defense — Charisma modifier uses (min 1) per long rest.
+      { name: 'Glorious Defense', key: 'glorious_defense', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
     alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-watchers', name: 'Oath of the Watchers', classId: 'paladin', sourceBook: 'TCE', description: 'The Oath of the Watchers binds paladins to protect mortals from the dangers posed by extraplanar entities.', features: [
     { name: 'Channel Divinity: Watcher\'s Will', level: 3, description: 'As an action, choose up to Cha-mod creatures within 30 feet. They gain advantage on Int, Wis, and Cha saves for 1 minute.' },
@@ -963,8 +988,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Misty Wanderer', level: 15, description: 'You can cast Misty Step a number of times per long rest equal to your Wis mod. You can take a willing creature within 5 feet with you.' },
   ],
     // Fey Reinforcements (11th): cast Summon Fey once per long rest without a slot.
-    resources: [{ name: 'Fey Reinforcements', key: 'fey_reinforcements', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    resources: [
+      { name: 'Fey Reinforcements', key: 'fey_reinforcements', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // TCE p.58: Misty Wanderer — Wisdom modifier uses (min 1) per long rest.
+      { name: 'Misty Wanderer', key: 'misty_wanderer', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
   { id: 'swarmkeeper', name: 'Swarmkeeper', classId: 'ranger', sourceBook: 'TCE', description: 'Magic intermingles with the bond that an archetypal ranger shares with nature — but the Swarmkeeper bonds with a swarm of nature spirits.', features: [
     { name: 'Gathered Swarm', level: 3, description: 'A swarm of nature spirits aids you. When you hit with an attack, choose: +1d6 piercing damage, push target 15 feet, or move yourself 5 feet without provoking opportunity attacks.' },
@@ -1002,11 +1032,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Rend Mind', level: 17, description: 'When you use Psychic Blades for Sneak Attack damage, force a Wis save (DC 8 + proficiency + Dex modifier) or be stunned for 1 minute (repeats save at end of each turn). Once per long rest; expending three Psionic Energy dice lets you use it again.' },
   ],
     // Same Psionic Energy pool as Psi Warrior (TCE): 2 x proficiency bonus, all back on a long rest.
-    resources: [{
-      name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
-      resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
-    }],
+    resources: [
+      {
+        name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+        resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+      },
+      // TCE p.63: both are once per long rest, or spend Psionic Energy dice to use again
+      // (one die for Psychic Veil, three for Rend Mind) — an alternative cost, not a recharge.
+      { name: 'Psychic Veil', key: 'psychic_veil', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Rend Mind', key: 'rend_mind', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } },
+    ],
   },
 
   // ── TCE: SORCERER ────────────────────────────────────────────────────
@@ -1134,8 +1172,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Perfected Bond', level: 15, description: 'While drake is summoned: Empowered Bite — drake deals 2d6 extra Draconic Essence damage on its Bite. Large Drake — grows to Large; no longer prohibited from flying while you ride it. Reflexive Resistance — when you or the drake takes damage within 30 ft, you can use your reaction to give yourself or the drake resistance to that instance of damage. Uses = proficiency bonus; all regain on long rest.' },
   ],
     // Drakewarden Perfected Bond (15th): prof bonus uses, all back on a long rest.
-    resources: [{ name: 'Perfected Bond', key: 'perfected_bond', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+    resources: [
+      { name: 'Perfected Bond', key: 'perfected_bond', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // FToD p.28: Drake's Breath — once per long rest (or a spell slot of 1st level or
+      // higher to use it again, which is an alternative cost rather than a recharge).
+      { name: "Drake's Breath", key: 'drakes_breath', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
 
   // ── TCE: ARTIFICER SUBCLASSES ─────────────────────────────────────────
@@ -1148,8 +1192,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Chemical Mastery', level: 15, description: 'You gain resistance to acid and poison damage and are immune to the poisoned condition. You can cast Greater Restoration and Heal once per long rest each without expending a spell slot.' },
   ],
     // Chemical Mastery (15th): the two free castings, one each per long rest.
-    resources: [{ name: 'Chemical Mastery', key: 'chemical_mastery', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:2,16:2,17:2,18:2,19:2,20:2 } }],
+    resources: [
+      { name: 'Chemical Mastery', key: 'chemical_mastery', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:2,16:2,17:2,18:2,19:2,20:2 } },
+      // TCE p.14: Restorative Reagents — the free Lesser Restoration is Int modifier uses
+      // (min 1) per long rest. (The temp-HP rider on elixirs has no limit of its own.)
+      { name: 'Restorative Reagents', key: 'restorative_reagents', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
   { id: 'armorer', name: 'Armorer', classId: 'artificer', sourceBook: 'TCE', description: 'An artificer who specializes as an Armorer modifies armor to function almost like a second skin.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with heavy armor and smith\'s tools.' },
@@ -1200,8 +1250,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Legion of One', level: 18, description: 'You can use a bonus action to create two echoes with your Manifest Echo feature, and these echoes can coexist. If you try to create a third echo, the previous two echoes are destroyed. Anything you can do from one echo\'s position can be done from the other\'s instead.\n\nIn addition, when you roll initiative and have no uses of Unleash Incarnation remaining, you regain one use of that feature.' },
   ],
     // Unleash Incarnation (3rd): Constitution modifier uses (min 1), all back on a long rest (EGtW).
-    resources: [{ name: 'Unleash Incarnation', key: 'unleash_incarnation', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    resources: [
+      { name: 'Unleash Incarnation', key: 'unleash_incarnation', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // EGtW p.183: Shadow Martyr is once per short or long rest; Reclaim Potential is
+      // Constitution modifier uses (min 1) per long rest.
+      { name: 'Shadow Martyr', key: 'shadow_martyr', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Reclaim Potential', key: 'reclaim_potential', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
   },
 
   { id: 'chronurgy-magic', name: 'Chronurgy Magic', classId: 'wizard', sourceBook: 'EGtW', description: 'Focusing on the manipulation of time, those who follow the Chronurgy tradition learn to alter the pace of reality to their liking. Using the principles of dunamis, these mages can slow down or reverse time around a creature.', features: [
@@ -1212,8 +1270,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Convergent Future', level: 14, description: 'You can peer through possible futures and magically pull one of them into reality. As a reaction, when you or a creature you can see within 60 feet of you makes an attack roll, an ability check, or a saving throw, you can ignore the roll and decide whether the roll succeeds or fails. When you use this feature, you gain one level of exhaustion. Only a long rest removes this exhaustion.' },
   ],
     // Momentary Stasis (6th): Intelligence modifier uses (min 1), all back on a long rest.
-    resources: [{ name: 'Momentary Stasis', key: 'momentary_stasis', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    resources: [
+      { name: 'Momentary Stasis', key: 'momentary_stasis', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // EGtW p.184: Chronal Shift — a flat 2 uses per long rest, not an ability modifier.
+      { name: 'Chronal Shift', key: 'chronal_shift', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },
+    ],
   },
 
   { id: 'graviturgy-magic', name: 'Graviturgy Magic', classId: 'wizard', sourceBook: 'EGtW', description: 'Understanding and mastering the forces that draw matter together or drive it apart, the School of Graviturgy opens up possibilities that other spellcasters can\'t consider. Some of the brightest arcane minds have been drawn to this school, seeking to master the forces that bind the universe together.', features: [

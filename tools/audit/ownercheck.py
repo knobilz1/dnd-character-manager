@@ -55,6 +55,13 @@ EXPECT = dict(
     ocean_form='tob-school-of-the-tide-watchers',
     # graviturgy correction: 'Deprive the Unworthy' does not exist in EGtW
     violent_attraction='graviturgy-magic',
+    # second-pass gap fixes: limited uses inside subclasses that already had resources
+    hurl_through_hell='the-fiend', accursed_specter='hexblade',
+    bulwark_of_force='psi-warrior', psychic_veil='soulknife', rend_mind='soulknife',
+    shadow_martyr='echo-knight', reclaim_potential='echo-knight',
+    chronal_shift='chronurgy-magic', hidden_paths='circle-of-dreams',
+    glorious_defense='oath-of-glory', misty_wanderer='fey-wanderer',
+    restorative_reagents='alchemist', drakes_breath='drakewarden',
 )
 bad = 0
 for k, want in EXPECT.items():
