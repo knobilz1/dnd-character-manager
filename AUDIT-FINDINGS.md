@@ -519,6 +519,43 @@ route through `baseClassId()`.
 sorcerer/warlock/wizard-2024 all appear). Likely benign — those tags come from the 11 PHB2024-exclusive
 spells and Ranger simply gets none of them — but confirm against the 2024 Ranger spell list.
 
+### G8 — HIGH (2024): every PHB 2024 class starts with an EMPTY inventory
+`startingEquipment.ts` defines entries for exactly 13 classIds — `barbarian bard cleric druid fighter monk
+paladin ranger rogue sorcerer warlock wizard artificer`. **No `-2024` ids.**
+`getClassStartingEquipment` (`:432`) is `.find(e => e.classId === classId)` on the **raw** id, and
+`StepEquipment.tsx:32` passes `primaryClass.classId` straight in. So a 2024 character gets `undefined`
+and receives **no starting equipment at all**. Another R1 instance; fix via `baseClassId()`, though the
+2024 equipment lists differ from 2014 so the data may need its own entries.
+
+### G9 — starting-equipment names that match no item template lose their description (and 2 lose weight)
+`StepEquipment.tsx:48-66` looks each item up in `items.ts` **by name** to inherit `weight` and
+`description`. Six names have no exact match:
+| startingEquipment name | actual template |
+|---|---|
+| `Light crossbow` | `Crossbow, light` |
+| `Crossbow bolt` | `Crossbow bolts (20)` |
+| `Arrow` | `Arrows (20)` |
+| `Holy symbol` | `Holy symbol (amulet)` / `(emblem)` / `(reliquary)` |
+| `Druidic focus` | `Druidic focus (sprig of mistletoe)` / `(totem)` / `(wooden staff)` / `(yew wand)` |
+| `Wooden shield` | *no match at all* |
+
+Most carry an explicit `weight:` inline so encumbrance survives, **but `Arrow` and `Crossbow bolt` carry
+neither weight nor a template match**, so 20 arrows and 20 bolts weigh **0**. All six lose their
+description on the sheet.
+Note `Holy symbol` and `Druidic focus` are deliberately generic (the player picks a variant), so the fix is
+probably a generic template entry rather than renaming.
+
+**False positives in this sweep, recorded so they are not chased:** `Artisan\`, `Burglar\`, `Diplomat\`,
+`Dungeoneer\`, `Entertainer\`, `Explorer\`, `Priest\`, `Scholar\`, `Thieves\`, `Tinker\` are **sed
+truncation at an escaped apostrophe** (`Artisan\'s tools`), not real names. `... (your choice)` entries are
+intentional placeholders, not item references.
+
+### G10 — `subclassTips` covers 2014 completely and 2024 not at all
+141 tips for 188 subclasses. **All 47 missing are 2024** (the `-2024` set plus `circle-of-the-sea`,
+`college-of-dance`, `wild-heart`, `world-tree`, which are 2024 subclasses stored without the suffix).
+Given the 2014 priority this is low urgency — 2014 coverage is 141/141 — but it is a complete gap for the
+2024 half of the picker.
+
 ### Still to check in Phase G
 `subclass.classId` → real class · `race.parentRaceId` → real race · `spell.classes[]` → real class ids ·
 `startingEquipment` → real item names · `subclassTips` keys → real subclass ids · duplicate ids within
