@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Character, BookId, AbilityKey, WizardStep, ClassLevel, PreparedSpell, CharacterAppearance } from '../types';
 import { WIZARD_STEPS } from '../types';
 import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
-import { getClass } from '../data/classes';
+import { getClass, baseClassId } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
@@ -218,7 +218,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
 
     // Compute pact magic if warlock
     let pactMagic = undefined;
-    const warlockClass = draft.classes.find(c => c.classId === 'warlock');
+    const warlockClass = draft.classes.find(c => baseClassId(c.classId) === 'warlock');
     if (warlockClass) {
       const pm = PACT_MAGIC_TABLE[warlockClass.level];
       if (pm) pactMagic = { slotsTotal: pm.slots, slotsUsed: 0, slotLevel: pm.slotLevel };

@@ -626,7 +626,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
       // Refresh pact magic if this is a warlock level up.
       let pactMagic = s.character.pactMagic;
-      if (classId === 'warlock') {
+      if (baseClassId(classId) === 'warlock') {
         const pm = PACT_MAGIC_TABLE[newLevel];
         if (pm) {
           pactMagic = {
@@ -806,7 +806,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         }
       }
       // Bard level 5+ (Font of Inspiration): bardic inspiration also recharges on short rest.
-      const bardLevel = s.character.classes.find(c => c.classId === 'bard')?.level ?? 0;
+      const bardLevel = classLevel(s.character.classes, 'bard');
       if (bardLevel >= 5) shortRestKeys.add('bardic_inspiration');
       // Feat-granted short-rest resources
       for (const featId of (s.character.selectedFeats ?? [])) {
@@ -839,7 +839,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
 
       // Sorcerous Restoration (Sorcerer level 20): regain 4 sorcery points on short rest.
-      const sorcererLevel = s.character.classes.find(c => c.classId === 'sorcerer')?.level ?? 0;
+      const sorcererLevel = classLevel(s.character.classes, 'sorcerer');
       if (sorcererLevel >= 20) {
         resources = resources.map(r =>
           r.key === 'sorcery_points'
