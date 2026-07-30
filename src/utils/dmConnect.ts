@@ -89,10 +89,42 @@ export interface NarrationEntry {
  *  back — see useDmNarrationFeed, the caller. Throws the same way pingDM's
  *  underlying fetch would on an unreachable DM; callers should treat that as
  *  "try again next poll," not a fatal error. */
-export async function fetchNarrationSince(since: number, ip: string): Promise<{ entries: NarrationEntry[]; latest: number }> {
-  const res = await tauriFetch(`${dmBaseUrl(ip)}/narration?since=${since}`, { method: 'GET', connectTimeout: 5000 });
+export async function fetchNarrationSince(
+  since: number,
+  ip: string,
+  who?: string,
+): Promise<{ entries: NarrationEntry[]; latest: number; proxyFor: string[] }> {
+  // `who` turns a poll this device was making anyway into presence for the
+  // DM's roll call — there's no separate heartbeat and no announce. It also
+  // brings back `proxyFor`: the absent characters this device has been asked
+  // to run tonight. Both are additive; an older DM build just ignores the
+  // parameter and returns no proxyFor.
+  const suffix = who?.trim() ? `&who=${encodeURIComponent(who.trim())}` : '';
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/narration?since=${since}${suffix}`, { method: 'GET', connectTimeout: 5000 });
   if (!res.ok) throw new Error(`DM responded ${res.status}`);
-  return (await res.json()) as { entries: NarrationEntry[]; latest: number };
+  const j = (await res.json()) as { entries?: NarrationEntry[]; latest?: number; proxyFor?: string[] };
+  return { entries: j.entries ?? [], latest: j.latest ?? since, proxyFor: j.proxyFor ?? [] };
+}
+
+/** Pull one character's full sheet from the DM.
+ *
+ *  The only route in this app that sends a character DM → player. Used when a
+ *  player is running an absent friend's character for the evening, and by the
+ *  owner's own "Pull latest from DM" button afterwards to collect what happened
+ *  to it while they were away.
+ *
+ *  Returns null when the DM isn't sharing that character (404) — which is the
+ *  normal answer, not an error: the DM only ever shares sheets it deliberately
+ *  lent out, and it stops sharing them at End Session. */
+export async function fetchSharedCharacter(name: string, ip: string): Promise<Character | null> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/character?name=${encodeURIComponent(name)}`, {
+    method: 'GET',
+    connectTimeout: 10000, // a full sheet carries a data-URL portrait
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const j = (await res.json()) as { character?: Character } | null;
+  return j?.character ?? null;
 }
 
 /** One floor of the map the DM is sharing — a name and its already-rendered

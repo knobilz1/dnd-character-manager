@@ -12,10 +12,16 @@ import { cn } from '../utils/cn';
  * connected player, whether or not they were the one talking. Unread lines
  * (arrived since the panel was last opened) badge the icon, same idea as an
  * unread-messages counter.
+ *
+ * `characterName` rides along on the poll this component already runs, which
+ * is how the DM's roll call learns that this player's sheet is open on the
+ * network, and how a character the DM has lent this device for the evening
+ * gets picked up. Optional: without it the log still works, it just doesn't
+ * register presence.
  */
-export function DmNarrationLog() {
+export function DmNarrationLog({ characterName }: { characterName?: string }) {
   const connected = useDmConnection();
-  const entries = useDmNarrationFeed();
+  const entries = useDmNarrationFeed(characterName);
   const [open, setOpen] = React.useState(false);
   const [lastSeenSeq, setLastSeenSeq] = React.useState(0);
   const listRef = React.useRef<HTMLDivElement>(null);

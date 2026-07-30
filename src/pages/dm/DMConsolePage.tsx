@@ -1299,11 +1299,32 @@ export function DMConsolePage() {
   const rollCallTakenRef = React.useRef(rollCallTaken);
   rollCallTakenRef.current = rollCallTaken;
   const [rollCallOpen, setRollCallOpen] = React.useState(false);
+  // Character names whose device has polled the narration feed recently — i.e.
+  // has their sheet open on the network. Shown as a dot beside each roll-call
+  // row and nothing more: the DM is looking at actual humans, and someone
+  // playing off a printed sheet is present while never appearing here.
+  const [presentOnLan, setPresentOnLan] = React.useState<string[]>([]);
   // Digests of the characters the DM itself is running, handed over ONCE on the
   // first turn after roll call (see buildTurnPrompt's `absentSheets`). Not a
   // per-turn cost: the numbers don't change and the resumed CLI transcript
   // keeps them for the rest of the sitting.
   const pendingAbsentSheetsRef = React.useRef<string | null>(null);
+
+  // Only polled while the roll-call dialog is actually open — presence is a
+  // decoration on one dialog, not something the console needs to know
+  // continuously, so there's no reason to run this all session.
+  React.useEffect(() => {
+    if (!rollCallOpen) return;
+    let cancelled = false;
+    const tick = () => {
+      invoke<string[]>('present_players')
+        .then((names) => { if (!cancelled) setPresentOnLan(names); })
+        .catch(() => {});
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [rollCallOpen]);
 
   // Streamed-narration playback pipeline (see dm.rs's run_claude_streaming
   // and the dm-narration-chunk event it emits). Claude's reply streams in
@@ -1707,6 +1728,11 @@ export function DMConsolePage() {
     // checks. Previously only fetched when the Plan Next Session dialog opened,
     // so without this the gate would see an empty roster and never fire.
     void refreshPartyRoster();
+
+    // Re-arm the pull-back channel. The listener's copies live in memory and
+    // died with the last app run, so a player returning the following week
+    // would otherwise find nothing to collect.
+    void publishSharedCharacters();
 
     // What the "Recap" button will read aloud — per campaign, so switching
     // campaigns must never leave the previous one's "previously on" in place.
@@ -2795,6 +2821,15 @@ export function DMConsolePage() {
     setAbsent({});
     setRollCallTaken(false);
     pendingAbsentSheetsRef.current = null;
+    // Every borrowed sheet goes back: clearing the assignments is what makes
+    // the borrower's device drop the character from its own borrowed store on
+    // its next poll.
+    invoke('set_proxy_assignments', { assignments: {} }).catch(() => {});
+    // But the sheets themselves stay fetchable, refreshed to how the night
+    // left them. This is exactly when an absent player's device needs to
+    // collect a night's worth of damage, spent slots and loot — clearing here
+    // would 404 at the one moment it matters.
+    void publishSharedCharacters();
   }
 
   /** Stops whatever's currently playing AND clears any sentences still
@@ -4412,6 +4447,7 @@ export function DMConsolePage() {
   );
   const absentCount = Object.keys(absent).length;
   const presentNames = rollCallRows.filter((r) => !absent[r.key]).map((r) => r.name);
+  const onlineKeys = React.useMemo(() => new Set(presentOnLan.map(partyKey)), [presentOnLan]);
 
   function setRowAbsence(key: string, a: Absence | null) {
     setAbsent((prev) => {
@@ -4430,6 +4466,7 @@ export function DMConsolePage() {
       .filter((r) => absent[r.key]?.mode === 'dm' && r.sheet)
       .map((r) => buildSheetDigest(r.sheet!));
     pendingAbsentSheetsRef.current = digests.length ? digests.join('\n\n') : null;
+    void publishProxyAssignments();
     setRollCallTaken(true);
     setRollCallOpen(false);
     setWarning(null);
@@ -4440,9 +4477,63 @@ export function DMConsolePage() {
   function markEveryonePresent() {
     setAbsent({});
     pendingAbsentSheetsRef.current = null;
+    void publishProxyAssignments({});
     setRollCallTaken(true);
     setRollCallOpen(false);
     setWarning(null);
+  }
+
+  /** Make the DM's current copy of every party sheet pullable by its owner.
+   *
+   *  Two things make this necessary rather than nice-to-have. The DM's copies
+   *  drift from the players' own devices constantly — applyDmActions writes
+   *  damage and conditions here every turn and nothing ever sends that back —
+   *  and after a night where somebody else ran an absent player's character,
+   *  the DM holds the ONLY current version of it.
+   *
+   *  Called at the three moments that matter rather than on every change: the
+   *  party sheets carry data-URL portraits, and re-pushing all of them on each
+   *  HP tick would be pointless IPC churn. Campaign load covers "I'm back the
+   *  following week"; End Session covers "collect it before you go home".
+   *
+   *  This does widen what the listener will serve: any party member's sheet,
+   *  by name, to anyone on the LAN. Weighed against a listener that already
+   *  serves the DM's spoken narration and accepts unauthenticated pushes, on a
+   *  home network on game night, that's a small step — and it's the only way
+   *  the owner ever gets their character back. */
+  async function publishSharedCharacters() {
+    try {
+      await invoke('set_shared_characters', { characters: partyRef.current });
+    } catch (e) {
+      console.warn('Could not publish party sheets to the LAN listener:', e);
+    }
+  }
+
+  /** Tell the LAN listener who is running whose character, and lend it the
+   *  sheets involved.
+   *
+   *  Both halves have to live in Rust rather than here: it's the *player's*
+   *  device that asks the listener for a sheet, so a check that only ran in
+   *  this UI couldn't refuse one. set_shared_characters is the whole access
+   *  control for GET /character — only what's pushed can be fetched — so this
+   *  sends exactly the loaned characters and nothing else, and an empty call
+   *  closes the door again. */
+  async function publishProxyAssignments(override?: AbsenceMap) {
+    const map = override ?? absent;
+    const assignments: Record<string, string[]> = {};
+    for (const row of rollCallRows) {
+      const a = map[row.key];
+      if (a?.mode !== 'proxy' || !a.proxyBy || !row.sheet) continue;
+      (assignments[a.proxyBy] ??= []).push(row.name);
+    }
+    try {
+      await invoke('set_proxy_assignments', { assignments });
+      await publishSharedCharacters();
+    } catch (e) {
+      // Non-fatal: the DM and autopilot modes don't need the listener at all,
+      // so a failure here must not take down the rest of roll call.
+      console.warn('Could not publish proxy assignments to the LAN listener:', e);
+    }
   }
 
   return (
@@ -4761,7 +4852,16 @@ export function DMConsolePage() {
               <div key={row.key} className="bg-slate-900 border border-slate-700 rounded-lg p-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-white truncate">{row.name}</p>
+                    <p className="text-sm font-bold text-white truncate flex items-center gap-1.5">
+                      <span
+                        title={onlineKeys.has(row.key)
+                          ? 'Their sheet is open on the network — a hint, not proof they\'re in the room'
+                          : 'No sheet open on the network. They may still be here with a printed one.'}
+                        className={cn('w-1.5 h-1.5 rounded-full shrink-0',
+                          onlineKeys.has(row.key) ? 'bg-emerald-400' : 'bg-slate-600')}
+                      />
+                      {row.name}
+                    </p>
                     {!row.sheet && (
                       <p className="text-[11px] text-slate-500">no sheet on this machine — they've never sent one here</p>
                     )}

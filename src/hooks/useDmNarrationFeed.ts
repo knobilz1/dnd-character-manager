@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { fetchNarrationSince, type NarrationEntry } from '../utils/dmConnect';
+import { fetchNarrationSince, fetchSharedCharacter, type NarrationEntry } from '../utils/dmConnect';
+import { useBorrowedStore } from '../store/useBorrowedStore';
 
 const POLL_MS = 3000;
 
@@ -18,7 +19,7 @@ const POLL_MS = 3000;
  * the next successful poll just picks up with `since` wherever it left off
  * and appends only what's actually new.
  */
-export function useDmNarrationFeed(): NarrationEntry[] {
+export function useDmNarrationFeed(characterName?: string): NarrationEntry[] {
   const dmIp = useSettingsStore((s) => s.dmIp);
   const [entries, setEntries] = React.useState<NarrationEntry[]>([]);
   const sinceRef = React.useRef(0);
@@ -31,7 +32,14 @@ export function useDmNarrationFeed(): NarrationEntry[] {
     let cancelled = false;
     const poll = async () => {
       try {
-        const { entries: fresh } = await fetchNarrationSince(sinceRef.current, dmIp);
+        const { entries: fresh, proxyFor } = await fetchNarrationSince(sinceRef.current, dmIp, characterName);
+        if (cancelled) return;
+        // Whoever the DM has asked this device to run tonight (an absent
+        // player's character — see the roll call in DMConsolePage). Handled
+        // here rather than in a hook of its own because this poll is the only
+        // channel that reaches a player device at all, and a second loop to
+        // carry a usually-empty array would be pure overhead.
+        await syncBorrowed(proxyFor, dmIp);
         if (cancelled || fresh.length === 0) return;
         sinceRef.current = fresh[fresh.length - 1].seq;
         setEntries((prev) => [...prev, ...fresh]);
@@ -43,7 +51,26 @@ export function useDmNarrationFeed(): NarrationEntry[] {
     poll();
     const interval = setInterval(poll, POLL_MS);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [dmIp]);
+  }, [dmIp, characterName]);
 
   return entries;
+}
+
+/** Bring the borrowed store in line with what the DM says we're running:
+ *  hand back anyone no longer assigned, and pull down any newly assigned sheet.
+ *
+ *  Pulling is one-shot per character, not per poll — `reconcile` only reports
+ *  the names we don't already hold, so the (portrait-carrying, therefore heavy)
+ *  sheet crosses the wire once. A fetch that fails just leaves the name
+ *  outstanding and the next poll retries it. */
+async function syncBorrowed(proxyFor: string[], dmIp: string): Promise<void> {
+  const store = useBorrowedStore.getState();
+  // Fast path for the overwhelmingly common case: nothing assigned, nothing
+  // held, so there is nothing to reconcile and no state to touch.
+  if (proxyFor.length === 0 && store.borrowed.length === 0) return;
+  const missing = store.reconcile(proxyFor);
+  for (const name of missing) {
+    const c = await fetchSharedCharacter(name, dmIp).catch(() => null);
+    if (c) useBorrowedStore.getState().upsert(c);
+  }
 }

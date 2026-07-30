@@ -6,6 +6,7 @@ import { openPath } from '@tauri-apps/plugin-opener';
 import { printCharacterToPDF, getCustomTemplatePath } from '../../utils/pdfTemplate';
 import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5, Download, History, Camera, Zap, Eye, Printer } from 'lucide-react';
 import { useLibraryStore } from '../../store/useLibraryStore';
+import { useBorrowedStore } from '../../store/useBorrowedStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
@@ -23,6 +24,7 @@ import { DmNarrationLog } from '../../components/DmNarrationLog';
 import { DmMapView } from '../../components/DmMapView';
 import { TableCameraButton } from '../../components/TableCameraButton';
 import { SendToDmButton } from '../../components/SendToDmButton';
+import { PullFromDmButton } from '../../components/PullFromDmButton';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
@@ -117,6 +119,11 @@ export function SheetPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { characters, sendToGraveyard } = useLibraryStore();
+  const borrowed = useBorrowedStore((s) => s.borrowed);
+  // True when this sheet belongs to an absent player and we're only running it
+  // for the evening — used to hide destructive controls that would act on
+  // someone else's character.
+  const isBorrowed = borrowed.some((b) => b.id === id);
   const { character, load, save, setCurrentHP, healHP, damageHP, setTempHP, setMaxHP,
     addDeathSuccess, addDeathFailure, resetDeathSaves, addCondition, removeCondition,
     setExhaustion, useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, usePactSlot,
@@ -160,9 +167,13 @@ export function SheetPage() {
     e.target.value = '';
   }
 
-  // Load character on mount
+  // Load character on mount. Falls back to the borrowed store so a character
+  // lent by the DM for the evening (an absent player's, being run by whoever
+  // is sitting next to them) opens as an ordinary sheet — same route, same
+  // components, and still through load(), which is where schema migration
+  // lives. Writes go back to the right store via useCharacterStore.save().
   React.useEffect(() => {
-    const c = characters.find(c => c.id === id);
+    const c = characters.find(c => c.id === id) ?? borrowed.find(b => b.id === id);
     if (c) load(c);
     else navigate('/');
   }, [id]);
@@ -261,7 +272,7 @@ export function SheetPage() {
       {showDeadOverlay && (
         <YouAreDeadOverlay
           onDismiss={() => setShowDeadOverlay(false)}
-          onSendToGraveyard={character.inGraveyard ? undefined : () => {
+          onSendToGraveyard={character.inGraveyard || isBorrowed ? undefined : () => {
             sendToGraveyard(character.id);
             navigate('/');
           }}
@@ -290,7 +301,20 @@ export function SheetPage() {
             }
           </button>
           <div>
-            <h1 className="font-bold text-white text-lg leading-tight">{character.name}</h1>
+            <h1 className="font-bold text-white text-lg leading-tight flex items-center gap-2">
+              {character.name}
+              {/* A proxying player has two near-identical windows open. Without
+                  a mark on the borrowed one it is genuinely easy to spend the
+                  wrong character's spell slot. */}
+              {isBorrowed && (
+                <span
+                  title="You're running this for an absent player. It goes back to them at the end of the session."
+                  className="text-[10px] font-medium uppercase tracking-wide text-amber-300 bg-amber-900/40 border border-amber-800/60 rounded px-1.5 py-0.5"
+                >
+                  Borrowed
+                </span>
+              )}
+            </h1>
             <p className="text-xs text-slate-400">
               Level {totalLevel} {race?.name ?? ''}{' '}
               {character.classes.length > 1
@@ -315,8 +339,9 @@ export function SheetPage() {
           </button>
           <DiceRoller exhaustionLevel={exhaustionLevel} characterName={character.name} />
           <SendToDmButton character={character} />
+          {!isBorrowed && <PullFromDmButton character={character} />}
           <TalkToDMButton characterName={character.name} />
-          <DmNarrationLog />
+          <DmNarrationLog characterName={character.name} />
           <DmMapView />
           <TableCameraButton characterName={character.name} />
           <div className="relative">
@@ -595,7 +620,7 @@ export function SheetPage() {
                 isRaging={isRaging}
                 showRageOverlay={showRageOverlay}
                 setShowRageOverlay={setShowRageOverlay}
-                sendToGraveyard={sendToGraveyard}
+                sendToGraveyard={isBorrowed ? null : sendToGraveyard}
                 navigate={navigate}
                 useItemCharge={useItemCharge}
                 hasAlternateForm={hasAlternateForm}
@@ -1858,8 +1883,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
               </div>
             </div>
 
-            {/* Send to graveyard — only when all 3 failures are set and not already buried */}
-            {character.deathSaves.failures === 3 && !character.inGraveyard && (
+            {/* Send to graveyard — only when all 3 failures are set and not
+                already buried. Null when this is a borrowed sheet: burying a
+                character you're holding for one evening isn't yours to do. */}
+            {sendToGraveyard && character.deathSaves.failures === 3 && !character.inGraveyard && (
               <button
                 onClick={() => { sendToGraveyard(character.id); navigate('/'); }}
                 className="mt-4 w-full text-xs text-red-300/70 hover:text-red-200 border border-red-900/50 hover:border-red-700 rounded-lg py-2 transition-colors tracking-widest uppercase"

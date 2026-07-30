@@ -41,12 +41,32 @@ function humanize(key: string): string {
 }
 
 export function buildSheetDigest(c: Character): string {
-  const d = computeCharacterDerived(c);
-  const lines: string[] = [];
-
   const classes = (c.classes || [])
     .map((cl) => `${cl.classId}${cl.subclassId ? `(${cl.subclassId})` : ''} ${cl.level}`)
     .join(' / ');
+
+  // computeCharacterDerived assumes a COMPLETE Character — it iterates
+  // selectedFeats, baseAbilityScores and friends directly. That holds for a
+  // sheet this device owns, but a party member's sheet arrived over LAN, and
+  // party_listener.rs validates only name + classes before accepting it. A
+  // half-populated sheet therefore reaches here and throws.
+  //
+  // Caught live: it took down the whole roll call, because confirmRollCall
+  // builds digests synchronously — the DM couldn't start the night at all.
+  // Degrade to what can be read straight off the sheet instead, and say
+  // plainly that it's partial: same reasoning as the UNKNOWN-HP wording in
+  // dmPrompt.ts, where the one unacceptable outcome is the DM quietly
+  // inventing numbers for someone else's character.
+  let d: ReturnType<typeof computeCharacterDerived>;
+  try {
+    d = computeCharacterDerived(c);
+  } catch {
+    return `${c.name} — ${classes || 'class unknown'} | HP ${c.currentHP ?? '?'}/${c.maxHP ?? '?'}\n`
+      + 'Their sheet reached the table incomplete, so no ability scores, attacks or spells are available. '
+      + 'Play them cautiously and do NOT invent numbers for them — ask the table to re-send the sheet.';
+  }
+
+  const lines: string[] = [];
   lines.push(
     `${c.name} — L${d.totalLevel} ${classes} | AC ${d.ac} | HP ${c.currentHP}/${c.maxHP} | Speed ${d.speed} | Init ${fmt(d.initiative)} | Prof ${fmt(d.profBonus)}`
   );

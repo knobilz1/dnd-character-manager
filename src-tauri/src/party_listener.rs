@@ -108,6 +108,127 @@ fn parse_since_param(request_line: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// Pure: pulls a named query parameter out of an HTTP request line, percent-
+/// decoded. None when the parameter is absent or there's no query string.
+///
+/// Character names travel through here, so they arrive `encodeURIComponent`'d
+/// — "Ellara Moonwhisper" reaches us as "Ellara%20Moonwhisper", and matching it
+/// raw against a roster name would silently never hit.
+fn parse_query_param(request_line: &str, key: &str) -> Option<String> {
+    let path_and_query = request_line.split_whitespace().nth(1)?;
+    let (_, query) = path_and_query.split_once('?')?;
+    let prefix = format!("{key}=");
+    let raw = query.split('&').find_map(|pair| pair.strip_prefix(prefix.as_str()))?;
+    Some(percent_decode(raw))
+}
+
+/// Minimal percent-decoder for query values: `%XX` escapes plus `+` for space.
+/// Enough for a character name, and not worth pulling in a dependency for.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 3 <= bytes.len() => {
+                match std::str::from_utf8(&bytes[i + 1..i + 3])
+                    .ok()
+                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+                {
+                    Some(b) => {
+                        out.push(b);
+                        i += 3;
+                    }
+                    None => {
+                        out.push(b'%');
+                        i += 1;
+                    }
+                }
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The one way a character name becomes a key on this side of the wire —
+/// mirrors partyKey() in src/utils/dmPrompt.ts and usePartyStore's own upsert.
+fn name_key(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+// ── Who's actually at the table (roll call) ──────────────────────────────────
+//
+// There is no announce, handshake, or heartbeat protocol here, and deliberately
+// so. A player's open sheet already polls GET /narration every few seconds
+// (useDmNarrationFeed), so adding `who` to a request the app was making anyway
+// turns it into presence for free — no second loop, no new endpoint.
+//
+// This is a HINT for the roll-call dialog and nothing more. The DM is looking
+// at actual humans: a laptop being awake isn't a person being in the room, and
+// someone playing off a paper sheet is present while never appearing here. The
+// manual present/away toggle stays the source of truth.
+
+/// Generous against the ~3s narration poll — a device has to miss many polls in
+/// a row before it drops off, so a brief network hiccup can't blink someone out
+/// of the room mid-roll-call.
+const PRESENCE_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn presence() -> &'static Mutex<HashMap<String, std::time::Instant>> {
+    static SEEN: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
+    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Names seen inside the timeout, dropping stale ones in place — expiry happens
+/// lazily on read rather than from a background timer, the same shape
+/// `fresh_camera_holder` uses. Sorted so the UI ordering is stable.
+fn fresh_presence(seen: &mut HashMap<String, std::time::Instant>) -> Vec<String> {
+    seen.retain(|_, at| at.elapsed() < PRESENCE_TIMEOUT);
+    let mut names: Vec<String> = seen.keys().cloned().collect();
+    names.sort();
+    names
+}
+
+// ── Proxy play: running an absent player's character ─────────────────────────
+//
+// Nothing has ever travelled DM → player in this app; every route below either
+// accepts a push or serves narration/maps. These two globals are what make the
+// other direction possible, and they live in Rust rather than the DM's frontend
+// for the same reason TABLE_PHOTOS does: it's the *player's* device that asks
+// this listener, so a check that only ran in the console's UI couldn't refuse.
+
+/// borrower name key → the character names their device should be running.
+fn proxy_assignments() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static ASSIGNED: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    ASSIGNED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// character name key → that character's full sheet JSON.
+///
+/// This is the whole access control for `GET /character`: only what the console
+/// has pushed here is fetchable at all, and the map is replaced wholesale each
+/// time. Like every other route on this listener, there is no authentication
+/// beyond that.
+///
+/// The console publishes the DM's current copy of the WHOLE party, not just
+/// characters lent out for proxy play, because the pull has two users. The
+/// borrower needs the sheet at lend time; the absent player needs it back
+/// afterwards — and the DM's copy is the only current one after a night
+/// somebody else ran their character. Since this map lives in memory and dies
+/// with the app, the console re-publishes on every campaign load so that
+/// "collect what happened while I was away" still works the following week.
+fn shared_characters() -> &'static Mutex<HashMap<String, serde_json::Value>> {
+    static SHARED: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
+    SHARED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// The battle map the DM is currently sharing with players — Phase 5 of the
 /// multi-story map work. Unlike the narration log this is NOT a growing
 /// history: it is just the one map on the table right now, replaced wholesale
@@ -285,12 +406,47 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
     }
     if request_line.starts_with("GET /narration") {
         let since = parse_since_param(&request_line);
+        // `who` is optional and additive: an older player build that doesn't
+        // send it still gets its narration, it just doesn't register presence.
+        let who = parse_query_param(&request_line, "who");
+        let proxy_for: Vec<String> = match who.as_deref() {
+            Some(name) if !name.trim().is_empty() => {
+                let key = name_key(name);
+                presence().lock().unwrap().insert(key.clone(), std::time::Instant::now());
+                proxy_assignments().lock().unwrap().get(&key).cloned().unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
         let log = narration_log().lock().unwrap();
         let entries = entries_since(&log.entries, since);
         let latest = log.entries.back().map(|e| e.seq).unwrap_or(since);
         drop(log);
-        let body = serde_json::json!({ "entries": entries, "latest": latest }).to_string();
+        // proxyFor rides along on a poll that already exists rather than
+        // getting its own loop — it's a handful of bytes. The heavy part (the
+        // sheet itself, which carries a data-URL portrait) is a separate
+        // one-shot GET /character the device only makes when this list changes.
+        let body = serde_json::json!({ "entries": entries, "latest": latest, "proxyFor": proxy_for }).to_string();
         return write_response(&mut stream, 200, &body, "application/json");
+    }
+    if request_line.starts_with("GET /character") {
+        // The DM lending an absent player's sheet to whoever is running them
+        // tonight. Serves only what the console explicitly pushed via
+        // set_shared_characters, so an unlent character is a 404 even though
+        // this listener has no auth at all.
+        let name = parse_query_param(&request_line, "name").unwrap_or_default();
+        let found = shared_characters().lock().unwrap().get(&name_key(&name)).cloned();
+        return match found {
+            Some(c) => {
+                let body = serde_json::json!({ "ok": true, "character": c }).to_string();
+                write_response(&mut stream, 200, &body, "application/json")
+            }
+            None => write_response(
+                &mut stream,
+                404,
+                "{\"ok\":false,\"error\":\"no such character is being shared\"}",
+                "application/json",
+            ),
+        };
     }
     if request_line.starts_with("GET /map") {
         // Player devices poll this for the DM's currently-shared map (revealed
@@ -619,6 +775,41 @@ pub fn clear_broadcast_map() {
     }
 }
 
+/// Character names whose devices have polled recently — the roll-call dialog's
+/// "their sheet is open on the network" dot. A hint beside the manual toggle,
+/// never a substitute for it (see the PRESENCE_TIMEOUT comment).
+#[tauri::command]
+pub fn present_players() -> Vec<String> {
+    let mut seen = presence().lock().unwrap();
+    fresh_presence(&mut seen)
+}
+
+/// Hands out tonight's proxy assignments: borrower name → the characters their
+/// device should run. Replaces the whole map, so un-assigning is just sending a
+/// map without them; the console clears it at End Session.
+#[tauri::command]
+pub fn set_proxy_assignments(assignments: HashMap<String, Vec<String>>) {
+    let mut current = proxy_assignments().lock().unwrap();
+    *current = assignments.into_iter().map(|(k, v)| (name_key(&k), v)).collect();
+}
+
+/// The sheets the DM is lending out tonight, keyed by character name. This is
+/// the access control for `GET /character` — only what's pushed here can be
+/// fetched — so push exactly the loaned characters and nothing else. Replaces
+/// the whole map; an empty one closes the door again.
+#[tauri::command]
+pub fn set_shared_characters(characters: Vec<serde_json::Value>) {
+    let mut current = shared_characters().lock().unwrap();
+    *current = characters
+        .into_iter()
+        .filter_map(|c| {
+            let name = c.get("name")?.as_str()?.to_string();
+            if name.trim().is_empty() { return None; }
+            Some((name_key(&name), c))
+        })
+        .collect();
+}
+
 /// Best-effort LAN-facing IP address, so the DM can read it out to players.
 /// Uses the "connect a UDP socket to a public IP, read local_addr()" trick —
 /// no packets actually need to leave the machine for this to resolve via the
@@ -747,6 +938,91 @@ mod tests {
     fn parse_since_param_reads_the_map_poll_query() {
         assert_eq!(parse_since_param("GET /map?since=9 HTTP/1.1"), 9);
         assert_eq!(parse_since_param("GET /map HTTP/1.1"), 0, "bare /map = everything (version 0)");
+    }
+
+    /// Names reach this listener `encodeURIComponent`'d, so anything with a
+    /// space — which is most character names — arrives percent-escaped. Match
+    /// it raw and presence silently never registers for exactly the players
+    /// whose names look like real names.
+    #[test]
+    fn parse_query_param_decodes_a_percent_escaped_character_name() {
+        assert_eq!(
+            parse_query_param("GET /narration?since=3&who=Ellara%20Moonwhisper HTTP/1.1", "who").as_deref(),
+            Some("Ellara Moonwhisper")
+        );
+        assert_eq!(
+            parse_query_param("GET /character?name=Thorin+Oakshield HTTP/1.1", "name").as_deref(),
+            Some("Thorin Oakshield"),
+            "+ is a space in a query string too"
+        );
+        assert_eq!(
+            parse_query_param("GET /narration?since=3 HTTP/1.1", "who"),
+            None,
+            "absent param — an older player build that doesn't send `who` must still get narration"
+        );
+        assert_eq!(parse_query_param("GET /narration HTTP/1.1", "who"), None, "no query string at all");
+        // A stray % must not panic or eat the rest of the name.
+        assert_eq!(parse_query_param("GET /x?who=100%25%20Bob HTTP/1.1", "who").as_deref(), Some("100% Bob"));
+        assert_eq!(parse_query_param("GET /x?who=bad%ZZ HTTP/1.1", "who").as_deref(), Some("bad%ZZ"));
+    }
+
+    /// Presence expires lazily on read, with no background timer — same shape
+    /// as fresh_camera_holder. Tested through a local map rather than the
+    /// global so it can't be perturbed by another test polling the listener.
+    #[test]
+    fn presence_drops_a_device_that_stopped_polling_and_keeps_a_live_one() {
+        let mut seen: HashMap<String, std::time::Instant> = HashMap::new();
+        seen.insert("ellara".into(), std::time::Instant::now());
+        seen.insert(
+            "thorin".into(),
+            std::time::Instant::now() - (PRESENCE_TIMEOUT + Duration::from_secs(1)),
+        );
+
+        assert_eq!(fresh_presence(&mut seen), vec!["ellara".to_string()]);
+        assert!(!seen.contains_key("thorin"), "a stale entry is dropped in place, not just filtered out of the answer");
+    }
+
+    /// `GET /character` has no authentication — nothing on this listener does.
+    /// Its access control is entirely that the console pushes only the sheets
+    /// it is deliberately lending, so an unlent name must miss even when that
+    /// character is very much at the table.
+    #[test]
+    fn only_deliberately_shared_characters_can_be_fetched() {
+        set_shared_characters(vec![
+            serde_json::json!({ "name": "Ellara Moonwhisper", "maxHP": 27 }),
+            serde_json::json!({ "name": "   " }),          // blank name: skipped
+            serde_json::json!({ "noNameField": true }),     // malformed: skipped
+        ]);
+
+        let shared = shared_characters().lock().unwrap();
+        assert!(shared.contains_key("ellara moonwhisper"), "keyed by the lowercased name");
+        assert_eq!(shared.len(), 1, "blank and malformed entries must not become fetchable keys");
+        assert!(!shared.contains_key("thorin oakshield"), "a character nobody lent out is not fetchable");
+        drop(shared);
+
+        // Sending a set replaces it wholesale, which is how the next roll call
+        // supersedes tonight's and how the door closes again. Note End Session
+        // deliberately does NOT clear this: the absent player's own device
+        // still has to pull a night's worth of changes back off the DM.
+        set_shared_characters(vec![]);
+        assert!(shared_characters().lock().unwrap().is_empty());
+    }
+
+    /// Assignments are keyed the same way names are keyed everywhere else, so
+    /// the console can send whatever casing the roster happens to hold.
+    #[test]
+    fn proxy_assignments_are_keyed_case_insensitively() {
+        set_proxy_assignments(HashMap::from([(
+            "Ana Whitlock".to_string(),
+            vec!["Ellara Moonwhisper".to_string()],
+        )]));
+
+        let assigned = proxy_assignments().lock().unwrap();
+        assert_eq!(assigned.get("ana whitlock").map(Vec::len), Some(1));
+        drop(assigned);
+
+        set_proxy_assignments(HashMap::new());
+        assert!(proxy_assignments().lock().unwrap().is_empty(), "End Session hands back every borrowed sheet");
     }
 
     #[test]

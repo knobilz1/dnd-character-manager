@@ -3,6 +3,7 @@ import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, A
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
+import { useBorrowedStore } from './useBorrowedStore';
 import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
 import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
@@ -332,7 +333,19 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   save: () => {
     const { character } = get();
-    if (character) useLibraryStore.getState().updateCharacter(character);
+    if (!character) return;
+    // Every mutation on the sheet funnels through here, which makes this the
+    // one place ownership has to be decided. A character borrowed from an
+    // absent player must never reach useLibraryStore: that store is what
+    // useDriveStore uploads, so it would put someone else's sheet in the
+    // borrower's personal Google Drive backup for good. Branching at the
+    // chokepoint covers the whole sheet; patching individual call sites would
+    // leave every one that got missed still leaking.
+    if (useBorrowedStore.getState().has(character.id)) {
+      useBorrowedStore.getState().updateCharacter(character);
+      return;
+    }
+    useLibraryStore.getState().updateCharacter(character);
   },
 
   setCurrentHP: (hp) =>

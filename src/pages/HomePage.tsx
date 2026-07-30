@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer, Radio, Send, Wand2, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Sword, Shield, Download, Upload, RefreshCw, Printer, Radio, Send, Wand2, Settings as SettingsIcon, UserPlus } from 'lucide-react';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { DriveSyncButton, DriveSync } from '../components/DriveSync';
 import { getVersion } from '@tauri-apps/api/app';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -8,6 +9,7 @@ import { writeTextFile, writeFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { printCharacterToPDF, pickAndStoreTemplatePath, clearCustomTemplatePath, getCustomTemplatePath } from '../utils/pdfTemplate';
 import { useLibraryStore } from '../store/useLibraryStore';
+import { useBorrowedStore, BORROWED_WINDOW_PREFIX } from '../store/useBorrowedStore';
 import { Button, Dialog, ThemeToggleButton } from '../components/ui';
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
@@ -18,6 +20,28 @@ import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useThemeStore } from '../store/useThemeStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { sendCharacterToDM, sendAllToDM } from '../utils/dmConnect';
+
+/** Open a borrowed character in its own window, so a player running two
+ *  characters can see both at once instead of tabbing between them mid-combat.
+ *
+ *  Frontend-only, exactly like the DM Console's "Present to TV" — Tauri's
+ *  WebviewWindow builds it, no Rust command needed. Decorations stay ON,
+ *  unlike /table: this is a real window someone resizes and moves, not a
+ *  chrome-less display surface. Re-opening focuses the existing window instead
+ *  of spawning a second one. */
+async function openBorrowedWindow(character: Character) {
+  const label = `${BORROWED_WINDOW_PREFIX}${character.id}`;
+  const existing = await WebviewWindow.getByLabel(label);
+  if (existing) { await existing.setFocus().catch(() => {}); return; }
+  const w = new WebviewWindow(label, {
+    url: `/character/${character.id}`,
+    title: `Tavern Sheet — ${character.name} (borrowed)`,
+    width: 1100,
+    height: 900,
+    focus: true,
+  });
+  w.once('tauri://error', (e) => console.warn('Borrowed sheet window:', e.payload ?? e));
+}
 
 async function exportCharacter(character: Character) {
   const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
@@ -35,6 +59,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const { characters: allCharacters, deleteCharacter, createCharacter } = useLibraryStore();
   const characters = allCharacters.filter(c => !c.inGraveyard);
   const graveyardCount = allCharacters.filter(c => c.inGraveyard).length;
+  const borrowed = useBorrowedStore((s) => s.borrowed);
   const { theme, toggleTheme } = useThemeStore();
   const { show3DCharacter, setShow3DCharacter } = useSettingsStore();
   const { dmIp, setDmIp, addDmSyncedCharacter } = useSettingsStore();
@@ -363,6 +388,42 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Characters lent to this device because their player couldn't make it
+            tonight (see the DM Console's roll call). Kept visually and
+            structurally apart from the library above — they belong to someone
+            else, they go back at End Session, and they must never reach the
+            Drive backup (see useBorrowedStore). */}
+        {borrowed.length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-sm font-bold text-amber-300/80 mb-1 flex items-center gap-1.5">
+              <UserPlus size={14} /> You're running tonight
+            </h2>
+            <p className="text-xs text-slate-500 mb-3">
+              Lent by the DM while their player is away. Open each one in its own window so you can keep your own
+              sheet in front of you.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {borrowed.map((c) => {
+                const level = totalCharacterLevel(c.classes);
+                const primaryClass = c.classes[0];
+                const classDef = primaryClass ? getClass(primaryClass.classId) : null;
+                return (
+                  <div key={c.id} className="bg-slate-800 border border-amber-800/50 rounded-xl p-4">
+                    <p className="font-bold text-white">{c.name}</p>
+                    <p className="text-xs text-slate-400 mb-3">
+                      Level {level} {classDef?.name ?? primaryClass?.classId ?? ''}
+                      {c.playerName ? ` · ${c.playerName}'s` : ''}
+                    </p>
+                    <Button size="sm" variant="outline" onClick={() => openBorrowedWindow(c)}>
+                      Open in its own window
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
