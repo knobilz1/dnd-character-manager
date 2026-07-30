@@ -373,6 +373,19 @@ This discretion never touches anything the dice or rules already decided. Death 
 Before giving the party any way out of a stuck spot, both of these have to be true — not just one: (1) there's truly no path forward at all, not just that the obvious route is gone or the remaining one is hard, costly, or risky; and (2) the dead end wasn't caused by the party's own deliberate choice. Burning the only ladder out of a pit fails condition 2 — that's on them. Handle it as a real consequence (a hard climb check, time pressure, calling for help), not by undoing the choice or handing them a free way out. Per "Discretionary story twists" above, it stands.
 The narrow case this rule covers: a dead end you created by accident, not one the party earned — a locked door with exactly one key, and that key is now gone for good with no other route ever established. Only when both conditions above genuinely hold, patch it: introduce a detail that gives them a legitimate way through (a crack in the wall you hadn't mentioned, a second route, a costly-but-real alternative) — it doesn't need to be easy or free, it just needs to exist. This is fixing your own authoring mistake, not a rescue, and it should be rare: reach for it only when you're sure no path exists, never just because the party is stuck or frustrated.
 
+## Running a player who isn't here tonight
+Some nights a player can't make it. When that happens their character's line in the per-turn party status is marked ABSENT and says how it's being covered. That marker is the authority — not your memory of who was at the table last week.
+
+- **"you are running this character"** — you play them for the evening. Their sheet is handed to you once, at roll call, as reference material: play from those numbers rather than inventing abilities they don't have. Keep them recognisably themselves — the personality, ideal, bond and flaw already in party.md are what they'd act on.
+- **"tagging along behind X"** — autopilot. They travel with the party and defend themselves if attacked, and that is all. Don't have them open conversations, volunteer skill checks, spend spell slots or limited resources, or propose plans. They are present, not driving.
+- **"being run at the table by Y's player"** — a real person at the table is playing them tonight. Treat them exactly like any other player-controlled character: you don't decide their actions, and the usual "a player only has authority over what their character attempts" rule applies to whoever is speaking for them.
+
+**This is one evening's absence, not a departure.** The character is still in the party and their player is back next week. Never write them out: don't kill them off, don't have them quit or wander away, don't strand them somewhere the party must later retrieve them from, and don't invent a reason they've left. If the fiction needs to explain why someone is quiet, keep it small and reversible — they're tired, they're scouting, they're bringing up the rear.
+
+They remain a PC, not an NPC: do NOT add them to entities.md via `rememberEntity` and do not assign them a permanent NPC voice — party.md is still their record. When one of them speaks, tag the line as you would any speaker (`[Ellara|female]: "…"`) so they don't come out in the narrator's voice; that's an evening's convenience, not a voice assignment.
+
+Their character's real decisions still belong to the player who isn't here. Don't spend one-shot magic items or hard-to-recover resources on their behalf, and don't commit them to anything that takes a genuine choice away from them next week.
+
 ## Running combat & positioning
 This section fully supersedes any older "Physical hex-grid positioning" text or `position`/`clearPositions` keys still shown elsewhere — ignore those; use the Active Battle Log described here.
 
@@ -11201,6 +11214,50 @@ Tactics:
         }
         // And filtering actually saves real per-turn weight.
         assert!(theater.len() < DM_RULES.len() - 2000, "expected a real saving, got {} vs {}", theater.len(), DM_RULES.len());
+    }
+
+    /// The absent-player rules must reach every table regardless of battle mode.
+    ///
+    /// This asserts against the RENDERED output of `dm_rules_for_mode`, not
+    /// against the `DM_RULES` constant — the constant containing the text
+    /// proves nothing, since the filter is exactly what could drop it. The
+    /// specific hazard: `dm_rules_for_mode` skips from
+    /// "### Running a fight on a prepared battle map" to the next heading off
+    /// Grid, and that section runs to the end of DM_RULES, so anything placed
+    /// after it would vanish on Theater and Hex. Hence the top-level `##`
+    /// placement before "## Running combat & positioning".
+    #[test]
+    fn dm_rules_carry_the_absent_player_protocol_in_every_battle_mode() {
+        for mode in ["theater", "grid", "hex"] {
+            let r = dm_rules_for_mode(mode);
+            assert!(r.contains("## Running a player who isn't here tonight"), "{mode} lost the section:\n{r}");
+
+            // The three coverage modes the roll call can assign, worded to match
+            // the markers dmPrompt.ts's absenceSuffix actually emits. If either
+            // side is reworded without the other, the DM is handed a marker the
+            // rules never explain.
+            assert!(r.contains("you are running this character"), "{mode} lost the DM-run mode");
+            assert!(r.contains("tagging along behind"), "{mode} lost autopilot");
+            assert!(r.contains("being run at the table by"), "{mode} lost proxy");
+
+            // The measured failure this text exists to prevent: asked to handle
+            // a missing player, the model's instinct is to write the character
+            // out of the story (see build_party_departure_prompt's doc comment).
+            assert!(r.contains("one evening's absence, not a departure"), "{mode} lost the anti-departure rule");
+
+            // An absent PC is still a PC. Without this the DM files them into
+            // entities.md as an NPC, which contradicts BASE_CLAUDE_MD and
+            // corrupts the campaign's permanent record.
+            assert!(r.contains("do NOT add them to entities.md"), "{mode} lost the not-an-NPC rule");
+        }
+
+        // Placement guard: the new section must sit ABOVE the combat section,
+        // outside the map-skip window. If someone moves it below, this fails
+        // before the filter silently eats it on two of the three modes.
+        let grid = dm_rules_for_mode("grid");
+        let absent_at = grid.find("## Running a player who isn't here tonight").unwrap();
+        let combat_at = grid.find("## Running combat & positioning").unwrap();
+        assert!(absent_at < combat_at, "the absent-player section must precede the combat section");
     }
 
     /// Switching mode mid-campaign must rewrite dm_rules.md immediately —

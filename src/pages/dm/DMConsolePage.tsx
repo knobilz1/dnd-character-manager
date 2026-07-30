@@ -7,12 +7,15 @@ import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile, writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff, Users } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { buildTurnPrompt, buildRecapPrompt } from '../../utils/dmPrompt';
+import { buildTurnPrompt, buildRecapPrompt, partyKey } from '../../utils/dmPrompt';
+import type { Absence, AbsenceMap, AbsenceMode } from '../../utils/dmPrompt';
+import { buildSheetDigest } from '../../utils/sheetDigest';
+import { cn } from '../../utils/cn';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
@@ -980,6 +983,9 @@ export function DMConsolePage() {
   // things that happen BETWEEN sessions, which is why it's on this dialog:
   // someone new joins next week, and someone has stopped coming.
   const [partyRoster, setPartyRoster] = React.useState<{ name: string; description: string }[]>([]);
+  // runTurn closes over refs, not state — the roll-call gate reads this one.
+  const partyRosterRef = React.useRef(partyRoster);
+  partyRosterRef.current = partyRoster;
   const [rosterBusy, setRosterBusy] = React.useState<string | null>(null);
   const [rosterNotice, setRosterNotice] = React.useState<string | null>(null);
   const [addPlayerOpen, setAddPlayerOpen] = React.useState(false);
@@ -1277,6 +1283,27 @@ export function DMConsolePage() {
   const [battleMode, setBattleMode] = React.useState<BattleMode>('theater');
   const battleModeRef = React.useRef(battleMode);
   battleModeRef.current = battleMode;
+
+  // Tonight's roll call — who isn't at the table and how their character is
+  // being covered (see the RollCallDialog below). Same lifetime rules as
+  // battleLog above: per-sitting, per-campaign, deliberately NOT persisted.
+  // Persisting it would reproduce usePartyStore's defect exactly — a store
+  // that never expires and is silently wrong the following week — and the
+  // recovery for losing it to a crash is one click of the roll-call button.
+  const [absent, setAbsent] = React.useState<AbsenceMap>({});
+  const absentRef = React.useRef(absent);
+  absentRef.current = absent;
+  // Whether roll call has been taken this sitting. Gates the first turn (see
+  // runTurn) so a night can't start without the DM saying who showed up.
+  const [rollCallTaken, setRollCallTaken] = React.useState(false);
+  const rollCallTakenRef = React.useRef(rollCallTaken);
+  rollCallTakenRef.current = rollCallTaken;
+  const [rollCallOpen, setRollCallOpen] = React.useState(false);
+  // Digests of the characters the DM itself is running, handed over ONCE on the
+  // first turn after roll call (see buildTurnPrompt's `absentSheets`). Not a
+  // per-turn cost: the numbers don't change and the resumed CLI transcript
+  // keeps them for the rest of the sitting.
+  const pendingAbsentSheetsRef = React.useRef<string | null>(null);
 
   // Streamed-narration playback pipeline (see dm.rs's run_claude_streaming
   // and the dm-narration-chunk event it emits). Claude's reply streams in
@@ -1676,6 +1703,11 @@ export function DMConsolePage() {
     }
     partyRef.current.forEach(syncPartyMemberToCampaign);
 
+    // The campaign's roster, which roll call enumerates and the first-turn gate
+    // checks. Previously only fetched when the Plan Next Session dialog opened,
+    // so without this the gate would see an empty roster and never fire.
+    void refreshPartyRoster();
+
     // What the "Recap" button will read aloud — per campaign, so switching
     // campaigns must never leave the previous one's "previously on" in place.
     void refreshLastRecap(activeCampaignId);
@@ -1940,6 +1972,18 @@ export function DMConsolePage() {
     const unlisten = listen<Character>('dm-party-character', (event) => {
       upsert(event.payload);
       syncPartyMemberToCampaign(event.payload);
+      // A sheet just arrived from their device, so they're here after all —
+      // drop any absence marked for them at roll call. Someone who turns up
+      // late shouldn't spend the rest of the night described to the DM as
+      // missing, and the DM shouldn't keep playing a character whose player
+      // is now sitting at the table.
+      const key = partyKey(event.payload.name ?? '');
+      setAbsent((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [upsert]);
@@ -2093,6 +2137,21 @@ export function DMConsolePage() {
       return { narration: CAMPAIGN_BUILDING_MESSAGE, interrupted: false, error: null };
     }
 
+    // Roll call gates the first turn of a sitting: the DM has to know who
+    // actually showed up before it narrates anyone, otherwise it spends the
+    // night speaking for a character whose player isn't in the room.
+    //
+    // Both conditions are load-bearing. runTurn deliberately has no campaign
+    // gate (the mic works with nothing selected, which is how the console gets
+    // tested), and a campaign with no roster has nothing to ask about — so
+    // neither case may be blocked. Deliberately NOT spoken aloud: this is an
+    // admin step for the DM's screen, not something the table should hear.
+    if (!rollCallTakenRef.current && campaignIdRef.current && partyRosterRef.current.length > 0) {
+      setRollCallOpen(true);
+      setWarning("Take roll call first — the DM needs to know who's at the table tonight.");
+      return { narration: '', interrupted: false, error: 'Roll call not taken yet.' };
+    }
+
     narrationBufferRef.current = '';
     streamedAnyChunkRef.current = false;
     suppressNarrationRef.current = false;
@@ -2120,6 +2179,10 @@ export function DMConsolePage() {
       // And for a recalled chapter — reference material the DM pulled up.
       const recalledChapter = pendingRecalledChapterRef.current ?? undefined;
       pendingRecalledChapterRef.current = null;
+      // Same one-shot consume for the absent characters' sheet digests, handed
+      // over on the first turn after roll call and never repeated.
+      const absentSheets = pendingAbsentSheetsRef.current ?? undefined;
+      pendingAbsentSheetsRef.current = null;
       const prompt = buildTurnPrompt({
         party: partyRef.current,
         spokenText,
@@ -2131,6 +2194,8 @@ export function DMConsolePage() {
         recalledChapter,
         battleLog: battleLogRef.current,
         interruption,
+        absent: absentRef.current,
+        absentSheets,
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
 
@@ -2637,7 +2702,7 @@ export function DMConsolePage() {
           // location catch-up, so a local-only session still gets a MEMORY.md
           // recap and captures what it can.
           console.warn('Opus session digest unavailable — falling back to a provider recap:', digestErr);
-          const reply = await callDm(buildRecapPrompt(partyRef.current), sessionIdRef.current, campaignId, 'low');
+          const reply = await callDm(buildRecapPrompt(partyRef.current, absentRef.current), sessionIdRef.current, campaignId, 'low');
           const { narration, actions } = parseDmReply(reply.text);
           await invoke('append_session_recap', { id: campaignId, date, recap: narration });
           if (actions?.rememberEntity?.length) {
@@ -2725,6 +2790,11 @@ export function DMConsolePage() {
     setTurns([]);
     setWarning(null);
     setBattleLog(null); // the battle log is per-sitting/per-campaign, never persisted to disk
+    // Tonight's attendance dies with tonight. Next week is a different room,
+    // and the next sitting re-gates on its own roll call.
+    setAbsent({});
+    setRollCallTaken(false);
+    pendingAbsentSheetsRef.current = null;
   }
 
   /** Stops whatever's currently playing AND clears any sentences still
@@ -4327,6 +4397,54 @@ export function DMConsolePage() {
     ? `${moduleBusy} (${formatElapsed(Math.floor((Date.now() - moduleBusyStartRef.current) / 1000))})${ingestStepSuffix}`
     : null;
 
+  // Roll call enumerates party.md (the campaign's own roster — it includes
+  // people who haven't shown up yet, and excludes other campaigns' characters)
+  // and left-joins the live sheet from usePartyStore, which is global and would
+  // otherwise put someone else's PC at tonight's table. Both sides key on the
+  // lowercased trimmed name via partyKey, so the marker can't silently fail to
+  // attach because one site trimmed and the other didn't.
+  const rollCallRows = React.useMemo(
+    () => partyRoster.map((m) => {
+      const key = partyKey(m.name);
+      return { key, name: m.name, sheet: party.find((c) => partyKey(c.name) === key) ?? null };
+    }),
+    [partyRoster, party]
+  );
+  const absentCount = Object.keys(absent).length;
+  const presentNames = rollCallRows.filter((r) => !absent[r.key]).map((r) => r.name);
+
+  function setRowAbsence(key: string, a: Absence | null) {
+    setAbsent((prev) => {
+      const next = { ...prev };
+      if (a) next[key] = a; else delete next[key];
+      return next;
+    });
+  }
+
+  /** Close roll call and hand the DM the sheets it needs. Digests go only to
+   *  characters the DM itself is running: autopilot defends and follows, so it
+   *  makes no tactical choices and needs no spell list, and a proxied character
+   *  is being run by a person with the real sheet in front of them. */
+  function confirmRollCall() {
+    const digests = rollCallRows
+      .filter((r) => absent[r.key]?.mode === 'dm' && r.sheet)
+      .map((r) => buildSheetDigest(r.sheet!));
+    pendingAbsentSheetsRef.current = digests.length ? digests.join('\n\n') : null;
+    setRollCallTaken(true);
+    setRollCallOpen(false);
+    setWarning(null);
+  }
+
+  /** The whole table turned up — the one-click path, and the one that keeps
+   *  solo testing to a single click. */
+  function markEveryonePresent() {
+    setAbsent({});
+    pendingAbsentSheetsRef.current = null;
+    setRollCallTaken(true);
+    setRollCallOpen(false);
+    setWarning(null);
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 p-6">
       <div className="max-w-4xl mx-auto">
@@ -4349,6 +4467,20 @@ export function DMConsolePage() {
                 title={`Read last session's recap aloud (${lastRecap.date})`}
               >
                 <ScrollText size={14} /> Recap
+              </Button>
+            )}
+            {activeCampaignId && partyRoster.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRollCallOpen(true)}
+                title={rollCallTaken ? 'Change who\'s at the table tonight' : 'Who showed up tonight? (needed before the first turn)'}
+              >
+                <Users size={14} /> Roll call
+                {!rollCallTaken && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />}
+                {rollCallTaken && absentCount > 0 && (
+                  <span className="ml-1 text-[11px] text-amber-400">{absentCount} out</span>
+                )}
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={handleEndSession} disabled={busy}>End session</Button>
@@ -4614,6 +4746,113 @@ export function DMConsolePage() {
       {/* `elevated` because this panel always opens on top of the Plan dialog —
           the map cards it reads against only exist while that dialog is up, so
           at equal z-index the Plan dialog (later in the DOM) hid it outright. */}
+      {/* Roll call — who's at the table tonight, and who's covering anyone who
+          isn't. Enumerates the campaign's own roster (party.md), so a player
+          who hasn't sent a sheet yet still gets asked about. */}
+      <Dialog open={rollCallOpen} onClose={() => setRollCallOpen(false)} title="Roll call — who's here tonight?" wide>
+        <p className="text-xs text-slate-400 mb-3">
+          The DM is told who's missing and how their character is being handled, so it won't spend the night
+          speaking for someone who isn't in the room. This is for tonight only — nobody leaves the story.
+        </p>
+        <div className="space-y-2">
+          {rollCallRows.map((row) => {
+            const a = absent[row.key];
+            return (
+              <div key={row.key} className="bg-slate-900 border border-slate-700 rounded-lg p-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white truncate">{row.name}</p>
+                    {!row.sheet && (
+                      <p className="text-[11px] text-slate-500">no sheet on this machine — they've never sent one here</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => setRowAbsence(row.key, null)}
+                      className={cn('text-xs px-2.5 py-1 rounded-md border transition-colors',
+                        !a ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-400 hover:text-white')}
+                    >
+                      Here
+                    </button>
+                    <button
+                      onClick={() => setRowAbsence(row.key, a ?? { mode: row.sheet ? 'dm' : 'autopilot' })}
+                      className={cn('text-xs px-2.5 py-1 rounded-md border transition-colors',
+                        a ? 'bg-amber-900/40 border-amber-700 text-amber-300' : 'border-slate-700 text-slate-400 hover:text-white')}
+                    >
+                      Away
+                    </button>
+                  </div>
+                </div>
+
+                {a && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-800 space-y-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {([
+                        ['dm', 'DM plays them', !!row.sheet, row.sheet ? '' : 'Needs their sheet on this machine'],
+                        ['autopilot', 'Autopilot (follows)', true, ''],
+                        ['proxy', 'Another player runs them', !!row.sheet, row.sheet ? '' : 'Needs their sheet on this machine'],
+                      ] as [AbsenceMode, string, boolean, string][]).map(([mode, label, enabled, why]) => (
+                        <button
+                          key={mode}
+                          disabled={!enabled}
+                          title={why}
+                          onClick={() => setRowAbsence(row.key, { ...a, mode })}
+                          className={cn('text-xs px-2.5 py-1 rounded-md border transition-colors',
+                            a.mode === mode ? 'bg-sky-900/40 border-sky-700 text-sky-300' : 'border-slate-700 text-slate-400 hover:text-white',
+                            !enabled && 'opacity-40 cursor-not-allowed hover:text-slate-400')}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {a.mode === 'autopilot' && (
+                      <label className="flex items-center gap-2 text-xs text-slate-400">
+                        Follows
+                        <select
+                          value={a.anchor ?? ''}
+                          onChange={(e) => setRowAbsence(row.key, { ...a, anchor: e.target.value || undefined })}
+                          className="bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-xs text-white"
+                        >
+                          <option value="">the party</option>
+                          {presentNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    {a.mode === 'proxy' && (
+                      <label className="flex items-center gap-2 text-xs text-slate-400">
+                        Run by
+                        <select
+                          value={a.proxyBy ?? ''}
+                          onChange={(e) => setRowAbsence(row.key, { ...a, proxyBy: e.target.value || undefined })}
+                          className="bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-xs text-white"
+                        >
+                          <option value="">someone at the table</option>
+                          {presentNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-slate-800 flex-wrap">
+          <p className="text-xs text-slate-500">
+            {absentCount === 0
+              ? 'Everyone marked here.'
+              : `${absentCount} away — the DM will be told on every turn.`}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={markEveryonePresent}>Everyone's here</Button>
+            <Button size="sm" onClick={confirmRollCall}>Start the session</Button>
+          </div>
+        </div>
+      </Dialog>
+
       <Dialog open={!!boardRead} onClose={() => setBoardRead(null)} title={boardRead ? `Read the board — ${boardRead.name}` : ''} wide elevated>
         {boardRead && (
           <div className="space-y-3">

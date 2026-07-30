@@ -17,6 +17,46 @@ import { hasKnownHp } from './partyHp';
  * fenced JSON block describing state changes — dmActions.ts parses that back out.
  */
 
+/** How an absent player's character is being handled tonight.
+ *  - `dm`        — the DM bot plays them.
+ *  - `autopilot` — they tag along behind `anchor`, defending themselves but
+ *                  never initiating. Cheaper than `dm` on purpose: a character
+ *                  making no tactical choices needs no sheet digest.
+ *  - `proxy`     — `proxyBy`'s player runs them as a second sheet. */
+export type AbsenceMode = 'dm' | 'autopilot' | 'proxy';
+
+export interface Absence {
+  mode: AbsenceMode;
+  /** autopilot: the present character they follow. */
+  anchor?: string;
+  /** proxy: the present character whose player is running them. */
+  proxyBy?: string;
+}
+
+/** Absences keyed by `partyKey(name)`. */
+export type AbsenceMap = Record<string, Absence>;
+
+/** The one way a character name becomes a lookup key, anywhere absence is
+ *  involved. `usePartyStore.upsert` and party.md's upsert both key on the
+ *  lowercased trimmed name, and a marker that silently fails to attach because
+ *  one site trimmed and another didn't is invisible at the table — the DM just
+ *  never hears that someone is out. */
+export function partyKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function absenceSuffix(a: Absence | undefined): string {
+  if (!a) return '';
+  switch (a.mode) {
+    case 'dm':
+      return ' — ABSENT tonight; you are running this character';
+    case 'autopilot':
+      return ` — ABSENT tonight; tagging along ${a.anchor ? `behind ${a.anchor}` : 'with the party'}, defending itself but initiating nothing`;
+    case 'proxy':
+      return ` — ABSENT tonight; being run at the table by ${a.proxyBy ? `${a.proxyBy}'s player` : 'another player'}`;
+  }
+}
+
 function classLine(c: Character): string {
   return (c.classes || [])
     .map((cl) => `${cl.classId}${cl.subclassId ? `(${cl.subclassId})` : ''} ${cl.level}`)
@@ -27,7 +67,7 @@ function totalLevel(c: Character): number {
   return (c.classes || []).reduce((s, cl) => s + (cl.level || 0), 0);
 }
 
-function statusLine(c: Character): string {
+function statusLine(c: Character, absent?: AbsenceMap): string {
   // A party member whose sheet arrived without HP (see partyHp.ts) would
   // otherwise be described to the DM, every single turn, as `HP NaN/undefined`.
   // Say plainly that it's unknown instead — the one thing that must NOT happen
@@ -42,12 +82,18 @@ function statusLine(c: Character): string {
     ? ` [DEATH SAVES ${c.deathSaves?.successes ?? 0}✓/${c.deathSaves?.failures ?? 0}✗]`
     : '';
   const insp = c.inspiration ? ' ⭐' : '';
-  return `${c.name} (${c.playerName || '?'}) — L${totalLevel(c)} ${classLine(c)} | HP ${hp} | ${cond}${exh}${insp}${ds}`;
+  const away = absenceSuffix(absent?.[partyKey(c.name)]);
+  return `${c.name} (${c.playerName || '?'}) — L${totalLevel(c)} ${classLine(c)} | HP ${hp} | ${cond}${exh}${insp}${ds}${away}`;
 }
 
-export function partyStatusText(party: Character[]): string {
+/** `absent` marks who isn't at the table tonight and how their character is
+ *  being covered (see the roll call in DMConsolePage). Threaded here rather
+ *  than pushed as its own prompt section because every character already gets
+ *  a line — a suffix costs ~10 tokens and no new structure. Omitted entirely
+ *  when everyone showed up. */
+export function partyStatusText(party: Character[], absent?: AbsenceMap): string {
   if (party.length === 0) return 'No characters at the table yet.';
-  return party.map(statusLine).join('\n');
+  return party.map((c) => statusLine(c, absent)).join('\n');
 }
 
 /** Which sourcebooks this table actually plays with — the union of every
@@ -140,7 +186,18 @@ export function battleLogStatusText(log: BattleLog): string {
  *  contains everything it generated while the players only heard part of it
  *  — so the next reply could casually reference things nobody at the table
  *  ever heard. This note re-anchors Claude's model of the conversation to
- *  what the table actually experienced. */
+ *  what the table actually experienced.
+ *  `absent` is tonight's roll call — who didn't show and how their character
+ *  is being covered. It rides as a suffix on each party status line rather
+ *  than as its own section, so it costs ~10 tokens per absent character and
+ *  nothing at all when everyone turned up.
+ *  `absentSheets` is a ONE-SHOT, same as recalledSession/Map/Chapter above: the
+ *  full digests of the characters the DM itself is running, sent on the first
+ *  turn after roll call and then dropped. It stays available for the rest of
+ *  the sitting because it's in the CLI's own resumed transcript — the same
+ *  reason deferring memory writes was safe (see campaign.rs's pending queue).
+ *  Sending it every turn instead would cost ~400 tokens × every turn to
+ *  re-state numbers that never change. */
 export function buildTurnPrompt(opts: {
   party: Character[];
   spokenText: string;
@@ -152,8 +209,10 @@ export function buildTurnPrompt(opts: {
   recalledChapter?: { id: string; text: string };
   battleLog?: BattleLog | null;
   interruption?: { heard: string };
+  absent?: AbsenceMap;
+  absentSheets?: string;
 }): string {
-  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, recalledChapter, battleLog, interruption } = opts;
+  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, recalledChapter, battleLog, interruption, absent, absentSheets } = opts;
   const parts: string[] = [];
   if (interruption) {
     parts.push(interruption.heard
@@ -173,7 +232,10 @@ ${recalledChapter.text}`);
   if (recalledMap) {
     parts.push(`Recalled battle map "${recalledMap.slug}" (you asked to pull this up last turn — its full layout and tactics, for your reference; place enemies on these cells and describe positions by them, don't read the raw grid aloud):\n${recalledMap.spec}`);
   }
-  parts.push(`Current party status:\n${partyStatusText(party)}`);
+  if (absentSheets) {
+    parts.push(`Character sheets for the absent players you're running tonight (reference material — sent once, at roll call, so keep it in mind for the rest of the session; play them from these numbers rather than inventing abilities):\n${absentSheets}`);
+  }
+  parts.push(`Current party status:\n${partyStatusText(party, absent)}`);
   const tableBooks = tableBooksText(party);
   if (tableBooks) {
     parts.push(`Books at this table: ${tableBooks}. When you improvise a monster, magic item or optional rule, prefer these — they're what the table can actually look up. The adventure's own content stands regardless of this list.`);
@@ -204,6 +266,6 @@ ${recalledChapter.text}`);
  *  scoped to ONLY rememberEntity/rememberLocation here, unlike a live turn's
  *  dm-actions block — damage/conditions/chapter-advance etc. don't make
  *  sense retroactively at session end. */
-export function buildRecapPrompt(party: Character[]): string {
-  return `The session is ending. In 3-4 sentences, summarize tonight's session for next week's recap — what happened, where the party ended up, and any open threads. Then check memory/entities.md and memory/locations.md above: go back through everyone and everywhere in tonight's actual session (not just ones that felt like a formal "introduction") — anyone who spoke to the party, was spoken about by name, or was visited, even mid-conversation and even if things weren't fully resolved — and if they're missing from those files, end your reply with a \`\`\`dm-actions block containing ONLY rememberEntity/rememberLocation for those (same shape as any other turn — see "Reporting state changes"). This explicitly INCLUDES an NPC who never gave a proper name but who spoke to the party, gave them real information, or clearly matters going forward (an unnamed elder, a hooded stranger, a village priest) — remember them exactly as you would a named one; unlike a live turn, where you'd skip a nameless walk-on, this end-of-session pass is the one place to capture the unnamed-but-important. When you do, give them a name specific enough to be unique — anchor it to their place or a distinctive trait ("Blind Elder of Fogreach", "Milky-Eyed Elder", "Raven-Shawled Priestess"), NOT a bare role like "Elder Woman" or "Old Man". This matters because entities.md is upserted by name: a generic role name will silently OVERWRITE a different NPC of the same role from another session (a second "Elder Woman" met months later would erase this one), and a bland key also leaves you unable to tell two of them apart when you read it back. The description should carry the same distinguishing detail, so next session you know precisely who this was. Err on the side of including a borderline case: a redundant re-add is harmless (upserted by name), but missing someone genuinely important to tonight's session — especially whoever the session ended on, mid-scene with — means next week's DM greets them as a total stranger. Omit the block entirely if nothing's missing. Never include any other dm-actions key here, and never invent an entry for anything that was only an out-of-character exchange (see "Out-of-character requests").\n\nCurrent party status:\n${partyStatusText(party)}`;
+export function buildRecapPrompt(party: Character[], absent?: AbsenceMap): string {
+  return `The session is ending. In 3-4 sentences, summarize tonight's session for next week's recap — what happened, where the party ended up, and any open threads. Then check memory/entities.md and memory/locations.md above: go back through everyone and everywhere in tonight's actual session (not just ones that felt like a formal "introduction") — anyone who spoke to the party, was spoken about by name, or was visited, even mid-conversation and even if things weren't fully resolved — and if they're missing from those files, end your reply with a \`\`\`dm-actions block containing ONLY rememberEntity/rememberLocation for those (same shape as any other turn — see "Reporting state changes"). This explicitly INCLUDES an NPC who never gave a proper name but who spoke to the party, gave them real information, or clearly matters going forward (an unnamed elder, a hooded stranger, a village priest) — remember them exactly as you would a named one; unlike a live turn, where you'd skip a nameless walk-on, this end-of-session pass is the one place to capture the unnamed-but-important. When you do, give them a name specific enough to be unique — anchor it to their place or a distinctive trait ("Blind Elder of Fogreach", "Milky-Eyed Elder", "Raven-Shawled Priestess"), NOT a bare role like "Elder Woman" or "Old Man". This matters because entities.md is upserted by name: a generic role name will silently OVERWRITE a different NPC of the same role from another session (a second "Elder Woman" met months later would erase this one), and a bland key also leaves you unable to tell two of them apart when you read it back. The description should carry the same distinguishing detail, so next session you know precisely who this was. Err on the side of including a borderline case: a redundant re-add is harmless (upserted by name), but missing someone genuinely important to tonight's session — especially whoever the session ended on, mid-scene with — means next week's DM greets them as a total stranger. Omit the block entirely if nothing's missing. Never include any other dm-actions key here, and never invent an entry for anything that was only an out-of-character exchange (see "Out-of-character requests").\n\nCurrent party status:\n${partyStatusText(party, absent)}`;
 }
