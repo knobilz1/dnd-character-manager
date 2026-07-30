@@ -436,6 +436,37 @@ Also note `sc` (subclass label) can go stale in these awk sweeps while `cid`/`le
 
 ---
 
+## PHASE G — CROSS-REFERENCE INTEGRITY — **2 REAL BUGS FOUND**
+New angle: do id references actually resolve? A broken id fails **silently** — the spell simply never
+appears, with no error anywhere.
+
+546 spell ids defined; 173 referenced by subclasses; 67 by races. Positive control passed (an injected
+fake id was correctly reported).
+
+### G1 — Twilight Domain never grants Leomund's Tiny Hut (2014, TCE)
+`src/data/subclasses/index.ts:667` — `alwaysPreparedSpells` 5th entry references **`leomunds-tiny-hut`**.
+The real id is **`leomund-tiny-hut`** (no `s`). Twilight Domain clerics silently never receive it.
+
+### G2 — 2024 Paladin oath never grants Protection from Evil and Good
+`src/data/subclasses/phb2024.ts:289` — references **`protection-from-evil-and-good`**.
+The real id is **`protection-from-evil-good`** (no `and`). The oath's level-3 spell list is
+protection from evil and good / shield of faith → **Oath of Devotion (2024)**. Silently never granted.
+
+Both are one-character-class typos with zero runtime signal. **Race `innateSpells` references are all
+clean** (67/67 resolve).
+
+### ⚠️ False positive recorded — the feat check in this pass is NOT valid
+`grantedSpells` extraction returned `cha int long short wis`, which are ability keys and recharge values,
+not spell ids — the regex matched every quoted string inside the block, not just spell ids. **No feat
+finding should be drawn from it.** Redo with a parser that reads only the array contents.
+
+### Still to check in Phase G
+`subclass.classId` → real class · `race.parentRaceId` → real race · `spell.classes[]` → real class ids ·
+`startingEquipment` → real item names · `subclassTips` keys → real subclass ids · duplicate ids within
+each data file · resource-key collisions between class and subclass.
+
+---
+
 # FIX PLAN (for the fixing phase)
 
 Ordered by severity × blast radius. Each item names the chokepoint, because per-call-site patching is what
