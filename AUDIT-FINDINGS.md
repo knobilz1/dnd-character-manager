@@ -336,6 +336,44 @@ not: in PHB 2024 an Epic Boon is a **feat chosen from the Epic Boon category**, 
 `LevelUpDialog.tsx:298` keys the ASI UI off `isASI`, so level 19 presents an ability-score picker instead
 of an Epic Boon feat list.
 
+### D4 — HIGH, mostly 2014 — subclass build choices are never prompted at level-up
+Swept every subclass feature whose text contains choice language (`choose one/two/three/a/an/from`,
+`select one/two`, `pick one/two`, `of your choice`):
+
+| Measure | Count |
+|---|---|
+| Subclass features containing choice language | **103** |
+| Subclasses affected | **70** |
+| Handled by `LevelUpDialog` | **2** — `totem-warrior` (totemSpirit / aspectTotem / totemicAttunement) and `battle-master` (maneuvers) |
+
+Everything else at class level is handled (`fightingStyles`, `invocations`, `metamagic`, `infusions`,
+`optionalFeatures`) — but those are *class* options, not subclass ones.
+
+**⚠️ Caveat, stated honestly: the 103 is an over-count.** The regex cannot distinguish a **build choice**
+(persists on the sheet, must be prompted once) from a **use-time choice** (chosen fresh each activation,
+correctly needs no prompt). `berserker` Intimidating Presence "choose one creature" and `circle-of-stars`
+Starry Form are use-time and are **not** bugs. The list must be triaged by hand before fixing.
+
+**Confirmed build choices that genuinely go unprompted** (spot-checked from the list):
+- `arcane-archer` — **Arcane Shot at 3, plus Additional Arcane Shot at 7, 10, 15, 18**: five separate
+  choice points, none prompted
+- `hunter` — Hunter's Prey (3), Defensive Tactics (7) *(and Multiattack 11 / Superior Hunter's Defense 15)*
+- `circle-of-the-land` — **Circle Spells (3)**: the land type drives the whole spell list
+- `circle-of-the-land` — Bonus Cantrip (2)
+- `champion` — **Additional Fighting Style (10)** — note this is the Champion's, which is why
+  `StepClassOptions.tsx:155` giving the *base* Fighter a 2nd style at 10 is suspected wrong (see R1 table)
+- `draconic-bloodline` — Dragon Ancestor (1)
+- `college-of-lore` — Bonus Proficiencies (3), Additional Magical Secrets (6)
+- `knowledge-domain` — Blessings of Knowledge (1) · `nature-domain` — Acolyte of Nature (1)
+- `rune-knight` — Rune Carver (3) · `armorer` — Armor Model (3) · `beast-master` — Ranger's Companion (3)
+- `bladesinging` — Training in War and Song (2) · `drakewarden` — Draconic Gift (3)
+- `horizon-walker` — Planar Warrior (3) · `path-of-wild-magic` — Wild Surge (3)
+
+Consequence: the choice is never recorded on the character, so nothing downstream can act on it — a
+Circle of the Land druid has no land type, so their Circle Spells cannot be granted at all.
+
+Regenerate the full list with the awk in commit for D4.
+
 ### Still owed in Phase D
 Per-subclass level-up options (does each subclass's choice-bearing feature actually prompt at its level),
 and racial level-gating (`InnateSpell.minCharLevel` — does a race's level-gated spell appear on level-up).
