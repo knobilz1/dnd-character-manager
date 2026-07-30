@@ -208,6 +208,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
     }
 
+    // Insert race-granted resources (Breath Weapon, Relentless Endurance, ...). Races were a fourth
+    // source of limited-use abilities with nowhere to live, so none of them could be tracked.
+    // Keyed on TOTAL character level, unlike class/subclass resources which use class level.
+    {
+      const race = getRace(c.raceId);
+      const totalLvl = totalCharacterLevel(c.classes ?? []);
+      for (const rd of (race?.resources ?? [])) {
+        if (resources.some(r => r.key === rd.key)) continue;
+        const rawMax = rd.maxPerLevel[totalLvl] ?? 0;
+        const normMax = rawMax === 'unlimited' ? 99 : rawMax as number;
+        if (normMax > 0) resources.push({ key: rd.key, current: normMax, max: normMax });
+      }
+    }
+
     // Insert feat-granted resources (e.g. Lucky feat: 3 luck points).
     for (const featId of (c.selectedFeats ?? [])) {
       const feat = ALL_FEATS.find(f => f.id === featId);
@@ -842,6 +856,11 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
       // Apply ability-mod / prof-bonus overrides so restoring to r.max gives the correct value
       // even if r.max was set from a stale level-table entry (e.g. bardic inspiration with high CHA).
+      // Race-granted short-rest resources (Breath Weapon, Stone's Endurance, ...).
+      for (const rd of (getRace(s.character.raceId)?.resources ?? [])) {
+        if (rd.rechargeOn === 'short') shortRestKeys.add(rd.key);
+      }
+
       // Partial short-rest recovery: "regain N on a Short Rest, all on a Long Rest".
       // Distinct from shortRestKeys, which refill completely.
       const partialRegain = new Map<string, number>();
@@ -851,6 +870,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         for (const rd of [...(def?.resources ?? []), ...(sub?.resources ?? [])]) {
           if (rd.shortRestRegain && rd.shortRestRegain > 0) partialRegain.set(rd.key, rd.shortRestRegain);
         }
+      }
+      for (const rd of (getRace(s.character.raceId)?.resources ?? [])) {
+        if (rd.shortRestRegain && rd.shortRestRegain > 0) partialRegain.set(rd.key, rd.shortRestRegain);
       }
 
       const srOverrides = computeResourceMaxOverrides(s.character);

@@ -96,6 +96,12 @@ export interface Race {
   /** Racial natural armor formula. base + optional ability mod. If canUseWithArmor is true,
    *  the character can also use this formula when wearing armor (taking the better value). */
   naturalArmor?: { base: number; mod?: AbilityKey; canUseWithArmor?: boolean };
+  /** Limited-use racial abilities that are NOT spells — Breath Weapon, Relentless Endurance,
+   *  Stone's Endurance, Fey Step and so on. Racial *spells* are tracked separately via
+   *  `innateSpells` + `Character.innateSpellUses`; this covers everything else, which previously
+   *  had nowhere to live and so could not be tracked at all.
+   *  `maxPerLevel` is keyed on TOTAL character level, not class level. */
+  resources?: ClassResourceDefinition[];
 }
 
 export interface ClassFeature {

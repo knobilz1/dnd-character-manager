@@ -1,6 +1,12 @@
 import type { Race } from '../../types';
 import { PHB2024_RACES } from './phb2024';
 
+/** A racial resource whose uses don't scale — the overwhelmingly common case (Breath Weapon,
+ *  Relentless Endurance, Fey Step). `Race.resources` reuses ClassResourceDefinition, whose
+ *  maxPerLevel is a per-level table, so this fills all 20 levels with the same value. */
+const atEveryLevel = (n: number): Record<number, number> =>
+  Object.fromEntries(Array.from({ length: 20 }, (_, i) => [i + 1, n]));
+
 export const ALL_RACES: Race[] = [
   // Human
   {
@@ -187,6 +193,9 @@ export const ALL_RACES: Race[] = [
   {
     id: 'dragonborn',
     name: 'Dragonborn',
+    // PHB p.34: "After you use your breath weapon, you can't use it again until you complete a
+    // short or long rest."
+    resources: [{ name: 'Breath Weapon', key: 'breath_weapon', rechargeOn: 'short', maxPerLevel: atEveryLevel(1) }],
     sourceBook: 'PHB',
     size: 'Medium',
     speed: 30,
@@ -261,6 +270,8 @@ export const ALL_RACES: Race[] = [
   {
     id: 'half-orc',
     name: 'Half-Orc',
+    // PHB p.41: "Once you use this trait, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Relentless Endurance', key: 'relentless_endurance', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) }],
     sourceBook: 'PHB',
     size: 'Medium',
     speed: 30,

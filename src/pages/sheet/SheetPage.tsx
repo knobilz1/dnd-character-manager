@@ -64,6 +64,10 @@ function getResourceDef(character: any, key: string) {
     const fromFeat = (feat?.grantedResources ?? []).find((fr: any) => fr.key === key);
     if (fromFeat) return fromFeat;
   }
+  // Race-granted resources (Breath Weapon, Relentless Endurance, ...). Without this the sheet
+  // falls back to the raw key and shows no recharge line.
+  const fromRace = getRace(character.raceId)?.resources?.find((rd: any) => rd.key === key);
+  if (fromRace) return fromRace;
   return undefined;
 }
 
