@@ -334,6 +334,9 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'circle-of-wildfire' && c.level >= 10)) {
       resourceMaxOverrides['cauterizing_flames'] = profBonus;
     }
+    if (character.classes.some(c => c.subclassId === 'college-of-creation' && c.level >= 3)) {
+      resourceMaxOverrides['performance_of_creation'] = profBonus;
+    }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
       resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);

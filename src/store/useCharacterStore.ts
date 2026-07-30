@@ -50,6 +50,8 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['wails_from_the_grave'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'circle-of-wildfire' && cl.level >= 10))
     overrides['cauterizing_flames'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'college-of-creation' && cl.level >= 3))
+    overrides['performance_of_creation'] = profBonus;
   // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
   {
     const palLvl = classLevel(c.classes, 'paladin');

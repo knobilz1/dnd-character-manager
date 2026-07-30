@@ -634,7 +634,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Performance of Creation', level: 3, description: 'As an action, create a nonmagical item worth up to 20 gp × your bard level (Medium or smaller) in an unoccupied space within 10 feet; it lasts a number of hours = your proficiency bonus. Once per long rest; can use again by expending a 2nd-level or higher spell slot.' },
     { name: 'Animating Performance', level: 6, description: 'As an action, animate a Large or smaller nonmagical item you can see within 30 feet (Dancing Item, HP = 10 + 5 × bard level). Once per long rest; can use again by expending a 3rd-level or higher spell slot.' },
     { name: 'Creative Crescendo', level: 14, description: 'When you use Performance of Creation, you can create up to your Charisma modifier items (min 2) simultaneously, no longer limited by gp value. Only one can be the maximum size; the rest must be Small or Tiny.' },
-  ]},
+  ],
+    resources: [
+      // Performance of Creation (3rd): proficiency-bonus uses per long rest — real max via override.
+      { name: 'Performance of Creation', key: 'performance_of_creation', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // Animating Performance (6th): once per long rest (a 3rd+ slot may be spent for more).
+      { name: 'Animating Performance', key: 'animating_performance', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'college-of-eloquence', name: 'College of Eloquence', classId: 'bard', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Adherents of the College of Eloquence master the art of oratory. They sway hearts and minds with practiced charm and an unassailable logic.', features: [
     { name: 'Silver Tongue', level: 3, description: 'When you make a Cha (Persuasion) or Cha (Deception) check, you can treat a d20 roll of 9 or lower as a 10.' },
     { name: 'Unsettling Words', level: 3, description: 'As a bonus action, spend a Bardic Inspiration die. Choose one creature within 60 feet; it must subtract the rolled number from its next save before end of your next turn.' },
