@@ -859,3 +859,85 @@ Entities audited: resource layer swept for all 25 classes; feature-level passes 
 Caveat: inflated by R1, one systemic cause touching nearly every class. Per-class **data** errors are so far
 rare — bard, cleric and druid numbers were all perfect against the book. The real defects are structural:
 R1 (2024 blindness), R2 (caps not enforced), R3 (races untrackable), R4 (recharge enum too narrow).
+
+---
+
+## Round 5 findings (batch 9 runtime verification, 2026-07-30)
+
+Found by *looking at the rendered sheet*, not by reading data. Each was invisible to
+`tsc -b --force` and to every static sweep run so far.
+
+### R7 — FIXED: override-managed resources loaded at the placeholder value, not full
+`load()` inserts a resource with `current = maxPerLevel[level]`, which for any
+ability-mod / prof-bonus resource is a placeholder of `1`. The override pass then ran
+`current: Math.min(r.current, override)`, so the character opened their sheet with **one
+use of a resource that should have been full**. A Wisdom 18 Light Domain cleric showed
+1/4 Warding Flares.
+
+Scope: every override-managed key, i.e. everything added in R5 batches 1–9 plus
+`divine_sense`, `cleansing_touch`, `psionic_energy`, `star_map`, `cosmic_omen`,
+`emboldening_bond`, `restore_balance`, `perfected_armor`, `perfected_bond`,
+`writhing_tide`, `swarming_dispersal`, `unleash_incarnation`, `momentary_stasis`,
+`deprive_the_unworthy`.
+
+Fixed in `ad41d8c` with a `preexisting` key snapshot taken before the insertion passes:
+already-saved keys keep the clamp (a stat drop must lower the max without refilling spent
+uses), brand-new keys start full.
+
+### R8 — FIXED: `load()` was not idempotent (input-array aliasing)
+`let resources = c.resources ?? []` then `resources.push(...)` **mutates the caller's
+character**. The override pass rebuilds entries with `.map()`, so the caller's array kept
+the *pre-override* values. A second `load()` — which React StrictMode guarantees in dev,
+and any re-navigation causes in prod — saw those as previously-saved and clamped back down.
+
+This is why R7's fix alone still rendered 1/4. Fixed by copying the array.
+
+**Methodology note:** R7 and R8 are the strongest argument yet for runtime verification.
+Both are in the single highest-traffic function in the store, both survived every static
+sweep, and R8 in particular can only be seen by loading the same character twice.
+
+### R9 — OPEN: the resource pip row is hard-capped at 20, with no numeric readout
+`SheetPage.tsx:2182` and `:2204` both do `Math.min(displayMax === 99 ? 20 : displayMax, 20)`.
+There is no number anywhere in the card — the pip count *is* the readout. So a level-20
+paladin's Lay on Hands pool (100 hit points, data is correct) renders as **20 pips**, and
+the sheet asserts a wrong number with nothing to signal it was truncated. Arcane Ward hits
+this too above 20 (wizard 9+ with a positive Int mod).
+
+Clicking still decrements from the true `current`, so the underlying value is fine — it is
+purely that what the player reads is wrong.
+
+Not fixed here: it is a display change outside R5's scope. The fix is presumably to switch
+to a numeric `current / max` readout above some threshold rather than raising the cap;
+100 pips is not a usable control either.
+
+### R10 — OPEN (low, rare): Psi Warrior and Soulknife share one `psionic_energy` pool
+Both subclasses define the key `psionic_energy`. TCE gives each its own pool, so a
+Fighter (Psi Warrior) / Rogue (Soulknife) multiclass gets one counter where it should have
+two. Harmless for single-class characters, which is why it has not surfaced. The
+ownership check now allow-lists the one legitimate duplicate (`bladesong`, the same
+subclass reprinted in SCAG and TCE) and flags this one.
+
+### Text corrections made in passing
+- **the-archfey / Dark Delirium** claimed "The creature can repeat the saving throw at the
+  end of each of its turns, ending the effect on a success". PHB p.109 has **no repeat
+  save**; the effect ends early only if the creature takes damage. The misty-realm
+  description was also missing. Both corrected.
+- **school-of-abjuration / Arcane Ward** was missing the damage-absorption rule, the
+  "regains 2x spell level when you cast an abjuration spell" rule, and the
+  once-per-long-rest creation limit. Corrected.
+
+Both entries had passed earlier text audits, which reinforces B1's note: those passes were
+not exhaustive.
+
+### Sweep correction — the R5 ready list was under-counted
+The subclass scanner searched descriptions for `can't use it again until`, but descriptions
+store escaped apostrophes (`can\'t`), so **every feature using that phrasing was silently
+missed**. Unescaping before matching recovered 4 more features (Fey Presence, Misty Escape,
+Indestructible Life, scag-swashbuckler Master Duelist). Current ready list: **36 subclasses,
+51 features**, of which 6 subclasses / 9 features are done as of `ad41d8c`.
+
+This is parser artifact #6. The positive/negative controls caught two *other* failures in
+the same scan (a `\n  {\n` entry pattern that matched nothing, and a regex that failed to
+compile) but could not catch this one, because the control subclasses were all found — the
+loss was inside the feature-level filter, one level below what the controls checked.
+**Controls must be placed at every level a sweep filters, not only at the outermost one.**
