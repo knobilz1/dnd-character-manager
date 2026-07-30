@@ -369,8 +369,8 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'chronurgy-magic' && c.level >= 6)) {
       resourceMaxOverrides['momentary_stasis'] = Math.max(1, mods.int);
     }
-    if (character.classes.some(c => c.subclassId === 'graviturgy-magic' && c.level >= 14)) {
-      resourceMaxOverrides['deprive_the_unworthy'] = Math.max(1, mods.int);
+    if (character.classes.some(c => c.subclassId === 'graviturgy-magic' && c.level >= 10)) {
+      resourceMaxOverrides['violent_attraction'] = Math.max(1, mods.int);
     }
     // TCE prof-bonus-per-long-rest features.
     if (character.classes.some(c => c.subclassId === 'the-fathomless')) {

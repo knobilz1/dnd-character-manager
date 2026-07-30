@@ -74,8 +74,8 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   // Dunamancy (EGtW): both are Intelligence modifier uses, minimum 1.
   if (c.classes.some(cl => cl.subclassId === 'chronurgy-magic' && cl.level >= 6))
     overrides['momentary_stasis'] = Math.max(1, abilityMod(score('int')));
-  if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 14))
-    overrides['deprive_the_unworthy'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 10))
+    overrides['violent_attraction'] = Math.max(1, abilityMod(score('int')));
   // TCE prof-bonus-per-long-rest features.
   if (c.classes.some(cl => cl.subclassId === 'the-fathomless'))
     overrides['tentacle_of_the_deeps'] = profBonus;

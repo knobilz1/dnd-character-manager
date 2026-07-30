@@ -53,6 +53,8 @@ EXPECT = dict(
     aspiring_alchemist='tob-gold-bloodline', gold_hoarder='tob-gold-bloodline',
     dark_depths='tob-ghost-ship-patron', voyage_of_the_damned='tob-ghost-ship-patron',
     ocean_form='tob-school-of-the-tide-watchers',
+    # graviturgy correction: 'Deprive the Unworthy' does not exist in EGtW
+    violent_attraction='graviturgy-magic',
 )
 bad = 0
 for k, want in EXPECT.items():
