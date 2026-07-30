@@ -113,6 +113,11 @@ export interface ClassResourceDefinition {
   /** Maps class level to die size for resources with a scaling die (e.g. Bardic Inspiration d6→d12).
    *  Sparse — the last entry at or below the current level applies. */
   resourceDie?: Record<number, number>;
+  /** Partial short-rest recovery, for resources whose rule is "regain N on a Short Rest, all on a Long
+   *  Rest" — PHB 2024 Cleric Channel Divinity and Druid Wild Shape both work this way. Use together with
+   *  `rechargeOn: 'long'`; a short rest then adds this many uses back instead of refilling.
+   *  Do NOT use for "regain all on a Short Rest" (2024 Monk Focus) — that is plain `rechargeOn: 'short'`. */
+  shortRestRegain?: number;
 }
 
 export interface DClass {

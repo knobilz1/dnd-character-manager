@@ -119,7 +119,9 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'full',
     spellcastingAbility: 'wis',
     resources: [
-      { name: 'Channel Divinity', key: 'channel_divinity', rechargeOn: 'short', maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:4,19:4,20:4} },
+      // PHB 2024: "2 uses; regain 1 on Short Rest, all on Long Rest." It was rechargeOn 'short', which
+      // refilled every use on a short rest — strictly more generous than the book.
+      { name: 'Channel Divinity', key: 'channel_divinity', rechargeOn: 'long', shortRestRegain: 1, maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:4,19:4,20:4} },
     ],
     subclassLabel: 'Divine Domain',
     subclassLevel: 3,
@@ -162,7 +164,9 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'full',
     spellcastingAbility: 'wis',
     resources: [
-      { name: 'Wild Shape', key: 'wild_shape', rechargeOn: 'short', maxPerLevel: {1:0,2:2,3:2,4:2,5:2,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:4,18:4,19:4,20:4} },
+      // PHB 2024: "2 uses; regain 1 on Short Rest, all on Long Rest." Same over-generous 'short' as the
+      // 2024 Cleric had. (2024 Monk Focus really is "all on Short/Long Rest", so that one stays 'short'.)
+      { name: 'Wild Shape', key: 'wild_shape', rechargeOn: 'long', shortRestRegain: 1, maxPerLevel: {1:0,2:2,3:2,4:2,5:2,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:4,18:4,19:4,20:4} },
     ],
     subclassLabel: 'Druid Circle',
     subclassLevel: 3,

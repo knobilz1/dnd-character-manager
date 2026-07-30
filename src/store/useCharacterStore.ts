@@ -842,11 +842,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
       // Apply ability-mod / prof-bonus overrides so restoring to r.max gives the correct value
       // even if r.max was set from a stale level-table entry (e.g. bardic inspiration with high CHA).
+      // Partial short-rest recovery: "regain N on a Short Rest, all on a Long Rest".
+      // Distinct from shortRestKeys, which refill completely.
+      const partialRegain = new Map<string, number>();
+      for (const cl of s.character.classes) {
+        const def = getClass(cl.classId);
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        for (const rd of [...(def?.resources ?? []), ...(sub?.resources ?? [])]) {
+          if (rd.shortRestRegain && rd.shortRestRegain > 0) partialRegain.set(rd.key, rd.shortRestRegain);
+        }
+      }
+
       const srOverrides = computeResourceMaxOverrides(s.character);
       let resources = s.character.resources.map((r) => {
-        if (!shortRestKeys.has(r.key)) return r;
         const correctMax = srOverrides[r.key] ?? r.max;
-        return { ...r, max: correctMax, current: correctMax };
+        if (shortRestKeys.has(r.key)) return { ...r, max: correctMax, current: correctMax };
+        const regain = partialRegain.get(r.key);
+        if (regain) return { ...r, max: correctMax, current: Math.min(r.current + regain, correctMax) };
+        return r;
       });
 
       // Bloodwell Vial (Tasha's): if one is equipped, regain 1d3 sorcery points per short rest.
