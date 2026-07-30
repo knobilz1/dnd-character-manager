@@ -1,131 +1,147 @@
 # Bounding conversation history ("session rolling")
 
-Status: **spec, not built.** Written 2026-07-29 off a measured 40-message run.
+Status: **measured 2026-07-29. Not building it.** Continuity survives a roll —
+that part works. The cost case does not. Numbers below; re-run the harness
+before revisiting, because every one of these is model- and CLI-dependent.
 
-## What the measurement says
+## Verdict
 
-40 chained messages against the real Curse of Strahd campaign, memory writes
-applied between turns as the app applies them:
+| question | answer |
+|---|---|
+| Does the DM lose the thread across a roll? | **No.** Seam invisible. See "The seam". |
+| Does rolling save money at 40 messages? | **No — it costs $0.70 more over the 10 turns after the roll.** |
+| Would it save money eventually? | Only past ~100 messages, and the estimate is inside the noise. |
 
-| turn | prompt | cache read | cache write | standing block | history |
-|-----:|-------:|-----------:|------------:|---------------:|--------:|
-| 1  | 37,896 |  2,131 | 35,762 | 27,784 | 10,112 |
-| 10 | 56,743 | 53,467 |  3,273 | 27,784 | 28,959 |
-| 20 | 66,118 | 63,778 |  2,337 | 27,847 | 38,271 |
-| 30 | 74,504 | 74,188 |    313 | 27,847 | 46,657 |
-| 40 | 79,589 | 78,974 |    612 | 28,043 | 51,546 |
+Three assumptions in the original spec were wrong, all in the same direction:
 
-Total $3.71, $0.093/message. First quarter $0.146/msg, last quarter $0.089/msg.
+1. **Roll overhead is ~5× what was budgeted.** Assumed ~$0.13 (one handoff
+   call). Measured $0.70. The handoff itself is trivial ($0.028) — the cost is
+   that a fresh session *thrashes for 6–9 turns* before its prefix restabilises,
+   exactly like turns 1–4 of a cold start. 6 of the 10 turns after the roll were
+   cache misses, against 2 for the control.
+2. **Unrolled history grows at 462 tok/turn, not 1,050.** The 1,050 figure
+   averaged in turn 1, whose reading is artificially low. Over settled turns
+   21→40 it is 462/turn and decelerating. So the unrolled prompt at turn 100 is
+   ~107k, not the ~143k the break-even model assumed.
+3. **Run-to-run noise is larger than the whole effect.** See below.
 
-Two findings, one of which killed the previous plan:
+## The noise finding — this invalidates single-run A/B at this length
 
-1. **The standing block is flat and cheap.** 27,784 → 28,043 over forty
-   messages, and after warmup it is almost entirely cache *reads* at a tenth
-   the cost. Every "trim the always-loaded files" idea targets this. Folding
-   the ~15 stub chapters would save ~1% of a turn-40 prompt. Not the problem.
-2. **History is the only thing growing.** 10,112 → 51,546, dead linear at
-   ~1,050 tokens/message, unbounded. By message 40 it is 1.8× the standing
-   block. It raises the prompt on every turn AND raises the cost of every cache
-   miss, because there is more to re-write.
+Turns 1–30 of both runs are *identical*: same inputs, same campaign, no roll
+has happened yet. They should cost the same. They differ by **$1.09, or 39%**.
 
-Misses land every 5–7 turns at $0.25–0.33; turns between them cost $0.03.
+```
+                                      control   rolled   delta
+turns  1-30  (identical, no roll yet)   $2.81    $1.73   -1.09
+turns 31-40  (rolled run has rolled)    $0.89    $1.59   +0.70
+total                                   $3.71    $3.32   -0.39
+```
 
-## The idea
+The headline "-10%" is entirely this noise. Cache-miss cadence is not
+reproducible between runs — control missed on turns 1,2,3,4,8,11,15,18,31,38;
+the rolled run on 1,6,17 over the same first 30 turns. Nothing we control
+explains it. **Any future comparison of this kind needs repeats, or a length
+where the effect exceeds ~40%.**
 
-The campaign already has a continuity mechanism that is not the transcript:
-`entities.md`, `locations.md`, `flagged_facts.md`, `party.md`, `MEMORY.md`,
-`standing.md`. They exist so the DM remembers across sessions. Within a session
-the verbatim conversation duplicates that job — and it is the expensive copy.
-Fifty thousand tokens of transcript to remember what four small registries
-already hold.
+The only trustworthy comparison is turns 31–40, where the runs genuinely
+differ — and there rolling loses.
 
-So: periodically end the CLI session and start a fresh one. History resets to
-near zero, the prompt drops back to ~30k, and continuity comes from the files
-that reload anyway plus a short handoff.
+## Why it can't win at realistic session lengths
 
-## THE COST MODEL SAYS DON'T DO THIS TOO EARLY
+Rolling buys a smaller prompt: 66,409 vs 79,589 at turn 40, a 13,180-token gap
+that then grows at 462/turn.
 
-This is the part that has to survive review, because the naive version makes
-things worse.
+- saving per cache-hit turn: 13,180 × $0.30/1M = **$0.004**
+- saving per cache miss: 13,180 × $3.75/1M = **$0.049**, ~1 miss per 6 turns
 
-Rolling re-pays the warmup. Turns 1–4 of the measured run cost $0.24–0.35 each
-because the 28k standing block had to be written to cache. Turns 25–40 cost
-$0.03. **A session that rolls every 10 turns pays first-quarter prices
-($0.146/msg) forever instead of settling to last-quarter prices ($0.089/msg).**
+Against $0.70 to buy it. Integrating the widening gap, break-even lands
+**60–100 turns after the roll** — a 130+ message session. A real session looks
+like 40–80 DM exchanges, at which point rolling is pure loss.
 
-Modelled per 30 turns, using measured rates:
+## The seam (the part that did work)
 
-| | hits | misses | roll overhead | total |
-|---|---|---|---|---|
-| rolled, steady prompt ~54k | 25 × $0.016 | 5 × $0.15 | ~$0.13 | **~$1.28** |
-| unrolled, around turn 100 (prompt ~143k) | 25 × $0.043 | 5 × $0.44 | — | **~$3.28** |
+Rolled at turn 30, history 45,104. Handoff was one `sonnet` call, $0.028,
+1,031 chars, using the prompt in "Design" below. Turn 31 — brand new CLI
+session, zero transcript — opened:
 
-Rolling wins ~2.5× *at turn 100*. Around turn 40 it is break-even or slightly
-worse. **Break-even is roughly turn 40–50**, so the trigger must be a history
-threshold near that, not a small turn count.
+> Ismark nods slowly as you push back from the table. "It'll be dark soon.
+> Bildrath's the only shop in the village…"
 
-Proposed trigger: **roll when history exceeds ~45,000 tokens** (about turn 40
-from cold). A 150-message session then rolls ~3 times and the prompt oscillates
-38k→80k instead of climbing to ~195k.
+It knew who was in the room, that they were seated, and where the shop was.
+Turn 33 then recalled Kolyan writing letters for help — established at turn 29
+in the *dead* session and **not in the handoff summary**. It came back because
+it is module text in `active_module/current.md`, which reloads every turn.
+That is precisely the mechanism the idea was betting on, and it holds.
 
-## Design
+Side effect worth knowing: the fresh session immediately wrote three entities
+to memory (Ismark, Bildrath, Parriwimple) that 30 turns of conversation had
+never flushed. A roll acts as a memory-flush point.
 
-**Trigger.** After a turn completes, estimate history as
-`(cache_read + cache_write + input) − standing_block_size`. Both halves are
-already available: the CLI returns usage in its JSON, and the standing block is
-just the byte size of `CLAUDE.md` plus its imports. No new model call to decide.
+So if rolling is ever needed for a *non-cost* reason — context-window limits on
+a very long session — the continuity design below is validated and can be built
+as written.
+
+## What the numbers actually point at
+
+Cache misses are ~67% of the bill ($2.50 of $3.71 over 40 turns, 10 misses at
+$0.15–0.35). Miss *cost* is proportional to the prefix being rewritten, which
+is standing block + history. Of the 27,784-token standing block,
+`active_module/current.md` alone is 14,861 tokens — more than half.
+
+Making that chapter recall-on-demand instead of always-loaded would cut ~20% of
+the bill, roughly twice what rolling could deliver, with no continuity risk.
+**But it is the chapter the DM is actively running**, so it is a straight
+fidelity trade, and the standing instruction is lose no fidelity. Not proposed
+— recorded because it is where the arithmetic leads.
+
+## Harness caveat found while doing this
+
+`prompt = cache_read + cache_creation + input` is **not monotonic** and is only
+trustworthy on clean cache-hit turns (`write < 2k`). Control turn 8 reports
+51,433 while turn 7 reported 61,062 and turn 9 read back 61,059 — a
+conversation cannot shrink. Every per-turn prompt/history number taken from a
+miss turn is junk. The comparisons above use hit turns only.
+
+## Design (unbuilt, validated on continuity)
+
+Kept because the continuity half is proven and would be reused verbatim.
+
+**Trigger.** After a turn, estimate history as
+`(cache_read + cache_write + input) − standing_block_size`, only on hit turns.
+Threshold ~45,000 tokens — which from the measured table fires at **turn 30**,
+not "about turn 40" as the first draft of this spec claimed.
 
 **Guards — never roll when:**
-- a battle is active (`battleLog` non-null). Initiative order, positions and
-  mid-round HP live in the transcript and nowhere else.
-- the DM asked for something that lands next turn (`recallSession`,
-  `recallMap`, `recallChapter`, a pending `makeMap`). The stash is keyed to the
-  next turn of the current session.
-- a turn is in flight.
+- a battle is active (`battleLog` non-null); initiative, positions and mid-round
+  HP live in the transcript and nowhere else
+- something lands next turn (`recallSession`, `recallMap`, `recallChapter`, a
+  pending `makeMap`) — the stash is keyed to the next turn of *this* session
+- a turn is in flight
 
-Defer to the next eligible turn rather than skipping. Out of combat, mid-scene
-is survivable if the handoff is good; mid-round is not.
+Defer to the next eligible turn rather than skipping.
 
-**The handoff.** One cheap call (`sonnet`, low effort) before the roll:
+**Handoff**, one cheap `sonnet` call before the roll:
 
 > Summarise the current moment for a DM picking this scene up cold: where the
 > party physically is, who is present and what they want, what was just said or
 > done, what question is hanging, and anything true right now that isn't in the
 > campaign's memory files. Six sentences. No plot recap — the files have that.
 
-Stash the result and prepend it to the first turn of the new session, labelled
-as "where we are right now", the same shape `recalledSession` already uses.
+Prepend to the first turn of the new session as "Where we are right now:",
+the shape `recalledSession` already uses. **If the handoff call fails, do not
+roll** — a failed roll costs nothing, a roll without a handoff drops the party.
 
-**What carries over for free:** everything in `CLAUDE.md` and its imports. That
-is the whole point — the registries are the durable memory and they reload
-automatically on the fresh session.
+**Also unresolved:** `sessionIdRef` is the app's handle on the CLI conversation.
+Rolling replaces it, so streaming listeners and the local-LLM
+`end_local_dm_session` path have to move with it.
 
-**Failure mode.** If the handoff call fails, do not roll. A failed roll costs
-nothing; a roll with no handoff drops the party mid-scene.
+## Reproducing
 
-## Risks
+- unrolled control: `scripts/dm-token-burn.py`
+- rolled: `scripts/dm-token-burn-rolled.py` (writes every reply to
+  `_replies.md` — read the turns either side of the roll, do not judge the seam
+  from the cost table)
 
-- **The seam.** The DM may repeat itself or re-describe a room. Six sentences
-  may not be enough. This is the thing to measure, not reason about.
-- **Trigger thrash.** History estimation is approximate (bytes/4). Add
-  hysteresis: after a roll, don't consider another for at least 10 turns.
-- **`--resume` chain identity.** `sessionIdRef` is the app's handle on the CLI
-  conversation; rolling replaces it. Anything else keyed to that id (streaming
-  listeners, the local-LLM `end_local_dm_session` path) has to move with it.
-
-## Validating it
-
-Do not ship on the model above. The 40-message harness
-(`scratchpad/burn40.py`) already produces the table; extend it to roll at the
-threshold and compare:
-
-1. **Cost:** same 40 messages, rolled vs not. Expect no better than parity at
-   40 — the win should appear at 80–120, so run those too.
-2. **Continuity:** read the three turns after a roll. Does the DM repeat a
-   description, forget who it was talking to, or lose the hanging question?
-   That is a read-the-output judgement, not a number.
-3. **The guard:** force a roll mid-combat in a test and confirm it defers.
-
-If continuity survives and cost drops at 100 messages, ship it. If the seam is
-visible, the fallback is a larger threshold — fewer, later rolls — rather than
-a better summary.
+Both copy the live campaign to a temp dir first and never touch it. Re-run both
+if the model, the CLI's cache behaviour, or the campaign size changes; every
+conclusion here depends on all three.
