@@ -181,6 +181,45 @@ mine.** Before `7247716` a 2024 warlock had `pact_slots` only — and no working
 Wild Shape uses are right, but 2024 says *"regain one expended use on a Short Rest, all on a Long Rest"*;
 `rechargeOn: 'short'` restores all. Same shape as C1.
 
+### ROUND 5 — limited-use feature sweep (classes AND subclasses)
+
+Method: extract every feature whose description contains limited-use language (`once per`,
+`times equal to`, `number of times`, `regain … uses`, `per long/short rest`, `expended uses`), then
+cross-reference against the resource keys that actually exist. Reproducible awk one-liner, both class
+files and both subclass files.
+
+#### ROOT CAUSE R5 — most limited-use SUBCLASS features are untracked
+| Measure | Count |
+|---|---|
+| Subclasses with ≥1 limited-use feature | **90** |
+| Subclasses defining any resource | 35 |
+| …overlap (have a feature *and* a resource) | 20 |
+| **Subclasses with limited-use features and NO resource** | **70** |
+| **Individual untracked features (floor)** | **102** |
+| 2024 subclasses with limited-use features | 18 — **all untracked** (zero 2024 subclasses define resources) |
+
+102 is a floor, not a total: the 20 subclasses that do define a resource usually define **one**, while
+having two to four limited-use features each (e.g. `circle-of-stars` has Cosmic Omen, Star Map and
+Starry Form; `chronurgy-magic` has Chronal Shift and Momentary Stasis; `circle-of-wildfire` has Blazing
+Revival and Cauterizing Flames).
+
+This is the single largest finding of the audit so far and it is Phase B's headline. It is one build —
+the same shape as R3 — not 102 separate fixes.
+
+#### New untracked CLASS features (beyond those already listed)
+| Class | Feature | Book |
+|---|---|---|
+| `paladin` | **Divine Sense** (lv1) | 1 + CHA mod uses per long rest — a **level-1** feature with no counter |
+| `paladin` | **Cleansing Touch** (lv14) | CHA mod uses per long rest |
+| `wizard` | **Signature Spells** (lv20) | 2 spells, each castable once per short rest without a slot |
+| `druid-2024` | **Wild Resurgence** (lv5) | once per long rest |
+
+#### Confirmed fine — not gaps
+`druid` Archdruid (unlimited Wild Shape — the `'unlimited'` flag covers it), `barbarian-2024` Persistent
+Rage and `bard-2024` Superior Inspiration (both "regain on initiative", not counters), `sorcerer`
+Sorcerous Restoration (handled in `shortRest`), `bard` Font of Inspiration, `fighter` Indomitable (2014),
+`wizard` Arcane Recovery (2014).
+
 ---
 
 # QUEUE
