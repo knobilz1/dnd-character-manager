@@ -1212,3 +1212,49 @@ Test 3 — **race-granted resources in both directions** (R3's plumbing):
 Both of these produced a *false pass* on the first attempt. Added to the running tally: the
 sweep-artifact count stands at 8, all under-reporting; these two are the first false
 positives, and both came from the interaction harness rather than a parser.
+
+---
+
+## R3 CLOSED — 27 races, plus a re-sync bug that would have frozen them (2026-07-30)
+
+See `8b02f8d`. Swept all 112 races with `tools/audit/r3scan.py`.
+
+The scanner's important design point: **24 of the 59 flagged traits are innate SPELL
+traits** (Drow Magic, the nine Tiefling Legacies, Fairy Magic, Githyanki Psionics…), and
+those are already tracked by a separate `innateSpells` system with its own per-spell
+counter in SpellPanel. Reporting them as untracked would have manufactured ~24 fake
+findings. The scanner splits on whether the race carries `innateSpells` rather than
+guessing from the trait text.
+
+### The bug the work exposed
+`load()`'s resource re-sync loop iterated only `c.classes`. Race maxes were therefore
+never recomputed after character creation — every proficiency-bonus race trait would have
+sat at its level-1 value for the entire campaign (Shifter 4→5 keeps 2 uses instead of 3).
+The eleven PB race resources added in the same commit would have been **born broken**.
+
+This is the third bug of the session found *while implementing* rather than by any sweep,
+after R7/R8 (`load()` idempotence) and R9 (the pip-clamp data loss). All three live in
+`load()` or the render path — the two places the audit's data-oriented checks never look.
+
+### Resolved: the Goliath disagreement
+Deferred earlier because "sources disagree". They do not — they are **different printings**.
+VGM's Goliath has Stone's Endurance once per short or long rest; MMoM's reprint makes it
+proficiency-bonus uses per long rest. The app's entry is `sourceBook: 'VGM'`, so the VGM
+rule is the correct one for it. Shifting has the identical split (ERLW 1/short vs MMoM
+PB/long) and both now render per their own book.
+
+**Generalisable:** when two sources disagree about a rule, check whether the app's entry
+names one of them before treating it as ambiguous. It usually does.
+
+### Still open, and NOT R3 (different root cause)
+Three races grant spells through trait text but have **no `innateSpells` entry at all**:
+`deep-gnome` (Gift of the Svirfneblin), `duergar` (Duergar Magic), `erlw-aberrant-dragonmark`.
+The consequence is worse than a missing counter — the spells are not castable from the sheet
+at all. This is an **innateSpells coverage gap**, and it deserves its own sweep across all
+112 races: which spell-granting traits have no matching `innateSpells` entry.
+
+### Deliberately no counter
+- `giff` **Firearms Expert** — recharges "when you reload", which is neither a rest nor a
+  daily budget. A counter would be noise.
+- `simic-hybrid` **Animal Enhancement** — a build choice (Manta Glide / Nimble Climber / …),
+  belongs to D4.
