@@ -113,4 +113,20 @@ export const BOOKS: Book[] = [
     year: 2015,
     description: "Forgotten Realms sourcebook. New subraces (Duergar, Ghostwise Halfling, Svirfneblin), tiefling/half-elf variants, 12 subclasses, 4 cantrips, and 12 backgrounds.",
   },
+  {
+    id: 'AcqInc',
+    name: 'Acquisitions Incorporated',
+    shortName: 'AcqInc',
+    color: 'lime',
+    year: 2019,
+    description: 'Adventuring-as-a-business sourcebook. The Verdan race, 5 franchise backgrounds, and 7 spells.',
+  },
+  {
+    id: 'ToB',
+    name: 'Tides of Blood',
+    shortName: 'ToB',
+    color: 'sky',
+    year: 2019,
+    description: 'Third-party nautical collection by Darren Kenny & Conor Higgins. 22 seafaring subclasses, 22 spells, and 8 backgrounds.',
+  },
 ];
