@@ -1162,3 +1162,53 @@ an interaction, not an observation.
 **Change to the method going forward: after seeding a sheet, spend one use of at least one
 resource and re-read, rather than only reading the initial state.** It costs one extra
 click per batch and it is the only thing that would have caught either bug.
+
+---
+
+## Rest-mechanics verification — the first interaction-based pass (2026-07-30)
+
+Direct consequence of the R9 correction. Roughly 80 resources were added this session with
+`rechargeOn: 'short' | 'long'`, and **not one had ever been rested**. Every batch was
+verified by reading the rendered counter, which proves the max is right and proves nothing
+about what resting does. This pass spends uses and then rests.
+
+### Result: the rest system is correct. No defects found.
+
+Test 1 — **mixed short/long on one sheet** (Ancients paladin 20: one short-rest resource
+among five long-rest ones, including the 100-point Lay on Hands pool):
+
+| step | Channel Divinity (short) | the five long-rest resources |
+|---|---|---|
+| initial | 1/1 | full |
+| spend one of each | 0/1 | each down exactly 1 (incl. Lay on Hands 99/100) |
+| **short rest** | **1/1 refilled** | **all five still spent** ✅ |
+| **long rest** | 1/1 | **all five refilled** ✅ |
+
+The middle row is the one that matters — it is the negative control. A short rest that
+refilled long-rest resources would be invisible to every static check the audit runs.
+
+Test 2 — **partial regain** (`shortRestRegain`, previously listed under verify-before-merge
+debt as typechecked but never run). 2024 Cleric, Channel Divinity 3 uses, rule is "regain
+one on a Short Rest, all on a Long Rest": spent all three → **0/3**, short rest → **1/3**.
+Exactly one back, not a refill. ✅
+
+An earlier attempt at this test read 2/3 → 3/3 and looked like a pass. It was not a valid
+test: from 2/3, "+1" and "refill" are the same number. **A partial-regain test only proves
+anything from a state more than one below max.**
+
+Test 3 — **race-granted resources in both directions** (R3's plumbing):
+- Dragonborn Breath Weapon (short): spent → 0/1, short rest → 1/1 ✅
+- Half-Orc Relentless Endurance (long): spent → 0/1, **short rest → still 0/1**, long rest → 1/1 ✅
+
+### Test-harness lessons worth keeping
+
+1. **Re-query the button on every click.** The resource card is replaced on each re-render,
+   so a held reference goes stale and later clicks hit a detached node. A first attempt at
+   "spend all three" landed one click and read 2/3 — which would have been reported as the
+   feature working.
+2. **A test whose pass and fail states produce the same number is not a test.** See the
+   2/3 → 3/3 case above.
+
+Both of these produced a *false pass* on the first attempt. Added to the running tally: the
+sweep-artifact count stands at 8, all under-reporting; these two are the first false
+positives, and both came from the interaction harness rather than a parser.
