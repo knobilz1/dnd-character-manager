@@ -264,6 +264,43 @@ Crystalline Chronicle, Demonomicon of Iggwilv, Lyre of Building, Ring of Obscuri
 Staff of Dunamancy, Amethyst Lodestone, Ruby Weave Gem, Mizzium Mortar, Voyager Staff, all 5 Strixhaven
 Primers, Earworm. Full list regenerable with the grep in this commit.
 
+### Phase C data accuracy — CLEAN (112 races)
+Anomaly sweep over every 2014 race: **speed** (all 25/30/35/40, zero outliers), **darkvision**
+(all absent/60/120, zero outliers), **ASI totals** (distribution 0/1/2/3/4/6).
+Both ASI outliers checked individually and both are **correct**: `human` +1 to all six = 6 (PHB standard
+human), `dwarf-mountain` +2 STR/+2 CON = 4. The 42 zero-totals are parent races whose subraces carry the
+increase, plus the flexible-ASI races.
+→ Race **numeric data is clean**. The entire race problem is tracking (R3), not values.
+Still owed for Phase C: per-race trait *text* vs source — but note the 2026-06-01/02 audits already covered
+race text for MMoM, VGM, GGR, ERLW, EGtW, FToD, SCoC, MToF and PHB (memory `audit_status.md`).
+
+---
+
+# EDITION PRIORITY — 2014 (user plays it more)
+Measured, not assumed. The headline findings are **overwhelmingly 2014**, not 2024:
+| Finding | 2014 | 2024 |
+|---|---|---|
+| R5 untracked subclasses | **52** | 18 |
+| R3 untracked races | **30** | 1 |
+| R6 untracked items | edition-agnostic (692 templates, mostly 2014-era DMG/XGtE/TCE) | — |
+| R2 caps unenforced | both | both |
+| R1 class-id blindness | n/a | 2024 only |
+Only R1 is 2024-specific. Weight remaining work toward 2014 accordingly, and when a sweep produces a list,
+report the 2014 subset first.
+
+2014 untracked subclasses include: alchemist, armorer, artillerist, battle-smith, chronurgy-magic,
+circle-of-spores, circle-of-stars, circle-of-wildfire, college-of-creation, college-of-eloquence,
+drakewarden, echo-knight, fey-wanderer, graviturgy-magic, horizon-walker, monster-slayer, oath-of-devotion,
+oath-of-glory, oath-of-the-ancients, oath-of-the-watchers, order-domain, path-of-the-beast,
+path-of-wild-magic, peace-domain, phantom, psi-warrior, rune-knight, school-of-abjuration,
+school-of-divination, soulknife, swarmkeeper, the-celestial, the-fiend, + the ToB set.
+
+# SECOND PASS (user-requested)
+After all phases complete and the batch fix pass lands, **start again from the beginning**. Rationale from
+the user: wrong tracking and bad spell/ability data can destroy the project, so one clean sweep is not
+enough. Second pass should re-run every reproducible sweep in this file (they are all greps/awk and cheap
+to repeat) and diff against these recorded numbers — any drift is a regression.
+
 ---
 
 # QUEUE
