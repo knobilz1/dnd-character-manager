@@ -40,7 +40,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Enthralling Performance', level: 3, description: 'Starting at 3rd level, if you perform for at least 1 minute, at the end of the performance choose a number of humanoids within 60 feet equal to your Charisma modifier (minimum one). Each must make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or be charmed by you. While charmed, the creature idolizes you and speaks glowingly of you to anyone who talks to it. It can repeat the save every 24 hours or when it suffers harm. Once per short or long rest.' },
     { name: 'Mantle of Majesty', level: 6, description: 'At 6th level, as a bonus action, you cast Command without expending a spell slot and assume a magisterial presence for 1 minute. For the duration, you can cast Command as a bonus action on each of your turns without a spell slot. Creatures that are charmed by you automatically fail their saving throw against this Command. Once per long rest.' },
     { name: 'Unbreakable Majesty', level: 14, description: 'At 14th level, your appearance permanently takes on an otherworldly aspect. As a bonus action, you enter a magical presence for 1 minute. For the duration, when any creature tries to attack you for the first time on a turn, that creature must succeed on a Charisma saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or forfeit the attack and be immune to this feature until the start of your next turn. Once per short or long rest.' },
-  ]},
+  ],
+    // XGtE p.14: Enthralling Performance and Unbreakable Majesty recharge on a short or long
+    // rest; Mantle of Majesty is long rest only.
+    resources: [
+      { name: 'Enthralling Performance', key: 'enthralling_performance', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Mantle of Majesty', key: 'mantle_of_majesty', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Unbreakable Majesty', key: 'unbreakable_majesty', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   // Cleric
   { id: 'life-domain', name: 'Life Domain', classId: 'cleric', sourceBook: 'PHB', description: 'The Life domain focuses on the vibrant positive energy—one of the fundamental forces of the universe—that sustains all life.', features: [
     { name: 'Bonus Proficiency', level: 1, description: 'When you choose this domain at 1st level, you gain proficiency with heavy armor.' },
@@ -394,14 +405,22 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Spirit Shield', level: 6, description: 'When a creature you can see within 30 feet takes damage, you can use your reaction to reduce that damage by 2d6 (3d6 at 10th, 4d6 at 14th).' },
     { name: 'Consult the Spirits', level: 10, description: 'You can cast Augury or Clairvoyance without expending a spell slot or material components, using your ancestral spirits instead of a sensor (for Clairvoyance). Wisdom is your spellcasting ability. Once per short or long rest.' },
     { name: 'Vengeful Ancestors', level: 14, description: 'When you use Spirit Shield, the attacker takes the same amount of force damage you prevented.' },
-  ]},
+  ],
+    // XGtE p.10: Consult the Spirits — "you can't use this feature again until you finish a short or long rest."
+    resources: [{ name: 'Consult the Spirits', key: 'consult_the_spirits', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'zealot', name: 'Path of the Zealot', classId: 'barbarian', sourceBook: 'XGtE', description: 'Barbarians who follow the Path of the Zealot are warriors who channel divine fury into a martial frenzy. They serve as the avenging instruments of their gods.', features: [
     { name: 'Divine Fury', level: 3, description: 'While raging, the first creature you hit with a weapon attack on each turn takes extra damage equal to 1d6 + half your barbarian level (necrotic or radiant, your choice).' },
     { name: 'Warrior of the Gods', level: 3, description: 'Spells that return you to life don\'t require material components.' },
     { name: 'Fanatical Focus', level: 6, description: 'If you fail a saving throw while raging, you can reroll it. You can only reroll one save per rage.' },
     { name: 'Zealous Presence', level: 10, description: 'As a bonus action, up to ten creatures of your choice within 60 feet that can hear you gain advantage on attack rolls and saving throws until the start of your next turn. Once per long rest.' },
     { name: 'Rage Beyond Death', level: 14, description: 'While raging, having 0 HP doesn\'t knock you unconscious. You can still die from failed death saves, but death is delayed until rage ends.' },
-  ]},
+  ],
+    // XGtE p.11: Zealous Presence — "Once you use this feature, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Zealous Presence', key: 'zealous_presence', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── XGtE: BARD ───────────────────────────────────────────────────────
   { id: 'college-of-swords', name: 'College of Swords', classId: 'bard', sourceBook: 'XGtE', description: 'Bards of the College of Swords are called blades. They entertain through daring feats of weapon prowess, often combined with theatrical performance.', features: [
@@ -554,7 +573,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Distant Strike', level: 11, description: 'When you take the Attack action, you can teleport up to 10 feet between attacks. If you attack at least two different creatures, you can make a third attack against a third creature.' },
     { name: 'Planar Warrior Improvement', level: 11, description: 'At 11th level, the extra force damage from your Planar Warrior feature increases to 2d8.' },
     { name: 'Spectral Defense', level: 15, description: 'When you take damage from an attack, you can use your reaction to gain resistance against the attack\'s damage.' },
-  ]},
+  ],
+    // XGtE p.42: Detect Portal (3rd) and Ethereal Step (7th) each recharge on a short or long rest.
+    resources: [
+      { name: 'Detect Portal', key: 'detect_portal', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Ethereal Step', key: 'ethereal_step', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'monster-slayer', name: 'Monster Slayer', classId: 'ranger', sourceBook: 'XGtE', description: 'Monster Slayers seek out vampires, dragons, evil fey, fiends, and other magical threats.', features: [
     { name: 'Monster Slayer Magic', level: 3, description: 'You learn additional spells, starting with Protection from Evil and Good.' },
     { name: 'Hunter\'s Sense', level: 3, description: 'As an action, choose a creature within 60 feet. You learn its damage immunities, resistances, and vulnerabilities. Wis-mod uses per long rest.' },
@@ -602,7 +629,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Empowered Healing', level: 6, description: 'When you or an ally within 5 feet rolls dice to determine HP restored, spend 1 sorcery point to reroll any of those dice.' },
     { name: 'Otherworldly Wings', level: 14, description: 'As a bonus action, manifest spectral wings (flying speed 30 ft) until incapacitated, dead, or dismissed as a bonus action.' },
     { name: 'Unearthly Recovery', level: 18, description: 'As a bonus action when below half HP, regain HP equal to half your max. Once per long rest.' },
-  ]},
+  ],
+    // XGtE p.50: Favored by the Gods (1st) recharges on a short or long rest;
+    // Unearthly Recovery (18th) is once per long rest.
+    resources: [
+      { name: 'Favored by the Gods', key: 'favored_by_the_gods', rechargeOn: 'short',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Unearthly Recovery', key: 'unearthly_recovery', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'shadow-magic', name: 'Shadow Magic', classId: 'sorcerer', sourceBook: 'XGtE', description: 'You are a creature of shadow, for your innate magic comes from the Shadowfell itself.', features: [
     { name: 'Eyes of the Dark', level: 1, description: 'You gain darkvision 120 feet.' },
     { name: 'Strength of the Grave', level: 1, description: 'When damage reduces you to 0 HP, make a Charisma save (DC 5 + damage). On success, drop to 1 HP. Once per long rest.' },
@@ -639,7 +675,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Radiant Soul', level: 6, description: 'You gain resistance to radiant damage, and once per turn when you cast a spell that deals radiant or fire damage, you can add your Cha modifier to one damage roll.' },
     { name: 'Celestial Resilience', level: 10, description: 'When you finish a short or long rest, you gain temporary HP equal to your warlock level + your Charisma modifier. Also choose up to 5 creatures you can see — each gains temporary HP equal to half your warlock level + your Charisma modifier.' },
     { name: 'Searing Vengeance', level: 14, description: 'When you must make a death saving throw at the start of your turn, you can instead spring back to your feet — regain HP equal to half your hit point maximum, then stand up. Each creature of your choice within 30 feet takes 2d8 + Charisma modifier radiant damage and is blinded until end of the current turn. Once per long rest.' },
-  ], expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }},
+  ],
+    // XGtE p.55: Searing Vengeance — "Once you use this feature, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Searing Vengeance', key: 'searing_vengeance', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }},
 
   // ── XGtE: WIZARD ─────────────────────────────────────────────────────
   { id: 'war-magic', name: 'War Magic', classId: 'wizard', sourceBook: 'XGtE', description: 'Practitioners of War Magic stand bravely on the front lines of battle, balancing offense and defense as they wield powerful evocations and abjurations.', features: [
