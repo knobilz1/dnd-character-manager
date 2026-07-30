@@ -240,6 +240,30 @@ Rage and `bard-2024` Superior Inspiration (both "regain on initiative", not coun
 Sorcerous Restoration (handled in `shortRest`), `bard` Font of Inspiration, `fighter` Indomitable (2014),
 `wizard` Arcane Recovery (2014).
 
+## ROOT CAUSE R6 — magic-item charges mostly untracked (Phase E, added by user)
+Item model is `ItemTemplate { name, category, weight?, description?, sourceBook?, maxCharges?, recharge? }`.
+`maxCharges` is what turns an item into a usable counter on the sheet (`InventoryPanel.tsx:89-120`,
+pips at `:304`), pre-filled when the item is added from template.
+
+| Measure | Count |
+|---|---|
+| Item templates total | 692 |
+| With `maxCharges` (tracked) | 48 |
+| **Charge/daily-use language in the text but NO `maxCharges`** | **39** |
+| **`maxCharges` set but NO `recharge` — charges never come back** | **2** |
+
+**The 2 broken ones:** `Ring of Three Wishes` (3 charges) and `Scarab of Protection` (12 charges). Both
+get a counter that can only ever count down. Ring of Three Wishes is correct per the DMG (it is expended
+permanently), so that one is fine — **Scarab of Protection is a real bug**: the DMG says it regains
+4d6 expended charges daily at dawn, so it should be `recharge: 'dawn'`.
+
+The 39 untracked include: Alchemy Jug, Gem of Brightness, Cape of the Mountebank, Chime of Opening,
+Cloak of Invisibility, Cloak of the Bat, Helm of Teleportation, Hat of Vermin, Staff of Birdcalls,
+Staff of Flowers, Wand of Pyrotechnics/Scowls/Smiles, Bell Branch, Blood Fury Tattoo, Crook of Rao,
+Crystalline Chronicle, Demonomicon of Iggwilv, Lyre of Building, Ring of Obscuring, Rod of Retribution,
+Staff of Dunamancy, Amethyst Lodestone, Ruby Weave Gem, Mizzium Mortar, Voyager Staff, all 5 Strixhaven
+Primers, Earworm. Full list regenerable with the grep in this commit.
+
 ---
 
 # QUEUE
