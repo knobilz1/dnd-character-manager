@@ -10,6 +10,7 @@ import { ALL_MANEUVERS } from '../../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../../data/optionalClassFeatures';
 import { bookEnabled } from '../../../utils/bookEnabled';
+import { baseClassId } from '../../../data/classes';
 import type { BookId, ClassOptionsState } from '../../../types';
 
 function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' | 'indigo' | 'violet' | 'rose' | 'yellow' | 'cyan' | 'gray' {
@@ -130,6 +131,10 @@ export function StepClassOptions() {
   const enabledBooks = new Set(draft.enabledBooks ?? []);
   const primaryClass = draft.classes?.[0];
   const classId = primaryClass?.classId ?? '';
+  // Every mechanic below keys off the 2014 class name, and the option data (fighting styles,
+  // invocations, metamagic, optional features) is tagged with 2014 ids. Without this collapse a
+  // PHB 2024 character silently got no Fighting Style, no invocations and no Metamagic picker.
+  const baseId = baseClassId(classId);
   const level = primaryClass?.level ?? 1;
   const subclassId = primaryClass?.subclassId;
 
@@ -150,18 +155,18 @@ export function StepClassOptions() {
   }
 
   // ── Fighting Styles ──────────────────────────────────────────────────
-  const hasFightingStyle = ['fighter', 'paladin', 'ranger'].includes(classId);
+  const hasFightingStyle = ['fighter', 'paladin', 'ranger'].includes(baseId);
   let fightingStyleCount = 0;
-  if (classId === 'fighter') fightingStyleCount = level >= 10 ? 2 : 1;
-  else if (classId === 'paladin' && level >= 2) fightingStyleCount = 1;
-  else if (classId === 'ranger' && level >= 2) fightingStyleCount = 1;
+  if (baseId === 'fighter') fightingStyleCount = level >= 10 ? 2 : 1;
+  else if (baseId === 'paladin' && level >= 2) fightingStyleCount = 1;
+  else if (baseId === 'ranger' && level >= 2) fightingStyleCount = 1;
 
   const fightingStylesAvail = ALL_FIGHTING_STYLES
     .filter(fs => bookEnabled(fs, enabledBooks))
-    .filter(fs => fs.classes.includes(classId));
+    .filter(fs => fs.classes.includes(baseId));
 
   // ── Eldritch Invocations & Pact Boon ────────────────────────────────
-  const isWarlock = classId === 'warlock';
+  const isWarlock = baseId === 'warlock';
   let invocationCount = 0;
   if (isWarlock) {
     if (level >= 2) invocationCount = 2;
@@ -182,7 +187,7 @@ export function StepClassOptions() {
   const pactBoonsAvail = ALL_PACT_BOONS.filter(p => bookEnabled(p, enabledBooks));
 
   // ── Metamagic ────────────────────────────────────────────────────────
-  const isSorcerer = classId === 'sorcerer';
+  const isSorcerer = baseId === 'sorcerer';
   let metamagicCount = 0;
   if (isSorcerer) {
     if (level >= 3) metamagicCount = 2;
@@ -192,7 +197,7 @@ export function StepClassOptions() {
   const metamagicAvail = ALL_METAMAGIC.filter(m => bookEnabled(m, enabledBooks));
 
   // ── Maneuvers (Battle Master) ────────────────────────────────────────
-  const isBattleMaster = classId === 'fighter' && subclassId === 'battle-master';
+  const isBattleMaster = baseId === 'fighter' && (subclassId === 'battle-master' || subclassId === 'battle-master-2024');
   let maneuverCount = 0;
   if (isBattleMaster) {
     maneuverCount = 3;
@@ -203,7 +208,7 @@ export function StepClassOptions() {
   const maneuversAvail = ALL_MANEUVERS.filter(m => bookEnabled(m, enabledBooks));
 
   // ── Infusions (Artificer) ────────────────────────────────────────────
-  const isArtificer = classId === 'artificer';
+  const isArtificer = baseId === 'artificer';
   let infusionsKnownCount = 0;
   if (isArtificer && level >= 2) infusionsKnownCount = 4;
   if (isArtificer && level >= 6) infusionsKnownCount = 6;
@@ -217,7 +222,7 @@ export function StepClassOptions() {
   // ── Optional Class Features (TCE) ────────────────────────────────────
   const optionalFeaturesAvail = ALL_OPTIONAL_CLASS_FEATURES
     .filter(f => bookEnabled(f, enabledBooks))
-    .filter(f => f.classId === classId)
+    .filter(f => f.classId === baseId)
     .filter(f => f.minLevel <= level);
 
   // ── Totem Warrior ─────────────────────────────────────────────────────

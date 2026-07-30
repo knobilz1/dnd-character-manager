@@ -456,10 +456,16 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const hasSpellcasting = classDef.spellcastingType !== 'none' || isSubclassSpellcaster;
   // EK/AT are known casters with their own per-class-level spell table.
   const isSubclassKnownCaster = isSubclassSpellcaster && !!sub?.spellsKnownByClassLevel;
-  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger', 'bard-2024', 'sorcerer-2024', 'warlock-2024', 'ranger-2024'].includes(classId) || isSubclassKnownCaster;
+  // bard-2024 and ranger-2024 became PREPARED casters in PHB 2024 and have entries in
+  // PREPARED_SPELLS_2024, not SPELLS_KNOWN. Listing them here meant spellsKnownFor() returned 0 for
+  // them, so a 2024 Bard or Ranger was never offered a spell pick on level-up.
+  // sorcerer-2024 / warlock-2024 stay here deliberately: the 2024 book labels their column "Prepared",
+  // but this app models them via SPELLS_KNOWN (entries present, values matching the 2024 column), and
+  // that is self-consistent — moving them would break a working path.
+  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger', 'sorcerer-2024', 'warlock-2024'].includes(classId) || isSubclassKnownCaster;
   // Wizard/Artificer: prepared casters but with a spellbook — gain exactly 2 free picks per level-up
   const isSpellbookCaster = ['wizard', 'wizard-2024'].includes(classId);
-  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer', 'cleric-2024', 'druid-2024', 'paladin-2024', 'wizard-2024'].includes(classId);
+  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer', 'bard-2024', 'cleric-2024', 'druid-2024', 'paladin-2024', 'ranger-2024', 'wizard-2024'].includes(classId);
 
   const spellsKnownGained = isSubclassKnownCaster
     ? Math.max(0, (sub!.spellsKnownByClassLevel![newLevel - 1] ?? 0) - (sub!.spellsKnownByClassLevel![currentLevel - 1] ?? 0))

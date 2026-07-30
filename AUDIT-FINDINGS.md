@@ -516,7 +516,22 @@ to `getRace()`. No lookup breaks. Recorded so it is not "fixed" later.
   that is two classes, not a class/subclass clash, and is correct.)
 - Positive control passed.
 
-### G6 — `spellsKnownFor` returns 0 for 2024 known-casters — the exact consequence of R1
+### ❌ G6 — RETRACTED. `SPELLS_KNOWN` **does** carry 2024 keys.
+`mechanics.ts:220-221` has `'sorcerer-2024'` and `'warlock-2024'`, with values matching the 2024
+"Prepared" column exactly. My original grep used `-A4`, which truncated the block before those two lines,
+and I concluded from the truncation that the keys were absent. **A fourth parser/tooling artifact.**
+`spellsKnownFor` works correctly for both.
+
+What survived from this area is the **`bard-2024` / `ranger-2024`** half (see D2): those two became
+prepared casters and live in `PREPARED_SPELLS_2024`, not `SPELLS_KNOWN`, yet `LevelUpDialog` listed them
+as *known* casters — so `spellsKnownFor` returned 0 and neither was ever offered a spell pick on level-up.
+Fixed by moving them to `isPreparedCaster`.
+
+Deliberately left alone: `sorcerer-2024` / `warlock-2024` stay classified as known casters. The 2024 book
+labels their column "Prepared", but this app models them through `SPELLS_KNOWN` with correct values and
+the path is self-consistent; reclassifying them would break something that works for a labelling nicety.
+
+### (original G6 text, superseded)
 `LevelUpDialog.tsx:463` computes newly-learned spells as
 `spellsKnownFor(classId, newLevel) - spellsKnownFor(classId, currentLevel)` using the **raw** classId.
 `SPELLS_KNOWN` (`mechanics.ts:214`) has **no `-2024` keys**, so both terms are 0.

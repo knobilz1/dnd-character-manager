@@ -30,7 +30,7 @@ import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { getClass } from '../../data/classes';
+import { getClass, baseClassId } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
@@ -228,7 +228,7 @@ export function SheetPage() {
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
 
   // ── Alternate form flags ─────────────────────────────────────────────────────
-  const druidEntry = character.classes.find(cl => cl.classId === 'druid');
+  const druidEntry = character.classes.find(cl => baseClassId(cl.classId) === 'druid');
   const isDruid = !!druidEntry;
   const druidLevel = druidEntry?.level ?? 0;
   const isMoonDruid = druidEntry?.subclassId === 'circle-of-the-moon';
@@ -2262,7 +2262,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
                   {/* ── Ki ability buttons (Monk) ─────────────────────── */}
                   {r.key === 'ki' && (() => {
-                    const monkEntry = character.classes.find((c: any) => c.classId === 'monk');
+                    const monkEntry = character.classes.find((c: any) => baseClassId(c.classId) === 'monk');
                     if (!monkEntry) return null;
                     const monkLevel: number = monkEntry.level;
                     const monkSubclass: string | undefined = monkEntry.subclassId;
