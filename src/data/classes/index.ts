@@ -420,7 +420,11 @@ export const ALL_CLASSES: DClass[] = [
     toolProficiencies: ['Thieves\' tools'],
     skillChoices: { count: 4, from: ['Acrobatics','Athletics','Deception','Insight','Intimidation','Investigation','Perception','Performance','Persuasion','Sleight of Hand','Stealth'] },
     spellcastingType: 'none',
-    resources: [],
+    resources: [
+      // PHB lv20 Stroke of Luck: "Once you use this feature, you can't use it again until you finish a
+      // short or long rest."
+      { name: 'Stroke of Luck', key: 'stroke_of_luck', rechargeOn: 'short', maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1} },
+    ],
     subclassLabel: 'Roguish Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },

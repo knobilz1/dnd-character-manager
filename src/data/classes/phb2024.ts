@@ -213,6 +213,8 @@ export const PHB2024_CLASSES: DClass[] = [
     resources: [
       { name: 'Action Surge', key: 'action_surge', rechargeOn: 'short', maxPerLevel: {1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:2,18:2,19:2,20:2} },
       { name: 'Second Wind', key: 'second_wind', rechargeOn: 'short', maxPerLevel: {1:2,2:2,3:2,4:3,5:3,6:3,7:3,8:3,9:3,10:4,11:4,12:4,13:4,14:4,15:4,16:4,17:4,18:4,19:4,20:4} },
+      // Was missing entirely. PHB 2024 Fighter table: Indomitable (1) at 9, (2) at 13, (3) at 17.
+      { name: 'Indomitable', key: 'indomitable', rechargeOn: 'long', maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:2,14:2,15:2,16:2,17:3,18:3,19:3,20:3} },
     ],
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
@@ -371,7 +373,11 @@ export const PHB2024_CLASSES: DClass[] = [
     skillChoices: { count: 3, from: ['Animal Handling', 'Athletics', 'Insight', 'Investigation', 'Nature', 'Perception', 'Stealth', 'Survival'] },
     spellcastingType: 'half',
     spellcastingAbility: 'wis',
-    resources: [],
+    resources: [
+      // PHB 2024 lv1 Favored Enemy: cast Hunter's Mark without a slot this many times; all back on a
+      // Long Rest. Counts from the 2024 Ranger table's Favored Enemy column (2/3/4/5/6 at 1/5/9/13/17).
+      { name: 'Favored Enemy', key: 'favored_enemy', rechargeOn: 'long', maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+    ],
     subclassLabel: 'Ranger Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13, wis: 13 },
@@ -418,7 +424,10 @@ export const PHB2024_CLASSES: DClass[] = [
     toolProficiencies: ['Thieves\' Tools'],
     skillChoices: { count: 4, from: ['Acrobatics', 'Athletics', 'Deception', 'Insight', 'Intimidation', 'Investigation', 'Perception', 'Persuasion', 'Sleight of Hand', 'Stealth'] },
     spellcastingType: 'none',
-    resources: [],
+    resources: [
+      // 2024 Rogue keeps Stroke of Luck at level 20 (confirmed present in this class's own feature list).
+      { name: 'Stroke of Luck', key: 'stroke_of_luck', rechargeOn: 'short', maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1} },
+    ],
     subclassLabel: 'Roguish Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
@@ -560,7 +569,11 @@ export const PHB2024_CLASSES: DClass[] = [
     skillChoices: { count: 2, from: ['Arcana', 'History', 'Insight', 'Investigation', 'Medicine', 'Nature', 'Religion'] },
     spellcastingType: 'full',
     spellcastingAbility: 'int',
-    resources: [],
+    resources: [
+      // PHB 2024 lv1: "On Short Rest: recover spell slots totaling <= half Wizard level (round up),
+      // no level 6+. Once per Long Rest." The once-per-long-rest use is what's tracked.
+      { name: 'Arcane Recovery', key: 'arcane_recovery', rechargeOn: 'long', maxPerLevel: {1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
+    ],
     subclassLabel: 'Arcane Tradition',
     subclassLevel: 3,
     multiclassPrerequisites: { int: 13 },
