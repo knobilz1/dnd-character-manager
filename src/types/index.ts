@@ -182,6 +182,12 @@ export interface Subclass {
   description: string;
   features: ClassFeature[];
   alwaysPreparedSpells?: Record<number, string[]>;
+  /** Always-prepared spells that depend on a build choice: Circle of the Land picks one of
+   *  eight land types and gets that column only. Outer key is the chosen land, inner shape
+   *  matches alwaysPreparedSpells. Kept separate from alwaysPreparedSpells because those
+   *  apply unconditionally — merging the two would grant a Land druid all 8 lists at once.
+   *  Named concretely rather than generalised: this is the only subclass with the shape. */
+  landSpells?: Record<string, Record<number, string[]>>;
   expandedSpells?: Record<number, string[]>;
   spellcastingType?: SpellcastingType;
   /** For subclass-granted spellcasting, the class whose spell list to use (e.g. 'wizard' for EK/AT). */
@@ -373,6 +379,10 @@ export interface ClassOptionsState {
   aspectTotem?: string;
   /** Barbarian Totem Warrior — chosen at lv.14 (Totemic Attunement) */
   totemicAttunement?: string;
+  /** Druid Circle of the Land — chosen at lv.3, selects which Circle Spells you get
+   *  (arctic | coast | desert | forest | grassland | mountain | swamp | underdark).
+   *  Without it the subclass grants no spells at all. */
+  landType?: string;
 }
 
 export type ItemCategory =

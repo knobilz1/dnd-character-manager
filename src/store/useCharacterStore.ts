@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, ClassLevel, PreparedSpell, JournalEntry } from '../types';
+import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, JournalEntry } from '../types';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
@@ -8,6 +8,7 @@ import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalC
 import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getSpell } from '../data/spells';
+import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
 
 /** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
  *  Mirrors the logic in useCharacterDerived.ts so the store can apply correct maxes
@@ -155,33 +156,7 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   return overrides;
 }
 
-/** IDs of all always-prepared spells unlocked at the given class/subclass levels. */
-function computeAlwaysPreparedIds(classes: ClassLevel[]): string[] {
-  const ids: string[] = [];
-  for (const cl of classes) {
-    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
-    if (!sub?.alwaysPreparedSpells) continue;
-    for (const [minLevelStr, spellIds] of Object.entries(sub.alwaysPreparedSpells)) {
-      if (cl.level >= Number(minLevelStr)) ids.push(...spellIds);
-    }
-  }
-  return [...new Set(ids)];
-}
 
-/** Ensure the spellbook contains all alwaysPrepared IDs, flagged correctly. */
-function syncAlwaysPrepared(spellbook: PreparedSpell[], alwaysPreparedIds: string[]): PreparedSpell[] {
-  const result = spellbook.map(s => ({
-    ...s,
-    isAlwaysPrepared: alwaysPreparedIds.includes(s.spellId),
-    isPrepared: alwaysPreparedIds.includes(s.spellId) ? true : s.isPrepared,
-  }));
-  for (const id of alwaysPreparedIds) {
-    if (!result.some(s => s.spellId === id)) {
-      result.push({ spellId: id, isPrepared: true, isAlwaysPrepared: true });
-    }
-  }
-  return result;
-}
 
 interface CharacterState {
   character: Character | null;
@@ -433,7 +408,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
         spellbook: syncAlwaysPrepared(
           c.spellbook ?? [],
-          computeAlwaysPreparedIds(c.classes ?? []),
+          computeAlwaysPreparedIds(c.classes ?? [], c.classOptions),
         ),
         // Migrate existing characters: add innate spell uses for any unlocked spells
         // that weren't tracked yet (cantrips are unlimited and not stored).
@@ -864,7 +839,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Sync always-prepared spells for newly unlocked subclass spell tables.
       const newSpellbook = syncAlwaysPrepared(
         s.character.spellbook,
-        computeAlwaysPreparedIds(classes),
+        computeAlwaysPreparedIds(classes, s.character.classOptions),
       );
 
       // Unlock any newly accessible innate spells (based on new total character level).

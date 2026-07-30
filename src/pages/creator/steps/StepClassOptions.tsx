@@ -225,6 +225,21 @@ export function StepClassOptions() {
     .filter(f => f.classId === baseId)
     .filter(f => f.minLevel <= level);
 
+  // ── Circle of the Land ────────────────────────────────────────────────
+  // The land type decides which Circle Spells you get. Until this picker existed the
+  // choice had nowhere to live, so a Land druid received NO circle spells at all.
+  const isLandDruid = baseId === 'druid' && subclassId === 'circle-of-the-land';
+  const LAND_OPTIONS: { id: string; emoji: string; name: string; description: string }[] = [
+    { id: 'arctic',    emoji: '🧊', name: 'Arctic',    description: '3rd: hold person, spike growth · 5th: sleet storm, slow · 7th: freedom of movement, ice storm · 9th: commune with nature, cone of cold' },
+    { id: 'coast',     emoji: '🌊', name: 'Coast',     description: '3rd: mirror image, misty step · 5th: water breathing, water walk · 7th: control water, freedom of movement · 9th: conjure elemental, scrying' },
+    { id: 'desert',    emoji: '🏜️', name: 'Desert',    description: '3rd: blur, silence · 5th: create food and water, protection from energy · 7th: blight, hallucinatory terrain · 9th: insect plague, wall of stone' },
+    { id: 'forest',    emoji: '🌲', name: 'Forest',    description: '3rd: barkskin, spider climb · 5th: call lightning, plant growth · 7th: divination, freedom of movement · 9th: commune with nature, tree stride' },
+    { id: 'grassland', emoji: '🌾', name: 'Grassland', description: '3rd: invisibility, pass without trace · 5th: daylight, haste · 7th: divination, freedom of movement · 9th: dream, insect plague' },
+    { id: 'mountain',  emoji: '⛰️', name: 'Mountain',  description: '3rd: spider climb, spike growth · 5th: lightning bolt, meld into stone · 7th: stone shape, stoneskin · 9th: passwall, wall of stone' },
+    { id: 'swamp',     emoji: '🐊', name: 'Swamp',     description: "3rd: darkness, Melf's acid arrow · 5th: water walk, stinking cloud · 7th: freedom of movement, locate creature · 9th: insect plague, scrying" },
+    { id: 'underdark', emoji: '🕳️', name: 'Underdark', description: '3rd: spider climb, web · 5th: gaseous form, stinking cloud · 7th: greater invisibility, stone shape · 9th: cloudkill, insect plague' },
+  ];
+
   // ── Totem Warrior ─────────────────────────────────────────────────────
   const isTotemWarrior = classId === 'barbarian' && (
     subclassId === 'totem-warrior' || subclassId === 'scag-totem-warrior-elk-tiger'
@@ -376,6 +391,21 @@ export function StepClassOptions() {
           selectedIds={opts.optionalFeatures}
           max={Infinity}
           onToggle={(id) => toggleList('optionalFeatures', id, Infinity)}
+        />
+      )}
+
+      {/* ── Circle of the Land: land type (lv.3+) ── */}
+      {isLandDruid && level >= 3 && (
+        <OptionSection
+          title="Circle Spells — Land Type"
+          helpText="Choose the land your circle is tied to. It decides which spells become always prepared at 3rd, 5th, 7th and 9th level; they don't count against your prepared total."
+          items={LAND_OPTIONS.map(l => ({
+            id: l.id, name: `${l.emoji} ${l.name}`, sourceBook: 'PHB' as BookId, description: l.description,
+          }))}
+          selectedIds={opts.landType ? [opts.landType] : []}
+          max={1}
+          radio
+          onToggle={(id) => patch({ landType: opts.landType === id ? undefined : id })}
         />
       )}
 
