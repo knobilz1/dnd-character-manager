@@ -670,7 +670,41 @@ oath-of-glory, oath-of-the-ancients, oath-of-the-watchers, order-domain, path-of
 path-of-wild-magic, peace-domain, phantom, psi-warrior, rune-knight, school-of-abjuration,
 school-of-divination, soulknife, swarmkeeper, the-celestial, the-fiend, + the ToB set.
 
-# SECOND PASS (user-requested)
+# SECOND PASS — RESULTS
+
+## Round 1: re-verify the two numbers the fix plan is sized on
+Both R5 and R3 were measured **before** the positive-control discipline was adopted, and four parser bugs
+had already produced false results elsewhere. Both were therefore re-run with **independently written
+parsers** plus positive and negative controls.
+
+| Finding | First pass | Second pass | Verdict |
+|---|---|---|---|
+| **R5** subclasses with ≥1 limited-use feature | 90 | **90** | ✅ reproduces |
+| **R5** limited-use feature lines | 133 | **133** | ✅ reproduces |
+| **R3** races untracked (limited-use, no innate-spell path) | 31 | **31** | ✅ reproduces, **set diff empty** |
+
+Controls: R5 broad pattern matched **188** subclasses (equals the known subclass count, so the parser sees
+every entry); nonsense pattern matched **0**. R3 nonsense pattern matched **0**.
+
+Minor, non-material difference: the second R3 parser counts 72 races / 85 features where the first counted
+76 / 91, because the two attribute traits to nested subraces slightly differently. **The number that
+matters — the 31 untracked races — is identical, and `comm -3` between the two sets is empty**, i.e. the
+same 31 races exactly.
+
+**Conclusion: Tier 3 of the fix plan is correctly sized.** R5 (102 features / 70 subclasses) and R3
+(31 races) are confirmed by two independent implementations.
+
+## Second-pass method note
+Re-running a sweep with the *same* script proves nothing — it reproduces its own bugs. Every second-pass
+check must be **written fresh** and carry a positive control (a pattern that must match a known
+population) and a negative control (a pattern that must match nothing). That is what caught the four
+first-pass parser failures, and what validated these two numbers.
+
+## Still to re-verify in the second pass
+R6 (39 items) · R2 cap sites · D4 (103 subclass choices — needs hand triage anyway) · Phase G's G1–G4
+(already high-confidence: each was confirmed by direct `grep` of the specific line, not by a sweep).
+
+# SECOND PASS (original plan)
 After all phases complete and the batch fix pass lands, **start again from the beginning**. Rationale from
 the user: wrong tracking and bad spell/ability data can destroy the project, so one clean sweep is not
 enough. Second pass should re-run every reproducible sweep in this file (they are all greps/awk and cheap
