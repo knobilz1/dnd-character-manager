@@ -1266,7 +1266,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Siren Song', level: 3, description: 'When you choose this college at 3rd level, as an action you choose one creature within 60 feet that can hear you. That creature must make a Wisdom saving throw with disadvantage; on a failure it is incapacitated and its movement is reduced to 0 until the start of your next turn. You can spend a Bardic Inspiration to target one additional creature within 5 feet of the first. Usable twice per long rest.' },
     { name: 'Deep Dreams', level: 6, description: 'When you reach 6th level you learn the sleep spell; it doesn\'t count against your bard spells known. When you cast sleep you can expend one Bardic Inspiration die and add that roll plus your Charisma modifier to the hit points affected. You can also cast it once at its lowest level without expending a spell slot per long rest.' },
     { name: 'Blessing of the Enchantress', level: 14, description: 'Beginning at 14th level, as an action you can expend a spell slot to cure a number of conditions equal to the spell slot level (blinded, charmed, deafened, frightened, paralysed, poisoned, stunned, or the effects of spells like hex/bestow curse). These can target the same creature or multiple.' },
-  ]},
+  ],
+    // ToB p.9: Siren Song is 2 uses per long rest (a flat 2, not an ability modifier);
+    // Deep Dreams grants one free lowest-level Sleep per long rest.
+    resources: [
+      { name: 'Siren Song', key: 'siren_song', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },
+      { name: 'Deep Dreams: Free Sleep', key: 'deep_dreams_sleep', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Cleric
   { id: 'tob-island-domain', name: 'Island Domain', classId: 'cleric', sourceBook: 'ToB', description: 'A beacon of hope for sailors in a storm — you are a steady hand, a calming presence, a pillar of strength supporting your crew through the coming tides.', features: [
@@ -1295,7 +1304,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Ocean Wildlife', level: 6, description: 'Starting at 6th level, whenever you transform into a beast or swarm without a swimming speed, you can convert their standard or flying speed into a swimming speed, and gain the ability to breathe underwater as that beast or swarm.' },
     { name: 'Druidic Rapids', level: 10, description: 'Starting from 10th level, your speed increases by 10 feet in natural form and by 20 feet in all Wild Shape forms. Any ally who starts their turn within 20 feet of you increases their speed by 10 feet and the range of your Breaking Waves increases to 20 feet.' },
     { name: 'Spawning Season', level: 14, description: 'Beginning at 14th level, when you use Wild Shape you can expend a second use to also transform up to 3 allied creatures you can see within 30 feet. Allied creatures gain Wild Shape benefits but cannot transform into anything with CR higher than 2. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.16: Spawning Season — once per long rest. (It also spends a second Wild Shape
+    // use, which the druid class resource already tracks.)
+    resources: [{ name: 'Spawning Season', key: 'spawning_season', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'tob-circle-of-the-tides', name: 'Circle of the Tides', classId: 'druid', sourceBook: 'ToB', description: 'You guard the waters of the world from pollution, hunting those who seek to bring death and ruin to those who cross the tides and dwell below the waters\' surface.', features: [
     { name: 'Tide Walker', level: 2, description: 'Starting from 2nd level you can use a bonus action to move an allied creature a number of feet equal to your Wisdom modifier multiplied by 5.' },
     { name: 'Rebuking Wave', level: 2, description: 'Starting from 2nd level whenever a creature comes within 5 ft of you, you can use your reaction to make a melee spell attack. On a hit the creature takes 1d8 magical bludgeoning damage and is knocked back 10 ft (2d8 at 5th, 3d8 at 11th, 4d8 at 17th).' },
@@ -1311,7 +1325,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Walk the Plank', level: 10, description: 'Starting at 10th level, you can give yourself a bonus to initiative rolls equal to your Charisma modifier. You also gain advantage on Acrobatics checks made when walking on a narrow space or boarding a ship.' },
     { name: 'No Quarter', level: 15, description: 'From 15th level, when you reduce a creature to 0 hit points, you can immediately use your reaction to move up to half your movement speed and make an attack using the weapon of the creature you defeated (including any magical properties).' },
     { name: 'Till the End of Our Days', level: 18, description: 'When you reach level 18, while within 60 feet of a body of water, you have advantage on death saving throws. Additionally, a roll of 18–20 on death saving throws counts as rolling a 20.' },
-  ]},
+  ],
+    // ToB p.22: Ferocious Presence — once per short or long rest.
+    resources: [{ name: 'Ferocious Presence', key: 'ferocious_presence', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'tob-captain', name: 'Captain', classId: 'fighter', sourceBook: 'ToB', description: 'A captain\'s word is final. Their charisma inspires crew to feats of great strength, and they never back down from a fight — leading from the front at all times.', features: [
     { name: 'Take to the Sea', level: 3, description: 'At 3rd level, you gain proficiency in vehicles (water) and navigator\'s tools.' },
     { name: 'Captain\'s Call', level: 3, description: 'Starting at level 3, as a bonus action you choose one ally within 60 feet who can hear you. That creature gains one Captain\'s Call die (d6) to add to one roll before the end of the next minute. Uses = 1 + Charisma modifier per long rest. Die grows to d8 at 10th, d10 at 18th.' },
@@ -1319,7 +1337,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Never Surrender', level: 10, description: 'At 10th level, when you use Second Wind you can also choose an ally within 30 feet; they regain the same number of hit points you do. In addition, Second Wind heals you by an additional amount equal to the value rolled on your Captain\'s Call die.' },
     { name: 'Leadership', level: 15, description: 'Starting at 15th level, whenever you give someone Captain\'s Call, all attacks you make on your next turn receive a +2 bonus to attack and damage rolls.' },
     { name: 'All for One', level: 18, description: 'From 18th level, as a bonus action expend a Captain\'s Call die to command allies equal to your Charisma modifier within 60 feet; they can use their reaction to immediately make a weapon attack or cast a cantrip targeting one creature. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.21: Captain's Call is 1 + Cha modifier uses (min 1) per long rest, with the die
+    // growing d6 -> d8 (10th) -> d10 (18th). This is the feature that exposed the sweep gap:
+    // the app phrases it "Uses = 1 + Charisma modifier per long rest", which matched none of
+    // the original patterns, and its escaped-apostrophe NAME hid it from the feature regex.
+    resources: [
+      { name: "Captain's Call", key: 'captains_call', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+        resourceDie: { 3: 6, 10: 8, 18: 10 } },
+      { name: 'All for One', key: 'all_for_one', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Monk
   { id: 'tob-way-of-the-depths', name: 'Way of the Depths', classId: 'monk', sourceBook: 'ToB', description: 'The essence of the cold, unforgiving depths empowers you to crush and drown your foes without hesitation or mercy.', features: [
@@ -1343,7 +1373,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aura of the Deep', level: 7, description: 'Starting from 7th level you emit a 15 ft aura while conscious. All allies within this area gain +5 to all Perception & Investigation checks.' },
     { name: 'More, More, More!', level: 15, description: 'At 15th level, if you are attuned to at least 1 magical item, you gain a +1 bonus to all saving throws. You also gain a +1 bonus to your AC for each magical item you are attuned to.' },
     { name: 'Avatar of Greed', level: 20, description: 'At 20th level, as an action you transform into a golden-skinned embodiment of greed for 1 minute. Once per turn you gain temporary hit points equal to half the damage you deal. Magical weapons do not have their magical bonuses when striking you. If you reduce a creature to 0 hit points, all items they carried are transported to a pocket dimension accessible only to you. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.30: Avatar of Greed — once per long rest.
+    resources: [{ name: 'Avatar of Greed', key: 'avatar_of_greed', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+  },
   { id: 'tob-oath-of-the-deep', name: 'Oath of the Deep', classId: 'paladin', sourceBook: 'ToB', description: 'You serve the Gods of the great beast of the ocean — every soul killed on the sea is an offering to its depths. The ocean devours the weak and you are its instrument.', features: [
     { name: 'Oath of the Deep Spells', level: 3, description: 'Paladin level 3 — Aquatic Volley, Cold Rebuke; 5th — Crushing Smite, Crushing Wave; 9th — Swell, Tidal Wave; 13th — Control Water, Watery Sphere; 17th — Drowning Smite, Reaching Cold.' },
     { name: 'Aura of the Deep', level: 3, description: 'Starting from 3rd level you emit an aura 15 feet in every direction while conscious. All allies in this area gain a swim speed equal to their movement speed, the ability to breathe underwater, can cast spells underwater, and have no penalty to ranged weapon range in this aura. Increases to 30 ft at 12th and 60 ft at 20th.' },
@@ -1369,7 +1403,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Quick Getaway', level: 9, description: 'From 9th level, your movement speed increases by 10 feet when you use Cunning Action to Hide or Dash. When an ally uses their Smuggler Token their movement also increases by 10 feet during their turn, and your movement increases by 10 feet until the end of your next turn.' },
     { name: 'Hidden Blades', level: 13, description: 'Beginning from 13th level, if you draw a weapon and attack with it on the same turn, you can deal an additional 1d8 psychic damage.' },
     { name: 'Smuggler\'s Ambush', level: 17, description: 'Once you reach 17th level, when you roll for initiative you can choose up to five allies within 60 feet. When attacking a surprised creature, once per turn they can deal damage equal to half your Sneak Attack damage dice (rounded down).' },
-  ]},
+  ],
+    // ToB p.33: People Person — Smuggler Tokens, 1 per short rest at 3rd, 2 at 11th, 3 at
+    // 19th. Level-scaled directly in the table, so no override is needed.
+    resources: [{ name: 'People Person: Smuggler Token', key: 'smuggler_token', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:3,20:3 } }],
+  },
 
   // Sorcerer
   { id: 'tob-salt-bloodline', name: 'Salt Bloodline', classId: 'sorcerer', sourceBook: 'ToB', description: 'Inside your blood flows a swarm of micro-organisms that once dwelled deep beneath the ocean. They grant incredible powers in exchange for chronic ailment.', features: [
@@ -1384,7 +1423,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aspiring Alchemist', level: 6, description: 'When you reach 6th level, you can spend 10 minutes of concentration to transform copper or silver coins into silver and gold coins respectively (up to 50 coins at once, twice per long rest). You can also spend 2 sorcery points to cast identify without material components even if you don\'t know the spell.' },
     { name: 'Treasure Hunter', level: 14, description: 'Starting from 14th level, you gain a burrow speed equal to your walking speed. In addition, you can attune to up to five magic items rather than three.' },
     { name: 'Gold Hoarder', level: 18, description: 'At 18th level, as an action you can spend 100 gold pieces to transform into a golem-like creature of molten gold for 1 minute. You gain +2 AC, resistance to fire damage, and creatures starting their turn within 5 feet of you take 10 fire damage. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.35: Aspiring Alchemist is 2 per long rest (the coin transmutation only — the
+    // identify option costs 2 sorcery points, which the sorcery point pool already tracks).
+    resources: [
+      { name: 'Aspiring Alchemist', key: 'aspiring_alchemist', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },
+      { name: 'Gold Hoarder', key: 'gold_hoarder', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Warlock
   { id: 'tob-sea-goddess-patron', name: 'Sea Goddess Patron', classId: 'warlock', sourceBook: 'ToB', description: 'The Sea Goddess calms storms, sends guiding winds, and warns her children of coming dangers. While you sail on her seas, you are under her protection.', features: [
@@ -1401,7 +1449,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Dark Depths', level: 6, description: 'Starting at 6th level, you gain resistance to cold damage. As an action you can summon 2 sahuagin (undead type, immune to poison/poisoned, resistant to necrotic, vulnerable to radiant/fire) that defend you and your allies for 10 minutes. Once per long rest.' },
     { name: 'Black Sails at Midnight', level: 10, description: 'At 10th level, as a reaction you can armour yourself with the ghostly hull of the ship: +2 AC until the start of your next turn. Additionally, when you use this reaction your speed also increases by 15 feet until the end of your next turn.' },
     { name: 'Voyage of the Damned', level: 14, description: 'When you reach 14th level, as an action you can summon a large ghostly ship crashing into a point up to 60 feet away. Every creature within 15 ft must make a Dexterity save (vs spell save DC) or take 8d8 force damage (half on success). The area is difficult terrain for 1 minute and creatures moving into it must make a Wisdom save or be frightened until the start of your next turn. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.39: Dark Depths (6th) and Voyage of the Damned (14th) are each once per long rest.
+    resources: [
+      { name: 'Dark Depths', key: 'dark_depths', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Voyage of the Damned', key: 'voyage_of_the_damned', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Wizard
   { id: 'tob-school-of-navigators', name: 'School of Navigators', classId: 'wizard', sourceBook: 'ToB', description: 'Travelling the seas seeking knowledge from across the world, you\'ve mastered navigation using the maps you\'ve gathered and the stars in the sky.', features: [
@@ -1417,7 +1473,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Tidal Magic', level: 6, description: 'At 6th level, certain spells become Ocean Spells for you: Wizard level 3 — Tidal Wave, Wall of Water; 4th — Control Water, Watery Sphere; 5th — Maelstrom; 8th — Tsunami. When you cast an Ocean Spell, every hostile creature within 30 feet of the target takes 1d10 cold + 1d12 bludgeoning (both ignore resistances), your speed is doubled, and the first attack against you before your next turn has disadvantage. At 9th add Maelstrom; at 15th add Tsunami.' },
     { name: 'Flow of Current', level: 10, description: 'When you reach 10th level, you gain resistance to cold damage. Your speed cannot be reduced, and moving through magical or non-magical difficult terrain costs you no extra movement.' },
     { name: 'Ocean Form', level: 14, description: 'At 14th level, as an action you assume an oceanic form (body made entirely of water) for 1 minute: immunity to cold; resistance to bludgeoning, piercing, and slashing damage; can cast Ocean Spells unprepared; when hit you can teleport up to 30 feet as a reaction. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.41: Ocean Form — once per long rest.
+    // NOT a resource: Pull of the Tides (2nd) picks a tidal aspect at the end of each long
+    // rest. The sweep flagged it on "per long rest", but it is a per-rest CHOICE with no use
+    // counter — the same shape as the Armorer's guardian/infiltrator mode.
+    resources: [{ name: 'Ocean Form', key: 'ocean_form', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── SCAG ──────────────────────────────────────────────────────────────────
 

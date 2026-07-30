@@ -45,6 +45,14 @@ EXPECT = dict(
     hunters_sense='monster-slayer', arcane_jolt='battle-smith',
     infectious_inspiration='college-of-eloquence', embodiment_of_the_law='order-domain',
     fungal_infestation='circle-of-spores',
+    # batch 15 (ToB)
+    siren_song='tob-college-of-the-siren', deep_dreams_sleep='tob-college-of-the-siren',
+    spawning_season='tob-circle-of-the-shoal', captains_call='tob-captain',
+    all_for_one='tob-captain', ferocious_presence='tob-corsair',
+    avatar_of_greed='tob-oath-of-greed', smuggler_token='tob-smuggler',
+    aspiring_alchemist='tob-gold-bloodline', gold_hoarder='tob-gold-bloodline',
+    dark_depths='tob-ghost-ship-patron', voyage_of_the_damned='tob-ghost-ship-patron',
+    ocean_form='tob-school-of-the-tide-watchers',
 )
 bad = 0
 for k, want in EXPECT.items():

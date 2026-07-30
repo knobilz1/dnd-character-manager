@@ -423,6 +423,10 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'college-of-eloquence' && c.level >= 14)) {
       resourceMaxOverrides['infectious_inspiration'] = Math.max(1, mods.cha);
     }
+    // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
+    if (character.classes.some(c => c.subclassId === 'tob-captain' && c.level >= 3)) {
+      resourceMaxOverrides['captains_call'] = Math.max(1, 1 + mods.cha);
+    }
     // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
     if (character.classes.some(c => c.subclassId === 'school-of-abjuration')) {
       resourceMaxOverrides['arcane_ward'] = classLevel(character.classes, 'wizard') * 2 + mods.int;

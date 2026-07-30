@@ -115,6 +115,9 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['arcane_jolt'] = Math.max(1, abilityMod(score('int')));
   if (c.classes.some(cl => cl.subclassId === 'college-of-eloquence' && cl.level >= 14))
     overrides['infectious_inspiration'] = Math.max(1, abilityMod(score('cha')));
+  // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
+  if (c.classes.some(cl => cl.subclassId === 'tob-captain' && cl.level >= 3))
+    overrides['captains_call'] = Math.max(1, 1 + abilityMod(score('cha')));
   // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
   if (c.classes.some(cl => cl.subclassId === 'school-of-abjuration'))
     overrides['arcane_ward'] = classLevel(c.classes, 'wizard') * 2 + abilityMod(score('int'));
