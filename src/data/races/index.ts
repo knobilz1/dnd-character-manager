@@ -128,6 +128,7 @@ export const ALL_RACES: Race[] = [
   // Dwarf
   {
     id: 'dwarf-hill',
+    proficiencies: ['Battleaxe', 'Handaxe', 'Light hammer', 'Warhammer'],
     name: 'Hill Dwarf',
     sourceBook: 'PHB',
     size: 'Medium',
@@ -150,6 +151,7 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'dwarf-mountain',
+    proficiencies: ['Battleaxe', 'Handaxe', 'Light hammer', 'Warhammer'],
     name: 'Mountain Dwarf',
     sourceBook: 'PHB',
     size: 'Medium',

@@ -2354,3 +2354,62 @@ flips only on a complete legal distribution.
 
 **Not fixed here: C7** (2024 backgrounds carry the ASI in prose only). It is a different type, a
 different picker and a different rule — folding it into this commit would have hidden it.
+
+---
+
+## FIX — C3 implemented and verified (the attack roll now asks about proficiency)
+
+**The blocker was a missing field, not a missing check.** `WeaponData` had no simple/martial
+category, and nearly every class states its proficiency as *"Simple weapons"* / *"Martial weapons"*
+rather than by name — so there was no way to resolve a grant against a weapon even if the attack roll
+had wanted to. That is why `toHit = abilityMod + profBonus` was unconditional.
+
+**What changed.**
+1. `WeaponData.category: 'simple' | 'martial' | 'unarmed'` on all 38 weapons — 14 simple, 23 martial,
+   1 unarmed, matching PHB p.149. The script asserted both directions (no weapon left unclassified,
+   no classification naming a weapon that does not exist) rather than guessing.
+2. New `src/utils/weaponProficiency.ts` → `isProficientWithWeapon(character, weaponName)`. Handles
+   both grant shapes: category grants, and named grants which the books pluralise inconsistently
+   ("Longswords" vs "Rapier"), so it tries the literal and a singularised form. Named grants resolve
+   through `lookupWeapon`, so race proficiency arrays that mix in skills — `['Perception']`,
+   `['Stealth']` — simply never match a weapon.
+3. `SheetPage.tsx` weapon panel: `toHit = abilityMod + (proficient ? profBonus : 0)`, plus a
+   **"not proficient"** badge. Deliberately visible: a smaller attack number with no explanation
+   reads as a bug.
+4. C3 layer 3, partially: `dwarf-hill` and `dwarf-mountain` now carry
+   `proficiencies: ['Battleaxe', 'Handaxe', 'Light hammer', 'Warhammer']`, which their own trait text
+   already granted.
+
+**Two deliberate non-changes.**
+- An **unknown weapon is treated as proficient**. The inventory accepts free text, and silently
+  docking the bonus on a homebrew or renamed item ("Longsword +1" resolves, "Bob's Cleaver" does not)
+  would be worse than granting it. Non-proficiency should be a statement, not a parse failure.
+- `gnome-rock` (artisan's tools) and `giff` (firearms) were **not** given `proficiencies` entries.
+  Neither is a weapon the attack roll can resolve, and adding data no code reads is how C3 came
+  about in the first place.
+
+**Runtime verification** — five builds, STR 16 (+3), level 5 (prof +3), so proficient = +6 and
+non-proficient = +3:
+
+| build | to-hit | badge | mechanism under test |
+|---|---|---|---|
+| Wizard + Greataxe | **+3** | shown | martial weapon, wizard has none — negative control |
+| Wizard + Quarterstaff | **+6** | — | named plural grant `'Quarterstaffs'` → singularisation works |
+| Fighter + Greataxe | **+6** | — | `'Martial weapons'` category grant |
+| **Hill Dwarf wizard + Battleaxe** | **+6** | — | **the new racial grant** — a wizard proficient by race |
+| **Hill Dwarf wizard + Greatsword** | **+3** | shown | the racial grant correctly does *not* over-apply |
+
+The dwarf pair is the load-bearing evidence: one character, two weapons, differing only in whether
+the racial grant covers them.
+
+**Still open in this area.**
+- **Armor proficiency is not enforced.** RAW: wearing armor you lack proficiency with gives
+  disadvantage on any ability check, save or attack using Str or Dex, and prevents spellcasting.
+  None of that exists. Left out deliberately — it needs the advantage/disadvantage wiring from A3,
+  and folding it in would have made this change hard to verify.
+- **The 12 proficiency-granting build choices from D4 are now unblocked** — the attack roll finally
+  reads the data, so storing those choices will do something. That was the whole reason C3 was
+  sequenced ahead of them.
+
+`npx tsc -b --force` clean, `npm run build` clean. `keycheck.py`, `spellrefs.py` and `maxtables.py`
+all re-run unchanged (0 dangling override keys, 223/223 spell refs, 0 table gaps).

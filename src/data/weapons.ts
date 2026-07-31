@@ -12,53 +12,57 @@ export interface WeaponData {
    *  'finesse' = higher of STR/DEX
    */
   ability: 'str' | 'dex' | 'finesse';
+  /** PHB weapon category. Drives proficiency: nearly every class states its proficiency as
+   *  "Simple weapons" / "Martial weapons" rather than by name, so without this the attack roll
+   *  had no way to ask and simply granted the bonus to everyone. 'unarmed' is proficient for all. */
+  category: 'simple' | 'martial' | 'unarmed';
   versatile?: string;    // damage dice when used two-handed
   ranged?: boolean;      // ranged weapons use DEX for the attack roll
 }
 
 export const WEAPON_TABLE: WeaponData[] = [
   // Simple Melee
-  { name: 'club',          damageDice: '1d4',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'dagger',        damageDice: '1d4',  damageType: 'piercing',    ability: 'finesse' },
-  { name: 'greatclub',     damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'handaxe',       damageDice: '1d6',  damageType: 'slashing',    ability: 'str' },
-  { name: 'javelin',       damageDice: '1d6',  damageType: 'piercing',    ability: 'str' },
-  { name: 'light hammer',  damageDice: '1d4',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'mace',          damageDice: '1d6',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'quarterstaff',  damageDice: '1d6',  damageType: 'bludgeoning', ability: 'str', versatile: '1d8' },
-  { name: 'sickle',        damageDice: '1d4',  damageType: 'slashing',    ability: 'str' },
-  { name: 'spear',         damageDice: '1d6',  damageType: 'piercing',    ability: 'str', versatile: '1d8' },
-  { name: 'unarmed',       damageDice: '1',    damageType: 'bludgeoning', ability: 'str', aliases: ['unarmed strike'] },
+  { name: 'club', category: 'simple',          damageDice: '1d4',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'dagger', category: 'simple',        damageDice: '1d4',  damageType: 'piercing',    ability: 'finesse' },
+  { name: 'greatclub', category: 'simple',     damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'handaxe', category: 'simple',       damageDice: '1d6',  damageType: 'slashing',    ability: 'str' },
+  { name: 'javelin', category: 'simple',       damageDice: '1d6',  damageType: 'piercing',    ability: 'str' },
+  { name: 'light hammer', category: 'simple',  damageDice: '1d4',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'mace', category: 'simple',          damageDice: '1d6',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'quarterstaff', category: 'simple',  damageDice: '1d6',  damageType: 'bludgeoning', ability: 'str', versatile: '1d8' },
+  { name: 'sickle', category: 'simple',        damageDice: '1d4',  damageType: 'slashing',    ability: 'str' },
+  { name: 'spear', category: 'simple',         damageDice: '1d6',  damageType: 'piercing',    ability: 'str', versatile: '1d8' },
+  { name: 'unarmed', category: 'unarmed',       damageDice: '1',    damageType: 'bludgeoning', ability: 'str', aliases: ['unarmed strike'] },
   // Simple Ranged
-  { name: 'light crossbow',damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, light'] },
-  { name: 'dart',          damageDice: '1d4',  damageType: 'piercing',    ability: 'finesse', ranged: true },
-  { name: 'shortbow',      damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true },
-  { name: 'sling',         damageDice: '1d4',  damageType: 'bludgeoning', ability: 'dex', ranged: true },
+  { name: 'light crossbow', category: 'simple',damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, light'] },
+  { name: 'dart', category: 'simple',          damageDice: '1d4',  damageType: 'piercing',    ability: 'finesse', ranged: true },
+  { name: 'shortbow', category: 'simple',      damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true },
+  { name: 'sling', category: 'simple',         damageDice: '1d4',  damageType: 'bludgeoning', ability: 'dex', ranged: true },
   // Martial Melee
-  { name: 'battleaxe',     damageDice: '1d8',  damageType: 'slashing',    ability: 'str', versatile: '1d10' },
-  { name: 'flail',         damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'glaive',        damageDice: '1d10', damageType: 'slashing',    ability: 'str' },
-  { name: 'greataxe',      damageDice: '1d12', damageType: 'slashing',    ability: 'str' },
-  { name: 'greatsword',    damageDice: '2d6',  damageType: 'slashing',    ability: 'str' },
-  { name: 'halberd',       damageDice: '1d10', damageType: 'slashing',    ability: 'str' },
-  { name: 'lance',         damageDice: '1d12', damageType: 'piercing',    ability: 'str' },
-  { name: 'longsword',     damageDice: '1d8',  damageType: 'slashing',    ability: 'str', versatile: '1d10' },
-  { name: 'maul',          damageDice: '2d6',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'morningstar',   damageDice: '1d8',  damageType: 'piercing',    ability: 'str' },
-  { name: 'pike',          damageDice: '1d10', damageType: 'piercing',    ability: 'str' },
-  { name: 'rapier',        damageDice: '1d8',  damageType: 'piercing',    ability: 'finesse' },
-  { name: 'scimitar',      damageDice: '1d6',  damageType: 'slashing',    ability: 'finesse' },
-  { name: 'shortsword',    damageDice: '1d6',  damageType: 'piercing',    ability: 'finesse' },
-  { name: 'trident',       damageDice: '1d6',  damageType: 'piercing',    ability: 'str', versatile: '1d8' },
-  { name: 'war pick',      damageDice: '1d8',  damageType: 'piercing',    ability: 'str' },
-  { name: 'warhammer',     damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str', versatile: '1d10' },
-  { name: 'whip',          damageDice: '1d4',  damageType: 'slashing',    ability: 'finesse' },
+  { name: 'battleaxe', category: 'martial',     damageDice: '1d8',  damageType: 'slashing',    ability: 'str', versatile: '1d10' },
+  { name: 'flail', category: 'martial',         damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'glaive', category: 'martial',        damageDice: '1d10', damageType: 'slashing',    ability: 'str' },
+  { name: 'greataxe', category: 'martial',      damageDice: '1d12', damageType: 'slashing',    ability: 'str' },
+  { name: 'greatsword', category: 'martial',    damageDice: '2d6',  damageType: 'slashing',    ability: 'str' },
+  { name: 'halberd', category: 'martial',       damageDice: '1d10', damageType: 'slashing',    ability: 'str' },
+  { name: 'lance', category: 'martial',         damageDice: '1d12', damageType: 'piercing',    ability: 'str' },
+  { name: 'longsword', category: 'martial',     damageDice: '1d8',  damageType: 'slashing',    ability: 'str', versatile: '1d10' },
+  { name: 'maul', category: 'martial',          damageDice: '2d6',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'morningstar', category: 'martial',   damageDice: '1d8',  damageType: 'piercing',    ability: 'str' },
+  { name: 'pike', category: 'martial',          damageDice: '1d10', damageType: 'piercing',    ability: 'str' },
+  { name: 'rapier', category: 'martial',        damageDice: '1d8',  damageType: 'piercing',    ability: 'finesse' },
+  { name: 'scimitar', category: 'martial',      damageDice: '1d6',  damageType: 'slashing',    ability: 'finesse' },
+  { name: 'shortsword', category: 'martial',    damageDice: '1d6',  damageType: 'piercing',    ability: 'finesse' },
+  { name: 'trident', category: 'martial',       damageDice: '1d6',  damageType: 'piercing',    ability: 'str', versatile: '1d8' },
+  { name: 'war pick', category: 'martial',      damageDice: '1d8',  damageType: 'piercing',    ability: 'str' },
+  { name: 'warhammer', category: 'martial',     damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str', versatile: '1d10' },
+  { name: 'whip', category: 'martial',          damageDice: '1d4',  damageType: 'slashing',    ability: 'finesse' },
   // Martial Ranged
-  { name: 'blowgun',       damageDice: '1',    damageType: 'piercing',    ability: 'dex', ranged: true },
-  { name: 'hand crossbow', damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, hand'] },
-  { name: 'heavy crossbow',damageDice: '1d10', damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, heavy'] },
-  { name: 'longbow',       damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true },
-  { name: 'net',           damageDice: '—',    damageType: '—',           ability: 'dex', ranged: true },
+  { name: 'blowgun', category: 'martial',       damageDice: '1',    damageType: 'piercing',    ability: 'dex', ranged: true },
+  { name: 'hand crossbow', category: 'martial', damageDice: '1d6',  damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, hand'] },
+  { name: 'heavy crossbow', category: 'martial',damageDice: '1d10', damageType: 'piercing',    ability: 'dex', ranged: true, aliases: ['crossbow, heavy'] },
+  { name: 'longbow', category: 'martial',       damageDice: '1d8',  damageType: 'piercing',    ability: 'dex', ranged: true },
+  { name: 'net', category: 'martial',           damageDice: '—',    damageType: '—',           ability: 'dex', ranged: true },
 ];
 
 /** Returns the weapon entry whose name or alias appears in the given item name. */

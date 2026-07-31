@@ -10,6 +10,7 @@ import { useBorrowedStore } from '../../store/useBorrowedStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
+import { isProficientWithWeapon } from '../../utils/weaponProficiency';
 import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
@@ -1455,7 +1456,11 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
         {equippedWeapons.map((item: any) => {
           const w = lookupWeapon(item.name);
           const abilityMod = abilityModForWeapon(w);
-          const toHit = abilityMod + profBonus;
+          // The proficiency bonus applies only if the character is actually proficient. This used
+          // to be unconditional, which made every character proficient with every weapon and left
+          // the whole class/race weapon-proficiency layer computing nothing.
+          const proficient = isProficientWithWeapon(character, item.name);
+          const toHit = abilityMod + (proficient ? profBonus : 0);
           const dmgDice = w?.damageDice ?? '1d6';
           const dmgType = w?.damageType ?? '—';
           const dmgLabel = w ? damageLine(dmgDice, abilityMod) : `?d? + ${abilityMod >= 0 ? '+' : ''}${abilityMod}`;
@@ -1465,7 +1470,19 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
             <div key={item.id} className="bg-slate-900/60 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-semibold text-white">{item.name}</p>
-                {w && <span className="text-[10px] text-slate-500 capitalize">{dmgType}</span>}
+                <div className="flex items-center gap-1.5">
+                  {/* Say so rather than silently docking the bonus — a smaller attack number with
+                      no explanation reads as a bug. */}
+                  {!proficient && (
+                    <span
+                      className="text-[10px] text-amber-400 bg-amber-950/40 border border-amber-700/40 px-1 rounded"
+                      title="You are not proficient with this weapon, so your proficiency bonus is not added to the attack roll."
+                    >
+                      not proficient
+                    </span>
+                  )}
+                  {w && <span className="text-[10px] text-slate-500 capitalize">{dmgType}</span>}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {/* Attack roll */}
