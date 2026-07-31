@@ -1911,3 +1911,86 @@ against RAW 6), **R20** (features that grant proficiency/expertise/resources as 
 
 Note R12 is *not* fixed by round 1: R11 made the 2024 lists visible, but the **counts** those lists are
 measured against are still the 2014 ladder in the creator.
+
+---
+
+# PHASE B / C sweeps — round 2 (2026-07-30, log-only)
+
+Two new reproducible sweeps: `tools/audit/racefields.py` and `tools/audit/subclasslevels.py`. Both
+carry positive and negative controls and both assert they accounted for every entity rather than
+silently skipping what they could not parse (the `subclasslevels` assert that *every* subclass yielded
+at least one parsed feature is the one that would have caught a silent-blindness bug).
+
+## C3 — the proficiency layer is data-complete and computationally inert
+The same three-layer shape as C1, and the widest instance found so far.
+
+**Layer 1 — nothing calculates from it.** Outside the data files, weapon and armor proficiencies are
+read in exactly three places, none of which is a calculation:
+- `StepClass.tsx:81` — a creator *display* line
+- `fillCharacterPDF.ts:247-249` and `printSheet.ts:1317-1319` — the two *export* paths
+
+`Race.proficiencies` is read by the two export paths **only**. `useCharacterDerived` never mentions
+weapon, armor or tool proficiency at all — only skills and saves.
+
+**Layer 2 — the attack roll assumes universal proficiency.** `SheetPage.tsx:1458`:
+```
+const toHit = abilityMod + profBonus;
+```
+Unconditional. Every character is proficient with every weapon they equip, and `toggleInventoryEquipped`
+has no gate either. A wizard with a greataxe gets the full proficiency bonus to hit. This is *why* the
+missing data in layer 3 has gone unnoticed: the data would not have changed any number if it were there.
+
+**Layer 3 — four races state a fixed proficiency in prose and carry no `proficiencies` array:**
+
+| race | book | prose |
+|---|---|---|
+| `dwarf-hill` | PHB | "proficiency with the battleaxe, handaxe, light hammer, and warhammer" |
+| `dwarf-mountain` | PHB | same |
+| `gnome-rock` | PHB | "proficiency with artisan's tools (tinker's tools)" |
+| `giff` | SJA | "proficiency with firearms" |
+
+Four more are **player choices**, so an array cannot express them and they belong to D4, not here:
+`changeling`, `erlw-changeling` (two skills of your choice), `tortle`, `erlw-mark-of-making` (one of
+several). Separated deliberately — merging them would have turned an 8-item defect list into a
+4-item one plus 4 false positives.
+
+Note the ordering consequence: filling in layer 3 alone changes nothing on the sheet, because layers
+1 and 2 discard it. Severity: **medium-high**, and it is a *fix-ordering* finding as much as a defect
+one — the data work is worthless before the attack roll learns to ask.
+
+## C4 — `autognome` states poison resistance in prose, `resistances: []`
+Its Mechanical Nature trait text contains "resistance to poison damage"; the field is empty. **SJA is
+not among the 14 reference books**, so this could not be checked against source — but the two
+representations inside the app disagree, which is a defect whichever side is right. Flagged for the
+fix pass to resolve against the book when available. Sole resistance disagreement in 122 races.
+
+## C5 — darkvision is CLEAN across all 122 races (baseline)
+Checked three ways: prose mentions darkvision but field unset (**0**), prose distance disagrees with
+the field (**0**), field set with no prose (**0**). The distance check parses "dim light within N feet"
+out of the trait text and compares it to the number — so this is not merely a presence check. Recorded
+as a regression baseline for the second pass.
+
+## B4 — subclass feature levels are structurally CLEAN (baseline)
+**955 features across all 189 subclasses.** Zero features below their class's `subclassLevel` (which
+would be unreachable — the level-up dialog grants from the level table, so the feature could never
+fire), and zero levels outside 1-20. Cross-referenced against the real `subclassLevel` of all 25
+classes, with `fighter=3`/`cleric=1` as the control.
+
+22 subclasses grant 3+ features at one level; inspection shows these are legitimate (XGtE and TCE
+entry levels genuinely stack three features), so it is reported as an observation, not a defect list.
+
+This bounds the remaining Phase B work: the *impossible* levels are all absent, so what is left is
+purely "is level N the level the book says", which needs per-subclass book reading and cannot be swept.
+
+## Running defect rate
+| Sweep | Entities | Defects |
+|---|---|---|
+| racefields — darkvision | 122 races × 3 checks | **0** |
+| racefields — resistances | 122 races | **1** (autognome) |
+| racefields — proficiencies | 122 races | **4** fixed + 4 deferred to D4 |
+| subclasslevels — reachability | 955 features / 189 subclasses | **0** |
+| proficiency consumers (code) | whole `src/` | **1 systemic** (C3) |
+
+Sweeps to date: **7 layers swept, 4 found defects (57%).** The three clean layers — spell-reference
+integrity, darkvision, and subclass feature reachability — are the regression baseline; recording a
+clean sweep is what makes the second pass able to detect drift.
