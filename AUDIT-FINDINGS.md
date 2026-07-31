@@ -2539,3 +2539,47 @@ and a cheap one to fix. Logged, not fixed, since the session is in log-only mode
 Phase B was the last logging layer. **All audit logging is now complete.**
 Running defect rate: **11 layers swept, 7 found defects (64%)** — Phase B's level layer is the
 fourth clean one, though it did surface B6 on the way out.
+
+---
+
+## R5 — CLOSED. Subclass resources are complete; the outstanding count was my probe, not the data
+
+R5 was logged as "102 features / 70 subclasses need `Subclass.resources`; only 8 of 141 use it". It
+has since been done — **72 of 141 subclasses now declare resources** — and both sweeps agree there
+is nothing left:
+
+- `r5scan.py`: **0 subclasses, 0 features** with a limited-use feature and no resources array.
+- `r5cover.py` (**new**): of the 72 that declare resources, **70 cover every limited-use feature**.
+
+`fixstatus.py` reported R5 outstanding because its probe counted `resources: [` arrays and treated
+anything under 141 as incomplete. Most subclasses correctly have **no** resources, so that number
+can never reach 141 and the probe could never have said DONE. Corrected.
+
+### r5cover.py — the question r5scan structurally cannot ask
+
+`r5scan` skips any subclass containing `resources: [`, so a subclass with three limited-use features
+and one resource counts as solved. That is this audit's recurring shape — two things each internally
+consistent, joined by nothing — so it needed its own check. `r5cover.py` compares limited-use
+feature count against declared resource count per subclass.
+
+**It found its own artifact first.** The initial count regex required `name: '...'` in single quotes,
+but a resource name containing an apostrophe is written with double quotes — `name: "Dark One's Own
+Luck"`. That undercounted `the-fiend`, `hexblade` and `rune-knight` and invented a shortfall in all
+three. Counting by `key:` instead fixed it. Two of the four "findings" evaporated.
+
+### The two that survived, both resolved as NOT defects
+
+| subclass | flagged feature | verdict |
+|---|---|---|
+| `graviturgy-magic` | Adjust Density (2) | **false positive.** Verified against `egtw-explorers-guide-wildemount.md:84` — concentration for up to 1 minute, no cost and no limited uses. `violent_attraction` alone is correct. |
+| `rune-knight` | Master of Runes (15) | **blocked on D4, not missing.** "You can use each rune twice per short or long rest" meters the RUNES, and which runes the character carved is a D4 build choice with no storage yet. `runic_shield` and `giants_might` are both present and correct. |
+
+So the honest status is: **R5 needs no further data entry.** One line of it (rune uses) unlocks when
+D4's Rune Carver storage lands, and is recorded there rather than left open here.
+
+**Methodology note.** This is the second time in this session that a "still outstanding" item turned
+out to be a bad probe rather than bad data — A1's Rage sentinel was the first. A probe that asks the
+wrong question is as dangerous as a sweep with no control: it manufactures work, and worse, it can
+just as easily report DONE for something broken (which is exactly what the A3 probe did by matching
+the word "advantage" inside two exhaustion comments). Every probe in `fixstatus.py` now states the
+behaviour it is testing for, not the presence of a symbol.
