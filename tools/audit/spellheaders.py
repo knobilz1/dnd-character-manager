@@ -21,7 +21,18 @@ from classfeaturelevels import strip_comments, blank_strings, balanced, objects,
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 MD = r'C:\Users\nabil\Desktop\Code\reference-books\md'
-BOOK_MD = {'PHB': 'phb-players-handbook.md'}   # only the PHB extract uses this header format
+BOOK_MD = {
+    'PHB': 'phb-players-handbook.md',
+    'XGtE': 'xge-xanathars-guide.md',
+    'TCE': 'tce-tashas-cauldron.md',
+    'EGtW': 'egtw-explorers-guide-wildemount.md',
+    'FToD': 'ftod-fizbans-treasury-of-dragons.md',
+    'GGR': 'ggr-guildmasters-guide-ravnica.md',
+    'SCoC': 'scoc-strixhaven-curriculum-of-chaos.md',
+    'ToB': 'tob-tides-of-blood.md',
+    'PHB2024': 'phb2024-players-handbook.md',
+    # SJA and AcqInc have no reference markdown at all — reported as uncovered, not skipped silently.
+}
 
 # Runtime checksum straight from the live app.
 TRUTH = dict(total=547, sum_levels=1925, conc=242, ritual=34, phb=361)
@@ -79,14 +90,28 @@ def validate(spells):
     return [f'{k}: parsed {got[k]} != runtime {v}' for k, v in TRUTH.items() if got[k] != v]
 
 
-HEAD = re.compile(
-    r'^###\s+(.+?)\s*$\n\*([^*]+)\*\s*\|(.*?)$', re.M)
+# Shape 1 (PHB):   ### Acid Splash
+#                  *Conjuration cantrip* | CT: 1 action | Range: 60 ft | C: V, S | Dur: Instantaneous
+HEAD = re.compile(r'^###\s+(.+?)\s*$\n\*([^*]+)\*\s*\|(.*?)$', re.M)
+
+# Shape 2 (XGtE / TCE / EGtW / FToD / GGR / SCoC):
+#     **Blade of Disaster** - 9th-level conjuration (p.107)
+#     - Casting Time: 1 bonus action | Range: 60 ft | Components: V, S | Duration: Concentration...
+# The detail line may or may not start with "- ", and uses CT:/Casting Time: and C:/Components:.
+HEAD_BOLD = re.compile(
+    r'^\*\*(.+?)\*\*\s*[\u2014\u2013-]\s*([^\n(]*?(?:cantrip|level\s+\w+)[^\n(]*)'
+    r'(?:\s*\(p\.[^)]*\))?\s*$\n\s*-?\s*((?:CT|Casting Time)\s*:.*?)$',
+    re.M | re.I)
+
+FIELD = re.compile(r'(CT|Casting Time|Range|C|Components|Dur|Duration)\s*:\s*(.+)$', re.I)
+FIELD_KEY = {'ct': 'CT', 'casting time': 'CT', 'range': 'RANGE',
+             'c': 'C', 'components': 'C', 'dur': 'DUR', 'duration': 'DUR'}
 
 
 def book_spells(md_text):
-    """name(lower) -> parsed header dict, from the '### Name' + '*Nth-level school*' shape."""
+    """name -> parsed header dict. Tries both layouts the extracts use."""
     out = {}
-    for name, kind, rest in HEAD.findall(md_text):
+    for name, kind, rest in HEAD.findall(md_text) + HEAD_BOLD.findall(md_text):
         kind_l = kind.lower()
         school = next((s for s in SCHOOLS if s in kind_l), None)
         if not school:
@@ -100,10 +125,9 @@ def book_spells(md_text):
             lvl = int(m.group(1))
         fields = {}
         for part in rest.split('|'):
-            p = part.strip()
-            mm = re.match(r'(CT|Range|C|Dur)\s*:\s*(.+)$', p, re.I)
+            mm = FIELD.match(part.strip())
             if mm:
-                fields[mm.group(1).upper()] = mm.group(2).strip()
+                fields[FIELD_KEY[mm.group(1).lower()]] = mm.group(2).strip()
         out[nname(name)] = dict(
             level=lvl, school=school, ritual='ritual' in kind_l,
             ct=fields.get('CT'), rng=fields.get('RANGE'),
@@ -147,23 +171,34 @@ def main():
         sys.exit(1)
     print(f'parser validated against the live app ({len(spells)} spells, checksums match)\n')
 
-    md = open(os.path.join(MD, BOOK_MD['PHB']), encoding='utf-8').read()
-    book = book_spells(md)
-    print(f'book extract: {len(book)} spell headers parsed\n')
+    books = {}
+    for bid, fn in BOOK_MD.items():
+        p = os.path.join(MD, fn)
+        books[bid] = book_spells(open(p, encoding='utf-8').read()) if os.path.exists(p) else None
 
     considered = compared = notfound = 0
+    per_book = {}
+    uncovered = []
     diffs = {k: [] for k in ('level', 'school', 'ritual', 'ct', 'range', 'components', 'duration')}
     for s in spells:
-        if s['book'] != 'PHB':
-            continue
         if filt and filt not in nname(s['name']):
             continue
         considered += 1
+        bid = s['book']
+        book = books.get(bid)
+        st = per_book.setdefault(bid, [0, 0])
+        st[1] += 1
+        if not book:
+            notfound += 1
+            uncovered.append(f"{bid}/{s['name']}")
+            continue
         b = book.get(nname(s['name']))
         if not b:
             notfound += 1
+            uncovered.append(f"{bid}/{s['name']}")
             continue
         compared += 1
+        st[0] += 1
         tag = f"{s['name']}"
         if s['level'] != b['level']:
             diffs['level'].append(f"{tag}: app L{s['level']} book L{b['level']}")
@@ -181,8 +216,12 @@ def main():
             diffs['duration'].append(f"{tag}: app '{s['dur']}' book '{b['dur']}'")
 
     assert compared + notfound == considered, 'accounting broke'
-    print(f'# PHB spells considered={considered} compared={compared} notFoundInExtract={notfound} '
-          f'({100*compared/considered:.1f}% coverage)')
+    print(f'# spells considered={considered} compared={compared} uncompared={notfound} '
+          f'({100*compared/considered:.1f}% coverage)\n')
+    print('  book      compared/total   coverage')
+    for bid, (c, t) in sorted(per_book.items(), key=lambda kv: -kv[1][1]):
+        flag = '' if c == t else ('   <- NO EXTRACT' if books.get(bid) is None else '   <- gap')
+        print(f'  {bid:9} {c:4}/{t:<4}      {100*c/t:5.1f}%{flag}')
     for k, v in diffs.items():
         print(f'\n===== {k.upper()} DIFFS ({len(v)}) =====')
         for x in v[:40]:

@@ -2931,3 +2931,72 @@ because it is not a 2014 spell at all.
 
 That is the shape worth remembering: **the spells a name-matching sweep silently skips are exactly
 the ones nobody has checked**, so an unexplained coverage gap is a finding, not a rounding error.
+
+---
+
+## Phase I part 2 — the non-PHB spell books: 10 more bugs, 536 of 547 now verified
+
+The extracts use **three** header layouts, not one:
+
+1. **PHB** — `### Name` then `*Conjuration cantrip* | CT: … | Range: … | C: … | Dur: …`
+2. **XGtE** — `**Name** — 8th-level necromancy` then `CT: … | Range: … | Components: … | Duration: …`
+3. **TCE / EGtW / FToD / SCoC** — same bold header, detail line prefixed `- ` and using
+   `Casting Time:` in full
+
+Teaching `spellheaders.py` shapes 2 and 3 took coverage from 361 to **500 of 547**.
+
+**ToB (22), PHB2024 (12), GGR (1), AcqInc (7) and SJA (2) have no spell descriptions in their
+extracts at all** — for AcqInc and SJA there is no extract file whatsoever. But every one of those
+books has a PDF, so `tools/audit/spellpdf.py` verifies the leftovers straight from the OCR'd text
+layer. That located **36 of the 47**, bringing total verification to **536 of 547 (98.0%)**.
+
+### The 10 fixes
+
+**XGtE + EGtW — 6 confirmed against the book PDF, 1 against the extract only**
+
+| Spell | Field | was | now |
+|---|---|---|---|
+| **Tether Essence** (EGtW) | school | Transmutation | **Necromancy** |
+| **Power Word Pain** | duration | Until dispelled | **Instantaneous** |
+| **Mighty Fortress** | duration | Until dispelled | **Instantaneous** |
+| **Transmute Rock** | duration | Instantaneous | **Until dispelled** |
+| **Thunderclap** | range | Self (5-foot radius) | **5 feet** |
+| **Earth Tremor** | range | Self (10-foot radius) | **10 feet** |
+| **Temporal Shunt** | duration | Instantaneous | **1 round** ⚠️ *extract only* |
+
+**Temporal Shunt is the one weaker claim on the page.** The string does not survive OCR in the XGtE
+PDF at all, so the only evidence is the markdown extract. Applied because the extract went **5 for 5**
+against the PDF on the other XGtE disagreements in this same run — but it is extract-verified, not
+PDF-verified, and is flagged as such in `tools/audit/fix_spells3.py`.
+
+Note *Power Word Pain* repeats the exact error already fixed in *Power Word Stun*: a Power Word
+spell given a lingering duration when the book says Instantaneous.
+
+**PHB 2024 — 3 found only because the PDF fallback exists**
+
+| Spell | Field | was | now |
+|---|---|---|---|
+| **Mind Sliver** (2024) | duration | Instantaneous | **1 round** — the 2014/TCE copy was already right; only the 2024 one was wrong |
+| **Jallarzi's Storm of Radiance** | components | V, S | **V, S, M** *(a pinch of phosphorus)* |
+| **Yolande's Regal Presence** | components | V, S | **V, S, M** *(a miniature tiara)* |
+
+All 12 PHB 2024 spells were uncompared until the PDF fallback was built, because that extract has no
+spell section. Three of the twelve were wrong — a **25% defect rate in the set nobody had checked**,
+against roughly 2% in the PHB set that had been audited before.
+
+### Still unverified — 11 spells, stated rather than glossed
+- **AcqInc 5, SJA 2** — no markdown extract, and both PDFs are AnyFlip web captures whose spell
+  entries do not survive text extraction (the same reason XGtE's *items* were unverifiable earlier).
+- **PHB2024 3, GGR 1** — entry not locatable in the OCR text.
+
+These are reported by the script every run rather than silently dropped.
+
+### Probe artifact caught, not reported as a finding
+The PDF sweep initially flagged `Mind Sliver: app '1 round' pdf 'l'`. The OCR renders the digit **1
+as a lowercase L** throughout these scans, and the field terminator fired early on it. Fixed by
+ignoring captures under 3 characters and normalising `l`→`1`. Had that been "fixed" in the data it
+would have written OCR noise into the app.
+
+Cross-field consistency over all 547 spells re-checked after every change: **still zero anomalies**,
+including the two spells that just gained an `M` component and now correctly carry
+`materialComponent`.
