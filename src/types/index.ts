@@ -456,6 +456,15 @@ export interface SubclassOptionGroup {
   /** Cumulative pick count keyed on the level in THIS class, matching `maxPerLevel` convention. */
   picksByLevel: Record<number, number>;
   choices: { id: string; name: string; description?: string }[];
+  /**
+   * What the picks CONFER, when they confer something the rest of the sheet must act on.
+   * Omit for choices that are purely descriptive (Dragon Ancestor, Hunter's Prey…).
+   *
+   * `'skill'` is the load-bearing one: `useCharacterDerived` merges those picks into the skill
+   * proficiency set, which is what makes College of Lore's three skills actually exist. For it to
+   * work each choice `id` MUST be a `SkillName` exactly as spelled in `ALL_SKILLS`.
+   */
+  grants?: 'skill' | 'language' | 'tool' | 'weapon';
 }
 
 export interface EquipmentOption {

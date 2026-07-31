@@ -3143,3 +3143,61 @@ two wizard cantrips are spells the character should have and does not.
 **Not attempted here.** This is ~16 option groups plus a change to how the creator computes skill
 allowance, and it is a build task rather than a sweep. Filed with the enumeration above so it starts
 from measured facts rather than the stale list.
+
+---
+
+## D4 fix, part 1 — subclass skill proficiencies now actually apply
+
+Root cause: `selectedSkillProficiencies` is capped at the CLASS's own `skillChoices.count`, has no
+writer outside the creator's skill step, and `useCharacterDerived` composed skills from exactly
+`selectedSkillProficiencies + background`. Anything a SUBCLASS granted was feature prose only.
+
+Fixed at the single place skills are composed rather than per subclass:
+
+```ts
+for (const cl of character.classes)
+  for (const group of getSubclassOptions(cl.subclassId))
+    if (group.grants === 'skill' && cl.level >= minLevel(group))
+      for (const picked of character.subclassOptions?.[group.key] ?? []) skillProfs.add(picked);
+```
+
+`SubclassOptionGroup` gained `grants?: 'skill' | 'language' | 'tool' | 'weapon'`. Only `'skill'` is
+wired; the others are declared so the remaining groups have somewhere to land. Choice ids for a
+skill group must be `SkillName` verbatim, or the merge silently misses — noted on the type.
+
+Five groups added, each transcribed from the book:
+
+| subclass | grant | source |
+|---|---|---|
+| College of Lore | 3 skills, any | PHB p.54, verified in PDF |
+| College of Lore (2024) | 3 skills, any | PHB 2024, verified in PDF |
+| Nature Domain (Acolyte of Nature) | 1 of Animal Handling / Nature / Survival | PHB p.62, verified in PDF |
+| Purple Dragon Knight (Royal Envoy) | Persuasion, or 1 of 4 alternates | SCAG p.129, verified in PDF |
+| Fey Wanderer 2024 (Otherworldly Glamour) | 1 of Deception / Performance / Persuasion | ⚠️ app's own June-audited text — the Fey Wanderer entry does not survive extraction from the 2024 scan |
+
+Royal Envoy is conditional in the book ("Persuasion; if already proficient, one of…"). Modelled as a
+single pick across all five rather than building conditional machinery — take Persuasion normally,
+or an alternate when you already have it. The doubled-Persuasion half of that feature was already
+handled and is untouched.
+
+**Verified end-to-end on a level-5 College of Lore bard:**
+
+| | Arcana | History | Stealth | Medicine | Nature |
+|---|---|---|---|---|---|
+| before | +1 | +1 | +1 | +1 | +1 |
+| after picking Arcana/History/Stealth | **+3** | **+3** | **+3** | +1 | +1 |
+
++1 → +3 is exactly right: Jack of All Trades' half-proficiency replaced by full proficiency at
+prof +3. Unpicked skills are the negative control and did not move. `selectedSkillProficiencies`
+stayed empty throughout, so the grant demonstrably comes from the new path. The picker showed
+"0 / 3 — choice required", reached "3 / 3", and a fourth skill was disabled.
+
+Harness note: clicking all three choices inside ONE `javascript_exec` registered only **one** pick —
+each click read stale React state. Same class as the click-then-read lag; **one interaction per
+call**.
+
+### Still open from the D4 enumeration
+Languages/tools (Knowledge Domain, Mastermind, Drakewarden, Cobalt Soul — display only), the cantrip
+grants (Circle of the Land Bonus Cantrip, Arcana Domain's two wizard cantrips, Acolyte of Nature's
+druid cantrip — these need spellbook integration, not this mechanism), Champion's second Fighting
+Style, Four Elements disciplines, Kensei weapons, and the 2014 Beast Master companion.

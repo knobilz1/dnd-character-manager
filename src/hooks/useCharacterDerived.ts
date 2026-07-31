@@ -3,6 +3,7 @@ import type { Character, AbilityKey, AbilityScores } from '../types';
 import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor, getMulticlassSpellSlots } from '../data/mechanics';
 import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
+import { getSubclassOptions } from '../data/subclassOptions';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS } from '../data/feats';
@@ -198,6 +199,19 @@ export function computeCharacterDerived(character: Character) {
       ...character.selectedSkillProficiencies,
       ...(bg?.skillProficiencies ?? []),
     ]);
+
+    // Subclass-granted skill proficiencies. `selectedSkillProficiencies` is capped at the CLASS's
+    // own `skillChoices.count`, so before this a College of Lore bard's "three skills of your
+    // choice" was rendered as feature prose and never actually granted — the proficiencies did not
+    // exist anywhere. Applying it here, at the single place skills are composed, covers every
+    // subclass that declares a `grants: 'skill'` option group rather than special-casing each.
+    for (const cl of character.classes) {
+      for (const group of getSubclassOptions(cl.subclassId)) {
+        if (group.grants !== 'skill') continue;
+        if (cl.level < Math.min(...Object.keys(group.picksByLevel).map(Number))) continue;
+        for (const picked of character.subclassOptions?.[group.key] ?? []) skillProfs.add(picked);
+      }
+    }
     const expertiseSet = new Set<string>(character.expertiseSkills ?? []);
 
     // Subclass auto-expertise (fixed skills, no player choice required)

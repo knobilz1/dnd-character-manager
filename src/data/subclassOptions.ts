@@ -19,6 +19,13 @@ import type { SubclassOptionGroup } from '../types';
  *
  * Every list below is transcribed from the book, with the page-anchored source named per group.
  */
+/** The 18 skills, as choices. Ids are `SkillName` verbatim so they merge into the proficiency set. */
+const ALL_SKILL_CHOICES = [
+  'Acrobatics', 'Animal Handling', 'Arcana', 'Athletics', 'Deception', 'History',
+  'Insight', 'Intimidation', 'Investigation', 'Medicine', 'Nature', 'Perception',
+  'Performance', 'Persuasion', 'Religion', 'Sleight of Hand', 'Stealth', 'Survival',
+].map(s => ({ id: s, name: s }));
+
 export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
 
   // PHB p.102. The chosen dragon determines a damage type, which Elemental Affinity (6th) then
@@ -172,6 +179,82 @@ export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
       { id: 'land', name: 'Beast of the Land', description: 'Charge knocks the target prone' },
       { id: 'sea', name: 'Beast of the Sea', description: 'Swim speed; its hit can grapple' },
       { id: 'sky', name: 'Beast of the Sky', description: 'Fly speed; hit and run' },
+    ],
+  }],
+
+  // ── Subclass SKILL grants ──────────────────────────────────────────────────────────────────
+  // These carry `grants: 'skill'`, so useCharacterDerived merges the picks straight into the skill
+  // proficiency set. Before this they were feature prose only: the creator caps skill picks at the
+  // CLASS's own `skillChoices.count`, so a College of Lore bard's three skills never existed.
+  // Choice ids MUST be SkillName exactly as spelled in ALL_SKILLS or the merge silently misses.
+
+  // PHB p.54, verified: "Bonus Proficiencies. When you join the College of Lore at 3rd level, you
+  // gain proficiency with three skills of your choice." Any three — hence the full list.
+  'college-of-lore': [{
+    key: 'loreBonusSkills',
+    label: 'Bonus Proficiencies — three skills of your choice',
+    picksByLevel: { 3: 3 },
+    grants: 'skill',
+    choices: ALL_SKILL_CHOICES,
+  }],
+
+  // PHB 2024, verified: "BONUS PROFICIENCIES You gain proficiency with three skills of your choice."
+  'college-of-lore-2024': [{
+    key: 'loreBonusSkills2024',
+    label: 'Bonus Proficiencies — three skills of your choice',
+    picksByLevel: { 3: 3 },
+    grants: 'skill',
+    choices: ALL_SKILL_CHOICES,
+  }],
+
+  // PHB p.62, verified: "Acolyte of Nature. At 1st level, you learn one druid cantrip of your
+  // choice. You also gain proficiency in one of the following skills of your choice: Animal
+  // Handling, Nature, or Survival." (The cantrip half is not modelled here — cantrips live in the
+  // spellbook, not in this mechanism.)
+  'nature-domain': [{
+    key: 'acolyteOfNatureSkill',
+    label: 'Acolyte of Nature — skill proficiency',
+    picksByLevel: { 1: 1 },
+    grants: 'skill',
+    choices: [
+      { id: 'Animal Handling', name: 'Animal Handling' },
+      { id: 'Nature', name: 'Nature' },
+      { id: 'Survival', name: 'Survival' },
+    ],
+  }],
+
+  // SCAG p.129, verified: "At 7th level, you gain proficiency in the Persuasion skill. If you are
+  // already proficient in it, you gain proficiency in one of the following skills of your choice:
+  // Animal Handling, Insight, Intimidation, or Performance."
+  // Modelled as one pick across all five rather than as conditional machinery: take Persuasion
+  // normally, or the alternative when you already have it. The doubled Persuasion this feature also
+  // grants is separate and already handled in useCharacterDerived.
+  'scag-purple-dragon-knight': [{
+    key: 'royalEnvoySkill',
+    label: 'Royal Envoy — Persuasion, or another skill if already proficient',
+    picksByLevel: { 7: 1 },
+    grants: 'skill',
+    choices: [
+      { id: 'Persuasion', name: 'Persuasion', description: 'The default grant' },
+      { id: 'Animal Handling', name: 'Animal Handling', description: 'Only if already proficient in Persuasion' },
+      { id: 'Insight', name: 'Insight', description: 'Only if already proficient in Persuasion' },
+      { id: 'Intimidation', name: 'Intimidation', description: 'Only if already proficient in Persuasion' },
+      { id: 'Performance', name: 'Performance', description: 'Only if already proficient in Persuasion' },
+    ],
+  }],
+
+  // PHB 2024 Fey Wanderer, Otherworldly Glamour. Source note: this one is taken from the app's own
+  // feature text (itself audited for wording in June 2026) rather than the PDF — the Fey Wanderer
+  // entry does not survive text extraction from the 2024 scan.
+  'fey-wanderer-2024': [{
+    key: 'otherworldlyGlamourSkill',
+    label: 'Otherworldly Glamour — skill proficiency',
+    picksByLevel: { 3: 1 },
+    grants: 'skill',
+    choices: [
+      { id: 'Deception', name: 'Deception' },
+      { id: 'Performance', name: 'Performance' },
+      { id: 'Persuasion', name: 'Persuasion' },
     ],
   }],
 };
