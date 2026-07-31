@@ -2877,3 +2877,57 @@ to be correct again.
 sheet. Confirmed pre-existing by stashing this session's changes and re-observing. Likely a `.map()`
 keyed on feature name, which collides legitimately (Wizard has five "Ability Score Improvement",
 Rogue has "Expertise" at 1 and 6). Filed as a separate task.
+
+---
+
+## Phase I — per-spell header accuracy: 8 bugs found, PHB now 100% verified (2026-07-31)
+
+`tools/audit/spellheaders.py` compares every spell's mechanical header — level, school, ritual,
+casting time, range, components, duration — against the book, which states all of them on one line
+(`*2nd-level abjuration* | CT: 1 action | Range: 30 ft | C: V, S, M (...) | Dur: 8 hours`).
+
+**Final: 361 of 361 PHB spells compared (100% coverage). Level, school, ritual, range, components
+and duration all clean.** The only remaining diffs are 4 casting-time *wordings* where the app
+carries the fuller PHB sentence and the extract abbreviates it — same meaning, not bugs
+(Shield, Counterspell, Feather Fall, Hellish Rebuke).
+
+### Cross-field consistency over all 547 spells — clean
+Ran first, with five injected-bad-data controls that each fired exactly once:
+level in 0–9, school in the 8 valid schools, **`concentration` flag agreeing with the duration
+text**, `M` component ⟷ `materialComponent` present, no cantrip carrying `atHigherLevels`, and no
+spell missing components/classes/duration/range/castingTime. **Zero anomalies.**
+
+### The 8 fixes, each verified against the PHB PDF (not the extract, not memory)
+
+| Spell | Field | was | now |
+|---|---|---|---|
+| **Mass Cure Wounds** | school | Evocation | **Conjuration** |
+| **Mass Heal** | school | Evocation | **Conjuration** |
+| **Power Word Stun** | duration | "Until ended" | **Instantaneous** |
+| **Fear** | range | Self | **Self (30-foot cone)** |
+| **Leomund's Tiny Hut** | range | Self | **Self (10-foot-radius hemisphere)** |
+| **Antimagic Field** | range | Self (10-foot radius) | Self (10-foot-radius **sphere**) |
+| **Crusader's Mantle** | range | Self (30-foot radius) | **Self** — the radius is body text, the Range line is "Self" |
+| **Divine Smite** | sourceBook | PHB | **PHB2024** (+ `paladin-2024` in classes) |
+
+**Divine Smite is the one that mattered.** In 2014 it is a paladin **class feature** (PHB p.85) —
+and the app already carries it at paladin level 2. Tagged `sourceBook: 'PHB'`, it was *also* offered
+to a 2014 paladin as a preparable 1st-level spell, i.e. the same ability twice. It only became a
+real spell in PHB 2024, whose paladin feature is "Paladin's Smite". Retagged to PHB2024 with both
+class ids, matching how the other eleven 2024 spells are declared; `bookEnabled()` does the edition
+gating from there.
+
+Note the two school bugs are both *healing* spells, and both were Evocation — a plausible-looking
+wrong answer, since Cure Wounds and Heal genuinely are Evocation. Mass Cure Wounds and Mass Heal are
+the two that aren't.
+
+### Coverage went 95.6% → 99.7% → 100%, and each step exposed a real bug
+The first run left 16 spells uncompared — **every named spell in the PHB** (Bigby's, Mordenkainen's
+×4, Otiluke's ×2, Melf's, Otto's, Rary's, Tenser's, Leomund's ×2, Drawmij's, Heroes', Crusader's).
+Two independent traps stacked: the TS source escapes the apostrophe (`Bigby\'s`) and the book uses a
+typographic one (`Bigby’s`). Fixing the match key pulled them in and immediately surfaced
+**Crusader's Mantle**; the last one, **Divine Smite**, turned out to be absent from the extract
+because it is not a 2014 spell at all.
+
+That is the shape worth remembering: **the spells a name-matching sweep silently skips are exactly
+the ones nobody has checked**, so an unexplained coverage gap is a finding, not a rounding error.
