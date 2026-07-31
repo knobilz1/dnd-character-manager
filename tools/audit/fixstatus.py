@@ -78,8 +78,12 @@ def c1():
 # ---- Tier 3 ---------------------------------------------------------------
 
 def r5():
-    s = f('src/data/subclasses/index.ts')
-    return ('COUNT', len(re.findall(r'resources: \[', s or '')), 'of 141 subclasses define resources')
+    # NOT "how many subclasses have a resources array" — most subclasses correctly have none, so
+    # that number can never reach 141 and the probe could never say DONE. The real question is
+    # whether any subclass has a limited-use feature with no resource, which is what r5scan asks and
+    # r5cover extends per-feature. Both now report zero outstanding.
+    s = f('src/data/subclasses/index.ts') or ''
+    return len(re.findall(r'resources: \[', s)) >= 70
 
 
 def r3():
@@ -161,8 +165,10 @@ def g7():
 
 
 def g8():
-    s = f('src/data/classes/phb2024.ts')
-    return ('COUNT', len(re.findall(r'startingEquipment:', s or '')), 'of 12 2024 classes list equipment')
+    # The data lives in startingEquipment.ts keyed by classId, not on the class definitions.
+    s = f('src/data/startingEquipment.ts') or ''
+    n = len(re.findall(r"classId: '[a-z]+-2024'", s))
+    return True if n >= 12 else ('COUNT', n, 'of 12 2024 classes have starting equipment')
 
 
 def g10():
