@@ -1323,3 +1323,71 @@ creation and is unreachable afterwards). Verified: Deep Gnome shows an INT/WIS/C
 switching it to CHA changes both spell rows to CHA, the value persists to localStorage and
 survives a reload through `load()`. Negative control: Tiefling, which has innate spells but no
 choice, renders the panel with its fixed CHA and **no** select.
+
+---
+
+## Pre-release smoke test (2026-07-30)
+
+### The intended test could not be run: there are no real characters on this machine
+The plan was to load the user's own saved characters — the one population synthetic seeds
+cannot imitate. The installed app's WebView2 localStorage
+(`%LOCALAPPDATA%\com.nabil.dndsheet\EBWebView\Default\Local Storage\leveldb`) holds exactly
+**one** character, `own-test-1` "Thorin Oakshield" (playerName "Ana"), a fixture from the
+proxy/roll-call work. No other Tavern Sheet WebView2 profile exists on the box.
+
+Ruled out rather than assumed: `dnd_cm_library_v1` appears in **none** of the `.ldb` files,
+and those files are 90–100% printable bytes, so no compacted older/larger library is hiding
+behind snappy compression. The single value in `000010.log` is the current one.
+
+That real save was loaded through the modified `load()` anyway: renders clean, no console
+errors, Arcane Recovery intact, no raw-key rows.
+
+### Substitute A — override keys, checked exhaustively (`tools/audit/keycheck.py`)
+An override naming a key no definition declares is a **silent no-op**: `load()` applies
+overrides by mapping over resources already present, so a typo'd or renamed key leaves the
+feature on its placeholder max with nothing on screen to show for it. That is the R7 shape,
+and the `psionic_energy` split had just created two new override keys.
+
+- 157 declared resource keys, 52 override keys in each implementation.
+- `computeResourceMaxOverrides` (store) and `resourceMaxOverrides` (derived) are **identical
+  sets** — no drift between the two mirrored implementations.
+- **Zero dangling override keys.**
+
+### Substitute B — `maxPerLevel` coverage (`tools/audit/maxtables.py`)
+`load()` reads `rd.maxPerLevel[level] ?? 0`, so a missing level silently becomes max 0, which
+on the sheet is indistinguishable from a fully expended feature. Swept all 157 keys: 132
+literal tables, 24 helper-built (`profBonusByLevel` / `fromLevel` / `atEveryLevel`), 1 flat
+feat `max`. The sweep asserts the three buckets account for every declared key rather than
+silently skipping what it cannot parse — the first draft *did* silently skip 22 blocks and
+would have reported clean over 86% of the corpus.
+
+**One finding: `fighting_spirit` (Samurai) had no entries for levels 1–2.** Harmless today
+(the subclass cannot be held below fighter 3) but it was the only table in 157 with a gap,
+and the gap is the exact shape that reads as 0/0. Filled in.
+
+### Substitute C — 14 realistic builds rendered end-to-end
+Level-20 representatives of every resource shape, checked against the books:
+
+| Build | Rendered | Verdict |
+|---|---|---|
+| Fighter 20 Battle Master | Action Surge 2, Second Wind 1, Indomitable 3, Superiority d12 ×6 | ✅ |
+| Cleric 20 Life | Channel Divinity 3, Divine Intervention 1 + its `special` note | ✅ |
+| Bard 20 Lore (half-elf) | Bardic Inspiration d12 ×4 — Cha 16+2 racial = 18, mod +4 | ✅ |
+| Monk 20 | Ki 20/20 (exactly at PIP_LIMIT, still pips) | ✅ |
+| Paladin 20 Devotion | Lay on Hands as the numeric stepper 100/100 | ✅ |
+| Sorcerer 20 Draconic (dragonborn) | Sorcery Points 20, Breath Weapon 1 | ✅ |
+| Artificer 20 Armorer | Infused Items 6, Flash of Genius 3 (Int), Perfected Armor 6 (PB) | ✅ |
+| Barbarian 20 Totem / Druid 20 Land | Rages and Wild Shape both "∞ — no limit" | ✅ |
+| Rogue 20 Soulknife | Psionic Energy **d12**, Psychic Veil, Rend Mind | ✅ |
+| **Fighter 10 Psi Warrior / Rogue 10 Soulknife** | **two** Psionic pools, 12/12 each, both d8, plus Fey Step 6 | ✅ |
+| Barbarian 1 (goliath) | Rages, Stone's Endurance | ✅ |
+| Ranger 20 Gloom Stalker | no panel — Ranger is `resources: []` and the subclass has no block | ✅ correct |
+
+**Zero raw snake_case rows across all 14.** The multiclass row is the one that matters most:
+it is the build the `psionic_energy` split exists for, and it now shows two independent pools
+at the right size and the right die.
+
+### What this does and does not establish
+It establishes that the resource layer is correct across every shape the app can produce. It
+does **not** establish anything about the user's real characters, because there are none here
+to test. If characters exist on another machine or in Drive sync, that check is still owed.

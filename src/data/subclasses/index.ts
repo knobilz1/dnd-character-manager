@@ -557,7 +557,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'samurai', name: 'Samurai', classId: 'fighter', sourceBook: 'XGtE', description: 'The Samurai is a fighter who draws on an implacable fighting spirit to overcome enemies. A Samurai\'s resolve is nearly unbreakable.',
     resources: [
       { name: 'Fighting Spirit', key: 'fighting_spirit', rechargeOn: 'long' as const,
-        maxPerLevel: {3:3,4:3,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:3,19:3,20:3} },
+        maxPerLevel: {1:0,2:0,3:3,4:3,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:3,19:3,20:3} },
     ],
     features: [
     { name: 'Bonus Proficiency', level: 3, description: 'You gain proficiency in one of: History, Insight, Performance, or Persuasion. Or you learn one language.' },
