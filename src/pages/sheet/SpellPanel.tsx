@@ -22,7 +22,7 @@ interface SpellPanelProps {
   toggleSpellPrepared: (id: string, maxPrepared?: number | null) => void;
   startConcentration: (id: string) => void;
   endConcentration: () => void;
-  addSpellToBook: (id: string) => void;
+  addSpellToBook: (id: string, limits?: { known?: number | null; cantrips?: number | null; spellbook?: number | null }) => void;
   removeSpellFromBook: (id: string) => void;
   useSpellSlot: (level: SlotLevel) => void;
   usePactSlot: () => void;
@@ -45,7 +45,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
 
   const primaryClass = character.classes[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
-  const { maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel } = derived;
+  const { maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel, spellsKnown, spellbookLimit } = derived;
   const slotsUsed = character.spellSlotsUsed;
   const pactMagic = character.pactMagic;
 
@@ -526,7 +526,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
 
         <div className="space-y-1 max-h-96 overflow-y-auto scrollbar-thin">
           {availableToAdd.map(spell => (
-            <div key={spell.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-700 cursor-pointer" onClick={() => { addSpellToBook(spell.id); }}>
+            <div key={spell.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-700 cursor-pointer" onClick={() => { addSpellToBook(spell.id, { known: spellsKnown, cantrips: cantripsKnown, spellbook: spellbookLimit }); }}>
               <Badge color={SCHOOL_COLORS[spell.school] ?? 'slate'} className="shrink-0 w-8 text-center justify-center">
                 {spell.level === 0 ? 'C' : spell.level}
               </Badge>

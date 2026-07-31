@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
-import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
+import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor, getMulticlassSpellSlots } from '../data/mechanics';
 import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
@@ -284,6 +284,8 @@ export function computeCharacterDerived(character: Character) {
     // Number of prepared spells (for prepared casters only) and max spell level
     let maxPreparedSpells: number | null = null;
     let cantripsKnown = 0;
+    let spellsKnown: number | null = null;
+    let spellbookLimit: number | null = null;
     if (primaryClassDef && spellcastingAbility) {
       const casterLevel = primaryClassLevel?.level ?? 0;
       const spellMod = mods[spellcastingAbility];
@@ -297,6 +299,28 @@ export function computeCharacterDerived(character: Character) {
         if (sub?.spellcastingType === 'third') {
           cantripsKnown = casterLevel >= 10 ? 3 : casterLevel >= 3 ? 2 : 0;
         }
+      }
+
+      // R15: how many spells the character may KNOW was computed in the creator and in the level-up
+      // dialog but never here, so the sheet — the one screen you use every session — had no number
+      // to enforce and `addSpellToBook` let a bard learn the entire bard list.
+      //
+      // Three different limits, and conflating them is the whole bug:
+      //   known casters (bard, sorcerer, warlock, ranger) have a hard spells-known ceiling;
+      //   wizards have a SPELLBOOK size instead, which grows by copying (PHB p.114: 6 at level 1,
+      //     +2 per level) and is unrelated to how many they prepare;
+      //   prepared casters (cleric, druid, paladin, artificer, 2024 bard/ranger) have NO book limit
+      //     at all — their whole class list is available and only preparation is capped.
+      // null therefore means "no limit applies", which is different from 0.
+      spellsKnown = spellsKnownFor(primaryClassDef.id, casterLevel) || null;
+      if (spellsKnown === null && primaryClassLevel?.subclassId) {
+        const sub = getSubclass(primaryClassLevel.subclassId);
+        if (sub?.spellcastingType === 'third') {
+          spellsKnown = spellsKnownFor(sub.spellListClassId ?? primaryClassDef.id, casterLevel) || null;
+        }
+      }
+      if (['wizard', 'wizard-2024'].includes(primaryClassDef.id)) {
+        spellbookLimit = 6 + 2 * Math.max(0, casterLevel - 1);
       }
     }
 
@@ -514,6 +538,8 @@ export function computeCharacterDerived(character: Character) {
       maxPreparedSpells,
       maxSpellLevel,
       cantripsKnown,
+      spellsKnown,
+      spellbookLimit,
       totalLevel,
       primaryClassDef,
       exhaustionLevel,

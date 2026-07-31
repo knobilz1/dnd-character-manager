@@ -195,7 +195,8 @@ interface CharacterState {
   /** maxPrepared: the derived prepared-spell cap, or null/undefined when no cap applies
    *  (known casters, spellbook casters). Passed in because the caller has the authoritative value. */
   toggleSpellPrepared: (spellId: string, maxPrepared?: number | null) => void;
-  addSpellToBook: (spellId: string) => void;
+  /** `limits` are the three separate ceilings; omit to add without a cap (migration/import paths). */
+  addSpellToBook: (spellId: string, limits?: { known?: number | null; cantrips?: number | null; spellbook?: number | null }) => void;
   removeSpellFromBook: (spellId: string) => void;
   startConcentration: (spellId: string) => void;
   endConcentration: () => void;
@@ -621,9 +622,34 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, spellbook } };
     }),
 
-  addSpellToBook: (spellId) =>
+  addSpellToBook: (spellId, limits) =>
     set((s) => {
       if (!s.character || s.character.spellbook.find(sp => sp.spellId === spellId)) return s;
+
+      // R16/R2: cap learning HERE, next to the prepared-spell guard, because this action is the one
+      // chokepoint every "learn a spell" path funnels through. Previously only the creator enforced
+      // a limit, so a character built correctly could then open the sheet and learn the entire
+      // class list — and the level-up dialog's own gate was bypassed by the sheet's Add Spell
+      // browser, which called straight through.
+      //
+      // Cantrips, known spells and a wizard's spellbook are three SEPARATE ceilings; a cantrip must
+      // never be refused because the spells-known list is full. `undefined`/`null` means no limit
+      // applies to that kind, which is not the same as a limit of 0.
+      const spell = getSpell(spellId);
+      if (spell && limits) {
+        const isCantrip = spell.level === 0;
+        const cap = isCantrip ? limits.cantrips
+          : limits.spellbook != null ? limits.spellbook
+          : limits.known;
+        if (cap != null && cap > 0) {
+          const held = s.character.spellbook.filter((sp) => {
+            if (sp.isAlwaysPrepared) return false;   // granted by subclass/race, never counted
+            const sp2 = getSpell(sp.spellId);
+            return sp2 && (sp2.level === 0) === isCantrip;
+          }).length;
+          if (held >= cap) return s;                 // at the ceiling — refuse
+        }
+      }
       return { character: { ...s.character, spellbook: [...s.character.spellbook, { spellId, isPrepared: false, isAlwaysPrepared: false }] } };
     }),
 

@@ -172,7 +172,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
   // id namespaced like every other 2024 entry: it previously collided with the TCE circle-of-stars, and
   // getSubclass() is .find() so the TCE one always won — a 2024 Druid picking this silently received the
   // 2014 features at 2014 levels.
-  { id: 'circle-of-stars-2024', name: 'Circle of Stars', classId: 'druid-2024', sourceBook: 'PHB2024',
+  { id: 'circle-of-stars-2024', name: 'Circle of the Stars', classId: 'druid-2024', sourceBook: 'PHB2024',
     description: 'Tap into the magic of constellations and the night sky.',
     features: [
       { name: 'Star Map', level: 3, description: 'Hold star map (created on Long Rest): always have Guidance and Guiding Bolt prepared. Cast Guiding Bolt without slot = Wis mod (min 1) times per Long Rest.' },
@@ -426,7 +426,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   // ═══════════════════════════ SORCERER ══════════════════════════════════════
 
-  { id: 'aberrant-mind-2024', name: 'Aberrant Mind', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
+  { id: 'aberrant-mind-2024', name: 'Aberrant Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Your mind brushes the Far Realm, granting alien psionic power.',
     features: [
       { name: 'Psionic Spells', level: 3, description: 'Always have prepared (by tier): level 3 — Arms of Hadar, Calm Emotions, Detect Thoughts, Dissonant Whispers, Mind Sliver; level 5 — Hunger of Hadar, Sending; level 7 — Evard\'s Black Tentacles, Summon Aberration; level 9 — Rary\'s Telepathic Bond, Telekinesis. Can replace one of these on level-up with a Divination or Enchantment spell of the same level.' },
@@ -438,7 +438,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     ],
   },
 
-  { id: 'clockwork-soul-2024', name: 'Clockwork Soul', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
+  { id: 'clockwork-soul-2024', name: 'Clockwork Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Tap the cosmic force of order for reliable, balanced magic.',
     features: [
       { name: 'Clockwork Magic', level: 3, description: 'Always have prepared (by tier): level 3 — Aid, Alarm, Lesser Restoration, Protection from Evil and Good; level 5 — Dispel Magic, Protection from Energy; level 7 — Freedom of Movement, Summon Construct; level 9 — Greater Restoration, Wall of Force. Can replace one of these on level-up with a spell of the same level from any list.' },
@@ -449,7 +449,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     ],
   },
 
-  { id: 'draconic-bloodline-2024', name: 'Draconic Bloodline', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
+  { id: 'draconic-bloodline-2024', name: 'Draconic Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Your innate magic flows from draconic blood.',
     features: [
       { name: 'Draconic Resilience', level: 3, description: 'HP max increases by +3 at level 3, then +1 per additional Sorcerer level. While not wearing armor: AC = 10 + Dex mod + Cha mod.' },
@@ -461,7 +461,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     hpBonusPerLevel: 1,
   },
 
-  { id: 'wild-magic-2024', name: 'Wild Magic', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
+  { id: 'wild-magic-2024', name: 'Wild Magic Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Harness the chaos of untamed arcane magic.',
     features: [
       { name: 'Wild Magic Surge', level: 3, description: 'Once per turn, after casting a Sorcerer spell with a slot, you can roll a d20. On a 20: roll on the Wild Magic Surge table (see PHB 2024 p.149–150). If the surge is a spell, it can\'t be affected by Metamagic.' },
@@ -474,7 +474,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   // ═══════════════════════════ WARLOCK ═══════════════════════════════════════
 
-  { id: 'archfey-patron-2024', name: 'The Archfey', classId: 'warlock-2024', sourceBook: 'PHB2024',
+  { id: 'archfey-patron-2024', name: 'Archfey Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'Your patron is a lord or lady of the fey, a creature of legend and trickery.',
     features: [
       { name: 'Archfey Spells', level: 3, description: 'Always have Calm Emotions, Faerie Fire, Misty Step, Phantasmal Force, Sleep prepared; level 5: Blink, Plant Growth; level 7: Dominate Beast, Greater Invisibility; level 9: Dominate Person, Seeming.' },
@@ -486,7 +486,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     alwaysPreparedSpells: { 3: ['calm-emotions', 'faerie-fire', 'misty-step', 'phantasmal-force', 'sleep'], 5: ['blink', 'plant-growth'], 7: ['dominate-beast', 'greater-invisibility'], 9: ['dominate-person', 'seeming'] },
   },
 
-  { id: 'celestial-patron-2024', name: 'The Celestial', classId: 'warlock-2024', sourceBook: 'PHB2024',
+  { id: 'celestial-patron-2024', name: 'Celestial Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'A powerful celestial grants you access to healing light.',
     features: [
       { name: 'Celestial Spells', level: 3, description: 'Always have Aid, Cure Wounds, Guiding Bolt, Lesser Restoration, Light, Sacred Flame prepared; level 5: Daylight, Revivify; level 7: Guardian of Faith, Wall of Fire; level 9: Greater Restoration, Summon Celestial.' },
@@ -498,7 +498,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     alwaysPreparedSpells: { 3: ['aid', 'cure-wounds', 'guiding-bolt', 'lesser-restoration', 'light', 'sacred-flame'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['greater-restoration', 'summon-celestial'] },
   },
 
-  { id: 'fiend-patron-2024', name: 'The Fiend', classId: 'warlock-2024', sourceBook: 'PHB2024',
+  { id: 'fiend-patron-2024', name: 'Fiend Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'A fiend of tremendous power has entered into a pact with you.',
     features: [
       { name: 'Fiend Spells', level: 3, description: 'Always have Burning Hands, Command, Scorching Ray, Suggestion prepared; level 5: Fireball, Stinking Cloud; level 7: Fire Shield, Wall of Fire; level 9: Geas, Insect Plague.' },
@@ -510,7 +510,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     alwaysPreparedSpells: { 3: ['burning-hands', 'command', 'scorching-ray', 'suggestion'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['geas', 'insect-plague'] },
   },
 
-  { id: 'great-old-one-2024', name: 'The Great Old One', classId: 'warlock-2024', sourceBook: 'PHB2024',
+  { id: 'great-old-one-2024', name: 'Great Old One Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'Your patron is a mysterious entity of the Far Realm.',
     features: [
       { name: 'Great Old One Spells', level: 3, description: 'Always have prepared (by tier): level 3 — Detect Thoughts, Dissonant Whispers, Phantasmal Force, Tasha\'s Hideous Laughter; level 5 — Clairvoyance, Hunger of Hadar; level 7 — Confusion, Summon Aberration; level 9 — Modify Memory, Telekinesis.' },
@@ -526,7 +526,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   // ═══════════════════════════ WIZARD ════════════════════════════════════════
 
-  { id: 'abjurer-2024', name: 'School of Abjuration', classId: 'wizard-2024', sourceBook: 'PHB2024',
+  { id: 'abjurer-2024', name: 'Abjurer', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Expert in protective and warding magic.',
     features: [
       { name: 'Abjuration Savant', level: 3, description: 'Add 2 Abjuration spells (level 1–2) to spellbook for free. Each time you gain a new slot level, add 1 free Abjuration spell of that level.' },
@@ -537,7 +537,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     ],
   },
 
-  { id: 'diviner-2024', name: 'School of Divination', classId: 'wizard-2024', sourceBook: 'PHB2024',
+  { id: 'diviner-2024', name: 'Diviner', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Pierce the veil of time and space to know the unknowable.',
     features: [
       { name: 'Divination Savant', level: 3, description: 'Add 2 Divination spells (level 1–2) free. Each new slot level: +1 free Divination spell.' },
@@ -548,7 +548,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     ],
   },
 
-  { id: 'evoker-2024', name: 'School of Evocation', classId: 'wizard-2024', sourceBook: 'PHB2024',
+  { id: 'evoker-2024', name: 'Evoker', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Channel raw magical energy into devastatingly powerful effects.',
     features: [
       { name: 'Evocation Savant', level: 3, description: 'Add 2 Evocation spells (level 1–2) free. Each new slot level: +1 free Evocation spell.' },
@@ -559,7 +559,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     ],
   },
 
-  { id: 'illusionist-2024', name: 'School of Illusion', classId: 'wizard-2024', sourceBook: 'PHB2024',
+  { id: 'illusionist-2024', name: 'Illusionist', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Master the art of deception through magical illusions.',
     features: [
       { name: 'Illusion Savant', level: 3, description: 'Add 2 Illusion spells (level 1–2) free. Each new slot level: +1 free Illusion spell.' },

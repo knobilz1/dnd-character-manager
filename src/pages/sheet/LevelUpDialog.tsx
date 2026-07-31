@@ -396,7 +396,11 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     if (!primary) return;
     if (needsSubclass && !pendingSubclass) return;
 
-    // Add spells and cantrips to the spellbook
+    // Add spells and cantrips to the spellbook.
+    // Deliberately uncapped: these picks are already gated by `canConfirm`, which limits them to
+    // exactly the number this level grants. Passing a ceiling here would compute it from the
+    // character's CURRENT level — the new level is not committed until below — so a legitimate
+    // pick would be refused for exceeding the cap it was about to raise.
     for (const id of [...pendingCantrips, ...pendingSpells]) {
       addSpellToBook(id);
     }
