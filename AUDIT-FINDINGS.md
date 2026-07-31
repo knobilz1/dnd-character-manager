@@ -2177,3 +2177,87 @@ are correctly use-time, 7 already work, ~10 were regex noise.** 12 of the 23 are
 | d4list — build choices with no storage | 150 candidates / 189 subclasses | **23** |
 
 Sweeps to date: **9 layers swept, 6 found defects (67%).**
+
+---
+
+# C6 — 52 of 122 races (43%) grant NO ability score increase at all
+
+`tools/audit/raceasi.py`. The largest single mechanical defect found in this audit.
+
+## What it is
+2014 races carry a fixed ASI (+2 Str, +1 Con). MMoM and PHB 2024 replaced that with a **flexible**
+one — "increase one score by 2 and a different one by 1, or three different scores by 1" — chosen by
+the player. The app models a flexible race as `abilityScoreIncreases: {}` and then never asks.
+
+Three facts, each independently checkable:
+
+1. **52 of 122 races have an empty `abilityScoreIncreases`.**
+2. **No storage exists for a chosen racial ASI.** `types/index.ts` contains no `racialAsi`,
+   `raceAsi`, `racialChoice`, `racialAbilityChoice` or `asiChoices`. The `abilityScoreChoice`
+   machinery in `StepFeats.tsx:155-166` belongs to **feats** and is keyed by feat id.
+3. **Every consumer reads the static object.** 19 read sites of `abilityScoreIncreases`
+   (`useCharacterDerived.ts:47`, `useCharacterStore.ts:22,807`, `useCreatorStore.ts:169,175,204-205`,
+   …) and exactly one assignment, in the data itself. `StepRace.tsx:182` renders the literal string
+   **"Flexible (see traits)"** — a label, not a picker.
+
+So a flexible race contributes +0 to every ability, permanently, with no way for the player to
+correct it.
+
+## Runtime proof, against a matched control
+Four characters, identical base scores 15/14/13/12/10/8, same class and level; only the race differs.
+
+| race | rendered scores | verdict |
+|---|---|---|
+| `dwarf-hill` (fixed ASI) | STR15 DEX14 **CON15** INT12 **WIS11** CHA8 | correct: +2 CON, +1 WIS. **The mechanism works.** |
+| `shifter` (MMoM) | STR15 DEX14 CON13 INT12 WIS10 CHA8 | **+0** — identical to base |
+| `elf-2024` (PHB 2024) | STR15 DEX14 CON13 INT12 WIS10 CHA8 | **+0** |
+| `human-variant` (PHB) | STR15 DEX14 CON13 INT12 WIS10 CHA8 | **+0** — RAW gives +1 to two of your choice |
+
+The dwarf control is what makes this conclusive: the racial-ASI path is not broken in general, it
+simply has no input for the flexible case.
+
+## Blast radius by book
+| book | count | notes |
+|---|---|---|
+| MMoM | 31 | the entire reprinted-races line |
+| PHB2024 | 10 | **all ten species** |
+| SJA | 6 | astral-elf, autognome, giff, hadozee, plasmoid, thri-kreen |
+| FToD | 3 | chromatic / metallic / gem dragonborn |
+| SCoC | 1 | owlin |
+| **PHB** | **1** | **`human-variant`** — Variant Human, one of the most-played races in 2014 |
+
+`human-variant` deserves separate note: it is not a flexible-ASI reprint, it is a **core PHB** option
+whose +1/+1 has simply never been implemented. It is the one instance of this defect that a
+2014-only, PHB-only player will hit.
+
+## A second-order finding: 32 of the 52 do not even say so in prose
+Only **20** of the empty-ASI races carry trait text describing the flexible increase (owlin does;
+deep-gnome does not). For the other 32 the ability increase is absent from the data *and* absent from
+the description, so the sheet gives the player no indication anything is missing. Those are strictly
+worse than the 20 — a player reading the trait list has no reason to suspect a gap.
+
+## Severity
+**Highest of the audit.** Every other finding costs a feature, a counter or a choice; this one is a
+flat −2/−1 (or −1/−1/−1) on 43% of races, which moves AC, attack, damage, saves, skills, spell save
+DC and HP simultaneously. It is also the cheapest kind of thing to miss in a text-accuracy audit,
+because the descriptions of the 20 are *correct* — they say exactly what the player should get.
+
+## Fix shape (for round 2, not done here)
+Needs a `Character` field for the chosen increases, a picker in `StepRace` (where the "Flexible"
+label already sits), and a level-up-independent path since race never changes. The 19 read sites all
+funnel through `race.abilityScoreIncreases`, so the merge point is one helper — the same shape as
+C3's, and worth doing in the same pass.
+
+## Languages — checked, no mechanical exposure
+`Race.languages` is a `string[]` rendered in `StepRace` and the export paths. Nothing computes from
+it; there is no language proficiency system to be wrong about. Recorded as **not a defect surface**
+rather than swept, so a later pass does not spend effort on it.
+
+## Running defect rate
+| Sweep | Entities | Defects |
+|---|---|---|
+| raceasi — flexible ASI reachability | 122 races | **52** (one root cause) |
+| raceasi — languages | 122 races | not a mechanical surface |
+
+Sweeps to date: **10 layers swept, 7 found defects (70%).** Phase C is now COMPLETE: speeds (C1),
+resistances (C4), darkvision (C5, clean), proficiencies (C3), ASIs (C6), languages (n/a).
