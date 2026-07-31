@@ -2083,3 +2083,97 @@ infusion, and ERLW's Armblade is still absent.
 Sweeps to date: **8 layers swept, 5 found defects (63%).** Phase A's per-class feature pass is now
 covered by a single reproducible sweep rather than 16 hand passes; what remains for Phase A is
 per-class *level table* verification against the books, which cannot be swept.
+
+---
+
+# D4 — build-choice triage, COMPLETE (2026-07-30, log-only)
+
+`tools/audit/d4list.py`. The earlier automated attempt was abandoned as unclassifiable
+("build=142, usetime=25 from a 103-item list"). It is now clear **why**, and the problem is smaller
+than it looked.
+
+## Why the automated attempt failed: one phrase
+Nearly every 2014 subclass feature opens with PHB boilerplate — "Beginning when you choose this
+archetype at 3rd level, ...". That "choose" is the **subclass** pick, not a choice the feature grants.
+`champion` Improved Critical, the canonical false positive in the old table, contains no choice at all:
+
+> "Beginning when you **choose this archetype** at 3rd level, your weapon attacks score a critical hit
+> on a roll of 19 or 20."
+
+Stripping that boilerplate — and its select / pick / adopt / join variants, which cost another
+6 candidates — takes 173 to **150**. The negative control (Improved Critical must NOT appear) fired on
+the first run and is what exposed this; without it the sweep would have shipped the same noise as
+before. The discriminator was never targeting language; it was boilerplate contamination.
+
+## The actual question
+Not "is this a choice" but **does the choice persist?** A build choice must be stored or the feature
+cannot work; a use-time choice is re-made every activation and storing it would be wrong.
+
+`ClassOptionsState` (`types/index.ts:384-402`) can store: fightingStyles, invocations, pactBoon,
+metamagic, maneuvers, infusions, optionalFeatures, totemSpirit, aspectTotem, totemicAttunement,
+landType. Plus armorerMode, pathOfBeastForm, expertiseSkills, knowledgeDomainSkills, featChoices on
+`Character`.
+
+## Result of the hand pass over all 150
+
+**Already stored correctly (7):** totem-warrior x3, battle-master maneuvers, champion +
+champion-2024 + college-of-swords fighting styles, armorer Armor Model, circle-of-the-land land type,
+knowledge-domain (partial — skills stored, languages not).
+
+**USE-TIME, correctly needing no storage (majority, ~95).** Two kinds: creature targeting ("choose a
+creature within 30 feet" — the bulk), and genuinely re-chosen options. The latter are worth naming
+because they *look* like build choices: hunter-2024 Hunter's Prey and Defensive Tactics ("change on
+Short/Long Rest"), the-fiend / fiend-patron-2024 Fiendish Resilience (each rest), wild-heart Rage of
+the Wilds and Power of the Wilds (each rage), path-of-the-beast Form of the Beast (each rage),
+circle-of-stars Starry Form (each activation), artillerist Eldritch Cannon (each summon), drakewarden
+Drake Companion damage type (when summoned), swarmkeeper Gathered Swarm (each hit),
+warrior-of-elements-2024 Elemental Epitome (each turn), tob-school-of-the-tide-watcher Pull of the
+Tides (each long rest), diviner-2024 The Third Eye (per rest).
+
+Note path-of-the-beast is *over*-modelled: `pathOfBeastForm` persists a choice RAW re-makes each
+rage. Harmless, but it is the mirror of the defect class below.
+
+**BUILD CHOICE WITH NO STORAGE — the defect list (23 features, 17 subclasses):**
+
+| group | subclass / feature | needs |
+|---|---|---|
+| **named-option lists** | arcane-archer Arcane Shot (lv3 x2, +1 at 7/10/15/18 = 6 picks) | new array |
+| | way-of-the-four-elements Disciple of the Elements (3) + Additional (6/11/17) | new array |
+| | rune-knight Rune Carver (lv3 x2, more later) | new array |
+| | hunter Hunter's Prey (3), Defensive Tactics (7) | new array |
+| | way-of-the-kensei Path of the Kensei (lv3, two weapons) | new array |
+| | beast-master Ranger's Companion (lv3) / beast-master-2024 Primal Companion (lv3) | new field |
+| **single fixed pick** | draconic-bloodline Dragon Ancestor (lv1) — **determines a damage resistance** | one field |
+| | draconic-bloodline-2024 Draconic Ancestor (3) + Elemental Affinity (6) | one field |
+| | divine-soul Divine Magic (lv1) — affinity grants a free spell | one field |
+| | way-of-the-ascendant-dragon Breath of the Dragon (lv3), "your chosen element" | one field |
+| | tob-sea-domain One with the Sea (lv17) | one field |
+| **proficiency / language** | battle-master Student of War; bladesinging + scag-bladesinging Training in War and Song; cavalier Bonus Proficiency; college-of-lore + college-of-lore-2024 Bonus Proficiencies; fey-wanderer-2024 Otherworldly Glamour; nature-domain Acolyte of Nature; scag-arcana-domain Arcane Initiate; scag-mastermind Master of Intrigue; scag-purple-dragon-knight Royal Envoy; drakewarden Draconic Gift; cobalt-soul Mystical Erudition | **blocked on C3** |
+
+**The proficiency group is blocked, not merely unimplemented.** Twelve of the 23 grant a weapon, tool,
+language or skill proficiency — and C3 established that racial/class proficiency data feeds no
+calculation at all (`toHit = abilityMod + profBonus`, unconditional). Storing these choices changes
+nothing until C3's attack-roll gate exists. That reorders the fix work: **C3 before this group**, or
+the effort is wasted.
+
+**Spell-pick group (storage exists, restriction unenforced):** college-of-lore Additional Magical
+Secrets (any class), scag-arcana-domain Arcane Mastery (one each of 6th-9th), circle-of-the-land Bonus
+Cantrip, school-of-illusion Improved Minor Illusion. The spellbook stores the result, so nothing is
+lost — but no code enforces the restriction, so the player can pick anything.
+
+**Residual false positives left to the hand pass (~10):** "if you so choose", and "a direction of your
+choice" where the *opponent* chooses (circle-of-the-land Nature's Sanctuary, scag-the-undying Among the
+Dead, tob-island-domain High Tide), plus oath-of-the-ancients Undying Sentinel ("you can choose to drop
+to 1 hit point" — a yes/no, not a stored option). Deliberately **not** pattern-matched away: a pattern
+broad enough to catch these was judged more likely to eat real candidates than to help.
+
+## D4 status: CLOSED as a question, OPEN as work
+The classification the earlier round called impossible is done: **23 build choices need storage, ~95
+are correctly use-time, 7 already work, ~10 were regex noise.** 12 of the 23 are blocked behind C3.
+
+## Running defect rate
+| Sweep | Entities | Defects |
+|---|---|---|
+| d4list — build choices with no storage | 150 candidates / 189 subclasses | **23** |
+
+Sweeps to date: **9 layers swept, 6 found defects (67%).**
