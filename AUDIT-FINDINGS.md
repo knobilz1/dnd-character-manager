@@ -2413,3 +2413,129 @@ the racial grant covers them.
 
 `npx tsc -b --force` clean, `npm run build` clean. `keycheck.py`, `spellrefs.py` and `maxtables.py`
 all re-run unchanged (0 dangling override keys, 223/223 spell refs, 0 table gaps).
+
+---
+
+## PHASE B — subclass feature LEVELS vs the books: **CLEAN** (187 of 189 compared)
+
+The brief said this layer "cannot be swept" and budgeted 97 hand comparisons across three books.
+That was wrong. `reference-books/md` carries the levels in machine-readable form; it just carries
+them in **seven different shapes**, which is presumably why it looked unsweepable:
+
+| container | books |
+|---|---|
+| `### Path of the Berserker (p.49)` | PHB barbarian/bard/druid/fighter/monk |
+| `#### Knowledge Domain (p.59)` | PHB cleric domains |
+| `**Sacred Oath — Oath of Devotion (PHB 85):**` | PHB paladin/ranger/rogue/sorcerer/warlock |
+| `### Fighter: Echo Knight (…) — p. 183` | SCAG, EGtW, FToD, TCE artificers |
+| `### CORSAIR (Fighter)` | ToB (uppercase) |
+| `**Path of the Berserker**` | PHB2024 |
+
+| feature line | books |
+|---|---|
+| `- **Improved Critical (3rd).**` | PHB |
+| `- **7th — Aura of Devotion:**` | PHB paladin |
+| `- **Level 3 — Frenzy:**` | PHB2024 |
+| `\| 3rd \| Divine Fury, Warrior of the Gods \|` | XGtE, TCE (feature table) |
+| `**Divine Fury** (3rd):` | XGtE, TCE (prose) |
+| `**Battlerager Armor** *(3rd level)*` | SCAG |
+| `**Master of the Deep (20th level):**` | ToB |
+
+Sweep: `tools/audit/subclassbooklevels.py`. Driven **from the data side** — every subclass in the
+codebase is looked up in its own book and anything not found is reported, never dropped.
+
+### Result
+
+```
+accounting: 189 considered = 187 compared + 0 no-book-file + 2 not-found-in-book
+  level-clean: 187   level-mismatch: 0
+  coverage: 882 of 933 data features paired with a book line (94.5%)
+  no thin matches: every subclass paired at least half its features
+  SCAG reprints checked against their XGtE twin: 0 of 2 differ
+  book self-consistency: table and prose agree everywhere both exist
+```
+
+**Zero level mismatches across 187 subclasses and 882 paired features.** First fully clean layer
+since B4. XGtE and TCE state every level twice (feature table *and* prose heading) and the two
+agree with each other everywhere both exist, so those two books are cross-checked, not just read.
+
+The 2 not compared, both book-side gaps rather than app defects:
+- `cobalt-soul` — `hidden: true` already; the EGtW markdown does not contain it (known, memory-only).
+- `scag-arcana-domain` — the SCAG markdown contains **no cleric content at all** (0 hits for
+  "cleric"). Unverifiable until that book file is filled in; recorded, not waved through.
+
+`scag-mastermind` / `scag-swashbuckler` have no SCAG feature text either — the book says only
+*"Also reprinted in XGtE. Identical mechanics."* They are diffed against the app's **own XGtE
+copies** instead, on the reasoning that if the two app entries disagree one of them is wrong
+whatever the book says. They match exactly.
+
+### The sweep found four bugs in ITSELF before it produced a number worth trusting
+
+Recording these because each one would have produced a **clean-looking result that verified
+nothing**, which is the specific failure this audit keeps hitting:
+
+1. **Block truncation.** The block bound ended at the next line that *looked* like a container, and
+   Eldritch Knight's section contains `**Eldritch Knight Spellcasting table (p.75):**` above its
+   features. Its body was cut to zero feature lines. A truncated block does not fail loudly — it
+   simply stops disagreeing with the data. Fixed by bounding on the actual sibling subclass names.
+2. **Silent zero-feature books.** The first run compared 40 of 189 and called it "level-clean: 40".
+   All 31 XGtE and 25 TCE subclasses had parsed as *zero features* because those books use the
+   table shape. Caught only by the accounting line, which is the fifth time in this audit.
+3. **The differ disagreeing with itself.** The book-self-consistency check used `dict(generator)`
+   (last wins) while `compare()` used `setdefault` (first wins), so a feature listed at several
+   levels because it *improves* — "Spirit Shield (2d6)" at 6th, "(3d6)" at 10th, "(4d6)" at 14th —
+   read as 14 on one side and 6 on the other. It accused **13 books of contradicting themselves**.
+   The books were fine. Fixed by resolving to the first grant (`min`) on both sides.
+4. **Vacuous per-subclass "clean".** Global coverage sat at 94% while `scag-totem-warrior-elk-tiger`
+   paired **0 of 6** features and sat in the clean pile having verified nothing. Added a
+   per-subclass thin-match report. (It turned out benign: the app splits the feature into
+   `Totem Spirit — Elk` / `— Tiger` where the book keeps one feature with sub-bullets, and the
+   levels 3/3, 6/6, 14/14 match the book's 3, 6, 14. Fixed with a fallback that pairs on the part
+   before the dash *without* collapsing the two variants, so a wrong level on only one is still
+   visible.)
+
+Controls in the script: **6 positive** (three container shapes, the table shape, the prose shape,
+the improvement case), **5 negative** (an XGtE subclass must not resolve inside the PHB; a
+perturbed level must be caught; a block must not swallow the next subclass; a progression table's
+dice/number cells must not be read as feature names; a filtered run must still balance), and
+**2 regression** controls pinning bugs 1 and 3 above.
+
+**End-to-end mutation test.** Synthetic controls prove the differ works on synthetic input, so the
+real one: `Champion / Survivor` was changed from 18 to 17 in `src/data/subclasses/index.ts`, the
+sweep re-run, and it reported `LEVEL Survivor data 17 book 18` — then reverted, `git diff` empty.
+That is the only evidence that the whole path from the real data file through to the report fires.
+It also caught a fifth bug on the way: the SCAG-reprint block ignored the book filter, so a
+filtered run double-counted and tripped the accounting assert.
+
+### NEW FINDING B6 — thirteen PHB 2024 subclasses show their 2014 name
+
+Surfaced as a side effect: 13 subclasses could not be found in `phb2024-players-handbook.md` by
+name because the 2024 book **renamed** them and the app kept the 2014 display name. The app's
+`id` fields already carry the new names (`abjurer-2024`, `archfey-patron-2024`), so this is only
+the user-visible `name` field being stale — but a player building a 2024 character sees a subclass
+the 2024 book does not contain.
+
+| app `name` | PHB 2024 book |
+|---|---|
+| Aberrant Mind | **Aberrant Sorcery** |
+| Clockwork Soul | **Clockwork Sorcery** |
+| Draconic Bloodline | **Draconic Sorcery** |
+| Wild Magic | **Wild Magic Sorcery** |
+| Circle of Stars | **Circle of the Stars** |
+| The Archfey | **Archfey Patron** |
+| The Celestial | **Celestial Patron** |
+| The Fiend | **Fiend Patron** |
+| The Great Old One | **Great Old One Patron** |
+| School of Abjuration | **Abjurer** |
+| School of Divination | **Diviner** |
+| School of Evocation | **Evoker** |
+| School of Illusion | **Illusionist** |
+
+Their **levels are correct** — all 13 compared clean once aliased. This is a naming defect only,
+and a cheap one to fix. Logged, not fixed, since the session is in log-only mode.
+
+### Status
+
+Phase B was the last logging layer. **All audit logging is now complete.**
+Running defect rate: **11 layers swept, 7 found defects (64%)** — Phase B's level layer is the
+fourth clean one, though it did surface B6 on the way out.
