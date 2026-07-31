@@ -231,6 +231,18 @@ export const PREPARED_SPELLS_2024: Partial<Record<string, number[]>> = {
   'wizard-2024':  [4,5,6,7,9,10,11,12,14,15,16,16,17,18,19,21,22,23,24,25],
 };
 
+/** True when the class prepares spells from a list rather than knowing a fixed set.
+ *
+ *  Derived from `maxPreparedSpellsFor` rather than restated as an id list: that function already
+ *  encodes the answer (it returns null for known/spontaneous casters), and it is the only copy that
+ *  covers both editions. Four hardcoded arrays used to answer this question independently and three
+ *  of them listed 2014 ids only, so every 2024 prepared caster — bard, cleric, druid, paladin,
+ *  ranger and wizard — was treated as a known caster by the sheet, the sidebar and the spell panel.
+ *  Level and modifier are irrelevant to the question, so any values do. */
+export function isPreparedCaster(classId: string): boolean {
+  return maxPreparedSpellsFor(classId, 1, 0) !== null;
+}
+
 export function spellsKnownFor(classId: string, level: number): number {
   const table = SPELLS_KNOWN[classId];
   if (!table) return 0;
@@ -281,8 +293,11 @@ export function maxPreparedSpellsFor(
       if (level < 2) return 0;
       return Math.max(1, Math.floor(level / 2) + spellMod);
     case 'artificer':
-      // Artificer gets spells at level 1 (unlike Paladin/Ranger who start at 2)
-      return Math.max(1, Math.ceil(level / 2) + spellMod);
+      // TCE: "Int modifier + half artificer level (rounded down)", minimum one spell. The Artificer
+      // does get spells at level 1 (unlike Paladin/Ranger, who start at 2) but that is what the
+      // Math.max(1, ...) is for — using ceil to buy it instead over-prepared by exactly one at
+      // every ODD level, all the way to 19.
+      return Math.max(1, Math.floor(level / 2) + spellMod);
     default:
       return null; // sorcerer, bard, ranger, warlock are known/spontaneous
   }

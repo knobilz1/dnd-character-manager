@@ -361,6 +361,12 @@ export interface Infusion {
   id: string;
   name: string;
   sourceBook: BookId;
+  /** Additional books this entry is available in. The Artificer class itself is
+   *  `sourceBook: 'TCE', alsoIn: ['ERLW']`, so without the same tag here a player who enabled
+   *  ERLW could take the class and then find an empty infusion picker. The other option types
+   *  (Metamagic, Maneuver, Invocation, PactBoon, FightingStyle) still lack this field — they
+   *  have no equivalent cross-book class today, but `bookEnabled` already reads it if added. */
+  alsoIn?: BookId[];
   minLevel: number;
   prerequisite?: string;
   description: string;

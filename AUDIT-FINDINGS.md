@@ -1857,3 +1857,57 @@ Recorded so the second pass can diff against it. Every number below was checked 
 7. **R14** — one clamp pass over the draft in `useCreatorStore.finalize()`, or reset `classOptions` in `setLevel`. Closes over-cap persistence for five caps at once.
 8. **R12** — move the count ladders into `mechanics.ts` keyed by raw class id, delete both inline copies.
 9. **R20** — data-layer work, largest diff, lowest leverage per line. Start with `grantedResources` on Metamagic Adept (one line, field already wired) and the Knowledge-Domain pattern for Corsair/PDK (three lines).
+---
+
+# BATCH FIX PASS — round 1 (2026-07-30)
+
+Cheapest-first, per the order recorded at the end of the Phase D section. Six fixes, each verified at
+runtime against a matched control rather than by reading the diff.
+
+| # | Root cause | Change | Runtime proof |
+|---|---|---|---|
+| 1 | **R19** | `mechanics.ts` Artificer prepared cap `Math.ceil` → `Math.floor` | Artificer 9 (Int 17) sheet reads **`Prepared (0/7)`**; `ceil` gave 8 |
+| 2 | **R13** (Battle Master instance) | `battleMasterManeuverCount` gains `if (level < 3) return 0` | Fighter 2→3 now offers **`MANEUVERS 0/3`**; previously the delta was `3−3=0` and the initial three were never offered |
+| 3 | **R17** | new `isPreparedCaster()` in `mechanics.ts`, derived from `maxPreparedSpellsFor(...) !== null`; 3 stale hardcoded arrays repointed (`SheetPage`, `SidebarPanel`, `SpellPanel`) | 2024 cleric 5 sheet reads **`Prepared (0/9)`**, matching `PREPARED_SPELLS_2024['cleric-2024'][4]`; previously no prepared UI at all |
+| 4 | **R11** | one-directional `PHB2024 → PHB` widening inside `bookEnabled()` | 2024 sorcerer 9→10 METAMAGIC and 2024 warlock 4→5 INVOCATIONS both populate; 2014 twins unchanged |
+| 5 | **R11** (ERLW half) | `alsoIn: ['ERLW']` on all 17 infusions and the 4 Artificer specialists; `alsoIn?` added to the `Infusion` type | ERLW-only Artificer 9→10 INFUSIONS populates |
+| 6 | **R13** | `canConfirm` moved below the option computations and given the six missing clauses | See the gate table below |
+
+## The gate, both directions
+A gate that only ever blocks is a soft-lock, so it was tested in both directions on a Battle Master 2→3:
+
+| state | Confirm |
+|---|---|
+| `MANEUVERS 0/3` | disabled |
+| `1/3` | disabled |
+| `2/3` | disabled |
+| **`3/3`** | **enabled** |
+
+Each clause uses the expertise pattern — `picked >= min(granted, picked + available)` — so it is
+satisfied by picking everything granted **or** everything that exists. That second half matters: a
+naive `remaining === 0` gate would have converted R11's silent loss into an unlevelable character.
+Prepared casters are exempt from the spell clause, matching the picker's own `canAdd` rule.
+
+## Two bugs introduced and caught during the fix, worth recording
+1. **`bookEnabled` aliasing.** The first version of the widening did `set.add('PHB')` on a `set` that
+   was the *caller's* Set whenever a Set was passed (several callers pass a memoised one). Fixed by
+   copying unconditionally. Identical shape to the `load()` aliasing bug from earlier in this audit —
+   the second time this exact mistake has appeared.
+2. **Gating on a search-filtered list.** `availableSpells` is filtered by the dialog's search box and
+   level dropdown, so using it in `canConfirm` would have let *typing a search term* unlock Confirm.
+   Split into `availableSpellsUnfiltered` (the real availability) and `availableSpells` (presentation).
+
+## Regression checks after the fixes
+- `npx tsc -b --force` clean; `npm run build` clean.
+- `keycheck.py`: 52 override keys, store and derived still identical sets, **0 dangling**.
+- `spellrefs.py`: **223 / 223** references resolve, unchanged.
+- 2014 control builds (sorcerer 9→10, Battle Master, TCE artificer) behave exactly as before.
+
+## Still open from the fix order
+Items 6–9: **R16 + R15** (spell-list resolution implemented three times; `spellsKnown` never derived —
+must land together), **R14** (creator never re-validates the draft on class/level change), **R12** (two
+divergent count ladders; the 2024 numbers are still wrong — a level-20 2024 sorcerer gets 4 metamagic
+against RAW 6), **R20** (features that grant proficiency/expertise/resources as description strings only).
+
+Note R12 is *not* fixed by round 1: R11 made the 2024 lists visible, but the **counts** those lists are
+measured against are still the 2014 ladder in the creator.

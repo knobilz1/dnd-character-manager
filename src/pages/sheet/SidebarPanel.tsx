@@ -14,6 +14,7 @@ import { cn } from '../../utils/cn';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 import { getClass } from '../../data/classes';
 import { getSpell } from '../../data/spells';
+import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import type { SlotLevel } from '../../types';
 import type { RollDie } from '../../store/useDiceStore';
 
@@ -533,8 +534,9 @@ function CombatAbilitiesSideModule() {
   if (!character || !derived) return null;
 
   const { slotTotals, spellSaveDC, spellAttackBonus } = derived;
-  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer']
-    .includes(character.classes[0]?.classId ?? '');
+  // From mechanics.ts, not a local list — the hardcoded 2014-only array this replaced meant a
+  // 2024 prepared caster got the known-caster rendering in the sidebar.
+  const isPreparedCaster = isPreparedCasterId(character.classes[0]?.classId ?? '');
 
   type SpellEntry = { spell: ReturnType<typeof getSpell>; alwaysPrepared: boolean };
   const combatSpells: SpellEntry[] = ((character.spellbook ?? [])

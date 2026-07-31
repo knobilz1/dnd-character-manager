@@ -80,6 +80,11 @@ function warlockInvocationCount2024(level: number): number {
 }
 
 function battleMasterManeuverCount(level: number): number {
+  // Below 3 there is no Battle Master, so the count is 0 — exactly as artificerInfusionCount
+  // guards level < 2 below. Without this the function returned 3 at levels 1 and 2, so the
+  // grant at level 3 was computed as a delta of 3 - 3 = 0 and the initial three maneuvers were
+  // never offered. Every later grant then under-delivered too (7th gave 2 instead of 5).
+  if (level < 3) return 0;
   if (level >= 15) return 9;
   if (level >= 10) return 7;
   if (level >= 7) return 5;
@@ -500,14 +505,20 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // Also account for pact magic
   const effectiveMaxSpellLevel = isWarlock ? (newPact?.slotLevel ?? 0) : newMaxSpellLevel;
 
-  const availableSpells = ALL_SPELLS.filter(s =>
+  // Split in two on purpose. The confirm gate needs to know whether any spell is *available* to
+  // pick, and the search box and level dropdown are presentation-only — gating on the filtered
+  // list would mean typing into the search box could unlock the Confirm button.
+  const availableSpellsUnfiltered = ALL_SPELLS.filter(s =>
     s.level > 0 &&
     s.level <= effectiveMaxSpellLevel &&
     bookEnabled(s, enabledBooks) &&
     s.classes.includes(spellListClassId) &&
     (!schoolRestriction || schoolRestriction.includes(s.school)) &&
     !spellbookIds.has(s.id) &&
-    !pendingSpells.includes(s.id) &&
+    !pendingSpells.includes(s.id)
+  );
+
+  const availableSpells = availableSpellsUnfiltered.filter(s =>
     (spellLevelFilter === 'all' || s.level === spellLevelFilter) &&
     (spellSearch === '' || s.name.toLowerCase().includes(spellSearch.toLowerCase()))
   );
@@ -595,17 +606,6 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const existingExpertise = new Set<string>(character.expertiseSkills ?? []);
   const expertiseEligible = Array.from(allProfSkills).filter(s => !existingExpertise.has(s) && !pendingExpertise.includes(s));
 
-  const canConfirm =
-    (method === 'average' || rollResult != null) &&
-    (!needsSubclass || pendingSubclass != null) &&
-    (!needsPactBoon || pendingPactBoon != null) &&
-    (!needsTotemSpirit || pendingTotemSpirit != null) &&
-    (!needsLandType || pendingLandType != null) &&
-    (!needsAspectTotem || pendingAspectTotem != null) &&
-    (!needsTotemicAttunement || pendingTotemicAttunement != null) &&
-    asiChoiceValid &&
-    pendingExpertise.length >= Math.min(expertiseCount, pendingExpertise.length + expertiseEligible.length);
-
   const pactBoonsAvail = needsPactBoon
     ? ALL_PACT_BOONS.filter(p => bookEnabled(p, enabledBooks))
     : [];
@@ -656,6 +656,42 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     .filter(i => bookEnabled(i, enabledBooks))
     .filter(i => i.minLevel <= newLevel)
     .filter(i => !allPickedInfusions.includes(i.id));
+
+  // Defined here, below every option computation, because it now depends on them.
+  //
+  // The six option arrays used to be absent from this gate entirely, while the grant itself is a
+  // TABLE DELTA (see the note above totalNewInvocations). Those two facts together made a skipped
+  // pick permanent: Confirm stayed enabled at "0/2 chosen", the level went through, and every
+  // later level computed its delta from the same table and offered nothing. The subclass gate at
+  // needsSubclass already had this exact bug fixed once; this generalises it.
+  //
+  // Each clause uses the same shape as the expertise one: satisfied when the player has picked
+  // everything they were granted, OR everything that actually exists to pick. The second half is
+  // what stops an empty candidate list from soft-locking the dialog — which matters because that
+  // is precisely the state R11 produced, and a naive `remaining === 0` gate would have turned a
+  // silent loss into an unlevelable character.
+  const satisfied = (picked: number, granted: number, available: number) =>
+    picked >= Math.min(granted, picked + available);
+
+  const canConfirm =
+    (method === 'average' || rollResult != null) &&
+    (!needsSubclass || pendingSubclass != null) &&
+    (!needsPactBoon || pendingPactBoon != null) &&
+    (!needsTotemSpirit || pendingTotemSpirit != null) &&
+    (!needsLandType || pendingLandType != null) &&
+    (!needsAspectTotem || pendingAspectTotem != null) &&
+    (!needsTotemicAttunement || pendingTotemicAttunement != null) &&
+    asiChoiceValid &&
+    satisfied(pendingExpertise.length, expertiseCount, expertiseEligible.length) &&
+    satisfied(pendingCantrips.length, cantripsGained, availableCantrips.length) &&
+    // Prepared casters get the whole list and have no spells-known quota to meet; only
+    // known and spellbook casters owe picks here (mirrors the canAdd rule on the picker).
+    (!(isKnownCaster || isSpellbookCaster) ||
+      satisfied(pendingSpells.length, spellsKnownGained, availableSpellsUnfiltered.length)) &&
+    satisfied(pendingInvocations.length, totalNewInvocations, invocationsAvail.length) &&
+    satisfied(pendingMetamagic.length, totalNewMetamagic, metamagicAvail.length) &&
+    satisfied(pendingManeuvers.length, totalNewManeuvers, maneuversAvail.length) &&
+    satisfied(pendingInfusions.length, totalNewInfusions, infusionsAvail.length);
 
   const existingOptionalFeatures = classOpts.optionalFeatures ?? [];
   const optionalFeaturesNewAtLevel = ALL_OPTIONAL_CLASS_FEATURES

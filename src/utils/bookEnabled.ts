@@ -14,6 +14,19 @@ export function bookEnabled(
   enabledBooks: BookId[] | Set<BookId>,
 ): boolean {
   if (item.hidden) return false;
-  const set = enabledBooks instanceof Set ? enabledBooks : new Set(enabledBooks);
+  // Copy even when handed a Set: the 2024 widening below adds to this collection, and adding to
+  // the caller's own Set would silently mutate their state (several callers pass a memoised Set).
+  const set = new Set(enabledBooks);
+  // Selecting the 2024 edition REPLACES 'PHB' with 'PHB2024' (StepBooks.tsx selectPhbEdition —
+  // the two ids are mutually exclusive and toggle() refuses to re-add PHB). But the shared option
+  // data — invocations, metamagic, maneuvers, fighting styles, pact boons — is all tagged with the
+  // 2014 book it was first printed in and carries no alsoIn. Without this widening the filter is
+  // arithmetically guaranteed to return an empty list for every 2024 class, so a 2024 sorcerer had
+  // no metamagic to choose from, a 2024 warlock no invocations, and so on — silently, because the
+  // level-up gate treats an unsatisfiable requirement as satisfied.
+  // One-directional on purpose: a 2014 character must never see 2024 content.
+  // StepSpells.tsx already did exactly this locally for the spell list; this lifts it to the one
+  // predicate every picker in the app shares.
+  if (set.has('PHB2024')) set.add('PHB');
   return set.has(item.sourceBook) || (item.alsoIn?.some(b => set.has(b)) ?? false);
 }

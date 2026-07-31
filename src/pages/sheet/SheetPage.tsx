@@ -9,6 +9,7 @@ import { useLibraryStore } from '../../store/useLibraryStore';
 import { useBorrowedStore } from '../../store/useBorrowedStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
+import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
@@ -993,7 +994,8 @@ function parseSorceryCost(costStr: string): number | 'var' {
 // Shows prepared/known spells, class features, and magic-item abilities at the
 // bottom of the Combat tab so everything needed in a fight is in one place.
 
-const PREPARED_CASTER_IDS = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
+// Prepared-caster identity comes from mechanics.ts. The hardcoded list this replaced held 2014
+// ids only, so a 2024 prepared caster took the known-caster branch here.
 
 const SPELL_SCHOOL_COLORS: Record<string, string> = {
   Abjuration: 'text-blue-400',   Conjuration: 'text-purple-400',
@@ -1055,7 +1057,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
   }
 
   const primaryClassId  = character.classes[0]?.classId ?? '';
-  const isPreparedCaster = PREPARED_CASTER_IDS.includes(primaryClassId);
+  const isPreparedCaster = isPreparedCasterId(primaryClassId);
 
   const totalSlots = Object.values(slotTotals ?? {}).reduce((s: number, n) => s + (n as number), 0);
   const hasAnyCastingResource = totalSlots > 0 || (pactMagic && pactMagic.slotsTotal > 0);

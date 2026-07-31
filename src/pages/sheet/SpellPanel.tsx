@@ -8,6 +8,7 @@ import { SpellDetail } from '../creator/steps/StepSpells';
 import type { AbilityKey, Character, Spell, SpellLevel, SlotLevel } from '../../types';
 import { getClass } from '../../data/classes';
 import { getRace } from '../../data/races';
+import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 
 const SCHOOL_COLORS: Record<string, string> = {
   Abjuration: 'blue', Conjuration: 'purple', Divination: 'indigo',
@@ -30,7 +31,9 @@ interface SpellPanelProps {
   setInnateSpellAbility: (ability: AbilityKey) => void;
 }
 
-const PREPARED_CASTER_CLASSES = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
+// The prepared-caster identity is derived from mechanics.ts, not restated here — the hardcoded
+// list this replaced omitted every 2024 class, so a 2024 cleric/druid/wizard/bard/paladin/ranger
+// was rendered as a known caster with no prepared-spell UI at all.
 
 export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell, setInnateSpellAbility }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
@@ -74,7 +77,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
     (search === '' || s.name.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const isPreparedCaster = classDef && PREPARED_CASTER_CLASSES.includes(classDef.id);
+  const isPreparedCaster = !!classDef && isPreparedCasterId(classDef.id);
   const levels = [0,1,2,3,4,5,6,7,8,9] as SpellLevel[];
 
   // Total slots available across all levels (excluding pact magic).

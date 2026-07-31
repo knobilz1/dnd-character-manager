@@ -1230,7 +1230,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   },
 
   // ── TCE: ARTIFICER SUBCLASSES ─────────────────────────────────────────
-  { id: 'alchemist', name: 'Alchemist', classId: 'artificer', sourceBook: 'TCE', description: 'An Alchemist is an expert at combining reagents to produce mystical effects. Alchemists use their creations to give life and to leech it away.', features: [
+  { id: 'alchemist', name: 'Alchemist', classId: 'artificer', sourceBook: 'TCE', alsoIn: ['ERLW'], description: 'An Alchemist is an expert at combining reagents to produce mystical effects. Alchemists use their creations to give life and to leech it away.', features: [
     { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with alchemist\'s supplies. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
     { name: 'Alchemist Spells', level: 3, description: 'You always have certain spells prepared: Healing Word, Ray of Sickness (3rd), Flaming Sphere, Melf\'s Acid Arrow (5th), Gaseous Form, Mass Healing Word (9th), Blight, Death Ward (13th), Cloudkill, Raise Dead (17th).' },
     { name: 'Experimental Elixir', level: 3, description: 'After a long rest, you can magically produce an experimental elixir in an empty flask. Roll on the Experimental Elixir table for the effect (Healing, Swiftness, Resilience, Boldness, Flight, Transformation). At higher levels you create more elixirs.' },
@@ -1248,7 +1248,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
     ],
   },
-  { id: 'armorer', name: 'Armorer', classId: 'artificer', sourceBook: 'TCE', description: 'An artificer who specializes as an Armorer modifies armor to function almost like a second skin.', features: [
+  { id: 'armorer', name: 'Armorer', classId: 'artificer', sourceBook: 'TCE', alsoIn: ['ERLW'], description: 'An artificer who specializes as an Armorer modifies armor to function almost like a second skin.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with heavy armor and smith\'s tools.' },
     { name: 'Armorer Spells', level: 3, description: 'You always have certain spells prepared: Magic Missile, Thunderwave (3rd), Mirror Image, Shatter (5th), Hypnotic Pattern, Lightning Bolt (9th), Fire Shield, Greater Invisibility (13th), Passwall, Wall of Force (17th).' },
     { name: 'Arcane Armor', level: 3, description: 'Your armor becomes Arcane Armor. It includes integrated weapons, requires no Strength minimum, you can don/doff as an action, and it includes thieves\' tools/smith\'s tools.' },
@@ -1261,7 +1261,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     resources: [{ name: 'Perfected Armor', key: 'perfected_armor', rechargeOn: 'long',
       maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }],
   },
-  { id: 'artillerist', name: 'Artillerist', classId: 'artificer', sourceBook: 'TCE', description: 'An Artillerist specializes in using magic to hurl energy, projectiles, and explosions on a battlefield.', features: [
+  { id: 'artillerist', name: 'Artillerist', classId: 'artificer', sourceBook: 'TCE', alsoIn: ['ERLW'], description: 'An Artillerist specializes in using magic to hurl energy, projectiles, and explosions on a battlefield.', features: [
     { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with woodcarver\'s tools. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
     { name: 'Artillerist Spells', level: 3, description: 'You always have certain spells prepared: Shield, Thunderwave (3rd), Scorching Ray, Shatter (5th), Fireball, Wind Wall (9th), Ice Storm, Wall of Fire (13th), Cone of Cold, Wall of Force (17th).' },
     { name: 'Eldritch Cannon', level: 3, description: 'You can use your action to magically create a Small or Tiny Eldritch Cannon in an unoccupied space within 5 feet. Choose Flamethrower, Force Ballista, or Protector. It lasts 1 hour or until destroyed/dismissed. Once per long rest unless you expend a spell slot.' },
@@ -1273,7 +1273,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     resources: [{ name: 'Eldritch Cannon', key: 'eldritch_cannon', rechargeOn: 'long',
       maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
   },
-  { id: 'battle-smith', name: 'Battle Smith', classId: 'artificer', sourceBook: 'TCE', description: 'Armies require protection, and someone has to put things back together if defenses fail. A combination of protector and medic, a Battle Smith is an expert at defending allies and repairing both materiel and personnel.', features: [
+  { id: 'battle-smith', name: 'Battle Smith', classId: 'artificer', sourceBook: 'TCE', alsoIn: ['ERLW'], description: 'Armies require protection, and someone has to put things back together if defenses fail. A combination of protector and medic, a Battle Smith is an expert at defending allies and repairing both materiel and personnel.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with martial weapons and smith\'s tools.' },
     { name: 'Battle Smith Spells', level: 3, description: 'You always have certain spells prepared: Heroism, Shield (3rd), Branding Smite, Warding Bond (5th), Aura of Vitality, Conjure Barrage (9th), Aura of Purity, Fire Shield (13th), Banishing Smite, Mass Cure Wounds (17th).' },
     { name: 'Battle Ready', level: 3, description: 'You can use your Intelligence modifier instead of Strength or Dexterity for the attack and damage rolls of magic weapons. You gain proficiency with martial weapons.' },
