@@ -3000,3 +3000,31 @@ would have written OCR noise into the app.
 Cross-field consistency over all 547 spells re-checked after every change: **still zero anomalies**,
 including the two spells that just gained an `M` component and now correctly carry
 `materialComponent`.
+
+---
+
+## Phase G8 — spell REFERENCES resolve: clean (615 refs)
+
+G5 checked the forward direction (`spell.classes[]` naming real classes). This is the reverse —
+everything that points **at** a spell by id. A dangling id here silently drops the spell from a
+sheet, with no error anywhere.
+
+| Area | refs |
+|---|---|
+| `subclasses.alwaysPreparedSpells` (domain / oath / patron lists) | 362 |
+| `subclasses.landSpells` | 64 |
+| `subclasses.expandedSpells` | 60 |
+| `races.innateSpells[].spellId` | 119 |
+| `feats.grantedSpells[].spellId` | 10 |
+| **total** | **615 — zero dangling** |
+
+Controls injected for all three reference shapes (level-keyed object, flat array, `spellId`
+object); all three fire.
+
+**The population count is the finding here, not the result.** The first version of this check
+looked at `alwaysPrepared` and reported **"129 refs, clean"** — but the real key is
+`alwaysPreparedSpells`, and it holds a **level-keyed object** rather than an array. The largest
+population in the app, 362 subclass spell references, was invisible while the check reported green.
+Nearly 5× the refs were being skipped. Saved as `tools/audit/spellrefs.js` with that written at the
+top, because a green result whose denominator nobody read is the exact failure this audit keeps
+producing.
