@@ -312,4 +312,130 @@ export const SUBCLASS_TIPS: Record<string, string> = {
     "A nautical wizard who uses stars and ocean currents to enhance their magic. You predict weather, navigate flawlessly, and amplify certain spells while at sea. Best in maritime campaigns where navigation and weather matter mechanically — on the open ocean you're an invaluable asset; in a dungeon you're a very good wizard with a nautical aesthetic.",
   'tob-school-of-the-tide-watchers':
     'A wizard who reads the magical tides of time and energy to gain brief foresight. You can sense threats before they arrive and prepare accordingly. Excellent in campaigns with many combats, where information about incoming encounters gives you a meaningful edge. A cerebral, preparation-focused subclass for patient players.',
+  // ── PHB 2024 ─────────────────────────────────────────────────────────────
+  // Written against each subclass's 2024 features, NOT copied from its 2014 namesake. The 2024
+  // rewrite changed several of them materially — Champion's Remarkable Athlete moved to level 3 and
+  // now grants Initiative advantage, Hunter's Prey became re-choosable on a rest, Beast Master's
+  // companion became a summoned stat block — so the 2014 text would have been confidently wrong.
+
+  // Barbarian
+  'berserker-2024':
+    "The straightforward, hit-things-harder barbarian, and much kinder than its 2014 version — Frenzy now rides on Reckless Attack and adds damage instead of handing you exhaustion, so you can use it every single fight without paying for it later. Retaliation at 10 punishes anything that hits you. Pick this if you want to rage, swing, and not manage a resource economy while doing it.",
+  'wild-heart':
+    "The 2024 replacement for Totem Warrior, and far more flexible: you choose a beast aspect fresh on each rage rather than locking one in at level 3. Bear for damage resistance, Eagle for mobility, Wolf to set up your allies. Aspect of the Wilds adds a climb or swim speed you can swap on a long rest. Best for players who like reading the room and picking the right tool each fight.",
+  'world-tree':
+    "A barbarian who is also a battlefield controller. Vitality of the Tree hands out temporary HP to you and an ally every single turn you rage, and Branches of the Tree lets you yank an approaching enemy to your side and stop them dead. At 14 you teleport 60 feet as a bonus action. The most support-shaped barbarian in the game — you protect the squishy people rather than just out-damaging things.",
+  'zealot-2024':
+    "A divine fanatic who is very hard to put down. Warrior of the Gods gives you a personal pool of d12s to heal yourself as a bonus action, Fanatical Focus rerolls a failed save once per rage, and at 14 you keep fighting at 0 HP for the rest of the rage. If your table plays dangerous, gritty combat, this is the barbarian that keeps standing up.",
+
+  // Bard
+  'college-of-dance':
+    "A bard who fights unarmed and never wears armour — Dazzling Footwork gives you monk-like AC and turns your Bardic Inspiration die into your unarmed damage. Tandem Footwork buffs the whole party's initiative, and Leading Evasion at 14 makes you and nearby allies shrug off area damage. Pick it if you want a nimble, front-foot bard who is genuinely good in a melee.",
+  'college-of-glamour-2024':
+    "The fey-touched face of the party. Mantle of Inspiration hands out temporary HP and free repositioning to several allies at once, Mantle of Majesty lets you cast Command every turn for a minute without spending slots, and Unbreakable Majesty makes attackers pass a save just to swing at you. Strongest when the party needs both a social lead and an emergency escape button.",
+  'college-of-lore-2024':
+    "The classic skill-monkey and spell-thief. Cutting Words now also cancels a successful ability check, not just an attack or damage roll, so you can shut down an enemy's escape or grapple. Magical Discoveries pulls two spells from the Cleric, Druid or Wizard list. Peerless Skill lets you rescue a failed roll after the fact. The most versatile bard, and the best at solving problems that aren't combat.",
+  'college-of-valor-2024':
+    "The armoured, weapon-swinging bard. Martial Training gives you martial weapons, medium armour and shields, and lets you use your weapon as a spellcasting focus. Extra Attack at 6 can trade one attack for a cantrip. Combat Inspiration now works both offensively and defensively off the same die. A solid pick if you want to be a real front-liner without giving up full spellcasting.",
+
+  // Cleric
+  'life-domain-2024':
+    "The definitive healer. Disciple of Life adds HP to every healing spell, Preserve Life restores five times your cleric level in one Channel Divinity, and Supreme Healing at 17 maximises every healing die you ever roll. It's simple and it never stops being useful — if your group takes a lot of damage, nothing else keeps them upright this reliably.",
+  'light-domain-2024':
+    "A blaster cleric with a strong defensive reaction. Warding Flare imposes disadvantage on an attack against anyone you can see, and from level 6 it also hands the target temporary HP and recharges on a short rest. Radiance of the Dawn is reliable area damage that ignores cover. Good when you want a cleric who contributes damage every round rather than only healing.",
+  'trickery-domain-2024':
+    "A cleric built around a decoy. Invoke Duplicity creates an illusion of you that you cast spells from, giving you advantage while standing somewhere safe, and Trickster's Transposition lets you swap places with it — an escape hatch every single turn. At 17 the illusion also heals. The most mobile and evasive cleric, and excellent for infiltration parties.",
+  'war-domain-2024':
+    "The cleric who fights. War Priest gives you extra weapon attacks as a bonus action, Guided Strike adds +10 to turn a miss into a hit, and War God's Blessing casts Spiritual Weapon or Shield of Faith free and without concentration — which frees your concentration for something else entirely. At 17 you resist all nonmagical weapon damage. A front-line cleric with real staying power.",
+
+  // Druid
+  'circle-of-the-land-2024':
+    "The spellcasting druid, now much better supported: you pick a land type on each long rest instead of being locked in, Natural Recovery returns spell slots on a short rest, and Nature's Ward gives immunity to poison plus resistance matched to your terrain. Land's Aid spends a Wild Shape for damage-and-healing in one action. Pick it if you want to be a caster first and a shapeshifter rarely.",
+  'circle-of-the-moon-2024':
+    "The shapeshifting brawler. Circle Forms sets your beast AC and hands you temporary HP equal to three times your druid level every time you transform, which makes you astonishingly hard to kill. Moonlight Step teleports you 30 feet as a bonus action with advantage on the next attack. If you want to spend combat as an angry animal, this is still the way to do it.",
+  'circle-of-the-sea':
+    "New in 2024, and unusually low-maintenance: Wrath of the Sea creates a lasting aura around you that damages and shoves enemies who come near, with no concentration required. Stormborn adds flight and three damage resistances while it's up, and at 14 you can put the aura on an ally instead. Great for a druid who wants a constant battlefield presence rather than a big turn.",
+  'circle-of-stars-2024':
+    "A druid who spends Wild Shape on constellation forms instead of animals. Archer for reliable ranged damage as a bonus action, Chalice for healing, Dragon for unbreakable concentration. Cosmic Omen gives you a d6 to swing any roll within 30 feet. The most flexible round-to-round druid — you switch forms as a bonus action from level 10 and cover whatever the party needs.",
+
+  // Fighter
+  'battle-master-2024':
+    "The tactical fighter, and still the most skill-expressive one. Superiority dice fuel manoeuvres that trip, disarm, push or let an ally attack out of turn. Relentless at 15 means you can use a manoeuvre even with no dice left. Know Your Enemy is now a bonus action instead of a minute of study. Best for players who enjoy choosing the right trick rather than repeating the same attack.",
+  'champion-2024':
+    "The simplest fighter, and better than its reputation in 2024. Remarkable Athlete now arrives at level 3 and grants advantage on initiative plus free movement after a crit, and Heroic Warrior at 10 hands you Heroic Inspiration at the start of every combat turn. Crits land on 19–20, then 18–20 at 15. Pick this if you want to play well without tracking any resources at all.",
+  'eldritch-knight-2024':
+    "A fighter with a wizard's toolkit bolted on. War Magic lets you swap an attack for a cantrip, Eldritch Strike makes your weapon hits set up your spells, and War Bond keeps your weapon in your hand and summonable. Spells are now prepared rather than fixed, so you're far less locked in than the 2014 version. Strong if you like the front line but want options.",
+  'psi-warrior-2024':
+    "A fighter powered by telekinesis. Psionic Energy dice shield allies, add force damage, and shove enemies around; Telekinetic Adept gives you a bonus-action flight burst. Guarded Mind ends charm and fear on yourself, and Bulwark of Force at 15 grants half cover to your whole front line. A control-flavoured fighter that never runs fully dry — you regain a die on every short rest.",
+
+  // Monk
+  'warrior-of-mercy-2024':
+    "The monk as field medic and executioner in the same package. Hand of Healing restores HP as part of your Flurry of Blows, Hand of Harm adds damage and poison, and from 11 you can do both in one flurry without spending focus on the healing. At 17 you can raise the dead once per long rest. Pick it if you want to keep the party alive without ever leaving melee.",
+  'warrior-of-open-hand-2024':
+    "The purest martial monk. Open Hand Technique makes every Flurry of Blows hit also knock prone, push 15 feet, or deny reactions — control attached to damage you were dealing anyway. Wholeness of Body heals you as a bonus action, and Quivering Palm at 17 is one of the game's few outright kill buttons. The strongest all-round monk and the easiest to play well.",
+  'warrior-of-shadow-2024':
+    "A stealth monk who fights inside their own darkness. Shadow Arts lets you cast Darkness, see through it, and move it around; Shadow Step teleports you 60 feet with advantage on the next attack, and from 11 you don't even need dim light to do it. Cloak of Shadows at 17 makes you invisible and lets you move through walls. Best in a party comfortable fighting in the dark.",
+  'warrior-of-elements-2024':
+    "The elemental monk, hugely improved over the 2014 Four Elements. One focus point imbues you for ten minutes: your unarmed strikes gain reach and elemental damage, and you get flight and a swim speed at 11. Elemental Burst is real area damage on demand. No more paying a fortune per casting — this is the monk that finally plays like a bender should.",
+
+  // Paladin
+  'oath-of-devotion-2024':
+    "The archetypal holy knight. Sacred Weapon adds your Charisma to attack rolls for ten minutes, Aura of Devotion makes you and nearby allies immune to being charmed, and Smite of Protection grants half cover to everyone in your aura whenever you smite. Straightforward, durable, and it makes the whole party tougher just by standing near you.",
+  'oath-of-glory-2024':
+    "The athletic, momentum-building paladin. Inspiring Smite converts every smite into temporary HP for the party, Aura of Alacrity gives you and allies +10 speed, and Glorious Defense at 15 lets you boost an ally's AC and counter-attack when the attack misses. Excellent in a mobile party that wants to control distance rather than stand and trade.",
+  'oath-of-the-ancients-2024':
+    "The resilience paladin. Aura of Warding gives you and your allies resistance to necrotic, psychic and radiant damage — three of the nastiest types in the game — and Undying Sentinel now heals you for three times your paladin level when it triggers. Nature's Wrath restrains a group of enemies. The best pick when the campaign leans undead, fiends and save-or-suck effects.",
+  'oath-of-vengeance-2024':
+    "The single-target hunter. Vow of Enmity gives you advantage on every attack against one creature for a minute, and it transfers to a new target when that one drops. Relentless Avenger stops runners dead, and Soul of Vengeance gives you a free attack whenever your quarry swings. If your table fights bosses, this paladin deletes them.",
+
+  // Ranger
+  'beast-master-2024':
+    "Completely rebuilt for 2024 and finally good. Your Primal Companion is a proper summoned stat block — Land, Sea or Sky — that scales with you, acts on your turn, and can be re-summoned after a fight rather than being permanently lost. Bestial Fury gives it two attacks, and Share Spells extends your self-buffs to it. Pick it if you want a real animal partner, not a liability.",
+  'fey-wanderer-2024':
+    "A ranger who is also the party's face. Otherworldly Glamour adds your Wisdom to every Charisma check, Dreadful Strikes adds psychic damage to your hits, and Beguiling Twist turns a resisted charm or fear into a counter-attack. Misty Wanderer gives you free Misty Steps that can carry an ally along. The best social ranger, and no weaker in a fight for it.",
+  'gloom-stalker-2024':
+    "The ambusher, and still one of the strongest openings in the game. Dread Ambusher gives extra speed and bonus psychic damage, Umbral Sight makes you invisible to darkvision while in darkness, and Stalker's Flurry adds a second attack or a stagger on top. Shadowy Dodge at 15 imposes disadvantage and teleports you away. Devastating in dungeons and at night.",
+  'hunter-2024':
+    "The flexible damage ranger. Hunter's Prey and Defensive Tactics are now re-chosen on every short or long rest, so you tune yourself to the day's enemies instead of committing at level 3. Hunter's Lore reveals a marked target's resistances outright. Superior Hunter's Defense at 15 gives you resistance to whatever just hit you. Simple, adaptable, and consistently effective.",
+
+  // Rogue
+  'arcane-trickster-2024':
+    "The rogue with a spellbook. Mage Hand Legerdemain gives you an invisible hand you control as a bonus action — the best scouting and pickpocketing tool in the game. Magical Ambush makes enemies save at disadvantage when you cast while invisible, and Spell Thief at 17 steals a spell outright. Spells are now prepared with no school restriction, so it's far more flexible than the 2014 version.",
+  'assassin-2024':
+    "Built entirely around the first round. Assassinate grants advantage on initiative and on attacks against anything that hasn't acted yet, and Death Strike at 17 doubles the damage of an opening Sneak Attack that fails a Constitution save. Assassin's Tools adds disguises and craftable poisons. Frightening when you get the drop; ordinary when you don't, so play the scout.",
+  'soulknife-2024':
+    "A rogue who needs no weapons at all. Psychic Blades are conjured, thrown, and impossible to disarm or detect. Psionic Energy dice boost skill checks, turn a missed blade into a hit, and let you teleport. Rend Mind at 17 stuns on a Sneak Attack. The most self-contained rogue — nothing to carry, nothing to lose, and it works in any setting.",
+  'thief-2024':
+    "The utility rogue. Fast Hands lets you use an object, tools or Sleight of Hand as a bonus action every turn, Supreme Sneak keeps you invisible while attacking from hiding, and Use Magic Device gives you a fourth attunement slot plus a chance to not spend item charges. Thief's Reflexes at 17 grants you two turns in the first round. Endlessly practical.",
+
+  // Sorcerer
+  'aberrant-mind-2024':
+    "A psionic sorcerer with a free, always-prepared spell list bolted on. Psionic Sorcery casts those spells with sorcery points instead of slots and strips out the components entirely, so you cast silently while bound and gagged. Revelation in Flesh buys flight, swimming, darkvision or squeezing through gaps at will. Enormous flexibility from a very small resource pool.",
+  'clockwork-soul-2024':
+    "The order sorcerer, and a superb defensive pick. Restore Balance cancels advantage or disadvantage on any roll within 60 feet — an answer to Pack Tactics and to the boss's Legendary Resistance setups. Bastion of Law hands out a pool of damage-absorbing dice, and Trance of Order makes every d20 you roll a minimum of 10 for a full minute.",
+  'draconic-bloodline-2024':
+    "The durable sorcerer. Draconic Resilience raises your HP every level and gives you an unarmoured AC of 10 + Dex + Cha, which is genuinely good armour. Elemental Affinity adds your Charisma to matching spell damage and gives you resistance to it. Dragon Wings at 14 and a summonable dragon at 18. The most survivable sorcerer by a wide margin.",
+  'wild-magic-2024':
+    "Chaos, but now under your control. Tides of Chaos gives you advantage on demand, Bend Luck swings someone else's roll with a d4, Controlled Chaos rolls twice on the surge table so you pick the better result, and Tamed Surge at 18 lets you simply choose the effect you want. It starts unpredictable and ends as one of the most powerful toolkits in the game.",
+
+  // Warlock
+  'archfey-patron-2024':
+    "The teleporting warlock. Steps of the Fey gives you free Misty Steps that also heal an ally or frighten an enemy, Misty Escape triggers one as a reaction when you're hit, and Bewitching Magic staples another onto every enchantment or illusion you cast. Beguiling Defenses makes you immune to charm and punishes attackers. Impossible to pin down.",
+  'celestial-patron-2024':
+    "The warlock as healer, which the class otherwise cannot do. Healing Light is a pool of d6s that refreshes on a long rest and costs no spell slots, so you can top the party up between fights. Radiant Soul adds Charisma to radiant and fire damage, and Searing Vengeance at 14 revives a dying ally at half HP and knocks their attackers back.",
+  'fiend-patron-2024':
+    "The bruiser warlock. Dark One's Blessing hands you temporary HP every time anything nearby drops — including kills by your allies now — so you accumulate a buffer just by being in the fight. Dark One's Own Luck adds a d10 to checks and saves, Fiendish Resilience gives a damage resistance you re-pick each rest, and Hurl Through Hell is 8d10 psychic on a failed save.",
+  'great-old-one-2024':
+    "The psychic manipulator. Psychic Spells lets you switch any warlock spell's damage to psychic and strip the verbal component from enchantments and illusions — you cast without anyone noticing. Awakened Mind opens telepathy at range, Clairvoyant Combatant imposes disadvantage through it, and Eldritch Hex stacks a save penalty on your Hex target.",
+
+  // Wizard
+  'abjurer-2024':
+    "The tanky wizard. Arcane Ward is a rechargeable shield that refills every time you cast an abjuration spell, and Projected Ward extends it to anyone within 30 feet — you soak damage for the whole party. Spell Breaker makes Dispel Magic a bonus action and upgrades both it and Counterspell. Spell Resistance at 14 gives advantage on saves against spells and resistance to their damage.",
+  'diviner-2024':
+    "The wizard who edits the plot. Portent gives you two d20 results rolled after each long rest that you can substitute for almost any roll — yours or an enemy's — which turns a boss's critical hit into a miss or a failed save into a certainty. There is no other subclass ability in the game that gives you this much control over an outcome you can see coming.",
+  'evoker-2024':
+    "The blaster, and the only one that can safely drop a Fireball on a melee. Sculpt Spells lets several allies auto-succeed and take no damage from your own area spells. Potent Cantrip means your cantrips still deal half damage on a miss or a successful save, Empowered Evocation adds your Intelligence to damage, and Overchannel maximises a spell outright.",
+  'illusionist-2024':
+    "The trickster wizard, considerably stronger in 2024. Improved Illusions casts illusions without verbal components and extends their range by 60 feet. Phantasmal Creatures turns your summons spectral. Illusory Self makes an attack automatically miss once per short rest, and Illusory Reality at 14 makes part of an illusion physically real for a minute — a bridge, a wall, a door.",
+
 };

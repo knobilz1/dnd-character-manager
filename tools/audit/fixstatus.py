@@ -172,8 +172,14 @@ def g8():
 
 
 def g10():
-    s = f('src/data/subclassTips.ts')
-    return ('COUNT', len(re.findall(r"'[a-z0-9-]+-2024'", s or '')), '2024 subclass tip keys')
+    # Count against the REAL 2024 subclass ids, not against ids ending in "-2024": four of them
+    # (wild-heart, world-tree, college-of-dance, circle-of-the-sea) are new in 2024 and have no
+    # 2014 namesake to disambiguate from, so they carry no suffix.
+    tips = f('src/data/subclassTips.ts') or ''
+    ids = set(re.findall(r"\{ id: '([a-z0-9-]+)'", f('src/data/subclasses/phb2024.ts') or ''))
+    have = set(re.findall(r"^  '([a-z0-9-]+)':$", tips, re.M))
+    missing = ids - have
+    return True if not missing else ('COUNT', len(missing), 'of %d 2024 subclasses still have no tip' % len(ids))
 
 
 def b6():
