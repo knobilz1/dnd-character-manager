@@ -3201,3 +3201,28 @@ Languages/tools (Knowledge Domain, Mastermind, Drakewarden, Cobalt Soul — disp
 grants (Circle of the Land Bonus Cantrip, Arcana Domain's two wizard cantrips, Acolyte of Nature's
 druid cantrip — these need spellbook integration, not this mechanism), Champion's second Fighting
 Style, Four Elements disciplines, Kensei weapons, and the 2014 Beast Master companion.
+
+---
+
+## Resource max overrides — the two copies are in sync (checked, not assumed)
+
+`useCharacterDerived` (display) and `computeResourceMaxOverrides` in `useCharacterStore`
+(load / level-up / rest) each compute the same 52 ability- and proficiency-scaled resource maxima,
+kept in sync by a comment: *"Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two
+in sync."*
+
+That is the shape this audit keeps finding — two files, each internally consistent, joined by
+nothing but a comment. If they drift, the max shown on the sheet and the max restored by a rest
+disagree, which is invisible until a player counts.
+
+**Diffed both directions: 52 keys each, zero present in only one.** Then diffed the value
+expressions per key: 17 differ *textually* and none differ semantically — they are the same formula
+in each file's local idiom (`abilityMod(score('cha'))` vs `mods.cha`). **No drift today.**
+
+The duplication remains a live fragility: nothing enforces it, so the next resource added to one
+file and not the other will not fail any check. Worth an assert if a third copy ever appears.
+
+Probe note: the first extraction reported the store side had **0** override keys, because it matched
+on the variable name used in the *other* file. Zero was the tell — a population count that collapses
+to nothing is a broken probe, not a clean result. Same instinct that caught the 129-vs-615 spell
+reference gap.
