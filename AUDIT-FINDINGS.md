@@ -3080,3 +3080,66 @@ items 785. Checked `sourceBook` **and every `alsoIn[]` entry** against the 16 id
 **Zero invalid, zero missing.** This one matters because the failure is silent in both directions: a
 typo'd book id makes content invisible no matter which books you enable, and a missing one makes it
 unconditionally visible.
+
+---
+
+## D4 remainder — enumerated from the data, and one real gap found (2026-07-31)
+
+The old note said "12 proficiency/language choices, Four Elements disciplines, Kensei weapons, 2014
+Beast Master companion, tob-sea-domain, 2024 Elemental Affinity". Re-derived it from the data
+instead of trusting the list: scanned all 189 subclasses' feature text for choice language, then
+split **build** choices (made once, must persist) from **use-time** ones (re-chosen each rage/rest/
+activation, correctly needing no storage).
+
+Of 64 subclasses matching choice language, most are use-time and correct as-is — Fiendish Resilience
+and 2024 Fiend Patron ("choose 1 damage type at the end of each rest"), Wild Heart ("on each Rage
+activation"), Path of the Beast Bestial Soul, Circle of Stars' constellation, 2024 Hunter Defensive
+Tactics, 2024 Diviner Third Eye, plus pure targeting text (Sculpt Spells, Zealous Presence, Aura of
+the Sentinel, Inspiring Smite, Heart of the Storm).
+
+**A false positive worth recording: Path of the Totem Warrior.** The sweep flagged it as unprompted
+because it has no entry in `SUBCLASS_OPTIONS`. It is fully handled — `totemSpirit`, `aspectTotem`
+and `totemicAttunement` on `ClassOptionsState`, prompted in **both** `StepClassOptions` and
+`LevelUpDialog` at levels 3, 6 and 14. Same for Battle Master manoeuvres and Circle of the Land's
+land type. That is the [[audit-probe-lesson]] shape exactly: the probe asked "is it in this file"
+rather than "is the choice reachable".
+
+### 🔴 REAL GAP — subclass-granted skill proficiencies are never granted
+
+`StepSkills.tsx:39` sets `maxChoices = classDef?.skillChoices.count ?? 2` — **the class count only.**
+`selectedSkillProficiencies` is written nowhere else (confirmed: the creator step is its sole
+writer), and `useCharacterDerived:197` composes skills from exactly
+`selectedSkillProficiencies + background`. Knowledge Domain is special-cased with its own
+`knowledgeDomainSkills` field; nothing else is.
+
+So a **College of Lore bard is missing three skill proficiencies** — "you gain proficiency with
+three skills of your choice" is displayed as feature prose and never granted. This one changes real
+numbers, unlike a language or tool pick.
+
+Affected, all unprompted and ungranted:
+
+| subclass | grants | book |
+|---|---|---|
+| College of Lore | **3 skills** | PHB |
+| College of Lore (2024) | **3 skills** | PHB2024 |
+| Knowledge Domain | 2 skills + 2 languages | PHB — *skills handled, languages not* |
+| Nature Domain (Acolyte of Nature) | 1 druid cantrip + 1 skill | PHB |
+| Arcana Domain (Arcane Initiate) | Arcana + 2 wizard cantrips | SCAG |
+| Purple Dragon Knight (Royal Envoy) | 1 skill | SCAG |
+| Mastermind (Master of Intrigue) | 1 gaming set + 2 languages | SCAG |
+| Fey Wanderer (2024) | 1 skill of three | PHB2024 |
+| Bladesinging / SCAG Bladesinging | 1 one-handed weapon | TCE / SCAG |
+| Drakewarden (Draconic Gift) | 1 language + a cantrip | FToD |
+| Circle of the Land (Bonus Cantrip) | 1 druid cantrip | PHB |
+| School of Illusion (Improved Minor Illusion) | 1 wizard cantrip *(conditional)* | PHB |
+| Champion / Champion 2024 | a second Fighting Style | PHB / PHB2024 |
+| Way of the Four Elements | disciplines | PHB |
+| Way of the Kensei | 2 kensei weapons | XGtE |
+| Beast Master (2014) | companion beast | PHB |
+
+The cantrip grants matter mechanically too — Circle of the Land's Bonus Cantrip and Arcana Domain's
+two wizard cantrips are spells the character should have and does not.
+
+**Not attempted here.** This is ~16 option groups plus a change to how the creator computes skill
+allowance, and it is a build task rather than a sweep. Filed with the enumeration above so it starts
+from measured facts rather than the stale list.
