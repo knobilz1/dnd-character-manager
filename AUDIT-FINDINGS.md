@@ -2776,3 +2776,104 @@ pre-fill → spend → Long Rest → confirm):
 One harness note worth keeping: **"Long Rest" opens a confirmation** (`setRestConfirm('long')`) —
 clicking it alone does nothing, you must then click **"Take Long Rest"**. Two earlier runs of this
 check looked like a failing fix when they were only an unconfirmed dialog.
+
+---
+
+## Phase G — referential integrity: CLEAN (2026-07-31)
+
+Run against the **real loaded modules** through the Vite dev server (`await import('/src/data/…')`),
+not by parsing TypeScript. Two probe bugs today came from regex-parsing TS; the runtime objects have
+no such failure mode. Every check carries a control that fires on injected bad data.
+
+| # | Check | Population | Result |
+|---|---|---|---|
+| G1 | `subclass.classId` resolves to a real class | 189 subclasses | **clean** |
+| G2 | `race.parentRaceId` resolves | 122 races | 14 flagged → **all false positives**, see below |
+| G3 | duplicate `id` within a collection | **1,234 entities across 12 collections** | **clean — zero** |
+| G4 | resource-key collisions (class vs subclass, and within each) | 23 classes + 72 subclasses carrying resources | **clean** |
+| G5 | `spell.classes[]` entries are real class ids | 547 spells | **clean** |
+| G6 | `startingEquipment` names + categories | 186 entries | **clean in behaviour**, see below |
+| G7 | `SUBCLASS_TIPS` keys resolve; coverage | 189 tips | **clean, 189/189 covered** |
+
+Collections checked for duplicate ids: classes (25), subclasses (189), races (122), spells (547),
+feats (155), backgrounds (73), invocations (54), infusions (17), maneuvers (23), metamagic (10),
+fighting styles (15), pact boons (4).
+
+**G2 is not a bug.** The 14 subraces point at `elf` / `dwarf` / `halfling` / `gnome`, and no race
+carries those ids (`getRace('elf')` is undefined). But `StepRace.tsx:36` reads
+`parent ? parent.name : capitalize(parentId)` — `parentRaceId` is a **grouping key for the creator's
+subrace list, not a foreign key**. There is no plain "elf" to play in 5e. Recorded so a later pass
+does not "fix" it and break the grouping.
+
+**G6 is not a bug either.** 22 names do not resolve to an `ItemTemplate`, but the entries carry their
+own `name` + `category` + `weight` and nothing looks them up, so nothing is lost. Checks that DID
+matter, both clean:
+- **0 category mismatches** among names that resolve.
+- `Light crossbow` (template is `Crossbow, light`) still resolves through `lookupWeapon` via the
+  alias added in the May weapons audit — so it renders as a real attack with damage. That was the
+  live risk, since it is exactly the shape of the `handaxes → handax → category 'gear'` bug.
+- The rest are deliberate placeholders (`Martial melee weapon (your choice)`, `Tool/Instrument`).
+
+**Duplicate names are safe.** 2014/2024 pairs share names (Barbarian/Barbarian, Alert/Alert,
+Acolyte/Acolyte). Checked the sharp version — *can two same-named entries ever be visible at once?*
+Comparing `sourceBook` + `alsoIn[]` for every duplicate-name pair: **no pair shares a book**, so the
+book toggle always separates them.
+
+---
+
+## Phase H — base-class feature levels vs the books: NO MISMATCHES
+
+The 16 outstanding "per-class feature-by-feature passes" run as a sweep
+(`tools/audit/classfeaturelevels.py`) instead of by hand.
+
+**Result: 25 of 25 classes compared, 298 book features paired to an app feature, ZERO level
+mismatches.** The four thin-pairing classes (rogue, sorcerer, warlock, wizard) were then checked by
+hand against the PHB and every one is correct — e.g. Warlock's 14 features land on
+1/1/2/3/4/8/11/12/13/15/16/17/19/20 exactly, and Rogue's 19 on the PHB's own progression.
+
+The unpaired remainder is **book-side extraction noise, not missing app features**: for classes the
+extract nests as `###` (Paladin, Ranger, Rogue, Sorcerer) the subclass blocks cannot be excluded by
+heading level, so Thief's *Fast Hands*, Assassin's *Assassinate*, Draconic Bloodline's *Dragon
+Ancestor* etc. are counted as if they were class features.
+
+### Three parser bugs, each caught by a guard rather than by luck
+The script refuses to compare until its TS parse **exactly reproduces the running app's per-class
+feature count and level sequence**. That gate fired three times:
+1. **10 of 25 classes silently dropped** — the parser hunted for `id:` and walked back to the nearest
+   `{`, landing inside nested objects. Rewritten to iterate the one top-level `DClass[]` array.
+2. **Class array truncated after 4 of 25** — apostrophes inside `//` comments ("the character's …")
+   opened a phantom string literal that swallowed every brace after it. Added comment stripping.
+3. **Every full caster paired at 0%** — the table row regex used a lazy `(.+?)…\|$`, which on a
+   13-column caster table (`Lvl|Prof|Features|Cantrips|1..9`) captured all the slot columns as
+   feature names. Now takes column 3 exactly.
+
+Plus two book-side bounding bugs the **coverage assert** caught — without it the sweep would have
+reported "0 mismatches, all clean" at 3.3% pairing, which is worth nothing:
+- Paladin's section swallowed Ranger, Rogue and Sorcerer, because those four are `###` nested under
+  Monk's `##` while every other class is `##`. Bound now stops at the next same-or-higher heading.
+- Monk looked like a 110-feature class because its `##` section contains all its Way-of-* subclass
+  subsections. Bound now stops at the first subclass `###`.
+
+And one normalisation bug that manufactured a false finding: the sweep reported Rogue's
+**Thieves' Cant** as missing, when the app has it — the book uses a typographic apostrophe (U+2019)
+and the app an ASCII one. Quotes and dashes are now unified on both sides.
+
+Pairing over the run: 3.3% → 45.7% → 66.4% → **68.2%**, mismatches 0 throughout.
+
+### 🟡 Fixed: six classes store features out of level order
+`wizard`, `cleric-2024`, `monk-2024`, `paladin-2024`, `rogue-2024`, `sorcerer-2024` hold their
+`features[]` out of order — Wizard has Spell Mastery (18) sitting after the level-19 ASI, and
+`rogue-2024` runs `1,6,1,1,1,2,5,5,3,3,4,…`. Zero of the 189 subclasses have this.
+
+Two render sites did not sort, so those features displayed in array order:
+- `SheetPage.tsx` `classAbilities` — class **and** subclass features, unsorted.
+- `TraitsPanel.tsx:215` — subclass features (the sibling class list 30 lines above *did* sort).
+
+Fixed by sorting at both render sites rather than reordering six data files, so array order never has
+to be correct again.
+
+### Noted, not fixed — pre-existing
+`CombatAbilitiesPanel` logs a React duplicate-key warning many times per render on any mid-level
+sheet. Confirmed pre-existing by stashing this session's changes and re-observing. Likely a `.map()`
+keyed on feature name, which collides legitimately (Wizard has five "Ability Score Improvement",
+Rogue has "Expertise" at 1 and 6). Filed as a separate task.

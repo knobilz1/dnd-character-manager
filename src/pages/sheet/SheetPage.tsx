@@ -1130,7 +1130,11 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
         ...(sub?.features.filter((f: any) => f.level <= cl.level) ?? [])
           .map((f: any) => ({ name: f.name, description: f.description, source: sub!.name, level: f.level })),
       ];
-    });
+    })
+    // Sort by level — six class definitions store their features out of level order
+    // (wizard has Spell Mastery at 18 after the level-19 ASI), and without this they
+    // render in array order. Sorting here means data order never has to be correct.
+    .sort((a: { level: number }, b: { level: number }) => a.level - b.level);
 
   // ── Magic-item abilities ─────────────────────────────────────────────────────
   // Only show equipped magic items. Unequipped items leave the panel automatically.

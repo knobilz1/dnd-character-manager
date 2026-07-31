@@ -214,6 +214,7 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
           <div className="space-y-2">
             {subclass.features
               .filter(f => f.level <= (primaryClass?.level ?? 1))
+              .sort((a, b) => a.level - b.level)
               .map((f, i) => (
                 <div key={i} className="bg-slate-900 rounded-lg p-3">
                   <div className="flex items-center gap-2 mb-1">
