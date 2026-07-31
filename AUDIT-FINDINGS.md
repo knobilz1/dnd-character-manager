@@ -1568,3 +1568,292 @@ The text-accuracy audit read descriptions, and every description is correct. The
 read resource definitions, and every definition is correct. Each file is internally consistent; the
 defect is in the **join** between `enabledBooks` and `sourceBook` — the third instance of that shape in
 this audit, after the AcqInc/ToB registry gap (B1) and racial speeds (C1).
+
+---
+
+# PHASE D COMPLETE — cap enforcement sweep (multi-agent, 2026-07-30)
+
+Run as a 57-agent workflow: 8 sweepers (one per cap) piped into per-finding adversarial verifiers
+prompted to **refute**, then a synthesis pass grouping survivors by root cause. 41 findings confirmed,
+**3 refuted and dropped**. Full agent transcripts: `.claude/.../workflows/wf_da788e90-527/`.
+
+## Reconciliation with the R11 entry committed earlier this session (`d244607`)
+Two sweepers hit the book-filter defect independently, from different caps (metamagic, infusions). I
+generalised it and confirmed it at runtime *before* the workflow finished, and logged it above as R11.
+**They are the same root cause** — the section below is the fuller treatment and supersedes the numbering,
+not the evidence. The two are complementary:
+- my entry has the **runtime proof**: four builds vs four matched controls, plus the measurement that
+  `Confirm` is `disabled === false` while the counter reads `0/2 chosen`;
+- the section below has the **static anatomy**: the exact consumer sites, and the crucial detail I
+  missed — the fix already exists, once, at `StepSpells.tsx:199-206`.
+
+## Independently spot-checked before recording (I did not take agent output on trust)
+| claim | verdict |
+|---|---|
+| R19 — Artificer prepared cap uses `Math.ceil` | **confirmed**: `mechanics.ts:285` `Math.ceil(level/2)`; TCE line 53 says "Int modifier + half artificer level (**rounded down**)". `paladin` on line 282 correctly uses `Math.floor`. Over-prepares by 1 at every odd level. |
+| R15 — `addSpellToBook` has no cap | **confirmed**: `useCharacterStore.ts:622-626` guards only against duplicates. |
+| R11 — the one correct impl is in `StepSpells` | **confirmed**: `StepSpells.tsx:202-206`, one-directional `if (set.has('PHB2024')) set.add('PHB')`, with a comment explaining exactly why. |
+
+## Phase D — cap enforcement sweep
+
+Read-only mechanical audit of the eight player-choice caps (spells known, cantrips known, prepared spells, expertise, invocations, metamagic, maneuvers, infusions) across `audit/class-mechanics`. Every finding below survived an adversarial refutation pass. Grouped by **root cause**, not by cap — the same structural defect surfaces in up to six caps at once, and fixing it once closes all of them.
+
+### Defect rate
+
+| Metric | Count |
+|---|---|
+| Caps swept | 8 |
+| Caps with ≥1 confirmed defect | 8 |
+| **Defect rate** | **100%** |
+| Confirmed findings | 41 |
+| Distinct root causes | 10 (R11–R20) |
+| Findings refuted on review | 3 |
+
+Every cap's **numbers** are largely correct; every cap's **enforcement** has at least one hole. The table lookups were audited and are clean (see Verified Correct). The failures are in the plumbing between the table and the mutation.
+
+---
+
+### R11 — PHB2024 characters have `PHB` deleted from `enabledBooks`, and no non-spell option list was ever re-tagged
+
+**What it is.** `StepBooks.tsx:19-25` `selectPhbEdition('2024')` does `next.delete('PHB'); next.add('PHB2024')` — the two ids are mutually exclusive, and `toggle()` at `:31` early-returns for both so PHB cannot be re-enabled. `bookEnabled.ts:16-18` passes only on `sourceBook` or an `alsoIn` hit. Every option data file predates 2024 and carries bare `sourceBook: 'PHB'` with zero `alsoIn: ['PHB2024']` tags. Result: a 2024 character's option pickers render **empty grids under live "Choose N" headers**.
+
+**Why the structure produces it.** The fix was applied once, locally, at exactly one call site — `StepSpells.tsx:202-206` `const set = new Set(draft.enabledBooks); if (set.has('PHB2024')) set.add('PHB')` — inside a `useMemo` consumed only by that step's spell filter. It was never lifted into `bookEnabled()` or into the stored `enabledBooks`, so every other picker in the app still passes the raw set.
+
+**Sites.**
+- Data with 0 PHB2024 tags: `src/data/invocations.ts:5-36` (32 entries), `src/data/metamagic.ts:3-19` (10), `src/data/maneuvers.ts:5-20` (16 PHB + 7 TCE), `src/data/fightingStyles.ts`, `src/data/pactBoons.ts`, `src/data/optionalClassFeatures.ts`
+- Raw-set consumers, creator: `StepClassOptions.tsx:131` → `:165` (styles), `:183` (invocations), `:197` (metamagic), `:208` (maneuvers), `:218` (infusions)
+- Raw-set consumers, level-up: `LevelUpDialog.tsx:458` → `:610`, `:642`, `:652`, `:656`, `:662`
+- The one correct implementation: `StepSpells.tsx:199-206`
+- No normalization at the boundary: `useCreatorStore.ts:246` copies `draft.enabledBooks` verbatim; `useCharacterStore.ts:459` is `c.enabledBooks ?? ['PHB']`, a missing-field default only
+
+**Failure scenario.** Books step → 2024 Edition (default set becomes exactly `['PHB2024']`) → Warlock 5 → Class Options. The "Eldritch Invocations — Choose 3" card renders over an empty grid. `OptionSection` (`StepClassOptions.tsx:68-112`) has no empty state, so it is a blank rectangle. Same character at every level-up: `CompactOptionPicker` prints `"No results."` (`LevelUpDialog.tsx:148`) and `canConfirm` (`:598-607`) never references invocations, so the level completes silently. Character reaches 20 with zero invocations. Identical for 2024 Sorcerer metamagic, 2024 Battle Master maneuvers, 2024 Fighter fighting styles.
+
+**Severity: high.** Class-defining features are unreachable on a shipping edition, with no recovery path — no sheet UI writes `classOptions`.
+
+**Adjacent instance, same shape:** `alsoIn: ['ERLW']` appears exactly once in `src/data/` (`classes/index.ts:601`, Artificer). All 17 infusions (`infusions.ts:5-21`) and all 4 Artificer subclasses (`subclasses/index.ts:1233/1251/1264/1276`) are TCE-only, so an ERLW-only Artificer — the natural Eberron loadout — gets zero infusions and zero subclasses. The subclass path at least has a real empty state (`StepSubclass.tsx:53-65`); the infusion path is silent.
+
+---
+
+### R12 — Two independent implementations of every option count; only `LevelUpDialog` was taught 2024
+
+**What it is.** The creator and the level-up dialog each carry their own hardcoded progression ladder. `StepClassOptions.tsx:137` collapses the class id via `baseClassId()` (`classes/index.ts:669-671`, returns `spellListClassId`) so `sorcerer-2024` → `sorcerer`, then applies the **2014** ladder. `LevelUpDialog.tsx:264` keeps the raw `classId` and has 2024-aware variants. The two disagree, and the level-up delta formula swallows the gap.
+
+**Why the structure produces it.** `baseClassId()` is correct and necessary for filtering option *data* (which is tagged with 2014 ids — see the comment at `StepClassOptions.tsx:134-136`). The bug is reusing the same collapsed id for the *count*. No count table lives in `mechanics.ts` alongside `SPELLS_KNOWN`; each is inlined at its use site.
+
+**Sites.**
+
+| Cap | Creator (2014 ladder, wrong for 2024) | Level-up | RAW 2024 |
+|---|---|---|---|
+| Invocations | `StepClassOptions.tsx:171-178` (0 at L1, 2 at L2, 3 at L5) | `LevelUpDialog.tsx:70-80` ✓ correct | 1 at L1, 3 at L2, 5 at L5 |
+| Metamagic | `StepClassOptions.tsx:191-196` (2@L3, 3@L10, 4@L17) | `LevelUpDialog.tsx:62-67` (2@L2, 3@L10, 4@L17) — only the L2 threshold was fixed | 2@L2, 4@L10, 6@L17 (`phb2024-players-handbook.md:1293`) |
+| Expertise (bard) | `StepSkills.tsx:9-20` (2@L3, 4@L10) | `LevelUpDialog.tsx:586` (2 at L2 or L9) ✓ correct | 2@L2, 4@L9 (`phb2024-players-handbook.md:354,361,378`) |
+
+**Failure scenario.** Create a 2024 Sorcerer at level 1. Creator's metamagic ladder starts at L3 → no picker. Level 1→2: `metaCountFn(2) - metaCountFn(1)` = 2 − 2 = **0** → no picker. The level-2 grant falls into the gap between the two functions and is unrecoverable (`updateClassOptions`, `useCharacterStore.ts:921-926`, has exactly one caller and no top-up). At L10 and L17 both implementations under-grant, so a level-20 2024 Sorcerer ends with **4 metamagic options against RAW 6**. A 2024 Warlock created at L1 ends level 20 with 9 of 10 invocations; created at L5, 8 of 10. A 2024 Bard created at level 9 gets 2 expertise instead of 4, permanently.
+
+**Severity: high.** Wrong numbers on a shipping build, silently under-granted, with no display anywhere that shows the cap.
+
+---
+
+### R13 — `canConfirm` omits all six pending option arrays; grants are computed as a level delta, never as owed-vs-owned
+
+**What it is.** `LevelUpDialog.tsx:598-607` gates Confirm on HP method, subclass, pact boon, three totem picks, land type, ASI validity and expertise. `pendingSpells`, `pendingCantrips`, `pendingInvocations`, `pendingMetamagic`, `pendingManeuvers` and `pendingInfusions` appear nowhere in it. The button at `:1684` is `disabled={!canConfirm}`. Separately, every `totalNew*` is `Math.max(0, countFn(newLevel) - countFn(currentLevel))` — a **table delta**, explicitly documented as such at `:613-616` ("NOT the difference against what's stored"). So a skipped pick is never re-offered: every subsequent level with a flat table yields 0.
+
+**Why the structure produces it.** The delta design is deliberate and correct for its stated purpose (not double-offering creator-time picks). It is also exactly what makes a skipped grant permanent. The author already fixed this failure mode once for subclasses — see the `>=` rationale comment at `:297-301` — and never generalized it.
+
+**Sites.** `LevelUpDialog.tsx:598-607` (the gate), `:389-420` (`confirm()`, whose only early return is the subclass), `:400-403` (the merge fires only when some pending array is non-empty), `:411-413` (Set unions), plus each delta: `:487` spells, `:455` cantrips, `:618` invocations, `:624` metamagic, `:632` maneuvers, `:637` infusions. Store side: `useCharacterStore.ts:921-926` is a blind `{...existing, ...partial}` spread with no clamp and no backfill.
+
+**Failure scenario.** Battle Master 6 → 7. Section shows "0/2 chosen" in amber; Confirm is green. Player confirms. Levels 7→8→9 all yield delta 0, so the section does not render. Level 10 offers exactly 2. The character is permanently 2 maneuvers short. Same for a Warlock at 4→5 (7 of 8 at level 20), a Sorcerer at 2→3 (2 of 4 at level 20), an Artificer at 5→6 (6 of 8 known infusions at level 10).
+
+**Severity: medium.** Silently lost grants, never over-cap. Recovery exists only as a whole-character rollback: `SheetPage.tsx:769` calls `saveSnapshot(character!, 'Before Level Up')` and `SnapshotPanel.tsx:42-47` can restore it — 30 snapshots retained (`useSnapshotStore.ts:23`), so a shortfall noticed at level 20 is gone.
+
+**Aggravating instance (high):** `battleMasterManeuverCount` (`LevelUpDialog.tsx:82-87`) has **no `level < 3` guard** — it returns 3 for levels 0, 1 and 2. A Fighter taking Battle Master at 2→3 gets a delta of 3 − 3 = 0 and is never prompted for the *initial three* maneuvers at all. The two sibling functions in the same file do guard (`warlockInvocationCount2024:70-80` falls through to 0; `artificerInfusionCount:89-90` opens with `if (level < 2) return 0`). One-line fix, one call site.
+
+---
+
+### R14 — The creator never re-validates the draft when class or level changes
+
+**What it is.** `StepClass.tsx:31-43` `setLevel` rewrites only `classes`. `useCreatorStore.ts:100-101` `updateDraft` is a shallow merge, so `spellbook`, `classOptions` and `expertiseSkills` survive untouched. Every picker enforces its cap **at click time only** — no picker has a reconciliation effect keyed on the new cap. `CreatorPage.tsx:46,49,51` return unconditional `true` for `class-options`, `skills` and `spells`, and Finish is gated solely on `draft.name` (`:134`). `useCreatorStore.ts:255,265-268,291` copy the draft verbatim into the saved character.
+
+**Why the structure produces it.** `selectClass` (`StepClass.tsx:20-29`) *does* reset `selectedFeats` and `classOptions` — so the omission in `setLevel` is asymmetric, not a merge artifact. The reset instinct exists; it was applied to one of the two mutations.
+
+**Sites.** `StepClass.tsx:31-43` (setLevel), `StepClassOptions.tsx:149-155` (`toggleList` is add-side only), `StepSkills.tsx:73-91` (effect has `expertiseSlots` in its deps but the only expertise branch is the `=== 0` clear at `:82-84`), `StepSpells.tsx:250-268` (no trim; the sole `useEffect` at `:276-280` resets the level filter), `CreatorPage.tsx:46,49,51`, `useCreatorStore.ts:255,265-268,291`, `useLibraryStore.ts:27-28` (bare array push), `useCharacterStore.ts:409-416,470` (load backfills missing keys, never clamps).
+
+**Failure scenario.** Bard 20 → pick 22 spells → Back → level 1 → Finish. Saved as a Bard 1 with 22 known spells. Worse, the excess is **unremovable in the creator**: `StepSpells.tsx:212` filters the grid on `s.level <= maxSpellLevel`, so at Bard 1 the 2nd–9th-level picks are not rendered at all and have no Remove button — the banner reads "22 / 4 (full)" with no way to act. Same shape everywhere: Artificer 18 → 12 infusions → level 2 keeps all 12 including a 14th-level-prereq infusion (and `StepClassOptions.tsx:218-220` filters `items` by `minLevel <= level`, so those eight are invisible and un-deselectable); Rogue 6 → 4 expertise → level 3 keeps 4, and `useCharacterDerived.ts:217` doubles PB on all four; Warlock 18 → 8 invocations → level 2 keeps 8; Fighter 10 → 2 fighting styles → level 1 keeps 2.
+
+**Severity: medium-to-high.** Reachable in two Back clicks by an ordinary "actually let's start lower" edit, persists into the saved character, and is unrecoverable from inside the wizard.
+
+**Secondary instance:** the same effect's proficiency strip (`StepSkills.tsx:74-76`) strands expertise on a **background** change. Acolyte→Criminal drops Religion proficiency; the expertise pick on Religion survives, and the tile is inert (`:187` `onClick={() => { if (proficient) toggleExpertise(skill); }}`, dimmed at `:193`), so the slot is occupied and cannot be freed. Consequence is cosmetic — `useCharacterDerived.ts:217` requires proficiency for the doubled bonus, so only the double-dot marker at `SheetPage.tsx:598` is wrong.
+
+---
+
+### R15 — `addSpellToBook` is a chokepoint with no cap, and `spellsKnown` is never derived
+
+**What it is.** `useCharacterStore.ts:622-626` `addSpellToBook` takes only a `spellId` and its sole guard is a duplicate check. Its sibling four lines above, `toggleSpellPrepared` (`:592-601`), carries an explicit comment calling itself "the single chokepoint every preparation path funnels through" and accepts a `maxPrepared` argument from the caller. The pattern was not applied to `addSpellToBook`. Compounding it: `useCharacterDerived.ts` returns `maxPreparedSpells`, `cantripsKnown`, `maxSpellLevel` and `slotTotals` (`:495-526`) but has **no `spellsKnown`** and does not import `spellsKnownFor` — so no consumer has a number to compare against.
+
+**Sites.** `useCharacterStore.ts:622-626` (mutation), `SpellPanel.tsx:526` `onClick={() => { addSpellToBook(spell.id); }}` on a bare div — no disabled state, no confirm, and the handler never closes the dialog so the whole list can be click-through'd. `SpellPanel.tsx:69-75` `availableToAdd` filters on book, class, dedupe, level filter and search only. `SheetPage.tsx:723` passes the raw store action through. `SpellPanel.tsx:45` destructures only `{ maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel }`. `LevelUpDialog.tsx:395` is the only *capped* caller (`:1222`, `pendingSpells.length < spellsKnownGained`).
+
+**Failure scenario.** Bard 3 (Spells Known = 6). Spells tab → Add Spell → click every row. All ~110 PHB bard spells land in the spellbook, every one castable (`SpellPanel.tsx:87` `if (!isPreparedCaster) return true;`). No counter turns red because there is no spells-known counter. Persists through `save()` and Drive sync. Same for a Wizard 5 clicking the "C" filter and adding six extra cantrips → `10/4` in red, all castable, nothing ever trims it (`load()` at `:427` and `levelUp` at `:857-860` only run `syncAlwaysPrepared`).
+
+**Severity: medium.** The over-cap state persists and nothing trims it, but reaching it requires deliberately clicking extra rows in the add browser.
+
+**Important: a naïve clamp in `addSpellToBook` would be wrong.** Several features legitimately push the spellbook past the table — College of Lore Additional Magical Secrets (`phb-players-handbook.md:380`, "don't count against spells known"), Pact of the Chain's find familiar (`:1105`), feat-granted spells. And `cantripsKnown` is computed from the **primary class only** (`useCharacterDerived.ts:283-296`, no multiclass summation) while `SpellPanel.tsx:68-71` deliberately widens the add list to every class the character has — so there is currently no correct number to clamp against. The fix is two changes: derive `spellsKnown` and make `cantripsKnown` multiclass-aware, *then* gate.
+
+---
+
+### R16 — Spell-list resolution is implemented three times, and only the creator's copy is correct
+
+**What it is.** Resolving "which spells may this character pick" requires two normalizations: fall back to `classDef.spellListClassId` (so `sorcerer-2024` → `sorcerer` and `eldritch-knight` → `wizard`), and treat `PHB2024` as also unlocking `PHB`. Three implementations exist; each does a different subset.
+
+| Site | subclass `spellListClassId` | class `spellListClassId` | PHB2024→PHB | uses `bookEnabled` |
+|---|---|---|---|---|
+| `StepSpells.tsx:134-136`, `:199-206` | ✓ | ✓ | ✓ | ✓ |
+| `LevelUpDialog.tsx:282`, `:503-513` | ✓ | ✗ | ✗ | ✓ |
+| `SpellPanel.tsx:68-75` | ✗ | ✗ | ✗ | ✗ (bare `enabledBooks.includes(s.sourceBook)`, so `alsoIn` is ignored too) |
+
+**Failure scenario A (2024, high).** PHB-2024 Sorcerer 1→2. `spellsKnownGained` = 4 − 2 = 2 and the dialog renders "You learn 2 new spells." The list beneath is **empty**: core spells carry `classes: ['sorcerer']` not `'sorcerer-2024'`, and `bookEnabled` rejects `sourceBook: 'PHB'` for a set of `['PHB2024']` (`grep -c "alsoIn.*PHB2024" src/data/spells/index.ts` = 0). Confirm is enabled (R13), the 2 spells are lost, and `SpellPanel`'s Add Spell is broken the same way so there is no recovery. Applies to every 2024 caster; `wizard-2024` is worst — 2 free spellbook picks per level that can never be spent. Above level 1 the list is not literally empty but shows 1–2 of ~150 (`arcane-vigor`, `jallarzi-storm-of-radiance`, `tashas-bubbling-cauldron` carry the `-2024` tags).
+
+**Failure scenario B (EK/AT, medium).** A single-classed Eldritch Knight or Arcane Trickster's Add Spell dialog is **always empty** — no spell in the dataset lists `'fighter'` or `'rogue'` (every class id appearing in any spell's `classes` array: artificer, bard, cleric, druid, paladin, ranger, sorcerer, warlock, wizard). `LevelUpDialog` is their only route to learn spells, and per R13 it does not require the picks — so skipping the level-3 prompt costs 3 spells with no UI anywhere that can record them. A Fighter(EK)/Wizard multiclass is fine, which is why `SpellPanel.tsx:65-67`'s multiclass comment exists.
+
+**Severity: high** (2024 instance), **medium** (EK/AT instance).
+
+**Note the interaction.** R15 and R16 point in opposite directions and cancel out misleadingly: a 2014 Bard can add unlimited spells; an EK or a 2024 Sorcerer can add none. Fixing only the uncapped path leaves EK/AT and 2024 casters unable to reach their legal count at all. **Fix these together.** The lazy fix is one exported helper — `spellListIdsFor(character)` + `spellBooksFor(character)` — that all three sites call.
+
+---
+
+### R17 — The prepared-caster identity is a hardcoded string array duplicated in four places; three are stale
+
+**What it is.** Whether a class is a prepared caster is expressed as a literal id list, copied four times. `LevelUpDialog.tsx:482` carries the correct list including all six `-2024` ids (with a comment about a previously-fixed instance of this same stale-id bug). The three sheet-side copies do not.
+
+**Sites.** `SpellPanel.tsx:33` `const PREPARED_CASTER_CLASSES = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];`, consumed at `:77`. Duplicated at `SheetPage.tsx:996` (used `:1058`, `:1066`, `:1081`) and `SidebarPanel.tsx:536-537`. The correct normalizer `baseClassId()` exists at `classes/index.ts:669` — its own doc comment describes this exact bug class — and is used in 9 places, none of them these three.
+
+**Failure scenario.** PHB-2024 Cleric 5, WIS 16. `derived.maxPreparedSpells` = 9, computed correctly (`useCharacterDerived.ts:287` → `PREPARED_SPELLS_2024['cleric-2024']`). On the sheet: `isPreparedCaster` is false, so the "Prepared (n/max)" header (`SpellPanel.tsx:107`) never renders, the prepare checkbox (`:175`) never renders — meaning `toggleSpellPrepared`, the one correctly-enforcing chokepoint in the codebase, is **unreachable** — and `:87` `if (!isPreparedCaster) return true;` makes every spell in the book castable. Worst case `wizard-2024`: a creator-capped level-20 spellbook of 44 spells (`StepSpells.tsx:174`, `6 + 2*(charLevel-1)`) against a prepared cap of 25, all 44 castable with no counter shown.
+
+**Severity: high.** A correctly-computed cap that reaches nothing.
+
+**One fix closes it:** `mechanics.ts` already knows the answer — a class is a prepared caster iff `maxPreparedSpellsFor` returns non-null. Export that predicate and point the four call sites at it. `StepSpells.tsx:169` already derives it that fifth way (`preparedLimit !== null`), which is why the creator recognizes 2024 prepared casters and the sheet does not.
+
+---
+
+### R18 — Prepared-only casters have no pick guard at creation, and the creator writes `isPrepared: true` on every selection
+
+**What it is.** `StepSpells.tsx:250-268`: the `level > 0` branch is `if (isSpellbookCaster) {…} else if (isKnownCaster && selectedNonCantrips >= effectiveSpellLimit) return;`. For a prepared-only caster **both flags are false** — `isSpellbookCaster` is wizard/`wizard-2024` only (`:173`), and `isKnownCaster` requires `spellsKnownFor() > 0` (`:175`), which returns 0 for cleric/druid/paladin/artificer and for `bard-2024`/`cleric-2024`/`druid-2024`/`paladin-2024`/`ranger-2024` (no `SPELLS_KNOWN` entry, `mechanics.ts:214-222`). Control falls through to `:267` `updateDraft({ spellbook: [...current, { spellId, isPrepared: true, isAlwaysPrepared: false }] })`. `preparedLimit` is computed at `:168` but drives only the informational banner at `:328-336`.
+
+**Why nothing downstream repairs it.** `useCreatorStore.ts:265-268` passes the spellbook through `syncAlwaysPrepared`, which (`alwaysPrepared.ts:43`) is `isPrepared: alwaysPreparedIds.includes(s.spellId) ? true : s.isPrepared` — it can only *set* prepared, never clear. `toggleSpellPrepared` (`useCharacterStore.ts:604`) is `if (!entry.isPrepared && …)`, so it refuses new preparations but cannot repair an inherited over-cap state.
+
+**Failure scenario.** Level-1 Cleric, WIS 16, cap = 1 + 3 = 4. Tick all 15 PHB 1st-level cleric spells — none refused. Finish. Sheet header reads "Prepared (15/4)" in red, all 15 castable, and the only way out is unticking 11 one at a time. For a *2024* cleric it is worse: per R17 there is no red counter and no checkboxes at all.
+
+**Severity: high.** Every prepared caster is routinely born over cap, and nothing at any later point reconciles.
+
+**Adjacent, same file, medium:** `StepSpells.tsx:155` maps the 2014 `paladin` to `'wis'` while `:160` correctly maps `'paladin-2024': 'cha'`. The class definition (`classes/index.ts:335`) and the sheet both use `'cha'`. A level-6 CHA-15 paladin sees "prepare 2" in the creator and 5 on the sheet. The `?? 'wis'` fallback at `:165` silently mis-abilities any future class id absent from the map. (Note the whole line is unreliable regardless: `draft.baseAbilityScores` is the *pre-racial* score, so the creator understates the limit for cleric, druid and wizard too — the paladin mapping is its sharpest instance, not its only one.)
+
+---
+
+### R19 — `Math.ceil` where the book says rounded down (Artificer prepared cap)
+
+**What it is.** `mechanics.ts:283-285` `case 'artificer': return Math.max(1, Math.ceil(level / 2) + spellMod);`. The comment at `:284` ("Artificer gets spells at level 1 (unlike Paladin/Ranger who start at 2)") is a conflation — the level-1 case is already handled by the `Math.max(1, …)` floor, which is exactly RAW's "minimum of one spell." The Paladin case one line above correctly uses `Math.floor`.
+
+**Correct per book.** `tce-tashas-cauldron.md:53` (verified in both the reference-books copy and the Drive copy): "Prepare Int modifier + half artificer level (rounded down) spells." Line 51 of the same file — "Spell slots for multiclassing: Add half artificer levels (rounded up)" — is a *different quantity*; rounding up is correct there and wrong here.
+
+**Failure scenario.** Artificer 5, INT 18. RAW: floor(5/2) + 4 = 6. App: ceil(5/2) + 4 = **7**. `SpellPanel.tsx:109` shows "Prepared (6/7)" and `toggleSpellPrepared` — the one enforcing chokepoint — faithfully accepts a 7th spell, because it enforces the value it is handed (`useCharacterStore.ts:604-612`) and by design does not recompute. Wrong at every odd level 1–19 for any artificer with a positive INT modifier.
+
+**Severity: high.** Wrong number on a real build, enforced.
+
+---
+
+### R20 — Features that grant proficiency, expertise, resources or spells exist as description strings with no data hook
+
+**What it is.** `ClassFeature` (`types/index.ts:113-123`) carries only `name`/`level`/`description`/`isASI`/`featOnly`. Subclasses have no skill-granting field (`skillProficiencies` exists only on the background type, `types/index.ts:245`). `computeAlwaysPreparedIds` (`alwaysPrepared.ts:12-33`) reads only subclass `alwaysPreparedSpells` and `landSpells`, never class features. `classOptions.optionalFeatures` is written (`useCharacterStore.ts:921-926`) but never read by `useCharacterDerived` (`grep optionalFeatures src/hooks/` → nothing). So any feature whose mechanics don't fit an existing field is prose only.
+
+**Sites — expertise / proficiency:**
+- `useCharacterDerived.ts:192-210` is the *complete* set of subclass expertise handling: two hardcoded `if (cl.subclassId === …)` lines plus the Knowledge Domain block. `expertiseSlotsForClass` (`StepSkills.tsx:9-20`) handles only rogue and bard; `LevelUpDialog.tsx:584-587` the same four ids.
+- Unhandled entirely: Scout Survivalist (`subclasses/index.ts:669`), Cobalt Soul Mystical Erudition (`:1350`), TCE Deft Explorer/Canny (`optionalClassFeatures.ts:138-145`), PHB2024 Ranger Deft Explorer L2 + Expertise L9 (`classes/phb2024.ts:396,404`), PHB2024 Wizard Scholar L2 (`:592`).
+- Half-implemented: Corsair (`:196`) and Purple Dragon Knight (`:198`) add to `effectiveExpertiseSet` but never to `skillProfs`, while `:217` requires `effectiveExpertiseSet.has(skill) && skillProfs.has(skill)`. The Knowledge Domain block immediately below (`:200-210`) does **both** adds — the correct pattern is in the same function.
+
+**Sites — resources / spells:**
+- `feats.ts:154-159` Metamagic Adept and `fightingStyles.ts:17` Superior Technique: no `grantedResources`, no maneuver contribution. Both cap sites (`StepClassOptions.tsx:201-206`, `LevelUpDialog.tsx:82-87`) key solely off `isBattleMaster` and level; `selectedFeats` and `classOptions.fightingStyles` are never consulted.
+- `feats.ts:518-524` Metamagic Adept likewise. **Half of this is a one-line data omission:** `Feat.grantedResources` exists at `types/index.ts:316` and is wired end to end (consumed at `useCharacterStore.ts:331-338`, rest at `:976-981`, sheet at `SheetPage.tsx:64`, already used by Lucky at `feats.ts:140`). Adding `grantedResources: [{ key: 'sorcery_points', … }]` would light up the metamagic UI, since `SheetPage.tsx:2361` keys off `r.key === 'sorcery_points'`.
+- `subclasses/phb2024.ts` defines **zero** resources (`grep -c "resources:"` → 0, against 72 in `subclasses/index.ts`). `battle-master-2024` (`:188-199`) therefore has no Superiority Dice at all — no count, no die size, nothing to spend — while `LevelUpDialog.tsx:629-630` still prompts it for maneuvers.
+- Armorer Armor Modifications (`tce-tashas-cauldron.md:193`, "+2 Infused Items") has no resource entry and no `computeResourceMaxOverrides` branch (`useCharacterStore.ts:16-130` has an armorer branch at `:69-70` for `perfected_armor` only). `grep "infused_items" src/` → 2 hits, both the definition. Gap is a constant −2 from level 9: L9 shows 3 vs RAW 5, L10-13 4 vs 6, L14-17 5 vs 7, L18-20 6 vs 8. `setResource` (`:637-644`) hard-clamps to `r.max`, so the player cannot work around it.
+- Wizard 20 Signature Spells (`classes/index.ts:594`, `classes/phb2024.ts:604`) and Wizard 18 Spell Mastery (`:593`/`:602`): description only. The **only** code that writes `isAlwaysPrepared: true` is `syncAlwaysPrepared`, fed by the subclass-only computer, so the player cannot even hand-mark two spells — `SpellPanel.tsx:177-178` disables the toggle for always-prepared spells.
+- PHB2024 Divine Order (Thaumaturge) / Primal Order (Magician), `classes/phb2024.ts:139,185`: a mandatory L1 either/or, one branch of which is +1 cantrip. No `ClassOptionsState` field, no `StepClassOptions` entry (`grep divineOrder|primalOrder|Thaumaturge|Magician src/` → the two description strings only), and the creator **hard-blocks the legal pick** (`StepSpells.tsx:257` mutation guard, `:402-408` disabled button).
+
+**Failure scenarios.** Fighter 7 Purple Dragon Knight with a background lacking Persuasion (Persuasion is not on the Fighter skill list, `classes/index.ts:220`, so this is the *default* case): RAW gives proficiency + doubling = +6 at level 7; the app gives +0, while `SheetPage.tsx:598-618` still draws the emerald double-dot expertise marker beside the bare ability modifier. — 2024 Ranger 9: RAW 3 expertise skills, app 0, no section rendered at creation or level-up, permanently −4 on three skills. — 2024 Fighter 3 Battle Master: prompted to choose maneuvers, no dice to spend them with. — Armorer 12: Infused Items reads 4/4, RAW 6.
+
+**Severity: high** for the expertise and Battle-Master-dice instances (wrong numbers on shipping builds); **medium** for Signature Spells / Spell Mastery / Divine Order / Metamagic Adept (features that silently do nothing).
+
+**Also in this class, low:** `infusions.ts:7` `bag-of-holding-infusion` is tagged `sourceBook: 'TCE'`, but TCE lists 16 infusions and Bag of Holding is a 2nd-level *Replicable Item* under Replicate Magic Item (`tce-tashas-cauldron.md:319`), not an infusion. It was a standalone infusion in ERLW. Retagging it `'ERLW'` alone would be half a fix — Armblade, ERLW's other standalone-turned-replicable, is absent, and no infusion carries `alsoIn: ['ERLW']` (see R11).
+
+---
+
+### Missing-mechanic findings (no shared root cause)
+
+These are genuine RAW features with no implementation anywhere. Each is independent.
+
+| # | Feature | Sites | Severity |
+|---|---|---|---|
+| M1 | **Spell swap on level-up** — Bard/Sorcerer/Warlock/Ranger/EK/AT may each replace one known spell per level (`phb-players-handbook.md:337,657,872,967,1007,1098`). `confirm()` only calls `addSpellToBook`; `removeSpellFromBook` isn't imported (`LevelUpDialog.tsx:157`). At flat table levels the whole section is hidden (`:1135`), so the swap is silently skipped at Sorcerer 11→12, Bard 11→12, Warlock 9→10, EK/AT at fighter/rogue 5/6/9/12/17/18. | `LevelUpDialog.tsx:157,394-396,484-489,1135` | medium |
+| M2 | **Invocation swap on level-up** — both editions allow it (`phb-players-handbook.md:1103`, `phb2024-players-handbook.md:1404`). `:410` is a Set union; `:645` filters known invocations out of the picker so a replacement target can't even be displayed. Note `updateClassOptions` (`useCharacterStore.ts:925`) is an object spread — a shorter array *would* shrink it, so this is a single-file fix. | `LevelUpDialog.tsx:410,645,1426` | medium |
+| M3 | **Maneuver swap** — PHB core (at 7/10/15, `phb-players-handbook.md:629`) and TCE Martial Versatility at ASI levels (`tce-tashas-cauldron.md:766`). Union-only merge at `:412`; `:651-653` excludes known maneuvers. The app's own data at `optionalClassFeatures.ts:83` tells the player the rule exists. | `LevelUpDialog.tsx:412,651-653,1515-1527` | medium |
+| M4 | **Magical Secrets (any-class picks)** — Bard 10/14/18 and College of Lore 6 choose from *any* class list. All three pickers filter on `s.classes.includes(spellListClassId)`; `expandedSpells` (`StepSpells.tsx:187-195`) is the warlock-patron mechanism and no bard subclass populates it. `counterspell` (`spells/index.ts:59`, `classes: ['sorcerer','warlock','wizard']`) is unreachable for a bard at any level. | `StepSpells.tsx:209-216`, `LevelUpDialog.tsx:507`, `SpellPanel.tsx:71`, `subclasses/index.ts:29` | medium |
+| M5 | **`prerequisiteSpell` never enforced** — 7 invocations declare it (`invocations.ts:5,16,28,45,47,48,49`); both filters check `minLevel` and `prerequisitePact` only. The field builds a caption (`StepClassOptions.tsx:333`, `LevelUpDialog.tsx:1453`) and nothing else, while the help text at `StepClassOptions.tsx:327` claims spell prereqs *are* filtered. Caution: the two hex invocations read "hex spell **or a warlock feature that curses**", so a naive `spellbook.includes('hex')` check would wrongly block a Hexblade. | `StepClassOptions.tsx:182-185`, `LevelUpDialog.tsx:641-645` | medium |
+| M6 | **Replicate Magic Item can only be learned once** — RAW says multiple times, each naming a different item (`tce-tashas-cauldron.md:317`). `Infusion` (`types/index.ts:360-367`) has no multi-pick flag and `classOptions.infusions` is `string[]` with no per-instance item field. `LevelUpDialog.tsx:655-658` filters it out after the first pick; `:413` dedupes via `new Set`; `StepClassOptions.tsx:149-155` treats the second click as *removal* (and `:92-95` does not disable an already-selected card, so the deselect is reachable). | `infusions.ts:17`, `types/index.ts:360-367,384`, `LevelUpDialog.tsx:413,655-658`, `StepClassOptions.tsx:92-95,149-155` | medium |
+| M7 | **Always-prepared subclass cantrips counted against the cantrip cap** — `SpellPanel.tsx:97-104` counts every level-0 spellbook entry, with no `isAlwaysPrepared` filter, while the sibling prepared count at `:51-55` *does* exclude them. `syncAlwaysPrepared` injects them at build and on **every load**, so deleting one is undone next load. A 2024 Celestial Warlock 3 shows `Cantrips: 4/2` in red on a build the app itself produced (Light + Sacred Flame are cleric-list, never offered in the creator); Circle of the Sea shows 3/2 (Ray of Frost is sorcerer/wizard-list). Display-only — `cantripsKnown` gates no mutation. | `SpellPanel.tsx:97-104`, `alwaysPrepared.ts:45-49`, `subclasses/phb2024.ts:158,169,498` | low |
+| M8 | **Arcane Trickster's sheet cantrip cap is 1 low** — `useCharacterDerived.ts:292-296` hardcodes the *Eldritch Knight* progression (2@3, 3@10) for any `spellcastingType === 'third'` subclass, ignoring the correct per-subclass tables that every other consumer reads (`subclasses/index.ts:195`, `phb2024.ts:217,383`). A creator-made Rogue 3 AT — legal, built by the app — displays `Cantrips: 3/2` in red. 2024 EK at Fighter 14 shows 4/3. Display-only, but alarming and self-contradictory. Related: the hook reads `classes[0]` only, so a Wizard 1 / AT 3 omits the AT cantrips from the cap entirely. | `useCharacterDerived.ts:292-296` | medium |
+
+---
+
+### Verified correct
+
+Recorded so the second pass can diff against it. Every number below was checked against the book text, level by level, not from memory.
+
+| Cap | What was verified | Evidence |
+|---|---|---|
+| spells-known | All 6 `SPELLS_KNOWN` tables exact at levels 1-20: bard, sorcerer, warlock, ranger, sorcerer-2024, warlock-2024 — including the flat pairs and plateaus | `mechanics.ts:215-221` vs `phb-players-handbook.md:341-361,876-896,1010-1030,1075-1095`; `phb2024-players-handbook.md:1262-1283,1379-1400` |
+| spells-known | All 4 EK/AT `spellsKnownByClassLevel` tables exact, incl. the 16/17/18 plateau at 11 | `subclasses/index.ts:114,196`; `phb2024.ts:218,384` |
+| spells-known | EK/AT `restrictedSchools` + `freePickLevels [8,14,20]` correct and correctly dropped at those levels | `subclasses/index.ts:115-116,197-198`; `LevelUpDialog.tsx:286-290` |
+| spells-known | Multiclass keyed off per-class level, never character level (correct per PHB p.163) | `LevelUpDialog.tsx:162-165,487` |
+| spells-known | Creator DOES enforce the cap in the mutation and the UI | `StepSpells.tsx:263-265,403-408` |
+| spells-known | Level-up DOES cap picks at the table delta | `LevelUpDialog.tsx:1222,1236` |
+| cantrips-known | All 7 PHB2014 + all 6 PHB2024 `CANTRIPS_KNOWN` tables exact at 1-20, incl. the Artificer's non-standard 2/3@10/4@14 | `mechanics.ts:242-255` vs the 13 class tables in both books; artificer vs `tce-tashas-cauldron.md:57-79` |
+| cantrips-known | Upper clamp safe: `table[max(0, min(level,20) - 1)]` | `mechanics.ts:261` |
+| cantrips-known | EK/AT school restriction correctly **not** applied to cantrips (RAW: spells only) | `LevelUpDialog.tsx:460-466` vs `:503-513`; `StepSpells.tsx:213` |
+| cantrips-known | Racial cantrips deliberately kept out of the spellbook, so they don't inflate the count | `useCharacterStore.ts:870,1043,1111`; `useCreatorStore.ts:273` |
+| prepared-spells | All 6 `PREPARED_SPELLS_2024` tables exact at 1-20, incl. flat spots and the wizard's divergent 16-20 tail | `mechanics.ts:225-232` vs `phb2024-players-handbook.md:351-372,453-474,564-585,927-948,1036-1057,1540-1561` |
+| prepared-spells | 2014 cleric/druid/wizard `max(1, level + mod)` and paladin `max(1, floor(level/2) + mod)` (≥L2) correct, min-1 handled | `mechanics.ts:275-282` |
+| prepared-spells | Always-prepared correctly excluded at **both** counting sites; flag re-derived live on load/level-up/creation, so it can only lower the count | `useCharacterStore.ts:607-611`, `SpellPanel.tsx:51-55`, `alwaysPrepared.ts:40-50` |
+| prepared-spells | `LevelUpDialog` cannot create an over-cap prepared state — everything it commits writes `isPrepared: false` | `LevelUpDialog.tsx:394-395`; `useCharacterStore.ts:625` |
+| expertise | 2014 Bard (2@3, 4@10), 2014 Rogue and 2024 Rogue (2@1, 4@6) correct at all levels | `StepSkills.tsx:11-18`; `LevelUpDialog.tsx:585,587` |
+| expertise | Level-up hard-caps picks, blocks Confirm until the quota is met, and has a correct degenerate-case fallback so it can't soft-lock | `LevelUpDialog.tsx:607,1659,1663-1664` |
+| expertise | Cannot grant expertise in a non-proficient skill, cannot double-grant; merge-not-overwrite on level-up | `LevelUpDialog.tsx:588-596`; `useCharacterStore.ts:888-891` |
+| expertise | Knowledge Domain fully correct: grants proficiency **and** expertise, capped at 2, list restricted at both picker and consumer, cleared on subclass change | `useCharacterDerived.ts:200-210`; `StepSkills.tsx:28,60,86-88` |
+| expertise | Keyed off class level, not character level; correctly does not stack with Jack of All Trades / Remarkable Athlete (`Math.max`, gated on `!skillProfs.has`) | `LevelUpDialog.tsx:162-165`; `useCharacterDerived.ts:219-223` |
+| invocations | 2014 count table exact at 1-20 in **both** implementations; 2024 function exact (just never reached from the creator) | `LevelUpDialog.tsx:43-52,70-80`; `StepClassOptions.tsx:169-179` |
+| invocations | All 54 invocation `minLevel`/`prerequisitePact` values verified against PHB/XGtE/TCE — zero discrepancies | `invocations.ts` vs `phb-players-handbook.md:1133-1165`, `xge:1163-1189`, `tce:1336-1348` |
+| invocations | Pact-boon prereq IS enforced at both gates; the `replace('pact-of-the-','')` mapping matches the type union exactly | `StepClassOptions.tsx:183`; `LevelUpDialog.tsx:642` |
+| invocations | Pending picks don't leak across classes in a multiclass level-up | `LevelUpDialog.tsx:211-233` |
+| metamagic | 2014 count table exact at 1-20 in both implementations | `LevelUpDialog.tsx:54-59`; `StepClassOptions.tsx:191-196` |
+| metamagic | Sorcery-point costs correct (1/1/1/1/1/2/3 + Transmuted 1); points are actually deducted with an affordability guard and cannot go negative; Twinned's variable cost degrades safely to a manual-deduct tooltip | `metamagic.ts:5-18`; `SheetPage.tsx:987-990,2361-2397` |
+| metamagic | Sorcery-point max table correct both editions (0 at L1, = sorcerer level thereafter) | `classes/index.ts:498`; `classes/phb2024.ts:488` |
+| maneuvers | 2014 maneuvers-known (3/5/7/9 at 3/7/10/15) and 2014 superiority dice count (4/5/6 at 3/7/15) exact at all 20 levels | `StepClassOptions.tsx:202-206`; `subclasses/index.ts:99` |
+| maneuvers | 2014 die size exact (d8@3, d10@10, d12@18) and `getResourceDie` picks against the **owning class's** level; short-rest recharge correct | `subclasses/index.ts:97,100`; `SheetPage.tsx:76-93`; `useCharacterStore.ts:1000-1010` |
+| maneuvers | The 16 PHB + 7 TCE maneuver list is complete and correctly attributed; XGtE adds none (verified — its only "maneuver" hits are Warding Maneuver and Elegant Maneuver) | `maneuvers.ts:5-29` |
+| maneuvers | Both gates double-guard against exceeding the delta; duplicates impossible | `LevelUpDialog.tsx:1531,1535,653,412`; `StepClassOptions.tsx:149-155` |
+| infusions | Infusions Known (4/6/8/10/12 at 2/6/10/14/18) exact at **both** sites; Infused Items table exact at all 20 levels | `LevelUpDialog.tsx:89-96`; `StepClassOptions.tsx:212-217`; `classes/index.ts:612-617` vs `tce:59-77` |
+| infusions | The two Artificer numbers are **not** conflated — separate structures, independent computation, distinct player-facing wording | `classes/index.ts:633`; `StepClassOptions.tsx:372` |
+| infusions | All 17 `minLevel` prerequisites match TCE p.20-24; multiclass keys off artificer class level in all five writers; long rest and level-up carry the tracker correctly | `infusions.ts:5-21`; `useCharacterStore.ts:754-767,369-378,1089-1094`; `useCreatorStore.ts:225-226` |
+| all | **No level-down path exists anywhere.** The only mutation of `character.classes` is `levelUp` (`useCharacterStore.ts:716-734`), which increments. No `setClassLevel`, no `removeClass`, no level editor. | grep across `src/store`, `src/pages/sheet` |
+| all | **No post-creation subclass change** (`useCharacterStore.ts:728` uses `?? subclassPick`, filling an empty slot only), **no post-creation ability-score editor** (only ASI/feat increases, which raise), **no post-creation book toggle** (`enabledBooks` written only by `StepBooks.tsx:26,35`). Every Q4 "legal when made, now illegal" drop path is unreachable on the sheet — the over-cap states that exist all originate in the creator (R14). | — |
+
+---
+
+### Cheapest-first fix order
+
+1. **R19** — `ceil` → `floor`, one character. Wrong number on every odd-level artificer.
+2. **R13 aggravating instance** — `if (level < 3) return 0;` at `LevelUpDialog.tsx:82`. One line, one call site; restores the Battle Master's initial 3 maneuvers.
+3. **R17** — export the prepared-caster predicate from `mechanics.ts` (it already knows: `maxPreparedSpellsFor() !== null`), point 4 call sites at it. Unblocks the entire 2024 prepared-caster sheet.
+4. **R11** — widen `PHB2024` → `PHB` once, inside `bookEnabled()`. Six option lists across four caps light up in one edit; beats adding `alsoIn` to ~70 data entries.
+5. **R13** — add the six pending arrays to `canConfirm` (`:598-607`). One expression; closes silent loss for spells, cantrips, invocations, metamagic, maneuvers and infusions simultaneously.
+6. **R16 + R15 together** — one `spellListIdsFor(character)` helper for the three divergent sites, plus derive `spellsKnown` in `useCharacterDerived`. Must land together (see the interaction note in R16).
+7. **R14** — one clamp pass over the draft in `useCreatorStore.finalize()`, or reset `classOptions` in `setLevel`. Closes over-cap persistence for five caps at once.
+8. **R12** — move the count ladders into `mechanics.ts` keyed by raw class id, delete both inline copies.
+9. **R20** — data-layer work, largest diff, lowest leverage per line. Start with `grantedResources` on Metamagic Adept (one line, field already wired) and the Knowledge-Domain pattern for Corsair/PDK (three lines).
