@@ -1391,3 +1391,98 @@ at the right size and the right die.
 It establishes that the resource layer is correct across every shape the app can produce. It
 does **not** establish anything about the user's real characters, because there are none here
 to test. If characters exist on another machine or in Drive sync, that check is still owed.
+
+---
+
+# PHASE B / PHASE C — sweeps run 2026-07-30 (log-only)
+
+## B2 — subclass spell grants are missing on at least 11 subclasses that grant spells in RAW
+`tools/audit/spellgrants.py`. Parsed all **189** subclasses (141 + 48) and split them by class into
+"has a spell-grant field" (`alwaysPreparedSpells` / `landSpells` / `expandedSpells`) vs not.
+
+Controls: `circle-of-the-land` must have a grant (it does), `champion` must not (it doesn't).
+
+| class | with | without | verdict |
+|---|---|---|---|
+| cleric | 17 | 2 | **both gaps** — `tob-island-domain`, `tob-sea-domain` |
+| paladin | 12 | 2 | **both gaps** — `tob-oath-of-greed`, `tob-oath-of-the-deep` |
+| **artificer** | **0** | **4** | **all four are gaps** |
+| warlock | 10 | 4 | 2 confirmed gaps (`the-genie`, `scag-the-undying`) |
+| druid | 3 | 10 | 2 confirmed gaps (`circle-of-spores`, `circle-of-wildfire`) |
+| ranger | 2 | 11 | 2 confirmed gaps (`fey-wanderer`, `swarmkeeper`) |
+| sorcerer | 0 | 14 | 1+ confirmed gap (`aberrant-mind`) |
+| bard/barbarian/fighter/monk/rogue/wizard | — | all | expected; these grant no list in RAW |
+
+**Confirmed against the books this turn (11):**
+- `alchemist` / `armorer` / `artillerist` / `battle-smith` — TCE "Alchemist Spells" (p.123 of the
+  extract), "Armorer Spells" (162), "Artillerist Spells" (205), "Battle Smith Spells" (235). Every
+  Artificer specialist has a Specialist Spells table and **none of the four is implemented**, so an
+  Armorer never receives *magic missile*/*thunderwave* at all.
+- `circle-of-spores` — TCE 657: "Circle Spells (2nd) … Always prepared (don't count against limit)".
+- `circle-of-wildfire` — TCE 725: same shape.
+- `fey-wanderer` — TCE 1071: "Fey Wanderer Magic (3rd): Additional spells … don't count against
+  spells known".
+- `swarmkeeper` — TCE 1107: "Swarmkeeper Magic (3rd)".
+- `aberrant-mind` — TCE 1250: "Psionic Spells (1st): Additional spells (always known)".
+- `the-genie` — TCE 1405: "Genie Expanded Spells".
+- `scag-the-undying` — SCAG 202: "Expanded Spells".
+
+**Correctly absent, checked so the list is not assumed uniform:** `drakewarden` (FToD grants a drake
+companion, no spell table) — proof that the "without" column is a triage list, not a defect list.
+
+**Still to triage against the books:** `clockwork-soul` (TCE names it differently from the pattern
+searched), the remaining XGtE druid/ranger circles and archetypes, the ToB entries, and all 48 of the
+2024 set. Severity: **high** — an unimplemented always-prepared list is a feature the player paid a
+subclass for and never receives, and nothing on the sheet indicates its absence.
+
+## B3 — every spell id referenced anywhere resolves (clean, and worth recording)
+`tools/audit/spellrefs.py`. A dangling id is *silent*: `getSpell()` returns undefined and the render
+path skips the row, so a granted spell simply never appears — invisible to a text-accuracy audit,
+which reads descriptions rather than ids.
+
+Swept `alwaysPreparedSpells`, `landSpells`, `expandedSpells`, `innateSpells`, `grantedSpells` and
+`spellList` across subclasses (both editions), races (both), feats (both) and classes (both):
+**615 raw references, 223 distinct ids, 0 dangling**, against a corpus of 547 spells.
+
+Note the asymmetry with B2 — every reference that *exists* is valid; the defect is the references
+that were never written. A referential-integrity check cannot see a missing feature, which is why
+B2 needed a per-class roster instead.
+
+## C1 — racial fly / climb / swim speeds are declared, unset, and unread
+Three separate layers each fail, which is why neither a data sweep nor a code sweep alone would find it:
+
+1. **Type**: `Race` declares `swim?`, `fly?`, `climb?` (`src/types/index.ts`).
+2. **Data**: across all 112 races, `fly` is set **0 times** and `climb` **0 times**; `swim` is set 3
+   times (`lizardfolk` :477, `triton` :520, `sea-elf` :1032).
+3. **Code**: nothing reads them. `useCharacterDerived.ts:243` computes
+   `(race?.speed ?? 30) + featSpeedBonus + monkSpeedBonus + barbFastMovement` and the sheet renders a
+   single `{speed} ft` (`SheetPage.tsx:530`). The only `.fly`/`.climb`/`.swim` readers in the repo
+   belong to the **Wild Shape beast-form** system (`beastForms.ts`, `WildShapeModal.tsx`,
+   `AlternateFormPanel.tsx`), which uses its own `speed` object and is unrelated.
+
+So even the three races that *do* set `swim: 30` have it silently discarded, and races whose defining
+trait is flight carry it only as prose:
+
+| race | trait text present | speed data |
+|---|---|---|
+| `aarakocra` | "Flight — flying speed equal to your walking speed" | `speed: 30`, no `fly` |
+| `fairy` | "Flight — flying speed equal to your walking speed" | `speed: 30`, no `fly` |
+| `owlin` | "Flight — thanks to your wings…" | `speed: 30`, no `fly` |
+| `hadozee` | "Climb Speed — climbing speed equal to your walking speed" | no `climb` |
+| `tabaxi` | "Cat's Claws — climbing speed of 20 feet" | no `climb` |
+| `lizardfolk` / `triton` / `sea-elf` | swim in text | `swim: 30` set, **never read** |
+
+Severity: **high** for the flying races — flight is the single mechanical reason to pick Aarakocra,
+Fairy or Owlin, and the sheet shows a plain 30 ft walk. Note this is the same shape as B1 and the
+AcqInc/ToB registry gap: **two files that are each internally consistent, joined by nothing.**
+
+## C2 — R3 and the innate-spell coverage sweep re-run clean (regression check)
+Both existing sweeps reproduce their recorded numbers exactly:
+- `r3scan.py`: 40 races flagged, 41 traits, **5 genuinely untracked** — of which 3 (`giff`, `kobold`,
+  `shadar-kai`) already carry a resource and are flagged for an unrelated reason, leaving
+  `erlw-aberrant-dragonmark` and `simic-hybrid` (a build choice → D4).
+- `innatescan.py`: entry control ok at 112 races; exactly **1** race grants a spell in trait text with
+  no `innateSpells` entry — `erlw-aberrant-dragonmark`, unchanged.
+
+The racial *resource* layer closed by R3 is therefore still closed. Phase C's remaining exposure is
+ASIs, speeds (C1), darkvision, resistances, proficiencies and languages — not limited-use tracking.
