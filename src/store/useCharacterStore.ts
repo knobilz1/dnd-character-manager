@@ -1,12 +1,14 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, ClassLevel, PreparedSpell, JournalEntry } from '../types';
+import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, JournalEntry } from '../types';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
 import { useBorrowedStore } from './useBorrowedStore';
 import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
-import { getClass } from '../data/classes';
+import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
+import { getSpell } from '../data/spells';
+import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
 
 /** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
  *  Mirrors the logic in useCharacterDerived.ts so the store can apply correct maxes
@@ -33,51 +35,131 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   const score = (key: AbilityKey) => baseScores[key] ?? 10;
 
   const overrides: Record<string, number> = {};
-  if (c.classes.some(cl => cl.classId === 'bard'))
+  if (c.classes.some(cl => baseClassId(cl.classId) === 'bard'))
     overrides['bardic_inspiration'] = Math.max(1, abilityMod(score('cha')));
-  if (c.classes.some(cl => cl.classId === 'artificer'))
+  if (c.classes.some(cl => baseClassId(cl.classId) === 'artificer'))
     overrides['flash_of_genius'] = Math.max(1, abilityMod(score('int')));
   if (c.classes.some(cl => cl.subclassId === 'bladesinging'))
     overrides['bladesong'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'samurai'))
     overrides['fighting_spirit'] = 3;
+  // Psi Warrior / Soulknife (TCE): each grants its own Psionic Energy pool of 2 x proficiency
+  // bonus. Separate keys, so a Fighter/Rogue holding both subclasses gets two pools, not one.
+  if (c.classes.some(cl => cl.subclassId === 'psi-warrior'))
+    overrides['psionic_energy_psi_warrior'] = profBonus * 2;
+  if (c.classes.some(cl => cl.subclassId === 'soulknife'))
+    overrides['psionic_energy_soulknife'] = profBonus * 2;
+  // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
+  if (c.classes.some(cl => cl.subclassId === 'phantom' && cl.level >= 3))
+    overrides['wails_from_the_grave'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-wildfire' && cl.level >= 10))
+    overrides['cauterizing_flames'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'college-of-creation' && cl.level >= 3))
+    overrides['performance_of_creation'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'peace-domain'))
+    overrides['emboldening_bond'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'swarmkeeper' && cl.level >= 7))
+    overrides['writhing_tide'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'swarmkeeper' && cl.level >= 15))
+    overrides['swarming_dispersal'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-stars' && cl.level >= 2))
+    overrides['star_map'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-stars' && cl.level >= 6))
+    overrides['cosmic_omen'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'armorer' && cl.level >= 15))
+    overrides['perfected_armor'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'clockwork-soul'))
+    overrides['restore_balance'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'drakewarden' && cl.level >= 15))
+    overrides['perfected_bond'] = profBonus;
+  // Echo Knight Unleash Incarnation (EGtW): Constitution modifier uses, minimum 1.
+  if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 3))
+    overrides['unleash_incarnation'] = Math.max(1, abilityMod(score('con')));
+  // Dunamancy (EGtW): both are Intelligence modifier uses, minimum 1.
+  if (c.classes.some(cl => cl.subclassId === 'chronurgy-magic' && cl.level >= 6))
+    overrides['momentary_stasis'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 10))
+    overrides['violent_attraction'] = Math.max(1, abilityMod(score('int')));
+  // TCE prof-bonus-per-long-rest features.
+  if (c.classes.some(cl => cl.subclassId === 'the-fathomless'))
+    overrides['tentacle_of_the_deeps'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'order-of-scribes' && cl.level >= 6))
+    overrides['manifest_mind'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-wild-magic' && cl.level >= 3))
+    overrides['magic_awareness'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-wild-magic' && cl.level >= 6))
+    overrides['bolstering_magic'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-the-beast' && cl.level >= 10))
+    overrides['infectious_fury'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'path-of-the-beast' && cl.level >= 14))
+    overrides['call_the_hunt'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'twilight-domain' && cl.level >= 6))
+    overrides['steps_of_night'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'rune-knight' && cl.level >= 7))
+    overrides['runic_shield'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'the-genie' && cl.level >= 6))
+    overrides['elemental_gift'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'rune-knight' && cl.level >= 3))
+    overrides['giants_might'] = profBonus;
+  if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon' && cl.level >= 3))
+    overrides['breath_of_the_dragon'] = profBonus;
+  // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
+  if (c.classes.some(cl => cl.subclassId === 'light-domain'))
+    overrides['warding_flare'] = Math.max(1, abilityMod(score('wis')));
+  // Wisdom-modifier-per-long-rest features (PHB / XGtE / TCE), minimum 1 use each.
+  {
+    const wisUses = Math.max(1, abilityMod(score('wis')));
+    const has = (id: string, lvl = 1) => c.classes.some(cl => cl.subclassId === id && cl.level >= lvl);
+    if (has('tempest-domain')) overrides['wrath_of_the_storm'] = wisUses;
+    if (has('war-domain')) overrides['war_priest'] = wisUses;
+    if (has('grave-domain')) overrides['eyes_of_the_grave'] = wisUses;
+    if (has('grave-domain', 6)) overrides['sentinel_at_deaths_door'] = wisUses;
+    if (has('monster-slayer', 3)) overrides['hunters_sense'] = wisUses;
+    if (has('order-domain', 6)) overrides['embodiment_of_the_law'] = wisUses;
+    if (has('circle-of-spores', 6)) overrides['fungal_infestation'] = wisUses;
+  }
+  // Battle Smith Arcane Jolt (TCE): Int modifier; Eloquence Infectious Inspiration: Cha modifier.
+  if (c.classes.some(cl => cl.subclassId === 'battle-smith' && cl.level >= 9))
+    overrides['arcane_jolt'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'college-of-eloquence' && cl.level >= 14))
+    overrides['infectious_inspiration'] = Math.max(1, abilityMod(score('cha')));
+  // Features found by the second-pass gap check: limited uses inside subclasses that
+  // already had a resources block, so the main sweep skipped the whole entry.
+  if (c.classes.some(cl => cl.subclassId === 'circle-of-dreams' && cl.level >= 10))
+    overrides['hidden_paths'] = Math.max(1, abilityMod(score('wis')));
+  if (c.classes.some(cl => cl.subclassId === 'fey-wanderer' && cl.level >= 15))
+    overrides['misty_wanderer'] = Math.max(1, abilityMod(score('wis')));
+  if (c.classes.some(cl => cl.subclassId === 'oath-of-glory' && cl.level >= 15))
+    overrides['glorious_defense'] = Math.max(1, abilityMod(score('cha')));
+  if (c.classes.some(cl => cl.subclassId === 'alchemist' && cl.level >= 9))
+    overrides['restorative_reagents'] = Math.max(1, abilityMod(score('int')));
+  if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 15))
+    overrides['reclaim_potential'] = Math.max(1, abilityMod(score('con')));
+  // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
+  if (c.classes.some(cl => cl.subclassId === 'tob-captain' && cl.level >= 3))
+    overrides['captains_call'] = Math.max(1, 1 + abilityMod(score('cha')));
+  // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
+  if (c.classes.some(cl => cl.subclassId === 'school-of-abjuration'))
+    overrides['arcane_ward'] = classLevel(c.classes, 'wizard') * 2 + abilityMod(score('int'));
+  // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
+  {
+    const palLvl = classLevel(c.classes, 'paladin');
+    if (palLvl > 0) {
+      overrides['divine_sense'] = Math.max(1, 1 + abilityMod(score('cha')));
+      if (palLvl >= 14) overrides['cleansing_touch'] = Math.max(1, abilityMod(score('cha')));
+    }
+  }
   // Way of the Ascendant Dragon: Wings Unfurled (monk 6) + Aspect of the Wyrm
   // (monk 11) — proficiency-bonus uses per long rest, level-gated.
   if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon')) {
-    const monkLvl = c.classes.find(cl => cl.classId === 'monk')?.level ?? 0;
+    const monkLvl = classLevel(c.classes, 'monk');
     if (monkLvl >= 6)  overrides['wings_unfurled']     = profBonus;
     if (monkLvl >= 11) overrides['aspect_of_the_wyrm'] = profBonus;
   }
   return overrides;
 }
 
-/** IDs of all always-prepared spells unlocked at the given class/subclass levels. */
-function computeAlwaysPreparedIds(classes: ClassLevel[]): string[] {
-  const ids: string[] = [];
-  for (const cl of classes) {
-    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
-    if (!sub?.alwaysPreparedSpells) continue;
-    for (const [minLevelStr, spellIds] of Object.entries(sub.alwaysPreparedSpells)) {
-      if (cl.level >= Number(minLevelStr)) ids.push(...spellIds);
-    }
-  }
-  return [...new Set(ids)];
-}
 
-/** Ensure the spellbook contains all alwaysPrepared IDs, flagged correctly. */
-function syncAlwaysPrepared(spellbook: PreparedSpell[], alwaysPreparedIds: string[]): PreparedSpell[] {
-  const result = spellbook.map(s => ({
-    ...s,
-    isAlwaysPrepared: alwaysPreparedIds.includes(s.spellId),
-    isPrepared: alwaysPreparedIds.includes(s.spellId) ? true : s.isPrepared,
-  }));
-  for (const id of alwaysPreparedIds) {
-    if (!result.some(s => s.spellId === id)) {
-      result.push({ spellId: id, isPrepared: true, isAlwaysPrepared: true });
-    }
-  }
-  return result;
-}
 
 interface CharacterState {
   character: Character | null;
@@ -109,13 +191,16 @@ interface CharacterState {
   restorePactSlots: () => void;
 
   // Spells
-  toggleSpellPrepared: (spellId: string) => void;
+  /** maxPrepared: the derived prepared-spell cap, or null/undefined when no cap applies
+   *  (known casters, spellbook casters). Passed in because the caller has the authoritative value. */
+  toggleSpellPrepared: (spellId: string, maxPrepared?: number | null) => void;
   addSpellToBook: (spellId: string) => void;
   removeSpellFromBook: (spellId: string) => void;
   startConcentration: (spellId: string) => void;
   endConcentration: () => void;
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
+  setInnateSpellAbility: (ability: AbilityKey) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -173,7 +258,31 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     // class/subclass definitions at the character's current level. For classes with
     // genuinely no tracked resources (Ranger, Rogue), the loop produces nothing and
     // the empty array remains — so the migration is safe for all classes.
-    let resources = c.resources ?? [];
+    // Copy, don't alias: the insertion passes below push into this array, and pushing into
+    // c.resources mutates the caller's character. That aliasing made load() non-idempotent —
+    // a second load saw the freshly-pushed pre-override entries as if they had been saved,
+    // took the Math.min branch, and clamped every override-managed resource back down.
+    let resources = [...(c.resources ?? [])];
+    // Psi Warrior and Soulknife used to share one 'psionic_energy' key. Splitting them leaves
+    // saved characters holding a key no definition claims any more, and the resource panel
+    // renders an unmatched key as its raw string — so rename rather than leave the orphan.
+    // A character with both subclasses can only carry one saved entry; the other is inserted
+    // fresh below. Neither subclass present means it was already dead data.
+    if (resources.some(r => r.key === 'psionic_energy')) {
+      const subs = (c.classes ?? []).map(cl => cl.subclassId);
+      const renamed = subs.includes('psi-warrior') ? 'psionic_energy_psi_warrior'
+        : subs.includes('soulknife') ? 'psionic_energy_soulknife'
+        : null;
+      resources = renamed
+        ? resources.map(r => (r.key === 'psionic_energy' ? { ...r, key: renamed } : r))
+        : resources.filter(r => r.key !== 'psionic_energy');
+    }
+    // Keys the character actually arrived with. Everything else in `resources` after the
+    // insertion passes below is brand new, and a brand-new resource must start full.
+    // This matters because override-managed keys (ability-mod / prof-bonus maxes) carry a
+    // placeholder of 1 in maxPerLevel, so inserting them at the table value and then
+    // clamping with Math.min left e.g. a Wis 18 Light Domain cleric on 1/4 Warding Flares.
+    const preexisting = new Set(resources.map(r => r.key));
     if (resources.length === 0 && (c.classes?.length ?? 0) > 0) {
       for (const cl of c.classes!) {
         const def = getClass(cl.classId);
@@ -205,6 +314,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
     }
 
+    // Insert race-granted resources (Breath Weapon, Relentless Endurance, ...). Races were a fourth
+    // source of limited-use abilities with nowhere to live, so none of them could be tracked.
+    // Keyed on TOTAL character level, unlike class/subclass resources which use class level.
+    {
+      const race = getRace(c.raceId);
+      const totalLvl = totalCharacterLevel(c.classes ?? []);
+      for (const rd of (race?.resources ?? [])) {
+        if (resources.some(r => r.key === rd.key)) continue;
+        const rawMax = rd.maxPerLevel[totalLvl] ?? 0;
+        const normMax = rawMax === 'unlimited' ? 99 : rawMax as number;
+        if (normMax > 0) resources.push({ key: rd.key, current: normMax, max: normMax });
+      }
+    }
+
     // Insert feat-granted resources (e.g. Lucky feat: 3 luck points).
     for (const featId of (c.selectedFeats ?? [])) {
       const feat = ALL_FEATS.find(f => f.id === featId);
@@ -227,6 +350,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     // Skip keys managed by loadOverrides — their max is not level-table-based.
     resources = resources.map(r => {
       if (loadOverrides[r.key] != null) return r; // handled in override pass below
+      // Race resources first, and keyed on TOTAL character level rather than class level.
+      // This loop used to consider only classes, so a race max never moved after creation —
+      // a Shifter going 4 -> 5 kept 2 uses of Shifting instead of gaining the 3rd, and every
+      // proficiency-bonus race trait was frozen at its level-1 value for the whole campaign.
+      {
+        const rd = (getRace(c.raceId)?.resources ?? []).find(x => x.key === r.key);
+        if (rd) {
+          const rawMax = rd.maxPerLevel[totalCharacterLevel(c.classes ?? [])] ?? 0;
+          const normMax = rawMax === 'unlimited' ? 99 : rawMax as number;
+          if (normMax !== r.max) {
+            const newCurrent = r.max > 0
+              ? Math.min(Math.round(r.current / r.max * normMax), normMax)
+              : normMax;
+            return { ...r, max: normMax, current: newCurrent };
+          }
+          return r;
+        }
+      }
       for (const cl of (c.classes ?? [])) {
         const def = getClass(cl.classId);
         const classDef = def?.resources.find(rd => rd.key === r.key);
@@ -248,11 +389,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     });
 
     // Apply overrides last so they are never overwritten by the re-sync pass above.
-    resources = resources.map(r =>
-      loadOverrides[r.key] != null
-        ? { ...r, max: loadOverrides[r.key]!, current: Math.min(r.current, loadOverrides[r.key]!) }
-        : r
-    );
+    resources = resources.map(r => {
+      const ov = loadOverrides[r.key];
+      if (ov == null) return r;
+      // Newly inserted this load → start full. Already-saved → clamp, so a stat drop
+      // (or a level loss) lowers the max without silently refilling spent uses.
+      return { ...r, max: ov, current: preexisting.has(r.key) ? Math.min(r.current, ov) : ov };
+    });
 
     set({
       // Defensive defaults for characters created before fields like
@@ -283,7 +426,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
         spellbook: syncAlwaysPrepared(
           c.spellbook ?? [],
-          computeAlwaysPreparedIds(c.classes ?? []),
+          computeAlwaysPreparedIds(c.classes ?? [], c.classOptions),
         ),
         // Migrate existing characters: add innate spell uses for any unlocked spells
         // that weren't tracked yet (cantrips are unlimited and not stored).
@@ -446,9 +589,30 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, pactMagic: { ...s.character.pactMagic, slotsUsed: 0 } } };
     }),
 
-  toggleSpellPrepared: (spellId) =>
+  toggleSpellPrepared: (spellId, maxPrepared) =>
     set((s) => {
       if (!s.character) return s;
+      const entry = s.character.spellbook.find((sp) => sp.spellId === spellId);
+      if (!entry) return s;
+
+      // Enforce the prepared-spell cap HERE rather than in the panel: this action is the single
+      // chokepoint every preparation path funnels through, so a future caller can't bypass it.
+      // The cap is passed in rather than recomputed — the caller derives it from the full ability
+      // pipeline (base + racial + feats + ASI), which this store does not reproduce faithfully.
+      // Un-preparing is always allowed, and cantrips/always-prepared spells never count (PHB: domain
+      // and other always-prepared spells "don't count against the number of spells you can prepare").
+      if (!entry.isPrepared && maxPrepared != null && maxPrepared > 0) {
+        const spell = getSpell(spellId);
+        if (spell && spell.level > 0) {
+          const preparedCount = s.character.spellbook.filter((sp) => {
+            if (!sp.isPrepared || sp.isAlwaysPrepared) return false;
+            const sp2 = getSpell(sp.spellId);
+            return sp2 && sp2.level > 0;
+          }).length;
+          if (preparedCount >= maxPrepared) return s; // at the cap — refuse
+        }
+      }
+
       const spellbook = s.character.spellbook.map((sp) =>
         sp.spellId === spellId ? { ...sp, isPrepared: !sp.isPrepared } : sp
       );
@@ -626,7 +790,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
       // Refresh pact magic if this is a warlock level up.
       let pactMagic = s.character.pactMagic;
-      if (classId === 'warlock') {
+      if (baseClassId(classId) === 'warlock') {
         const pm = PACT_MAGIC_TABLE[newLevel];
         if (pm) {
           pactMagic = {
@@ -693,7 +857,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Sync always-prepared spells for newly unlocked subclass spell tables.
       const newSpellbook = syncAlwaysPrepared(
         s.character.spellbook,
-        computeAlwaysPreparedIds(classes),
+        computeAlwaysPreparedIds(classes, s.character.classOptions),
       );
 
       // Unlock any newly accessible innate spells (based on new total character level).
@@ -806,7 +970,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         }
       }
       // Bard level 5+ (Font of Inspiration): bardic inspiration also recharges on short rest.
-      const bardLevel = s.character.classes.find(c => c.classId === 'bard')?.level ?? 0;
+      const bardLevel = classLevel(s.character.classes, 'bard');
       if (bardLevel >= 5) shortRestKeys.add('bardic_inspiration');
       // Feat-granted short-rest resources
       for (const featId of (s.character.selectedFeats ?? [])) {
@@ -818,11 +982,32 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
       // Apply ability-mod / prof-bonus overrides so restoring to r.max gives the correct value
       // even if r.max was set from a stale level-table entry (e.g. bardic inspiration with high CHA).
+      // Race-granted short-rest resources (Breath Weapon, Stone's Endurance, ...).
+      for (const rd of (getRace(s.character.raceId)?.resources ?? [])) {
+        if (rd.rechargeOn === 'short') shortRestKeys.add(rd.key);
+      }
+
+      // Partial short-rest recovery: "regain N on a Short Rest, all on a Long Rest".
+      // Distinct from shortRestKeys, which refill completely.
+      const partialRegain = new Map<string, number>();
+      for (const cl of s.character.classes) {
+        const def = getClass(cl.classId);
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        for (const rd of [...(def?.resources ?? []), ...(sub?.resources ?? [])]) {
+          if (rd.shortRestRegain && rd.shortRestRegain > 0) partialRegain.set(rd.key, rd.shortRestRegain);
+        }
+      }
+      for (const rd of (getRace(s.character.raceId)?.resources ?? [])) {
+        if (rd.shortRestRegain && rd.shortRestRegain > 0) partialRegain.set(rd.key, rd.shortRestRegain);
+      }
+
       const srOverrides = computeResourceMaxOverrides(s.character);
       let resources = s.character.resources.map((r) => {
-        if (!shortRestKeys.has(r.key)) return r;
         const correctMax = srOverrides[r.key] ?? r.max;
-        return { ...r, max: correctMax, current: correctMax };
+        if (shortRestKeys.has(r.key)) return { ...r, max: correctMax, current: correctMax };
+        const regain = partialRegain.get(r.key);
+        if (regain) return { ...r, max: correctMax, current: Math.min(r.current + regain, correctMax) };
+        return r;
       });
 
       // Bloodwell Vial (Tasha's): if one is equipped, regain 1d3 sorcery points per short rest.
@@ -839,7 +1024,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       }
 
       // Sorcerous Restoration (Sorcerer level 20): regain 4 sorcery points on short rest.
-      const sorcererLevel = s.character.classes.find(c => c.classId === 'sorcerer')?.level ?? 0;
+      const sorcererLevel = classLevel(s.character.classes, 'sorcerer');
       if (sorcererLevel >= 20) {
         resources = resources.map(r =>
           r.key === 'sorcery_points'
@@ -887,9 +1072,24 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         : s.character.maxHP;
       // Re-apply ability-mod / prof-bonus overrides so the stored max stays accurate
       // even if the character's stats changed since the last level-up.
+      // Keys whose rule is not a rest at all (Divine Intervention's 7-day cooldown, the
+      // Genie's 1d4-long-rests Limited Wish). A long rest must NOT hand these back — that
+      // is the whole reason 'special' exists. The player resets them by hand.
+      const specialKeys = new Set<string>();
+      for (const cl of s.character.classes) {
+        const def = getClass(cl.classId);
+        const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+        for (const rd of [...(def?.resources ?? []), ...(sub?.resources ?? [])]) {
+          if (rd.rechargeOn === 'special') specialKeys.add(rd.key);
+        }
+      }
+      for (const rd of (getRace(s.character.raceId)?.resources ?? [])) {
+        if (rd.rechargeOn === 'special') specialKeys.add(rd.key);
+      }
       const overrides = computeResourceMaxOverrides(s.character);
       const resources = s.character.resources.map((r) => {
         const correctMax = overrides[r.key] ?? r.max;
+        if (specialKeys.has(r.key)) return { ...r, max: correctMax };
         return { ...r, max: correctMax, current: correctMax };
       });
       const pactMagic = s.character.pactMagic ? { ...s.character.pactMagic, slotsUsed: 0 } : undefined;
@@ -1011,6 +1211,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const ws = s.character.activeWildShape;
       return { character: { ...s.character, activeWildShape: { ...ws, currentHp: Math.min(ws.currentHp + amount, ws.maxHp) } } };
     }),
+
+  setInnateSpellAbility: (ability) =>
+    set((s) => s.character ? { character: { ...s.character, innateSpellAbility: ability } } : s),
 
   setArmorerMode: (mode) =>
     set((s) => s.character ? { character: { ...s.character, armorerMode: mode } } : s),

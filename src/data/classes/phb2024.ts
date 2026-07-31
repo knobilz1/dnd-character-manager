@@ -18,7 +18,10 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'none',
     resources: [
       { name: 'Rages', key: 'rage', rechargeOn: 'long', maxPerLevel: {1:2,2:2,3:3,4:3,5:3,6:4,7:4,8:4,9:4,10:4,11:4,12:5,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:99} },
-      { name: 'Rage Damage Bonus', key: 'rage_damage', rechargeOn: 'long', maxPerLevel: {1:2,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:4,18:4,19:4,20:4} },
+      // Rage Damage is deliberately NOT a resource. It is a static scaling bonus (+2/+3/+4 at
+      // levels 1/9/16), not something you spend — as a resource it rendered with spend buttons
+      // and "recharges on a long rest". It is derived in useCharacterDerived (rageDamageBonus)
+      // and shown as a note under Rage, which is how the 2014 Barbarian has always done it.
     ],
     subclassLabel: 'Primal Path',
     subclassLevel: 3,
@@ -50,7 +53,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Brutal Strike (Greater)', level: 17, description: 'Brutal Strike extra damage increases to +2d10. You can use two Brutal Strike effects per use.' },
       { name: 'Indomitable Might', level: 18, description: 'If your Str check total is less than your Str score, use your Str score instead.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Irresistible Offense recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Irresistible Offense recommended) or another feat.' },
       { name: 'Primal Champion', level: 20, description: 'Strength and Constitution each increase by 4. Maximum for those scores is now 25.' },
     ],
   },
@@ -95,7 +98,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Subclass Feature', level: 14, description: 'Bard College feature.' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Superior Inspiration', level: 18, description: 'When you roll Initiative with fewer than 2 Bardic Inspiration uses remaining, regain uses until you have 2.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Spell Recall recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Spell Recall recommended) or another feat.' },
       { name: 'Words of Creation', level: 20, description: 'Always have Power Word Heal and Power Word Kill prepared. When casting either, you can target a second creature within 10 ft of the first.' },
     ],
   },
@@ -116,7 +119,15 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'full',
     spellcastingAbility: 'wis',
     resources: [
-      { name: 'Channel Divinity', key: 'channel_divinity', rechargeOn: 'short', maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:4,19:4,20:4} },
+      // PHB 2024: "2 uses; regain 1 on Short Rest, all on Long Rest." It was rechargeOn 'short', which
+      // refilled every use on a short rest — strictly more generous than the book.
+      { name: 'Channel Divinity', key: 'channel_divinity', rechargeOn: 'long', shortRestRegain: 1, maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:4,19:4,20:4} },
+      // PHB 2024 p.68: plainly "Once per Long Rest" — unlike the 2014 version, which is
+      // outcome-dependent and needs 'special'. The 2d4-Long-Rest lock at 20th applies only
+      // if you spend it on Wish via Greater Divine Intervention: a consequence of that
+      // choice, not this feature's recharge, so it stays out of rechargeOn.
+      { name: 'Divine Intervention', key: 'divine_intervention', rechargeOn: 'long',
+        maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
     ],
     subclassLabel: 'Divine Domain',
     subclassLevel: 3,
@@ -138,7 +149,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 12, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Subclass Feature', level: 17, description: 'Divine Domain feature.' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Fate recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Fate recommended) or another feat.' },
       { name: 'Greater Divine Intervention', level: 20, description: 'Divine Intervention can now cast Wish; if so, can\'t use Divine Intervention again for 2d4 Long Rests.' },
     ],
   },
@@ -159,7 +170,9 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'full',
     spellcastingAbility: 'wis',
     resources: [
-      { name: 'Wild Shape', key: 'wild_shape', rechargeOn: 'short', maxPerLevel: {1:0,2:2,3:2,4:2,5:2,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:4,18:4,19:4,20:4} },
+      // PHB 2024: "2 uses; regain 1 on Short Rest, all on Long Rest." Same over-generous 'short' as the
+      // 2024 Cleric had. (2024 Monk Focus really is "all on Short/Long Rest", so that one stays 'short'.)
+      { name: 'Wild Shape', key: 'wild_shape', rechargeOn: 'long', shortRestRegain: 1, maxPerLevel: {1:0,2:2,3:2,4:2,5:2,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:4,18:4,19:4,20:4} },
     ],
     subclassLabel: 'Druid Circle',
     subclassLevel: 3,
@@ -184,7 +197,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Improved Elemental Fury', level: 15, description: 'Potent Spellcasting: range of cantrips with range ≥10 ft increases by 300 ft. Primal Strike: extra damage increases to 2d8.' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Beast Spells', level: 18, description: 'Can cast spells while in Wild Shape form (except spells with specified/consumed Material components).' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Dimensional Travel recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Dimensional Travel recommended) or another feat.' },
       { name: 'Archdruid', level: 20, description: 'Evergreen Wild Shape: roll Initiative with 0 uses → regain 1. Nature Magician: convert Wild Shape uses into spell slots (each use = 2 spell levels; once/Long Rest). Longevity: age 1 year per 10 years.' },
     ],
   },
@@ -206,6 +219,8 @@ export const PHB2024_CLASSES: DClass[] = [
     resources: [
       { name: 'Action Surge', key: 'action_surge', rechargeOn: 'short', maxPerLevel: {1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:2,18:2,19:2,20:2} },
       { name: 'Second Wind', key: 'second_wind', rechargeOn: 'short', maxPerLevel: {1:2,2:2,3:2,4:3,5:3,6:3,7:3,8:3,9:3,10:4,11:4,12:4,13:4,14:4,15:4,16:4,17:4,18:4,19:4,20:4} },
+      // Was missing entirely. PHB 2024 Fighter table: Indomitable (1) at 9, (2) at 13, (3) at 17.
+      { name: 'Indomitable', key: 'indomitable', rechargeOn: 'long', maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:2,14:2,15:2,16:2,17:3,18:3,19:3,20:3} },
     ],
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
@@ -238,7 +253,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Action Surge (2 uses)', level: 17, description: 'At 17th level, you can use Action Surge twice before a rest, though still only once per turn.' },
       { name: 'Indomitable (3 uses)', level: 17, description: 'At 17th level, you can use Indomitable three times between Long Rests.' },
       { name: 'Subclass Feature', level: 18, description: 'Martial Archetype feature.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Combat Prowess recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Combat Prowess recommended) or another feat.' },
       { name: 'Three Extra Attacks', level: 20, description: 'Attack 4 times when taking the Attack action.' },
     ],
   },
@@ -294,7 +309,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Subclass Feature', level: 17, description: 'Monk Tradition feature.' },
       { name: 'Body and Mind', level: 20, description: 'Your Dexterity and Wisdom each increase by 4. Maximum for those scores is now 25.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Fortitude recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Fortitude recommended) or another feat.' },
     ],
   },
 
@@ -344,7 +359,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Restoring Touch', level: 14, description: 'When using Lay on Hands: also remove one or more conditions (Blinded/Charmed/Deafened/Frightened/Paralyzed/Stunned); costs 5 HP from pool per condition (no HP restored).' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Aura Expansion', level: 18, description: 'Your Aura of Protection expands to 30 feet.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Truesight recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Truesight recommended) or another feat.' },
       { name: 'Subclass Feature', level: 20, description: 'Sacred Oath feature.' },
     ],
   },
@@ -364,7 +379,11 @@ export const PHB2024_CLASSES: DClass[] = [
     skillChoices: { count: 3, from: ['Animal Handling', 'Athletics', 'Insight', 'Investigation', 'Nature', 'Perception', 'Stealth', 'Survival'] },
     spellcastingType: 'half',
     spellcastingAbility: 'wis',
-    resources: [],
+    resources: [
+      // PHB 2024 lv1 Favored Enemy: cast Hunter's Mark without a slot this many times; all back on a
+      // Long Rest. Counts from the 2024 Ranger table's Favored Enemy column (2/3/4/5/6 at 1/5/9/13/17).
+      { name: 'Favored Enemy', key: 'favored_enemy', rechargeOn: 'long', maxPerLevel: {1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+    ],
     subclassLabel: 'Ranger Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13, wis: 13 },
@@ -392,7 +411,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Precise Hunter', level: 17, description: 'Advantage on attack rolls against creatures afflicted by your Hunter\'s Mark.' },
       { name: 'Feral Senses', level: 18, description: 'Blindsight 30 ft.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Dimensional Travel recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Dimensional Travel recommended) or another feat.' },
       { name: 'Foe Slayer', level: 20, description: 'Your Hunter\'s Mark damage die becomes a d10 (instead of d6).' },
     ],
   },
@@ -411,7 +430,10 @@ export const PHB2024_CLASSES: DClass[] = [
     toolProficiencies: ['Thieves\' Tools'],
     skillChoices: { count: 4, from: ['Acrobatics', 'Athletics', 'Deception', 'Insight', 'Intimidation', 'Investigation', 'Perception', 'Persuasion', 'Sleight of Hand', 'Stealth'] },
     spellcastingType: 'none',
-    resources: [],
+    resources: [
+      // 2024 Rogue keeps Stroke of Luck at level 20 (confirmed present in this class's own feature list).
+      { name: 'Stroke of Luck', key: 'stroke_of_luck', rechargeOn: 'short', maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1} },
+    ],
     subclassLabel: 'Roguish Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
@@ -442,7 +464,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Subclass Feature', level: 17, description: 'Roguish Archetype feature.' },
       { name: 'Elusive', level: 18, description: 'Attack rolls against you can never have Advantage (unless you are Incapacitated).' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of the Night Spirit recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of the Night Spirit recommended) or another feat.' },
       { name: 'Stroke of Luck', level: 20, description: 'When you fail a D20 Test: turn the roll into a 20. Once per Short or Long Rest.' },
     ],
   },
@@ -488,7 +510,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Metamagic (expanded)', level: 17, description: 'Learn 2 more Metamagic options.' },
       { name: 'Subclass Feature', level: 18, description: 'Sorcerous Origin feature.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Energy Resistance recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Energy Resistance recommended) or another feat.' },
       { name: 'Arcane Apotheosis', level: 20, description: 'While Innate Sorcery is active: once on each of your turns, you can use one Metamagic option without spending Sorcery Points.' },
     ],
   },
@@ -533,7 +555,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Mystic Arcanum (level 8)', level: 15, description: 'Choose one level 8 Warlock spell: cast once without a slot per Long Rest. Can replace 1 arcanum per level-up.' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Mystic Arcanum (level 9)', level: 17, description: 'Choose one level 9 Warlock spell: cast once without a slot per Long Rest. Can replace 1 arcanum per level-up.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Fate recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Fate recommended) or another feat.' },
       { name: 'Eldritch Master', level: 20, description: 'When using Magical Cunning: regain ALL Pact Magic slots (not just half).' },
     ],
   },
@@ -553,7 +575,11 @@ export const PHB2024_CLASSES: DClass[] = [
     skillChoices: { count: 2, from: ['Arcana', 'History', 'Insight', 'Investigation', 'Medicine', 'Nature', 'Religion'] },
     spellcastingType: 'full',
     spellcastingAbility: 'int',
-    resources: [],
+    resources: [
+      // PHB 2024 lv1: "On Short Rest: recover spell slots totaling <= half Wizard level (round up),
+      // no level 6+. Once per Long Rest." The once-per-long-rest use is what's tracked.
+      { name: 'Arcane Recovery', key: 'arcane_recovery', rechargeOn: 'long', maxPerLevel: {1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
+    ],
     subclassLabel: 'Arcane Tradition',
     subclassLevel: 3,
     multiclassPrerequisites: { int: 13 },
@@ -574,7 +600,7 @@ export const PHB2024_CLASSES: DClass[] = [
       { name: 'Subclass Feature', level: 14, description: 'Arcane Tradition feature.' },
       { name: 'Ability Score Improvement', level: 16, isASI: true, description: 'Gain a feat or increase ability scores.' },
       { name: 'Spell Mastery', level: 18, description: 'Choose 1 level 1 and 1 level 2 spell in your spellbook (action casting time): always prepared; cast at lowest level without a slot. Change choices on Long Rest.' },
-      { name: 'Epic Boon', level: 19, isASI: true, description: 'Gain an Epic Boon feat (Boon of Spell Recall recommended) or another feat.' },
+      { name: 'Epic Boon', level: 19, isASI: true, featOnly: true, description: 'Gain an Epic Boon feat (Boon of Spell Recall recommended) or another feat.' },
       { name: 'Signature Spells', level: 20, description: 'Choose 2 level 3 spells in your spellbook: always prepared; cast each once at level 3 without a slot per Short/Long Rest.' },
     ],
   },

@@ -1,7 +1,12 @@
-import type { Book } from '../types';
+import type { Book, BookId } from '../types';
 
-export const BOOKS: Book[] = [
-  {
+/** Keyed by BookId, not a bare array, so a book id that exists in the union but was never
+ *  registered here is a compile error instead of a silent gap. That gap was real: AcqInc and
+ *  ToB content shipped citing books this registry had never heard of, which meant no badge,
+ *  no entry in the book picker, and therefore no way to enable the content at all. The mapped
+ *  type also pins each entry's own `id` to its key, so a typo'd id fails to compile too. */
+const REGISTRY: { [K in BookId]: Book & { id: K } } = {
+  PHB: {
     id: 'PHB',
     name: "Player's Handbook",
     shortName: 'PHB',
@@ -9,7 +14,7 @@ export const BOOKS: Book[] = [
     year: 2014,
     description: 'The core rulebook. 12 base classes, 15 races (including subraces), spells, and rules.',
   },
-  {
+  PHB2024: {
     id: 'PHB2024',
     name: "Player's Handbook (2024)",
     shortName: 'PHB 2024',
@@ -17,7 +22,7 @@ export const BOOKS: Book[] = [
     year: 2024,
     description: 'The revised 2024 core rulebook. 12 updated classes, 10 species with flexible ASI, 70 feats, revised spells, and new weapon mastery rules.',
   },
-  {
+  DMG: {
     id: 'DMG',
     name: "Dungeon Master's Guide",
     shortName: 'DMG',
@@ -25,7 +30,7 @@ export const BOOKS: Book[] = [
     year: 2014,
     description: 'Core magic items: weapons, armor, wondrous items, artifacts, and treasure tables.',
   },
-  {
+  XGtE: {
     id: 'XGtE',
     name: "Xanathar's Guide to Everything",
     shortName: 'XGtE',
@@ -33,7 +38,7 @@ export const BOOKS: Book[] = [
     year: 2017,
     description: 'Expanded subclasses, new spells, and additional rules options.',
   },
-  {
+  TCE: {
     id: 'TCE',
     name: "Tasha's Cauldron of Everything",
     shortName: 'TCE',
@@ -41,7 +46,7 @@ export const BOOKS: Book[] = [
     year: 2020,
     description: 'Optional class features, new subclasses, custom lineage, and more spells.',
   },
-  {
+  MMoM: {
     id: 'MMoM',
     name: 'Mordenkainen Monsters of the Multiverse',
     shortName: 'MMoM',
@@ -49,7 +54,7 @@ export const BOOKS: Book[] = [
     year: 2022,
     description: 'Updated and expanded playable races from across the multiverse.',
   },
-  {
+  VGM: {
     id: 'VGM',
     name: "Volo's Guide to Monsters",
     shortName: 'VGM',
@@ -57,7 +62,7 @@ export const BOOKS: Book[] = [
     year: 2016,
     description: 'Monster lore and additional playable monster races.',
   },
-  {
+  FToD: {
     id: 'FToD',
     name: "Fizban's Treasury of Dragons",
     shortName: 'FToD',
@@ -65,7 +70,7 @@ export const BOOKS: Book[] = [
     year: 2021,
     description: 'Dragon-themed subclasses, spells, and Dragonborn variants.',
   },
-  {
+  EGtW: {
     id: 'EGtW',
     name: "Explorer's Guide to Wildemount",
     shortName: 'EGtW',
@@ -73,7 +78,7 @@ export const BOOKS: Book[] = [
     year: 2020,
     description: 'Critical Role campaign setting with Dunamancy magic, Echo Knight, and Wildemount races.',
   },
-  {
+  GGR: {
     id: 'GGR',
     name: "Guildmasters' Guide to Ravnica",
     shortName: 'GGR',
@@ -81,7 +86,7 @@ export const BOOKS: Book[] = [
     year: 2018,
     description: 'Magic: The Gathering crossover. Ravnica guilds, new races, subclasses, spells, and magic items.',
   },
-  {
+  SJA: {
     id: 'SJA',
     name: 'Spelljammer: Adventures in Space',
     shortName: 'SJA',
@@ -89,7 +94,7 @@ export const BOOKS: Book[] = [
     year: 2022,
     description: 'Space-based adventure setting with six new races, spelljamming rules, ships, and Wildspace magic.',
   },
-  {
+  SCoC: {
     id: 'SCoC',
     name: 'Strixhaven: A Curriculum of Chaos',
     shortName: 'SCoC',
@@ -97,7 +102,7 @@ export const BOOKS: Book[] = [
     year: 2021,
     description: 'Magic school setting. Owlin race, five college backgrounds, Strixhaven feats, new spells, and campus magic items.',
   },
-  {
+  ERLW: {
     id: 'ERLW',
     name: 'Eberron: Rising from the Last War',
     shortName: 'ERLW',
@@ -105,7 +110,7 @@ export const BOOKS: Book[] = [
     year: 2019,
     description: 'Eberron campaign setting. Changeling, Kalashtar, Shifter, and Warforged races; 13 Dragonmark variants; House Agent background; and Eberron magic items.',
   },
-  {
+  SCAG: {
     id: 'SCAG',
     name: "Sword Coast Adventurer's Guide",
     shortName: 'SCAG',
@@ -113,4 +118,22 @@ export const BOOKS: Book[] = [
     year: 2015,
     description: "Forgotten Realms sourcebook. New subraces (Duergar, Ghostwise Halfling, Svirfneblin), tiefling/half-elf variants, 12 subclasses, 4 cantrips, and 12 backgrounds.",
   },
-];
+  AcqInc: {
+    id: 'AcqInc',
+    name: 'Acquisitions Incorporated',
+    shortName: 'AcqInc',
+    color: 'lime',
+    year: 2019,
+    description: 'Adventuring-as-a-business sourcebook. The Verdan race, 5 franchise backgrounds, and 7 spells.',
+  },
+  ToB: {
+    id: 'ToB',
+    name: 'Tides of Blood',
+    shortName: 'ToB',
+    color: 'sky',
+    year: 2019,
+    description: 'Third-party nautical collection by Darren Kenny & Conor Higgins. 22 seafaring subclasses, 22 spells, and 8 backgrounds.',
+  },
+};
+
+export const BOOKS: Book[] = Object.values(REGISTRY);

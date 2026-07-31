@@ -30,7 +30,7 @@ import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { getClass } from '../../data/classes';
+import { getClass, baseClassId } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
@@ -64,6 +64,10 @@ function getResourceDef(character: any, key: string) {
     const fromFeat = (feat?.grantedResources ?? []).find((fr: any) => fr.key === key);
     if (fromFeat) return fromFeat;
   }
+  // Race-granted resources (Breath Weapon, Relentless Endurance, ...). Without this the sheet
+  // falls back to the raw key and shows no recharge line.
+  const fromRace = getRace(character.raceId)?.resources?.find((rd: any) => rd.key === key);
+  if (fromRace) return fromRace;
   return undefined;
 }
 
@@ -87,6 +91,69 @@ function getResourceDie(character: any, key: string): number | undefined {
     if (d2 != null) return d2;
   }
   return undefined;
+}
+
+/** Above this many uses, a row of dots stops being readable (and stops fitting), so
+ *  the counter switches to a numeric stepper. Everything at or below it keeps the
+ *  familiar pips — Rages, Ki, Channel Divinity, Sorcery Points and the rest are all
+ *  20 or fewer at level 20, so this changes nothing for them. */
+const PIP_LIMIT = 20;
+
+/** Shared counter for a resource card.
+ *
+ *  This exists because the two call sites had drifted apart: both clamped the pip row
+ *  to 20, but the inactive one also computed the NEXT value from that clamped number.
+ *  A level-20 paladin has 100 Lay on Hands points; spending one set the pool to 19,
+ *  destroying 80 points silently. The rule the component enforces is that the display
+ *  may be summarised, but the value written back is always derived from `current`. */
+function ResourceCounter({ current, max, onChange }: {
+  current: number; max: number; onChange: (next: number) => void;
+}) {
+  // 99 is the 'unlimited' sentinel (e.g. Archdruid's Wild Shape). There is nothing to
+  // spend, so there is nothing to count — the old UI showed "99 / ∞" beside 20 pips,
+  // which read as though 99 were a real remaining total.
+  if (max === 99) {
+    return <p className="text-sm text-slate-300">∞ — no limit</p>;
+  }
+  if (max > PIP_LIMIT) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onChange(Math.max(0, current - 1))}
+          disabled={current <= 0}
+          className="w-6 h-6 rounded border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors leading-none"
+          title="Use one"
+        >−</button>
+        <span className="text-sm font-medium text-white tabular-nums">{current} / {max}</span>
+        <button
+          onClick={() => onChange(Math.min(max, current + 1))}
+          disabled={current >= max}
+          className="w-6 h-6 rounded border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors leading-none"
+          title="Restore one"
+        >+</button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-1.5 flex-wrap">
+      {Array.from({ length: max }).map((_, i) => {
+        const available = i < current;
+        return (
+          <button
+            key={i}
+            onClick={() => onChange(available ? current - 1 : current + 1)}
+            className={cn(
+              'w-5 h-5 rounded-full border-2 transition-all',
+              available
+                ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
+                : 'border-slate-600 bg-transparent hover:border-slate-400',
+            )}
+            title={available ? 'Use one' : 'Restore one'}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 // Exhaustion is tracked separately via exhaustionLevel; it has its own +/- UI
@@ -130,7 +197,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell,
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell, setInnateSpellAbility,
     activateWildShape, deactivateWildShape, damageWildShape, healWildShape, setArmorerMode, setPathOfBeastForm } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
@@ -224,7 +291,7 @@ export function SheetPage() {
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
 
   // ── Alternate form flags ─────────────────────────────────────────────────────
-  const druidEntry = character.classes.find(cl => cl.classId === 'druid');
+  const druidEntry = character.classes.find(cl => baseClassId(cl.classId) === 'druid');
   const isDruid = !!druidEntry;
   const druidLevel = druidEntry?.level ?? 0;
   const isMoonDruid = druidEntry?.subclassId === 'circle-of-the-moon';
@@ -659,6 +726,7 @@ export function SheetPage() {
                 usePactSlot={usePactSlot}
                 useInnateSpell={useInnateSpell}
                 useFeatSpell={useFeatSpell}
+                setInnateSpellAbility={setInnateSpellAbility}
               />
             )}
             {tab === 'inventory' && (
@@ -2174,22 +2242,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                     {/* Counter row */}
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-xs text-slate-400 shrink-0">{resourceDef?.name ?? r.key} uses remaining</p>
-                      <div className="flex gap-1.5 flex-wrap justify-end">
-                        {Array.from({ length: Math.min(displayMax === 99 ? 20 : displayMax, 20) }).map((_, i) => {
-                          const available = i < Math.min(r.current, displayMax === 99 ? 20 : displayMax);
-                          return (
-                            <button
-                              key={i}
-                              onClick={() => setResource(r.key, available ? Math.min(r.current, displayMax) - 1 : Math.min(r.current, displayMax) + 1)}
-                              className={cn(
-                                'w-4 h-4 rounded-full border-2 transition-all',
-                                available
-                                  ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
-                                  : 'border-slate-600 bg-transparent hover:border-slate-400',
-                              )}
-                            />
-                          );
-                        })}
+                      <div className="flex justify-end">
+                        <ResourceCounter
+                          current={r.current}
+                          max={displayMax}
+                          onChange={(n) => setResource(r.key, n)}
+                        />
                       </div>
                     </div>
                   </div>
@@ -2197,8 +2255,9 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
               }
 
               // ── Inactive state ───────────────────────────────────────
-              const cappedMax = Math.min(displayMax === 99 ? 20 : displayMax, 20);
-              const cappedCurrent = Math.min(r.current, cappedMax);
+              // Spend buttons below must never do arithmetic on a display-clamped value —
+              // that is exactly what silently truncated Lay on Hands. Use the real current.
+              const currentUses = r.current;
               return (
                 <div key={r.key} className="bg-slate-900/40 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-2">
@@ -2209,7 +2268,15 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                           <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">d{resourceDieSz}</span>
                         )}
                       </div>
-                      {resourceDef && <p className="text-xs text-slate-500">Recharges on {resourceDef.rechargeOn} rest</p>}
+                      {resourceDef && (
+                        <p className="text-xs text-slate-500">
+                          {resourceDef.rechargeOn === 'special'
+                            // No rest restores these, so saying "recharges on special rest"
+                            // would be worse than saying nothing — state the real rule.
+                            ? (resourceDef.rechargeNote ?? 'Recharges under a special rule — reset by hand')
+                            : `Recharges on ${resourceDef.rechargeOn} rest`}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {sustained && r.current > 0 && (
@@ -2233,32 +2300,17 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                       </button>
                     </div>
                   </div>
-                  {/* Radio bubbles — filled = available, empty = used */}
-                  <div className="flex gap-1.5 flex-wrap">
-                    {Array.from({ length: cappedMax }).map((_, i) => {
-                      const available = i < cappedCurrent;
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => setResource(r.key, available ? cappedCurrent - 1 : cappedCurrent + 1)}
-                          className={cn(
-                            'w-5 h-5 rounded-full border-2 transition-all',
-                            available
-                              ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
-                              : 'border-slate-600 bg-transparent hover:border-slate-400',
-                          )}
-                          title={available ? 'Use one' : 'Restore one'}
-                        />
-                      );
-                    })}
-                    {displayMax === 99 && (
-                      <span className="text-xs text-slate-400 self-center ml-1">{r.current} / ∞</span>
-                    )}
-                  </div>
+                  {/* Filled = available, empty = used. Switches to a numeric stepper
+                      above PIP_LIMIT, and for the 'unlimited' (99) sentinel. */}
+                  <ResourceCounter
+                    current={r.current}
+                    max={displayMax}
+                    onChange={(n) => setResource(r.key, n)}
+                  />
 
                   {/* ── Ki ability buttons (Monk) ─────────────────────── */}
                   {r.key === 'ki' && (() => {
-                    const monkEntry = character.classes.find((c: any) => c.classId === 'monk');
+                    const monkEntry = character.classes.find((c: any) => baseClassId(c.classId) === 'monk');
                     if (!monkEntry) return null;
                     const monkLevel: number = monkEntry.level;
                     const monkSubclass: string | undefined = monkEntry.subclassId;
@@ -2278,12 +2330,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                         </div>
                         {available.map(ability => {
                           // Variable-cost abilities (e.g. Sharpen the Blade): show as info, no deduction.
-                          const canAfford = ability.variable || cappedCurrent >= ability.cost;
+                          const canAfford = ability.variable || currentUses >= ability.cost;
                           return (
                             <button
                               key={ability.name}
                               disabled={!canAfford}
-                              onClick={() => { if (!ability.variable) setResource('ki', cappedCurrent - ability.cost); }}
+                              onClick={() => { if (!ability.variable) setResource('ki', currentUses - ability.cost); }}
                               title={ability.variable ? `${ability.description}\n\nCost varies — deduct ki manually.` : ability.description}
                               className={cn(
                                 'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
@@ -2317,12 +2369,12 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                         {options.map(m => {
                           const numCost = parseSorceryCost(m.cost);
                           const isVar = numCost === 'var';
-                          const canAfford = isVar || cappedCurrent >= numCost;
+                          const canAfford = isVar || currentUses >= numCost;
                           return (
                             <button
                               key={m.id}
                               disabled={!canAfford}
-                              onClick={() => { if (!isVar) setResource('sorcery_points', cappedCurrent - (numCost as number)); }}
+                              onClick={() => { if (!isVar) setResource('sorcery_points', currentUses - (numCost as number)); }}
                               title={isVar ? `${m.description}\n\nCost varies by spell level — deduct manually.` : m.description}
                               className={cn(
                                 'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',

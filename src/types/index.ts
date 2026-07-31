@@ -92,10 +92,22 @@ export interface Race {
   parentRaceId?: string;
   subraces?: Race[];
   innateSpells?: InnateSpell[];
+  /** Races whose book lets the player pick the spellcasting ability for their innate spells
+   *  (MMoM Duergar and Deep Gnome: "Intelligence, Wisdom, or Charisma... choose when you select
+   *  this race"). One choice covers the whole trait, so it lives on the race rather than on each
+   *  InnateSpell. The chosen value is stored as `Character.innateSpellAbility`; each spell's own
+   *  `ability` is the fallback for characters saved before the choice existed. */
+  innateSpellAbilityChoice?: AbilityKey[];
   hpBonusPerLevel?: number;
   /** Racial natural armor formula. base + optional ability mod. If canUseWithArmor is true,
    *  the character can also use this formula when wearing armor (taking the better value). */
   naturalArmor?: { base: number; mod?: AbilityKey; canUseWithArmor?: boolean };
+  /** Limited-use racial abilities that are NOT spells — Breath Weapon, Relentless Endurance,
+   *  Stone's Endurance, Fey Step and so on. Racial *spells* are tracked separately via
+   *  `innateSpells` + `Character.innateSpellUses`; this covers everything else, which previously
+   *  had nowhere to live and so could not be tracked at all.
+   *  `maxPerLevel` is keyed on TOTAL character level, not class level. */
+  resources?: ClassResourceDefinition[];
 }
 
 export interface ClassFeature {
@@ -103,16 +115,36 @@ export interface ClassFeature {
   level: number;
   description: string;
   isASI?: boolean;
+  /** The level grants a FEAT only, with no option to take +2 ability points instead —
+   *  PHB 2024's level-19 Epic Boon works this way ("Epic Boon feat or another feat"),
+   *  unlike a normal Ability Score Improvement. Set alongside `isASI`, which is what
+   *  drives the level-up dialog into its feat/ASI step in the first place. */
+  featOnly?: boolean;
 }
 
 export interface ClassResourceDefinition {
   name: string;
   key: string;
-  rechargeOn: 'short' | 'long' | 'dawn';
+  /** 'special' = the rule is not a rest at all, so NO rest restores it and the player
+   *  resets it by hand when the fiction says so. Required for the shapes the other three
+   *  cannot express: an in-game cooldown measured in days (Cleric Divine Intervention is
+   *  7 days after a *successful* use, but a long rest after a failed one), and a randomly
+   *  rolled number of long rests (the Genie's Limited Wish, 1d4). Modelling either as
+   *  'long' would silently hand the feature back every night. Always pair with
+   *  `rechargeNote`, or the card has nothing to tell the player. */
+  rechargeOn: 'short' | 'long' | 'dawn' | 'special';
+  /** Human-readable recharge rule, shown in place of "Recharges on X rest". Only meaningful
+   *  for `rechargeOn: 'special'`. */
+  rechargeNote?: string;
   maxPerLevel: Record<number, number | 'unlimited'>;
   /** Maps class level to die size for resources with a scaling die (e.g. Bardic Inspiration d6→d12).
    *  Sparse — the last entry at or below the current level applies. */
   resourceDie?: Record<number, number>;
+  /** Partial short-rest recovery, for resources whose rule is "regain N on a Short Rest, all on a Long
+   *  Rest" — PHB 2024 Cleric Channel Divinity and Druid Wild Shape both work this way. Use together with
+   *  `rechargeOn: 'long'`; a short rest then adds this many uses back instead of refilling.
+   *  Do NOT use for "regain all on a Short Rest" (2024 Monk Focus) — that is plain `rechargeOn: 'short'`. */
+  shortRestRegain?: number;
 }
 
 export interface DClass {
@@ -153,9 +185,19 @@ export interface Subclass {
   sourceBook: BookId;
   /** Additional books this entry is available in (reprints). */
   alsoIn?: BookId[];
+  /** Kept in the data but not offered in any picker. For entries whose real source book is not
+   *  registered yet: hiding beats mis-attributing it to a book it isn't in, and beats deleting
+   *  it (which would break any character who already picked it). */
+  hidden?: boolean;
   description: string;
   features: ClassFeature[];
   alwaysPreparedSpells?: Record<number, string[]>;
+  /** Always-prepared spells that depend on a build choice: Circle of the Land picks one of
+   *  eight land types and gets that column only. Outer key is the chosen land, inner shape
+   *  matches alwaysPreparedSpells. Kept separate from alwaysPreparedSpells because those
+   *  apply unconditionally — merging the two would grant a Land druid all 8 lists at once.
+   *  Named concretely rather than generalised: this is the only subclass with the shape. */
+  landSpells?: Record<string, Record<number, string[]>>;
   expandedSpells?: Record<number, string[]>;
   spellcastingType?: SpellcastingType;
   /** For subclass-granted spellcasting, the class whose spell list to use (e.g. 'wizard' for EK/AT). */
@@ -347,6 +389,10 @@ export interface ClassOptionsState {
   aspectTotem?: string;
   /** Barbarian Totem Warrior — chosen at lv.14 (Totemic Attunement) */
   totemicAttunement?: string;
+  /** Druid Circle of the Land — chosen at lv.3, selects which Circle Spells you get
+   *  (arctic | coast | desert | forest | grassland | mountain | swamp | underdark).
+   *  Without it the subclass grants no spells at all. */
+  landType?: string;
 }
 
 export type ItemCategory =
@@ -525,6 +571,9 @@ export interface Character {
   pactMagic?: PactMagicState;
   resources: ResourceState[];
   innateSpellUses?: Record<string, number>;
+  /** Player's pick when the race offers a choice of innate-spell ability. Unset falls back to
+   *  the ability on each InnateSpell. See `Race.innateSpellAbilityChoice`. */
+  innateSpellAbility?: AbilityKey;
   inspiration: boolean;
   experiencePoints: number;
   notes: string;

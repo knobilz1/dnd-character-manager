@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { Character, AbilityKey, AbilityScores } from '../types';
 import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, getMulticlassSpellSlots } from '../data/mechanics';
-import { getClass } from '../data/classes';
+import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
@@ -32,12 +32,13 @@ export function computeCharacterDerived(character: Character) {
     const totalLevel = totalCharacterLevel(character.classes);
     const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;
 
-    // Hoist class levels — used throughout for features that scale with class level
-    const barbLevel    = character.classes.find(c => c.classId === 'barbarian')?.level ?? 0;
-    const bardLevel    = character.classes.find(c => c.classId === 'bard')?.level ?? 0;
-    const monkLevel    = character.classes.find(c => c.classId === 'monk')?.level ?? 0;
-    const rogueLevel   = character.classes.find(c => c.classId === 'rogue')?.level ?? 0;
-    const paladinLevel = character.classes.find(c => c.classId === 'paladin')?.level ?? 0;
+    // Hoist class levels — used throughout for features that scale with class level.
+    // classLevel() collapses the PHB 2024 ids, so a 2024 character still gets these.
+    const barbLevel    = classLevel(character.classes, 'barbarian');
+    const bardLevel    = classLevel(character.classes, 'bard');
+    const monkLevel    = classLevel(character.classes, 'monk');
+    const rogueLevel   = classLevel(character.classes, 'rogue');
+    const paladinLevel = classLevel(character.classes, 'paladin');
     const hasRemarkableAthlete = character.classes.some(cl => cl.subclassId === 'champion' && cl.level >= 7);
 
     // Final ability scores = base + racial + feat bonuses
@@ -107,11 +108,11 @@ export function computeCharacterDerived(character: Character) {
       // Unarmored: start at 10 + DEX, then apply any Unarmored Defense features
       ac = 10 + mods.dex;
       // Barbarian Unarmored Defense: +CON (applies regardless of which class is primary)
-      if (character.classes.some(c => c.classId === 'barbarian')) {
+      if (barbLevel > 0) {
         ac = Math.max(ac, 10 + mods.dex + mods.con);
       }
       // Monk Unarmored Defense: +WIS (only without a shield; applies regardless of primary class)
-      if (!equippedShield && character.classes.some(c => c.classId === 'monk')) {
+      if (!equippedShield && monkLevel > 0) {
         ac = Math.max(ac, 10 + mods.dex + mods.wis);
       }
     }
@@ -307,10 +308,10 @@ export function computeCharacterDerived(character: Character) {
 
     // Resource max overrides — ability-mod or prof-bonus based resources.
     const resourceMaxOverrides: Record<string, number> = {};
-    if (character.classes.some(c => c.classId === 'bard')) {
+    if (bardLevel > 0) {
       resourceMaxOverrides['bardic_inspiration'] = Math.max(1, mods.cha);
     }
-    if (character.classes.some(c => c.classId === 'artificer')) {
+    if (character.classes.some(c => baseClassId(c.classId) === 'artificer')) {
       resourceMaxOverrides['flash_of_genius'] = Math.max(1, mods.int);
     }
     if (character.classes.some(c => c.subclassId === 'bladesinging')) {
@@ -319,6 +320,148 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'samurai')) {
       // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)
       resourceMaxOverrides['fighting_spirit'] = 3;
+    }
+    // Psi Warrior / Soulknife (TCE): each grants its own Psionic Energy pool of 2 x proficiency
+    // bonus. Separate keys, so a Fighter/Rogue holding both subclasses gets two pools, not one.
+    // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.
+    if (character.classes.some(c => c.subclassId === 'psi-warrior')) {
+      resourceMaxOverrides['psionic_energy_psi_warrior'] = profBonus * 2;
+    }
+    if (character.classes.some(c => c.subclassId === 'soulknife')) {
+      resourceMaxOverrides['psionic_energy_soulknife'] = profBonus * 2;
+    }
+    // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
+    // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.
+    if (character.classes.some(c => c.subclassId === 'phantom' && c.level >= 3)) {
+      resourceMaxOverrides['wails_from_the_grave'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'circle-of-wildfire' && c.level >= 10)) {
+      resourceMaxOverrides['cauterizing_flames'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'college-of-creation' && c.level >= 3)) {
+      resourceMaxOverrides['performance_of_creation'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'peace-domain')) {
+      resourceMaxOverrides['emboldening_bond'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'swarmkeeper' && c.level >= 7)) {
+      resourceMaxOverrides['writhing_tide'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'swarmkeeper' && c.level >= 15)) {
+      resourceMaxOverrides['swarming_dispersal'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'circle-of-stars' && c.level >= 2)) {
+      resourceMaxOverrides['star_map'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'circle-of-stars' && c.level >= 6)) {
+      resourceMaxOverrides['cosmic_omen'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'armorer' && c.level >= 15)) {
+      resourceMaxOverrides['perfected_armor'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'clockwork-soul')) {
+      resourceMaxOverrides['restore_balance'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'drakewarden' && c.level >= 15)) {
+      resourceMaxOverrides['perfected_bond'] = profBonus;
+    }
+    // Echo Knight Unleash Incarnation (EGtW): Constitution modifier uses, minimum 1.
+    if (character.classes.some(c => c.subclassId === 'echo-knight' && c.level >= 3)) {
+      resourceMaxOverrides['unleash_incarnation'] = Math.max(1, mods.con);
+    }
+    // Dunamancy (EGtW): both are Intelligence modifier uses, minimum 1.
+    if (character.classes.some(c => c.subclassId === 'chronurgy-magic' && c.level >= 6)) {
+      resourceMaxOverrides['momentary_stasis'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'graviturgy-magic' && c.level >= 10)) {
+      resourceMaxOverrides['violent_attraction'] = Math.max(1, mods.int);
+    }
+    // TCE prof-bonus-per-long-rest features.
+    if (character.classes.some(c => c.subclassId === 'the-fathomless')) {
+      resourceMaxOverrides['tentacle_of_the_deeps'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'order-of-scribes' && c.level >= 6)) {
+      resourceMaxOverrides['manifest_mind'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-wild-magic' && c.level >= 3)) {
+      resourceMaxOverrides['magic_awareness'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-wild-magic' && c.level >= 6)) {
+      resourceMaxOverrides['bolstering_magic'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-the-beast' && c.level >= 10)) {
+      resourceMaxOverrides['infectious_fury'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'path-of-the-beast' && c.level >= 14)) {
+      resourceMaxOverrides['call_the_hunt'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'twilight-domain' && c.level >= 6)) {
+      resourceMaxOverrides['steps_of_night'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'rune-knight' && c.level >= 7)) {
+      resourceMaxOverrides['runic_shield'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'the-genie' && c.level >= 6)) {
+      resourceMaxOverrides['elemental_gift'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'rune-knight' && c.level >= 3)) {
+      resourceMaxOverrides['giants_might'] = profBonus;
+    }
+    if (character.classes.some(c => c.subclassId === 'way-of-the-ascendant-dragon' && c.level >= 3)) {
+      resourceMaxOverrides['breath_of_the_dragon'] = profBonus;
+    }
+    // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
+    if (character.classes.some(c => c.subclassId === 'light-domain')) {
+      resourceMaxOverrides['warding_flare'] = Math.max(1, mods.wis);
+    }
+    // Wisdom-modifier-per-long-rest features (PHB / XGtE / TCE), minimum 1 use each.
+    {
+      const wisUses = Math.max(1, mods.wis);
+      const has = (id: string, lvl = 1) => character.classes.some(c => c.subclassId === id && c.level >= lvl);
+      if (has('tempest-domain')) resourceMaxOverrides['wrath_of_the_storm'] = wisUses;
+      if (has('war-domain')) resourceMaxOverrides['war_priest'] = wisUses;
+      if (has('grave-domain')) resourceMaxOverrides['eyes_of_the_grave'] = wisUses;
+      if (has('grave-domain', 6)) resourceMaxOverrides['sentinel_at_deaths_door'] = wisUses;
+      if (has('monster-slayer', 3)) resourceMaxOverrides['hunters_sense'] = wisUses;
+      if (has('order-domain', 6)) resourceMaxOverrides['embodiment_of_the_law'] = wisUses;
+      if (has('circle-of-spores', 6)) resourceMaxOverrides['fungal_infestation'] = wisUses;
+    }
+    // Battle Smith Arcane Jolt (TCE): Int modifier; Eloquence Infectious Inspiration: Cha modifier.
+    if (character.classes.some(c => c.subclassId === 'battle-smith' && c.level >= 9)) {
+      resourceMaxOverrides['arcane_jolt'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'college-of-eloquence' && c.level >= 14)) {
+      resourceMaxOverrides['infectious_inspiration'] = Math.max(1, mods.cha);
+    }
+    // Features found by the second-pass gap check: limited uses inside subclasses that
+    // already had a resources block, so the main sweep skipped the whole entry.
+    if (character.classes.some(c => c.subclassId === 'circle-of-dreams' && c.level >= 10)) {
+      resourceMaxOverrides['hidden_paths'] = Math.max(1, mods.wis);
+    }
+    if (character.classes.some(c => c.subclassId === 'fey-wanderer' && c.level >= 15)) {
+      resourceMaxOverrides['misty_wanderer'] = Math.max(1, mods.wis);
+    }
+    if (character.classes.some(c => c.subclassId === 'oath-of-glory' && c.level >= 15)) {
+      resourceMaxOverrides['glorious_defense'] = Math.max(1, mods.cha);
+    }
+    if (character.classes.some(c => c.subclassId === 'alchemist' && c.level >= 9)) {
+      resourceMaxOverrides['restorative_reagents'] = Math.max(1, mods.int);
+    }
+    if (character.classes.some(c => c.subclassId === 'echo-knight' && c.level >= 15)) {
+      resourceMaxOverrides['reclaim_potential'] = Math.max(1, mods.con);
+    }
+    // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
+    if (character.classes.some(c => c.subclassId === 'tob-captain' && c.level >= 3)) {
+      resourceMaxOverrides['captains_call'] = Math.max(1, 1 + mods.cha);
+    }
+    // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
+    if (character.classes.some(c => c.subclassId === 'school-of-abjuration')) {
+      resourceMaxOverrides['arcane_ward'] = classLevel(character.classes, 'wizard') * 2 + mods.int;
+    }
+    // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
+    if (paladinLevel > 0) {
+      resourceMaxOverrides['divine_sense'] = Math.max(1, 1 + mods.cha);
+      if (paladinLevel >= 14) resourceMaxOverrides['cleansing_touch'] = Math.max(1, mods.cha);
     }
     // Way of the Ascendant Dragon (FToD): Wings Unfurled (lv6) and Aspect of the
     // Wyrm (lv11) both have proficiency-bonus uses per long rest. Level-gated so the

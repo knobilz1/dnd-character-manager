@@ -6,7 +6,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'berserker', name: 'Path of the Berserker', classId: 'barbarian', sourceBook: 'PHB', description: 'For some barbarians, rage is a means to an end—that end being violence. The Path of the Berserker is a path of untrammeled fury, slick with blood.', features: [
     { name: 'Frenzy', level: 3, description: 'Starting when you choose this path at 3rd level, you can go into a frenzy when you rage. If you do so, for the duration of your rage you can make a single melee weapon attack as a bonus action on each of your turns after this one. When your rage ends, you suffer one level of exhaustion.' },
     { name: 'Mindless Rage', level: 6, description: 'Beginning at 6th level, you can\'t be charmed or frightened while raging. If you are charmed or frightened when you enter your rage, the effect is suspended for the duration of the rage.' },
-    { name: 'Intimidating Presence', level: 10, description: 'Beginning at 10th level, you can use your action to frighten someone with your menacing presence. When you do so, choose one creature that you can see within 30 feet of you. If the creature can see or hear you, it must succeed on a Wisdom saving throw (DC equal to 8 + your proficiency bonus + your Charisma modifier) or be frightened of you until the end of your next turn. On subsequent turns, you can use your action to extend the duration of this effect on the frightened creature until the end of your next turn. This effect ends if the creature ends its turn out of line of sight or more than 60 feet away from you.' },
+    { name: 'Intimidating Presence', level: 10, description: 'Beginning at 10th level, you can use your action to frighten someone with your menacing presence. When you do so, choose one creature that you can see within 30 feet of you. If the creature can see or hear you, it must succeed on a Wisdom saving throw (DC equal to 8 + your proficiency bonus + your Charisma modifier) or be frightened of you until the end of your next turn. On subsequent turns, you can use your action to extend the duration of this effect on the frightened creature until the end of your next turn. This effect ends if the creature ends its turn out of line of sight or more than 60 feet away from you. If the creature succeeds on its saving throw, you can\'t use this feature on that creature again for 24 hours.' },
     { name: 'Retaliation', level: 14, description: 'Starting at 14th level, when you take damage from a creature that is within 5 feet of you, you can use your reaction to make a melee weapon attack against that creature.' },
   ]},
   { id: 'totem-warrior', name: 'Path of the Totem Warrior', classId: 'barbarian', sourceBook: 'PHB', description: 'The Path of the Totem Warrior is a spiritual journey, as the barbarian accepts a spirit animal as guide, protector, and inspiration.', features: [
@@ -40,7 +40,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Enthralling Performance', level: 3, description: 'Starting at 3rd level, if you perform for at least 1 minute, at the end of the performance choose a number of humanoids within 60 feet equal to your Charisma modifier (minimum one). Each must make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or be charmed by you. While charmed, the creature idolizes you and speaks glowingly of you to anyone who talks to it. It can repeat the save every 24 hours or when it suffers harm. Once per short or long rest.' },
     { name: 'Mantle of Majesty', level: 6, description: 'At 6th level, as a bonus action, you cast Command without expending a spell slot and assume a magisterial presence for 1 minute. For the duration, you can cast Command as a bonus action on each of your turns without a spell slot. Creatures that are charmed by you automatically fail their saving throw against this Command. Once per long rest.' },
     { name: 'Unbreakable Majesty', level: 14, description: 'At 14th level, your appearance permanently takes on an otherworldly aspect. As a bonus action, you enter a magical presence for 1 minute. For the duration, when any creature tries to attack you for the first time on a turn, that creature must succeed on a Charisma saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or forfeit the attack and be immune to this feature until the start of your next turn. Once per short or long rest.' },
-  ]},
+  ],
+    // XGtE p.14: Enthralling Performance and Unbreakable Majesty recharge on a short or long
+    // rest; Mantle of Majesty is long rest only.
+    resources: [
+      { name: 'Enthralling Performance', key: 'enthralling_performance', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Mantle of Majesty', key: 'mantle_of_majesty', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Unbreakable Majesty', key: 'unbreakable_majesty', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   // Cleric
   { id: 'life-domain', name: 'Life Domain', classId: 'cleric', sourceBook: 'PHB', description: 'The Life domain focuses on the vibrant positive energy—one of the fundamental forces of the universe—that sustains all life.', features: [
     { name: 'Bonus Proficiency', level: 1, description: 'When you choose this domain at 1st level, you gain proficiency with heavy armor.' },
@@ -64,7 +75,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Improved Flare', level: 6, description: 'Starting at 6th level, you can also use your Warding Flare feature when a creature that you can see within 30 feet of you attacks a creature other than you.' },
     { name: 'Potent Spellcasting', level: 8, description: 'Starting at 8th level, you add your Wisdom modifier to the damage you deal with any cleric cantrip.' },
     { name: 'Corona of Light', level: 17, description: 'Starting at 17th level, you can use your action to activate an aura of sunlight that lasts for 1 minute or until you dismiss it using another action. While active, bright light shines from you in a 60-foot radius, and dim light shines 30 feet beyond that. Enemies in the bright light have disadvantage on saving throws against any spell that deals fire or radiant damage.' },
-  ], alwaysPreparedSpells: { 1: ['burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
+  ],
+    // PHB p.61: "You can use this feature a number of times equal to your Wisdom
+    // modifier (minimum once). You regain all expended uses when you finish a long rest."
+    resources: [{ name: 'Warding Flare', key: 'warding_flare', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
   // Fighter
   { id: 'champion', name: 'Champion', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypal Champion focuses on the development of raw physical power honed to deadly perfection.', features: [
     { name: 'Improved Critical', level: 3, description: 'Beginning when you choose this archetype at 3rd level, your weapon attacks score a critical hit on a roll of 19 or 20.' },
@@ -126,14 +142,26 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aura of Devotion', level: 7, description: 'Starting at 7th level, you and friendly creatures within 10 feet of you can\'t be charmed while you are conscious.' },
     { name: 'Purity of Spirit', level: 15, description: 'Beginning at 15th level, you are always under the effects of a protection from evil and good spell.' },
     { name: 'Holy Nimbus', level: 20, description: 'At 20th level, as an action, you can emanate an aura of sunlight. For 1 minute, bright light shines from you in a 30-foot radius, and dim light shines 30 feet beyond that. Any enemy that starts its turn in the bright light takes 10 radiant damage. You also have advantage on saving throws against spells cast by fiends or undead. Once per long rest.' },
-  ], alwaysPreparedSpells: { 3: ['protection-from-evil-good', 'sanctuary'], 5: ['lesser-restoration', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] }},
+  ],
+    // PHB p.86: Holy Nimbus — "Once you use this feature, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Holy Nimbus', key: 'holy_nimbus', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['protection-from-evil-good', 'sanctuary'], 5: ['lesser-restoration', 'zone-of-truth'], 9: ['beacon-of-hope', 'dispel-magic'], 13: ['freedom-of-movement', 'guardian-of-faith'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-ancients', name: 'Oath of the Ancients', classId: 'paladin', sourceBook: 'PHB', description: 'The Oath of the Ancients is as old as the race of elves and the rituals of the druids.', features: [
     { name: "Nature's Wrath", level: 3, description: 'You can use your Channel Divinity to invoke primeval forces to ensnare a foe. As an action, you can cause spectral vines to spring up and reach for a creature within 10 feet of you that you can see. The creature must succeed on a Strength or Dexterity saving throw (its choice) or be restrained. While restrained by the vines, the creature repeats the saving throw at the end of each of its turns. On a success, it frees itself and the vines vanish.' },
     { name: 'Turn the Faithless', level: 3, description: 'You can use your Channel Divinity to utter ancient words that are painful for fey and fiends to hear. Each fey or fiend that can see or hear you within 30 feet must make a Wisdom saving throw. On a failed save, the creature is turned for 1 minute or until it takes any damage. A turned creature must spend its turns trying to move as far away as possible and can\'t willingly move to a space within 30 feet of you. Creatures immune to the charmed condition are immune to this feature.' },
     { name: 'Aura of Warding', level: 7, description: 'Beginning at 7th level, ancient magic lies so heavily upon you that it creates an aegis around you. You and friendly creatures within 10 feet of you have resistance to damage from spells.' },
     { name: 'Undying Sentinel', level: 15, description: 'Starting at 15th level, when you are reduced to 0 hit points and are not killed outright, you can choose to drop to 1 hit point instead. Once you use this ability, you can\'t use it again until you finish a long rest.' },
     { name: 'Elder Champion', level: 20, description: 'At 20th level, as an action you can assume the form of an ancient force of nature for 1 minute. For the duration: you regain 10 hit points at the start of each of your turns; whenever you cast a paladin spell with a casting time of 1 action, you can cast it using a bonus action instead; hostile creatures within 10 feet have disadvantage on saving throws against your paladin spells and Channel Divinity options. Once per long rest.' },
-  ], alwaysPreparedSpells: { 3: ['ensnaring-strike', 'speak-with-animals'], 5: ['moonbeam', 'misty-step'], 9: ['plant-growth', 'protection-from-energy'], 13: ['ice-storm', 'stoneskin'], 17: ['commune-with-nature', 'tree-stride'] }},
+  ],
+    // PHB p.87: Undying Sentinel (15th) and Elder Champion (20th) are each once per long rest.
+    resources: [
+      { name: 'Undying Sentinel', key: 'undying_sentinel', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Elder Champion', key: 'elder_champion', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } },
+    ],
+    alwaysPreparedSpells: { 3: ['ensnaring-strike', 'speak-with-animals'], 5: ['moonbeam', 'misty-step'], 9: ['plant-growth', 'protection-from-energy'], 13: ['ice-storm', 'stoneskin'], 17: ['commune-with-nature', 'tree-stride'] }},
   // Ranger
   { id: 'hunter', name: 'Hunter', classId: 'ranger', sourceBook: 'PHB', description: 'Emulating the Hunter archetype means accepting your place as a bulwark between civilization and the terrors of the wilderness.', features: [
     { name: 'Hunter\'s Prey', level: 3, description: 'At 3rd level, you gain one of the following features of your choice: Colossus Slayer (deal extra d8 damage to creatures below their max HP), Giant Killer (reaction attack on large+ creature missing you), Horde Breaker (attack another creature within 5 ft. of target).' },
@@ -196,19 +224,43 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Dark One\'s Own Luck', level: 6, description: 'Starting at 6th level, you can call on your patron to alter fate in your favor. When you make an ability check or a saving throw, you can use this feature to add a d10 to your roll. You can do so after seeing the initial roll but before any of the roll\'s effects occur. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Fiendish Resilience', level: 10, description: 'Starting at 10th level, you can choose one damage type when you finish a short or long rest. You gain resistance to that damage type until you choose a different one with this feature.' },
     { name: 'Hurl Through Hell', level: 14, description: 'Starting at 14th level, when you hit a creature with an attack, you can use this feature to instantly transport the target through the lower planes. The creature disappears and hurtles through a nightmare landscape. At the end of your next turn, the target returns to the space it previously occupied or the nearest unoccupied space. If the target is not a fiend, it takes 10d10 psychic damage as it reels from its horrific experience. Once you use this feature, you can\'t use it again until you finish a long rest.' },
-  ], expandedSpells: { 1: ['burning-hands', 'command'], 3: ['blindness-deafness', 'scorching-ray'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['flame-strike', 'hallow'] }},
+  ],
+    // PHB p.109: "Once you use this feature, you can't use it again until you finish a short or long rest."
+    resources: [
+      { name: "Dark One's Own Luck", key: 'dark_ones_own_luck', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // PHB p.109: Hurl Through Hell — once per long rest.
+      { name: 'Hurl Through Hell', key: 'hurl_through_hell', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    expandedSpells: { 1: ['burning-hands', 'command'], 3: ['blindness-deafness', 'scorching-ray'], 5: ['fireball', 'stinking-cloud'], 7: ['fire-shield', 'wall-of-fire'], 9: ['flame-strike', 'hallow'] }},
   { id: 'the-great-old-one', name: 'The Great Old One', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a mysterious entity whose nature is utterly foreign to the fabric of reality. It might come from the Far Realm, the space beyond reality, or it could be one of the elder gods known only in legends.', features: [
     { name: 'Awakened Mind', level: 1, description: 'Starting at 1st level, your alien knowledge gives you the ability to touch the minds of other creatures. You can communicate telepathically with any creature you can see within 30 feet of you.' },
     { name: 'Entropic Ward', level: 6, description: 'At 6th level, when a creature makes an attack roll against you, you can use your reaction to impose disadvantage on that roll. If the attack misses you, your next attack roll against that creature has advantage, and you can reroll one of the dice once. Once per short or long rest.' },
     { name: 'Thought Shield', level: 10, description: 'Starting at 10th level, your thoughts can\'t be read by telepathy or other means unless you allow it. You also have resistance to psychic damage, and whenever a creature deals psychic damage to you, that creature takes the same amount of damage.' },
     { name: 'Create Thrall', level: 14, description: 'At 14th level, you can touch an incapacitated humanoid to infect its mind. After you spend 1 minute doing so, the creature is charmed by you until a remove curse spell is cast on it, the charmed condition is removed from it, or you use this feature again. You can communicate telepathically with the thrall as long as you are on the same plane of existence.' },
-  ], expandedSpells: { 1: ['dissonant-whispers', 'tashas-hideous-laughter'], 3: ['detect-thoughts', 'phantasmal-force'], 5: ['clairvoyance', 'sending'], 7: ['dominate-beast', 'evards-black-tentacles'], 9: ['dominate-person', 'telekinesis'] }},
+  ],
+    // PHB p.110: Entropic Ward — "Once you use this feature, you can't use it again until you finish a short or long rest."
+    resources: [{ name: 'Entropic Ward', key: 'entropic_ward', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    expandedSpells: { 1: ['dissonant-whispers', 'tashas-hideous-laughter'], 3: ['detect-thoughts', 'phantasmal-force'], 5: ['clairvoyance', 'sending'], 7: ['dominate-beast', 'evards-black-tentacles'], 9: ['dominate-person', 'telekinesis'] }},
   { id: 'the-archfey', name: 'The Archfey', classId: 'warlock', sourceBook: 'PHB', description: 'Your patron is a lord or lady of the fey, a creature of legend who holds secrets that were forgotten before the mortal races were born.', features: [
     { name: 'Fey Presence', level: 1, description: 'Starting at 1st level, your patron bestows upon you the ability to project the fearsome presence of the Fey. As an action, you can cause each creature in a 10-foot cube originating from you to make a Wisdom saving throw against your warlock spell save DC. The creatures that fail their saving throws are all charmed or frightened by you (your choice) until the end of your next turn. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Misty Escape', level: 6, description: 'Starting at 6th level, you can vanish in a puff of mist in response to harm. When you take damage, you can use your reaction to turn invisible and teleport up to 60 feet to an unoccupied space you can see. You remain invisible until the start of your next turn or until you attack or cast a spell. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Beguiling Defenses', level: 10, description: 'Beginning at 10th level, your mind is not easily beguiled. You are immune to being charmed. When another creature attempts to charm you, you can use your reaction to turn the effect back on that creature if it fails a Wisdom saving throw against your warlock spell save DC. The creature is then charmed by you for 1 minute or until the creature takes any damage.' },
-    { name: 'Dark Delirium', level: 14, description: 'Starting at 14th level, as an action, choose a creature that you can see within 60 feet of you. It must make a Wisdom saving throw against your spell save DC or be charmed or frightened by you (your choice) for 1 minute or until your concentration is broken. This spell has no effect if the creature is immune to being charmed or frightened. The creature can repeat the saving throw at the end of each of its turns, ending the effect on a success. Once per short or long rest.' },
-  ], expandedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['calm-emotions', 'phantasmal-force'], 5: ['blink', 'plant-growth'], 7: ['dominate-beast', 'greater-invisibility'], 9: ['dominate-person', 'seeming'] }},
+    { name: 'Dark Delirium', level: 14, description: 'Starting at 14th level, you can plunge a creature into an illusory realm. As an action, choose a creature that you can see within 60 feet of you. It must make a Wisdom saving throw against your warlock spell save DC. On a failed save, it is charmed or frightened by you (your choice) for 1 minute or until your concentration is broken (as if you are concentrating on a spell). This effect ends early if the creature takes any damage. Until this illusion ends, the creature thinks it is lost in a misty realm, the appearance of which you choose. The creature can see and hear only itself, you, and the illusion. You must finish a short or long rest before you can use this feature again.' },
+  ],
+    // PHB p.109: Fey Presence (1st), Misty Escape (6th) and Dark Delirium (14th) are each
+    // "once you use this feature, you can't use it again until you finish a short or long rest".
+    resources: [
+      { name: 'Fey Presence', key: 'fey_presence', rechargeOn: 'short',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Misty Escape', key: 'misty_escape', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Dark Delirium', key: 'dark_delirium', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    expandedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['calm-emotions', 'phantasmal-force'], 5: ['blink', 'plant-growth'], 7: ['dominate-beast', 'greater-invisibility'], 9: ['dominate-person', 'seeming'] }},
   // Wizard
   { id: 'school-of-evocation', name: 'School of Evocation', classId: 'wizard', sourceBook: 'PHB', description: 'You focus your study on magic that creates powerful elemental effects such as bitter cold, searing flame, rolling thunder, crackling lightning, and burning acid.', features: [
     { name: 'Evocation Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an evocation spell into your spellbook is halved.' },
@@ -219,11 +271,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ]},
   { id: 'school-of-abjuration', name: 'School of Abjuration', classId: 'wizard', sourceBook: 'PHB', description: 'The School of Abjuration emphasizes magic that blocks, banishes, or protects. Detractors of this school say that its tradition is about denial, negation rather than positive assertion.', features: [
     { name: 'Abjuration Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an abjuration spell into your spellbook is halved.' },
-    { name: 'Arcane Ward', level: 2, description: 'Starting at 2nd level, you can weave magic around yourself for protection. When you cast an abjuration spell of 1st level or higher, you can simultaneously use a strand of the spell\'s magic to create a magical ward on yourself that lasts until you finish a long rest. The ward has hit points equal to twice your wizard level + your Intelligence modifier.' },
+    { name: 'Arcane Ward', level: 2, description: 'Starting at 2nd level, you can weave magic around yourself for protection. When you cast an abjuration spell of 1st level or higher, you can simultaneously use a strand of the spell\'s magic to create a magical ward on yourself that lasts until you finish a long rest. The ward has hit points equal to twice your wizard level + your Intelligence modifier. Whenever you take damage while the ward has hit points, the ward takes the damage instead; if this reduces the ward to 0 hit points, you take any remaining damage. While the ward has 0 hit points it can\'t absorb damage, but its magic remains: whenever you cast an abjuration spell of 1st level or higher, the ward regains hit points equal to twice the level of the spell. Once you create the ward, you can\'t create it again until you finish a long rest.' },
     { name: 'Projected Ward', level: 6, description: 'Starting at 6th level, when a creature that you can see within 30 feet of you takes damage, you can use your reaction to cause your Arcane Ward to absorb that damage.' },
     { name: 'Improved Abjuration', level: 10, description: 'Beginning at 10th level, when you cast an abjuration spell that requires you to make an ability check as a part of casting that spell (as in counterspell and dispel magic), you add your proficiency bonus to that ability check.' },
     { name: 'Spell Resistance', level: 14, description: 'Starting at 14th level, you have advantage on saving throws against spells. Furthermore, you have resistance against the damage of spells.' },
-  ]},
+  ],
+    // PHB p.115: the ward is a hit point pool, not a use counter — max = 2x wizard level +
+    // Int modifier (overridden below), created at full strength and lasting until a long rest.
+    resources: [{ name: 'Arcane Ward', key: 'arcane_ward', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'school-of-illusion', name: 'School of Illusion', classId: 'wizard', sourceBook: 'PHB', description: 'You focus your studies on magic that dazzles the senses, befuddles the mind, and tricks even the wisest folk.', features: [
     { name: 'Illusion Savant', level: 2, description: 'Beginning when you select this school at 2nd level, the gold and time you must spend to copy an illusion spell into your spellbook is halved.' },
     { name: 'Improved Minor Illusion', level: 2, description: 'When you choose this school at 2nd level, you learn the minor illusion cantrip. If you already know this cantrip, you learn a different wizard cantrip of your choice. The cantrip doesn\'t count against your number of cantrips known. When you cast minor illusion, you can create both a sound and an image with a single casting of the spell.' },
@@ -248,7 +305,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Thunderbolt Strike', level: 6, description: 'When you deal lightning damage to a Large or smaller creature, you can also push it up to 10 feet away.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 thunder damage (2d8 at 14th).' },
     { name: 'Stormborn', level: 17, description: 'You have a flying speed equal to your walking speed when not underground or indoors.' },
-  ], alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }},
+  ],
+    // PHB p.62: Wrath of the Storm — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: 'Wrath of the Storm', key: 'wrath_of_the_storm', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }},
   { id: 'trickery-domain', name: 'Trickery Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods of trickery are mischief-makers and instigators who stand as a constant challenge to the accepted order among both gods and mortals.', features: [
     { name: 'Blessing of the Trickster', level: 1, description: 'You can use your action to touch a willing creature other than yourself to give it advantage on Dex (Stealth) checks for 1 hour.' },
     { name: 'Channel Divinity: Invoke Duplicity', level: 2, description: 'You create a perfect illusion of yourself within 30 feet that lasts for 1 minute. As a bonus action, you can move it up to 30 feet. You can cast spells through it and gain advantage on attacks against creatures within 5 feet of both you and the illusion.' },
@@ -263,7 +324,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Channel Divinity: War God\'s Blessing', level: 6, description: 'As a reaction when a creature within 30 feet makes an attack roll, you can use Channel Divinity to grant a +10 bonus to the roll.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 damage of the weapon\'s type (2d8 at 14th).' },
     { name: 'Avatar of Battle', level: 17, description: 'You gain resistance to bludgeoning, piercing, and slashing damage from nonmagical attacks.' },
-  ], alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }},
+  ],
+    // PHB p.63: War Priest — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: 'War Priest', key: 'war_priest', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }},
 
   // ── PHB: DRUID CIRCLES ────────────────────────────────────────────────
   { id: 'circle-of-the-land', name: 'Circle of the Land', classId: 'druid', sourceBook: 'PHB', description: 'The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites through a vast oral tradition.',
@@ -283,7 +348,28 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Land\'s Stride', level: 6, description: 'Moving through nonmagical difficult terrain costs no extra movement. You can also pass through nonmagical plants without being slowed or taking damage from thorns or spines. You also have advantage on saving throws against plants that are magically created or manipulated to impede movement, such as those created by the entangle spell.' },
     { name: 'Nature\'s Ward', level: 10, description: 'You can\'t be charmed or frightened by elementals or fey, and you are immune to poison and disease.' },
     { name: 'Nature\'s Sanctuary', level: 14, description: 'Creatures of the natural world sense your connection. When a beast or plant creature attacks you, it must make a Wisdom save or choose a different target, or its attack misses.' },
-  ]},
+  ],
+    // PHB p.68. Every spell id below was checked against the spell data before being
+    // written — a bad id here fails silently, which this codebase has been bitten by.
+    landSpells: {
+      arctic: { 3: ['hold-person', 'spike-growth'], 5: ['sleet-storm', 'slow'],
+                7: ['freedom-of-movement', 'ice-storm'], 9: ['commune-with-nature', 'cone-of-cold'] },
+      coast: { 3: ['mirror-image', 'misty-step'], 5: ['water-breathing', 'water-walk'],
+               7: ['control-water', 'freedom-of-movement'], 9: ['conjure-elemental', 'scrying'] },
+      desert: { 3: ['blur', 'silence'], 5: ['create-food-and-water', 'protection-from-energy'],
+                7: ['blight', 'hallucinatory-terrain'], 9: ['insect-plague', 'wall-of-stone'] },
+      forest: { 3: ['barkskin', 'spider-climb'], 5: ['call-lightning', 'plant-growth'],
+                7: ['divination', 'freedom-of-movement'], 9: ['commune-with-nature', 'tree-stride'] },
+      grassland: { 3: ['invisibility', 'pass-without-trace'], 5: ['daylight', 'haste'],
+                   7: ['divination', 'freedom-of-movement'], 9: ['dream', 'insect-plague'] },
+      mountain: { 3: ['spider-climb', 'spike-growth'], 5: ['lightning-bolt', 'meld-into-stone'],
+                  7: ['stone-shape', 'stoneskin'], 9: ['passwall', 'wall-of-stone'] },
+      swamp: { 3: ['darkness', 'melfs-acid-arrow'], 5: ['water-walk', 'stinking-cloud'],
+               7: ['freedom-of-movement', 'locate-creature'], 9: ['insect-plague', 'scrying'] },
+      underdark: { 3: ['spider-climb', 'web'], 5: ['gaseous-form', 'stinking-cloud'],
+                   7: ['greater-invisibility', 'stone-shape'], 9: ['cloudkill', 'insect-plague'] },
+    },
+  },
   { id: 'circle-of-the-moon', name: 'Circle of the Moon', classId: 'druid', sourceBook: 'PHB', description: 'Druids of the Circle of the Moon are fierce guardians of the wilds. Their order gathers under the full moon to share news and trade warnings.', features: [
     { name: 'Combat Wild Shape', level: 2, description: 'You can use Wild Shape on your turn as a bonus action, rather than as an action. Additionally, you can expend a spell slot as a bonus action while transformed to regain 1d8 HP per level of the slot.' },
     { name: 'Circle Forms', level: 2, description: 'You can transform into a beast with a CR as high as 1. Starting at 6th level, the CR limit becomes your druid level ÷ 3 (rounded down).' },
@@ -353,14 +439,22 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Spirit Shield', level: 6, description: 'When a creature you can see within 30 feet takes damage, you can use your reaction to reduce that damage by 2d6 (3d6 at 10th, 4d6 at 14th).' },
     { name: 'Consult the Spirits', level: 10, description: 'You can cast Augury or Clairvoyance without expending a spell slot or material components, using your ancestral spirits instead of a sensor (for Clairvoyance). Wisdom is your spellcasting ability. Once per short or long rest.' },
     { name: 'Vengeful Ancestors', level: 14, description: 'When you use Spirit Shield, the attacker takes the same amount of force damage you prevented.' },
-  ]},
+  ],
+    // XGtE p.10: Consult the Spirits — "you can't use this feature again until you finish a short or long rest."
+    resources: [{ name: 'Consult the Spirits', key: 'consult_the_spirits', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'zealot', name: 'Path of the Zealot', classId: 'barbarian', sourceBook: 'XGtE', description: 'Barbarians who follow the Path of the Zealot are warriors who channel divine fury into a martial frenzy. They serve as the avenging instruments of their gods.', features: [
     { name: 'Divine Fury', level: 3, description: 'While raging, the first creature you hit with a weapon attack on each turn takes extra damage equal to 1d6 + half your barbarian level (necrotic or radiant, your choice).' },
     { name: 'Warrior of the Gods', level: 3, description: 'Spells that return you to life don\'t require material components.' },
     { name: 'Fanatical Focus', level: 6, description: 'If you fail a saving throw while raging, you can reroll it. You can only reroll one save per rage.' },
     { name: 'Zealous Presence', level: 10, description: 'As a bonus action, up to ten creatures of your choice within 60 feet that can hear you gain advantage on attack rolls and saving throws until the start of your next turn. Once per long rest.' },
     { name: 'Rage Beyond Death', level: 14, description: 'While raging, having 0 HP doesn\'t knock you unconscious. You can still die from failed death saves, but death is delayed until rage ends.' },
-  ]},
+  ],
+    // XGtE p.11: Zealous Presence — "Once you use this feature, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Zealous Presence', key: 'zealous_presence', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── XGtE: BARD ───────────────────────────────────────────────────────
   { id: 'college-of-swords', name: 'College of Swords', classId: 'bard', sourceBook: 'XGtE', description: 'Bards of the College of Swords are called blades. They entertain through daring feats of weapon prowess, often combined with theatrical performance.', features: [
@@ -393,15 +487,34 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Sentinel at Death\'s Door', level: 6, description: 'When a creature you can see within 30 feet would suffer a critical hit, you can use your reaction to make it a normal hit. Wis modifier uses per long rest.' },
     { name: 'Potent Spellcasting', level: 8, description: 'You add your Wisdom modifier to damage from cleric cantrips.' },
     { name: 'Keeper of Souls', level: 17, description: 'When an enemy you can see within 60 feet dies, you or a creature within 60 feet regains HP equal to the dying creature\'s HD.' },
-  ], alwaysPreparedSpells: { 1: ['bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
+  ],
+    // XGtE p.19: Eyes of the Grave (1st) and Sentinel at Death's Door (6th) are each
+    // Wisdom modifier uses (min 1) per long rest.
+    resources: [
+      { name: 'Eyes of the Grave', key: 'eyes_of_the_grave', rechargeOn: 'long',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: "Sentinel at Death's Door", key: 'sentinel_at_deaths_door', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    alwaysPreparedSpells: { 1: ['bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
 
   // ── XGtE: DRUID ──────────────────────────────────────────────────────
   { id: 'circle-of-dreams', name: 'Circle of Dreams', classId: 'druid', sourceBook: 'XGtE', description: 'Druids who are members of the Circle of Dreams hail from regions that have strong ties to the Feywild and its dreamlike realms.', features: [
     { name: 'Balm of the Summer Court', level: 2, description: 'You have a pool of d6s equal to your druid level. As a bonus action, you can choose a creature within 120 feet and spend dice from the pool: heal HP equal to total + grant temp HP.' },
     { name: 'Hearth of Moonlight and Shadow', level: 6, description: 'When you start a short or long rest, you touch a point to create an invisible 30-foot-radius sphere for the rest\'s duration. While inside, you and allies gain +5 to Dexterity (Stealth) and Wisdom (Perception) checks; light from open flames inside is invisible from outside.' },
     { name: 'Hidden Paths', level: 10, description: 'You can use a bonus action to teleport up to 60 feet to an unoccupied space you can see, or teleport a willing creature within 30 feet up to 60 feet. Wis modifier uses per long rest.' },
-    { name: 'Walker in Dreams', level: 14, description: 'You can cast Dream, Scrying, or Teleportation Circle as a 1-minute action, once per long rest.' },
-  ]},
+    { name: 'Walker in Dreams', level: 14, description: 'When you finish a short rest, you can cast Dream (with yourself as the messenger), Scrying, or Teleportation Circle, without expending a spell slot or providing material components. The Teleportation Circle variant opens a portal to the last location where you finished a long rest on your current plane; if you have not taken a long rest on this plane, the spell fails but is not wasted. Once you use this feature, you can\'t use it again until you finish a long rest.' },
+  ],
+    // XGtE p.22: Walker in Dreams — recharges on a long rest (the *trigger* is finishing a
+    // short rest, which is not the same thing and is why the counter is 'long').
+    resources: [
+      { name: 'Walker in Dreams', key: 'walker_in_dreams', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // XGtE p.22: Hidden Paths — Wisdom modifier uses (min 1) per long rest.
+      { name: 'Hidden Paths', key: 'hidden_paths', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'circle-of-the-shepherd', name: 'Circle of the Shepherd', classId: 'druid', sourceBook: 'XGtE', description: 'Druids of the Circle of the Shepherd commune with the spirits of nature, especially the spirits of beasts and the fey, and call to those spirits for aid.', features: [
     { name: 'Speech of the Woods', level: 2, description: 'You can understand and verbally communicate with beasts, and you learn Sylvan.' },
     { name: 'Spirit Totem', level: 2, description: 'As a bonus action, you summon a 30-foot-aura spirit (Bear: temp HP and advantage on Str checks/saves; Hawk: reaction grants advantage on attacks within 30 ft; Unicorn: detect enemies, healing).' },
@@ -444,7 +557,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   { id: 'samurai', name: 'Samurai', classId: 'fighter', sourceBook: 'XGtE', description: 'The Samurai is a fighter who draws on an implacable fighting spirit to overcome enemies. A Samurai\'s resolve is nearly unbreakable.',
     resources: [
       { name: 'Fighting Spirit', key: 'fighting_spirit', rechargeOn: 'long' as const,
-        maxPerLevel: {3:3,4:3,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:3,19:3,20:3} },
+        maxPerLevel: {1:0,2:0,3:3,4:3,5:3,6:3,7:3,8:3,9:3,10:3,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:3,19:3,20:3} },
     ],
     features: [
     { name: 'Bonus Proficiency', level: 3, description: 'You gain proficiency in one of: History, Insight, Performance, or Persuasion. Or you learn one language.' },
@@ -513,7 +626,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Distant Strike', level: 11, description: 'When you take the Attack action, you can teleport up to 10 feet between attacks. If you attack at least two different creatures, you can make a third attack against a third creature.' },
     { name: 'Planar Warrior Improvement', level: 11, description: 'At 11th level, the extra force damage from your Planar Warrior feature increases to 2d8.' },
     { name: 'Spectral Defense', level: 15, description: 'When you take damage from an attack, you can use your reaction to gain resistance against the attack\'s damage.' },
-  ]},
+  ],
+    // XGtE p.42: Detect Portal (3rd) and Ethereal Step (7th) each recharge on a short or long rest.
+    resources: [
+      { name: 'Detect Portal', key: 'detect_portal', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Ethereal Step', key: 'ethereal_step', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'monster-slayer', name: 'Monster Slayer', classId: 'ranger', sourceBook: 'XGtE', description: 'Monster Slayers seek out vampires, dragons, evil fey, fiends, and other magical threats.', features: [
     { name: 'Monster Slayer Magic', level: 3, description: 'You learn additional spells, starting with Protection from Evil and Good.' },
     { name: 'Hunter\'s Sense', level: 3, description: 'As an action, choose a creature within 60 feet. You learn its damage immunities, resistances, and vulnerabilities. Wis-mod uses per long rest.' },
@@ -521,7 +642,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Supernatural Defense', level: 7, description: 'Whenever the target of your Slayer\'s Prey forces you to make a save, or you make an ability check to escape it, add 1d6 to your roll.' },
     { name: 'Magic-User\'s Nemesis', level: 11, description: 'When you see a creature within 60 feet casting a spell or teleporting, use your reaction to force a Wisdom save or its casting/teleportation fails.' },
     { name: 'Slayer\'s Counter', level: 15, description: 'If your Slayer\'s Prey forces you to make a save, you can use your reaction to make one weapon attack against it. If you hit, the save automatically succeeds.' },
-  ]},
+  ],
+    // XGtE p.42: Hunter's Sense — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: "Hunter's Sense", key: 'hunters_sense', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── XGtE: ROGUE ──────────────────────────────────────────────────────
   { id: 'inquisitive', name: 'Inquisitive', classId: 'rogue', sourceBook: 'XGtE', description: 'Inquisitives excel at rooting out secrets and unraveling mysteries. They rely on their sharp instincts, eye for detail, and forensic mind.', features: [
@@ -552,7 +677,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Panache', level: 9, description: 'As an action, make a Cha (Persuasion) check contested by a creature\'s Wis (Insight). On success vs hostile: it has disadvantage on attacks against others until you damage it. Vs non-hostile: it becomes charmed for 1 minute.' },
     { name: 'Elegant Maneuver', level: 13, description: 'As a bonus action, gain advantage on the next Acrobatics or Athletics check this turn.' },
     { name: 'Master Duelist', level: 17, description: 'If you miss with an attack roll, you can roll it again with advantage. Once per short or long rest.' },
-  ]},
+  ],
+    // XGtE p.47: Master Duelist — "you can't use this feature again until you finish a short or long rest."
+    resources: [{ name: 'Master Duelist', key: 'master_duelist', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── XGtE: SORCERER ───────────────────────────────────────────────────
   { id: 'divine-soul', name: 'Divine Soul', classId: 'sorcerer', sourceBook: 'XGtE', description: 'Sometimes the spark of magic that fuels a sorcerer comes from a divine source. Such blessed individuals are known as Divine Souls.', features: [
@@ -561,7 +690,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Empowered Healing', level: 6, description: 'When you or an ally within 5 feet rolls dice to determine HP restored, spend 1 sorcery point to reroll any of those dice.' },
     { name: 'Otherworldly Wings', level: 14, description: 'As a bonus action, manifest spectral wings (flying speed 30 ft) until incapacitated, dead, or dismissed as a bonus action.' },
     { name: 'Unearthly Recovery', level: 18, description: 'As a bonus action when below half HP, regain HP equal to half your max. Once per long rest.' },
-  ]},
+  ],
+    // XGtE p.50: Favored by the Gods (1st) recharges on a short or long rest;
+    // Unearthly Recovery (18th) is once per long rest.
+    resources: [
+      { name: 'Favored by the Gods', key: 'favored_by_the_gods', rechargeOn: 'short',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Unearthly Recovery', key: 'unearthly_recovery', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'shadow-magic', name: 'Shadow Magic', classId: 'sorcerer', sourceBook: 'XGtE', description: 'You are a creature of shadow, for your innate magic comes from the Shadowfell itself.', features: [
     { name: 'Eyes of the Dark', level: 1, description: 'You gain darkvision 120 feet.' },
     { name: 'Strength of the Grave', level: 1, description: 'When damage reduces you to 0 HP, make a Charisma save (DC 5 + damage). On success, drop to 1 HP. Once per long rest.' },
@@ -569,7 +707,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Hound of Ill Omen', level: 6, description: 'Spend 3 sorcery points as a bonus action to summon a hound (dire wolf stats, Medium monstrosity) targeting one creature within 120 feet. The hound has temp HP equal to half your sorcerer level, can move through creatures/objects, and automatically tracks the target. While the hound is within 5 feet of the target, the target has disadvantage on saving throws against your spells. Lasts 5 minutes or until you or the target drop to 0 HP.' },
     { name: 'Shadow Walk', level: 14, description: 'While in dim light or darkness, use a bonus action to teleport up to 120 feet to an unoccupied space you can see in dim light or darkness.' },
     { name: 'Umbral Form', level: 18, description: 'Spend 6 sorcery points to become shadow form: resistance to all damage except force/radiant, and you can move through occupied spaces. Lasts 1 minute.' },
-  ]},
+  ],
+    // XGtE p.50: Strength of the Grave — "you can't use it again until you finish a long rest."
+    resources: [{ name: 'Strength of the Grave', key: 'strength_of_the_grave', rechargeOn: 'long',
+      maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'storm-sorcery', name: 'Storm Sorcery', classId: 'sorcerer', sourceBook: 'XGtE', description: 'Your innate magic comes from the power of elemental air. Many with this power can trace their magic back to a near-death experience caused by the Great Rain.', features: [
     { name: 'Wind Speaker', level: 1, description: 'You can speak, read, and write Primordial (Aquan, Auran, Ignan, Terran).' },
     { name: 'Tempestuous Magic', level: 1, description: 'Whenever you cast a spell of 1st level or higher, you can use a bonus action to fly up to 10 feet without provoking opportunity attacks.' },
@@ -584,6 +726,9 @@ export const ALL_SUBCLASSES: Subclass[] = [
     resources: [
       { name: "Hexblade's Curse", key: 'hexblade_curse', rechargeOn: 'short' as const,
         maxPerLevel: {1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
+      // XGtE p.55: Accursed Specter — "you can't use it again until you finish a long rest."
+      { name: 'Accursed Specter', key: 'accursed_specter', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
     ],
     features: [
     { name: 'Hexblade\'s Curse', level: 1, description: 'As a bonus action, curse a creature within 30 feet for 1 minute. You gain a bonus to damage rolls against it equal to your proficiency bonus, your attacks crit on 19-20 against it, and if it dies you regain HP. Use once per short or long rest.' },
@@ -598,7 +743,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Radiant Soul', level: 6, description: 'You gain resistance to radiant damage, and once per turn when you cast a spell that deals radiant or fire damage, you can add your Cha modifier to one damage roll.' },
     { name: 'Celestial Resilience', level: 10, description: 'When you finish a short or long rest, you gain temporary HP equal to your warlock level + your Charisma modifier. Also choose up to 5 creatures you can see — each gains temporary HP equal to half your warlock level + your Charisma modifier.' },
     { name: 'Searing Vengeance', level: 14, description: 'When you must make a death saving throw at the start of your turn, you can instead spring back to your feet — regain HP equal to half your hit point maximum, then stand up. Each creature of your choice within 30 feet takes 2d8 + Charisma modifier radiant damage and is blinded until end of the current turn. Once per long rest.' },
-  ], expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }},
+  ],
+    // XGtE p.55: Searing Vengeance — "Once you use this feature, you can't use it again until you finish a long rest."
+    resources: [{ name: 'Searing Vengeance', key: 'searing_vengeance', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }},
 
   // ── XGtE: WIZARD ─────────────────────────────────────────────────────
   { id: 'war-magic', name: 'War Magic', classId: 'wizard', sourceBook: 'XGtE', description: 'Practitioners of War Magic stand bravely on the front lines of battle, balancing offense and defense as they wield powerful evocations and abjurations.', features: [
@@ -615,14 +764,32 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Bestial Soul', level: 6, description: 'Attacks with natural weapons count as magical. After each short or long rest, choose one benefit: swimming speed = walking speed + breathe underwater, climbing speed = walking speed (including ceilings without checks), or make a Str (Athletics) check when you jump and extend the jump by the roll in feet.' },
     { name: 'Infectious Fury', level: 10, description: 'When you hit a creature with your natural weapon while raging, force a Wis save (DC 8 + Con modifier + proficiency bonus) or it must use its reaction to make a melee attack against another creature you can see, or take 2d12 psychic damage. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Call the Hunt', level: 14, description: 'When you enter your rage, choose up to Con modifier (min 1) willing creatures within 30 feet. You gain 5 temp HP per accepting creature. Until your rage ends, each chosen creature can once per turn deal extra d6 damage when they hit with an attack. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
-  ]},
+  ],
+    // TCE p.24: Infectious Fury (10th) and Call the Hunt (14th) are both prof-bonus uses
+    // per long rest (overrides below).
+    resources: [
+      { name: 'Infectious Fury', key: 'infectious_fury', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Call the Hunt', key: 'call_the_hunt', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
   { id: 'path-of-wild-magic', name: 'Path of Wild Magic', classId: 'barbarian', sourceBook: 'TCE', description: 'Barbarians who tread the Path of Wild Magic perceive the magical energies that suffuse the multiverse and learn to channel them in battle.', features: [
     { name: 'Magic Awareness', level: 3, description: 'As an action, sense the presence of magic within 60 feet. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Wild Surge', level: 3, description: 'When you enter your rage, roll a d8 (save DC = 8 + proficiency + Con modifier): 1 — Chosen creatures within 30 ft make Con save or take 1d12 necrotic; you gain 1d12 temp HP. 2 — Teleport up to 30 ft (repeatable as bonus action each turn). 3 — A tiny spirit appears near a creature of your choice within 30 ft; at end of turn it explodes, each creature within 5 ft makes Dex save or takes 1d6 force (repeatable as bonus action). 4 — One held weapon deals force damage and gains the thrown property (range 20/60 ft) until rage ends. 5 — Creatures that hit you take 1d6 force damage until rage ends. 6 — You and allies within 10 ft gain +1 AC until rage ends. 7 — Ground within 15 ft becomes difficult terrain for your enemies until rage ends. 8 — A creature within 30 ft makes a Con save or takes 1d6 radiant and is blinded until the start of your next turn (repeatable as bonus action).' },
     { name: 'Bolstering Magic', level: 6, description: 'As an action, touch a creature: 1d3 bonus on attacks/checks for 10 minutes, or roll 1d3 to regain a spell slot of that level. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Unstable Backlash', level: 10, description: 'When you take damage or fail a save during rage, use your reaction to roll a new effect on the Wild Magic table.' },
     { name: 'Controlled Surge', level: 14, description: 'When you roll on the Wild Magic table, you can roll twice and use either result.' },
-  ]},
+  ],
+    // TCE p.25: Magic Awareness (3rd) and Bolstering Magic (6th) are both prof-bonus uses
+    // per long rest (overrides below).
+    resources: [
+      { name: 'Magic Awareness', key: 'magic_awareness', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Bolstering Magic', key: 'bolstering_magic', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
 
   // ── TCE: BARD ────────────────────────────────────────────────────────
   { id: 'college-of-creation', name: 'College of Creation', classId: 'bard', sourceBook: 'TCE', description: 'A bard who walks the College of Creation\'s path views themselves as an extension of the Song of Creation, the great musical effort that gave birth to all that exists.', features: [
@@ -630,14 +797,27 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Performance of Creation', level: 3, description: 'As an action, create a nonmagical item worth up to 20 gp × your bard level (Medium or smaller) in an unoccupied space within 10 feet; it lasts a number of hours = your proficiency bonus. Once per long rest; can use again by expending a 2nd-level or higher spell slot.' },
     { name: 'Animating Performance', level: 6, description: 'As an action, animate a Large or smaller nonmagical item you can see within 30 feet (Dancing Item, HP = 10 + 5 × bard level). Once per long rest; can use again by expending a 3rd-level or higher spell slot.' },
     { name: 'Creative Crescendo', level: 14, description: 'When you use Performance of Creation, you can create up to your Charisma modifier items (min 2) simultaneously, no longer limited by gp value. Only one can be the maximum size; the rest must be Small or Tiny.' },
-  ]},
+  ],
+    resources: [
+      // Performance of Creation (3rd): proficiency-bonus uses per long rest — real max via override.
+      { name: 'Performance of Creation', key: 'performance_of_creation', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // Animating Performance (6th): once per long rest (a 3rd+ slot may be spent for more).
+      { name: 'Animating Performance', key: 'animating_performance', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'college-of-eloquence', name: 'College of Eloquence', classId: 'bard', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Adherents of the College of Eloquence master the art of oratory. They sway hearts and minds with practiced charm and an unassailable logic.', features: [
     { name: 'Silver Tongue', level: 3, description: 'When you make a Cha (Persuasion) or Cha (Deception) check, you can treat a d20 roll of 9 or lower as a 10.' },
     { name: 'Unsettling Words', level: 3, description: 'As a bonus action, spend a Bardic Inspiration die. Choose one creature within 60 feet; it must subtract the rolled number from its next save before end of your next turn.' },
     { name: 'Unfailing Inspiration', level: 6, description: 'When a creature uses a Bardic Inspiration die from you and fails the roll, they keep the die.' },
     { name: 'Universal Speech', level: 6, description: 'As an action, choose up to Cha-mod creatures within 60 feet. They understand every language you speak for 1 hour.' },
     { name: 'Infectious Inspiration', level: 14, description: 'When a creature within 60 feet uses your Bardic Inspiration die and succeeds, use your reaction to inspire another creature within 60 feet (no action by them required). Cha-mod uses per long rest.' },
-  ]},
+  ],
+    // TCE p.20: Infectious Inspiration — Charisma modifier uses (min 1) per long rest.
+    resources: [{ name: 'Infectious Inspiration', key: 'infectious_inspiration', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── TCE: CLERIC ──────────────────────────────────────────────────────
   { id: 'order-domain', name: 'Order Domain', classId: 'cleric', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'The Order Domain represents discipline, dedication to a just cause, and devotion to a well-organized society.', features: [
@@ -647,7 +827,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Embodiment of the Law', level: 6, description: 'If you cast an enchantment spell, you can do so as a bonus action instead of an action. Wis-mod uses per long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 psychic damage (2d8 at 14th).' },
     { name: "Order's Wrath", level: 17, description: 'When you deal Divine Strike damage to a creature on your turn, that creature is cursed until the start of your next turn. The next time an ally hits the cursed creature with an attack, it takes an extra 2d8 psychic damage and the curse ends. Once per turn.' },
-  ], alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compulsion', 'locate-creature'], 9: ['commune', 'dominate-person'] }},
+  ],
+    // TCE p.32: Embodiment of the Law — Wisdom modifier uses (min 1) per long rest.
+    resources: [{ name: 'Embodiment of the Law', key: 'embodiment_of_the_law', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+    alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compulsion', 'locate-creature'], 9: ['commune', 'dominate-person'] }},
   { id: 'peace-domain', name: 'Peace Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The teachings of the gods of the Peace Domain unite people of all sorts to live with one another in tranquility.', features: [
     { name: 'Implement of Peace', level: 1, description: 'You gain proficiency in Insight, Performance, or Persuasion (your choice).' },
     { name: 'Emboldening Bond', level: 1, description: 'As an action, choose up to your proficiency bonus willing creatures within 30 feet of you (including yourself). A magical bond forms between them for 10 minutes or until you use this feature again. While a bonded creature is within 30 feet of another bonded creature, it can roll a d4 and add the number rolled to an attack roll, ability check, or saving throw (once per turn). You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
@@ -655,7 +839,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Protective Bond', level: 6, description: 'When a bonded creature is about to take damage, another bonded creature within 30 feet can use its reaction to teleport to an unoccupied space within 5 feet and take the damage instead.' },
     { name: 'Potent Spellcasting', level: 8, description: 'You add your Wisdom modifier to damage from cleric cantrips.' },
     { name: 'Expansive Bond', level: 17, description: 'Emboldening Bond and Protective Bond now work at 60 feet instead of 30. When a creature uses Protective Bond to take damage for another, it has resistance to that damage.' },
-  ], alwaysPreparedSpells: { 1: ['heroism', 'sanctuary'], 3: ['aid', 'warding-bond'], 5: ['beacon-of-hope', 'sending'], 7: ['otilukes-resilient-sphere', 'aura-of-purity'], 9: ['rarys-telepathic-bond', 'greater-restoration'] }},
+  ], alwaysPreparedSpells: { 1: ['heroism', 'sanctuary'], 3: ['aid', 'warding-bond'], 5: ['beacon-of-hope', 'sending'], 7: ['otilukes-resilient-sphere', 'aura-of-purity'], 9: ['rarys-telepathic-bond', 'greater-restoration'] },
+    // Emboldening Bond (1st): proficiency-bonus uses per long rest. Its "prof bonus creatures" clause
+    // is the number of TARGETS bonded, which is separate — only the uses are tracked here.
+    resources: [{ name: 'Emboldening Bond', key: 'emboldening_bond', rechargeOn: 'long',
+      maxPerLevel: { 1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
   { id: 'twilight-domain', name: 'Twilight Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The Twilight Domain represents the night sky, the protective veil of dusk, and the encroaching twilight.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with martial weapons and heavy armor.' },
     { name: 'Eyes of Night', level: 1, description: 'You have darkvision 300 feet. As an action, you can grant this darkvision to willing creatures within 10 feet for 1 hour.' },
@@ -664,7 +853,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Steps of Night', level: 6, description: 'In dim light or darkness, as a bonus action, gain a flying speed equal to your walking speed for 1 minute. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 radiant damage (2d8 at 14th).' },
     { name: 'Twilight Shroud', level: 17, description: 'Allies in your Twilight Sanctuary have half cover.' },
-  ], alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomunds-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
+  ],
+    // TCE p.33: Steps of Night — prof-bonus uses per long rest (override below).
+    resources: [{ name: 'Steps of Night', key: 'steps_of_night', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+    alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomund-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
 
   // ── TCE: DRUID ───────────────────────────────────────────────────────
   { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
@@ -673,21 +866,43 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Fungal Infestation', level: 6, description: 'When a Small or Medium beast or humanoid within 10 feet dies, you can use your reaction to animate it as a zombie under your control for 1 hour. Wis-mod uses per long rest.' },
     { name: 'Spreading Spores', level: 10, description: 'As a bonus action while Symbiotic Entity is active, create a 10-foot cube of spores within 30 feet for 1 minute. Creatures entering or starting their turn take Halo of Spores damage.' },
     { name: 'Fungal Body', level: 14, description: 'You are immune to being blinded, deafened, frightened, or poisoned. Any crit against you counts as a normal hit instead.' },
-  ]},
+  ],
+    // TCE p.36: Fungal Infestation — Wisdom modifier uses (min 1) per long rest.
+    // (Symbiotic Entity spends Wild Shape uses, which the druid class resource already tracks.)
+    resources: [{ name: 'Fungal Infestation', key: 'fungal_infestation', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'circle-of-stars', name: 'Circle of Stars', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Stars draw power from starlight. They glimpse the future in the stars\' radiance.', features: [
     { name: 'Star Map', level: 2, description: 'You create a star chart that serves as your druid spellcasting focus. You know the Guidance cantrip and Guiding Bolt is always prepared (doesn\'t count against spell limit). You can cast Guiding Bolt without expending a spell slot a number of times equal to your proficiency bonus per long rest.' },
     { name: 'Starry Form', level: 2, description: 'As a bonus action, expend a Wild Shape use to take on Starry Form for 10 minutes. Choose a constellation: Archer (bonus action ranged spell attack, 1d8 + Wis radiant), Chalice (when casting a healing spell using a slot, you or a creature within 30 ft regains 1d8 + Wis HP), or Dragon (Int and Wis checks, and Con saves to maintain concentration treat d20 ≤ 9 as 10).' },
     { name: 'Cosmic Omen', level: 6, description: 'After a long rest, roll a die. Until next long rest, reaction when a creature within 30 ft makes an attack, ability check, or saving throw: Weal (even roll) add 1d6 to the total; Woe (odd roll) subtract 1d6 from the total. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Twinkling Constellations', level: 10, description: 'Starry Form effects improve, and as a bonus action while in Starry Form, you can change which form you have and gain a flying speed of 20 feet.' },
     { name: 'Full of Stars', level: 14, description: 'While in Starry Form, you become partially incorporeal: resistance to bludgeoning, piercing, and slashing.' },
-  ]},
+  ],
+    resources: [
+      // Star Map (2nd) — Guiding Bolt free casts, and Cosmic Omen (6th): both prof bonus per long rest.
+      { name: 'Star Map', key: 'star_map', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Cosmic Omen', key: 'cosmic_omen', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
   { id: 'circle-of-wildfire', name: 'Circle of Wildfire', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Wildfire understand that destruction sometimes paves the way for greater growth.', features: [
     { name: 'Circle Spells', level: 2, description: 'You always have these spells prepared: 1st — Burning Hands, Cure Wounds; 3rd — Flaming Sphere, Scorching Ray; 5th — Plant Growth, Revivify; 7th — Aura of Life, Fire Shield; 9th — Flame Strike, Mass Cure Wounds.' },
     { name: 'Summon Wildfire Spirit', level: 2, description: 'As an action, expend a Wild Shape use to summon a wildfire spirit (Small elemental) in an unoccupied space within 30 feet. It can use Fiery Teleportation to teleport and deal fire damage.' },
     { name: 'Enhanced Bond', level: 6, description: 'When you cast a fire or healing spell, you can have it originate from your wildfire spirit. Damage spells deal +1d8 fire; healing spells heal +1d8.' },
     { name: 'Cauterizing Flames', level: 10, description: 'When a Small or larger creature dies within 30 feet of you or your wildfire spirit, a spectral flame appears in its space for 1 minute. Reaction when a creature you can see enters that space — extinguish the flame to either heal the creature or deal fire damage to it: 2d10 + Wis modifier. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Blazing Revival', level: 14, description: 'If you drop to 0 HP, your wildfire spirit is destroyed and you regain HP equal to half your max. Once per long rest.' },
-  ]},
+  ],
+    resources: [
+      // Cauterizing Flames (10th): proficiency-bonus uses per long rest — real max via override.
+      { name: 'Cauterizing Flames', key: 'cauterizing_flames', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // Blazing Revival (14th): once per long rest.
+      { name: 'Blazing Revival', key: 'blazing_revival', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: FIGHTER ─────────────────────────────────────────────────────
   { id: 'psi-warrior', name: 'Psi Warrior', classId: 'fighter', sourceBook: 'TCE', description: 'A Psi Warrior is a fighter who augments their physical might with the psionic power of their mind.', features: [
@@ -696,7 +911,25 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Guarded Mind', level: 10, description: 'You have resistance to psychic damage. If you start your turn frightened or charmed, you can spend 1 energy die to end the conditions.' },
     { name: 'Bulwark of Force', level: 15, description: 'As a bonus action, choose up to Int-mod creatures within 30 feet. They each gain half cover for 1 minute. Once per long rest.' },
     { name: 'Telekinetic Master', level: 18, description: 'You can cast Telekinesis without spell components, expending no spell slot. While concentrating, you can make one attack as a bonus action.' },
-  ]},
+  ],
+    // TCE: pool = 2 x proficiency bonus, all back on a long rest (plus a bonus-action single regain,
+    // which is a use-time action rather than a rest and so isn't modelled here). The maxPerLevel table
+    // mirrors 2 x PB as a fallback; the real max comes from the override.
+    // Keyed per subclass, not a shared 'psionic_energy': Psi Warrior and Soulknife each grant
+    // their own pool, so a Fighter/Rogue with both used to draw them both from one counter.
+    resources: [
+      {
+        name: 'Psionic Energy Dice (Psi Warrior)', key: 'psionic_energy_psi_warrior', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+        resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+      },
+      // TCE p.42: Bulwark of Force — once per long rest, or spend a Psionic Energy die to use
+      // it again. The die spend is an alternative cost, not a recharge, so only the rest-limited
+      // use is counted here (the dice above already track the other half).
+      { name: 'Bulwark of Force', key: 'bulwark_of_force', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'rune-knight', name: 'Rune Knight', classId: 'fighter', sourceBook: 'TCE', description: 'Rune Knights are fighters who enhance their gear with potent runes, fragments of giants\' lost rune magic.', features: [
     { name: 'Bonus Proficiencies', level: 3, description: 'You gain proficiency with smith\'s tools and can speak, read, and write Giant.' },
     { name: 'Rune Carver', level: 3, description: 'You learn two runes of your choice (Cloud, Fire, Frost, Stone, Hill, Storm). Inscribed on gear, each rune grants a passive benefit and a usable property.' },
@@ -705,7 +938,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Great Stature', level: 10, description: 'Your height increases by 3d4 inches. The extra damage you deal with Giant\'s Might increases to 1d8.' },
     { name: 'Master of Runes', level: 15, description: 'You can use each rune twice per short or long rest.' },
     { name: 'Runic Juggernaut', level: 18, description: 'Giant\'s Might extra damage increases to 1d10. You can now become Huge (not just Large), and you have a reach of +5 ft while Huge.' },
-  ]},
+  ],
+    // TCE p.47: Runic Shield — prof-bonus uses per long rest (override below).
+    // NOT modelled: rune invocations themselves (once each per short rest, twice from 15th).
+    // Those need a per-rune counter keyed on which runes the player chose — a D4 build choice.
+    resources: [
+      { name: 'Runic Shield', key: 'runic_shield', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // TCE p.46: Giant's Might — proficiency bonus uses per long rest.
+      { name: "Giant's Might", key: 'giants_might', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
 
   // ── TCE: MONK ────────────────────────────────────────────────────────
   { id: 'way-of-mercy', name: 'Way of Mercy', classId: 'monk', sourceBook: 'TCE', description: 'Monks of the Way of Mercy learn to manipulate the life force of others to bring aid to those in need.', features: [
@@ -715,7 +959,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Physician\'s Touch', level: 6, description: 'When you use Hand of Healing, end one of: blinded, deafened, paralyzed, poisoned, stunned. When you use Hand of Harm, target is poisoned until end of next turn.' },
     { name: 'Flurry of Healing and Harm', level: 11, description: 'When you use Flurry of Blows, you can replace each unarmed strike with Hand of Healing without spending ki.' },
     { name: 'Hand of Ultimate Mercy', level: 17, description: 'Spend 5 ki to touch a corpse dead no more than 24 hours and return it to life with 4d10 + your Wisdom modifier hit points (also ending blinded, deafened, paralyzed, poisoned, or stunned). Once per long rest.' },
-  ]},
+  ],
+    // TCE p.53: Hand of Ultimate Mercy — once per long rest. (It also costs 5 ki, which the
+    // ki pool already tracks; this counter is the separate once-a-day limit.)
+    resources: [{ name: 'Hand of Ultimate Mercy', key: 'hand_of_ultimate_mercy', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'way-of-the-astral-self', name: 'Way of the Astral Self', classId: 'monk', sourceBook: 'TCE', description: 'A monk who follows the Way of the Astral Self believes their body is an illusion, and that their consciousness can manifest a visible astral form.', features: [
     { name: 'Arms of the Astral Self', level: 3, description: 'As a bonus action, spend 1 ki to summon spectral arms for 10 minutes; a creature within 10 ft must make a Dex save or take force damage equal to two rolls of your Martial Arts die. While present, you use Wis for Strength checks/saves, and the arms\' unarmed strikes have +5 ft reach, use Wis for attack/damage, and deal force damage (Martial Arts die).' },
     { name: 'Visage of the Astral Self', level: 6, description: 'As a bonus action (or as part of summoning Arms), spend 1 ki to summon the visage for 10 minutes: Astral Sight (see in magical/nonmagical darkness out to 120 ft), Wisdom of the Spirit (advantage on Insight and Intimidation checks), and Word of the Spirit (speak privately to a creature within 60 ft, or amplify your voice to 600 ft).' },
@@ -731,7 +980,18 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Glorious Defense', level: 15, description: 'When you or an ally within 10 feet are hit by an attack, use your reaction to grant +Cha-mod AC against that attack. If the attack misses, make one weapon attack against the attacker. Cha-mod uses per long rest.' },
     { name: 'Aura of Alacrity Improvement', level: 18, description: 'At 18th level, the range of your Aura of Alacrity increases to 10 feet.' },
     { name: 'Living Legend', level: 20, description: 'As a bonus action for 1 minute: advantage on all Charisma checks; once per turn when you miss with a weapon attack, that attack hits instead; reaction when you fail a saving throw to reroll it (must use new roll). Once per long rest; can use again by expending a 5th-level spell slot.' },
-  ], alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'flame-strike'] }},
+  ],
+    // TCE p.54: Living Legend — once per long rest. The "spend a 5th-level slot to use it
+    // again" clause is an alternative cost, not a recharge, so it is not modelled here (same
+    // call as Warping Implosion's 5-sorcery-point reuse).
+    resources: [
+      { name: 'Living Legend', key: 'living_legend', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } },
+      // TCE p.54: Glorious Defense — Charisma modifier uses (min 1) per long rest.
+      { name: 'Glorious Defense', key: 'glorious_defense', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    alwaysPreparedSpells: { 3: ['guiding-bolt', 'heroism'], 5: ['enhance-ability', 'magic-weapon'], 9: ['haste', 'protection-from-energy'], 13: ['compulsion', 'freedom-of-movement'], 17: ['commune', 'flame-strike'] }},
   { id: 'oath-of-the-watchers', name: 'Oath of the Watchers', classId: 'paladin', sourceBook: 'TCE', description: 'The Oath of the Watchers binds paladins to protect mortals from the dangers posed by extraplanar entities.', features: [
     { name: 'Channel Divinity: Watcher\'s Will', level: 3, description: 'As an action, choose up to Cha-mod creatures within 30 feet. They gain advantage on Int, Wis, and Cha saves for 1 minute.' },
     { name: 'Channel Divinity: Abjure the Extraplanar', level: 3, description: 'Each aberration, celestial, elemental, fey, or fiend within 30 feet must make a Wis save or be turned for 1 minute.' },
@@ -739,7 +999,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Vigilant Rebuke', level: 15, description: 'When you or a creature within 30 feet succeeds on an Int, Wis, or Cha save, use your reaction to deal 2d8 + Cha mod force damage to the source.' },
     { name: 'Aura of the Sentinel Improvement', level: 18, description: 'At 18th level, the range of your Aura of the Sentinel increases to 30 feet.' },
     { name: 'Mortal Bulwark', level: 20, description: 'As a bonus action for 1 minute: truesight 120 ft, advantage on attacks vs aberrations/celestials/elementals/fey/fiends, and banish them on a hit (Cha save). Once per long rest.' },
-  ], alwaysPreparedSpells: { 3: ['alarm', 'detect-magic'], 5: ['moonbeam', 'see-invisibility'], 9: ['counterspell', 'nondetection'], 13: ['aura-of-purity', 'banishment'], 17: ['hold-monster', 'scrying'] }},
+  ],
+    // TCE p.56: Mortal Bulwark — once per long rest, with the same 5th-level-slot
+    // alternative cost as Living Legend (not modelled, it is not a recharge).
+    resources: [{ name: 'Mortal Bulwark', key: 'mortal_bulwark', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['alarm', 'detect-magic'], 5: ['moonbeam', 'see-invisibility'], 9: ['counterspell', 'nondetection'], 13: ['aura-of-purity', 'banishment'], 17: ['hold-monster', 'scrying'] }},
 
   // ── TCE: RANGER ──────────────────────────────────────────────────────
   { id: 'fey-wanderer', name: 'Fey Wanderer', classId: 'ranger', sourceBook: 'TCE', description: 'Mysterious wardens of the Feywild, Fey Wanderers are infused with otherworldly magic.', features: [
@@ -749,14 +1014,31 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Beguiling Twist', level: 7, description: 'Advantage on saves vs being charmed and frightened. When you or an ally within 120 feet succeeds on a save vs charm/fright, use your reaction to force a creature within 120 feet to make a Wis save or be charmed/frightened by you for 1 minute.' },
     { name: 'Fey Reinforcements', level: 11, description: 'You learn Summon Fey. You can cast it without a material component or expending a slot, once per long rest.' },
     { name: 'Misty Wanderer', level: 15, description: 'You can cast Misty Step a number of times per long rest equal to your Wis mod. You can take a willing creature within 5 feet with you.' },
-  ]},
+  ],
+    // Fey Reinforcements (11th): cast Summon Fey once per long rest without a slot.
+    resources: [
+      { name: 'Fey Reinforcements', key: 'fey_reinforcements', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // TCE p.58: Misty Wanderer — Wisdom modifier uses (min 1) per long rest.
+      { name: 'Misty Wanderer', key: 'misty_wanderer', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'swarmkeeper', name: 'Swarmkeeper', classId: 'ranger', sourceBook: 'TCE', description: 'Magic intermingles with the bond that an archetypal ranger shares with nature — but the Swarmkeeper bonds with a swarm of nature spirits.', features: [
     { name: 'Gathered Swarm', level: 3, description: 'A swarm of nature spirits aids you. When you hit with an attack, choose: +1d6 piercing damage, push target 15 feet, or move yourself 5 feet without provoking opportunity attacks.' },
     { name: 'Swarmkeeper Magic', level: 3, description: 'You learn additional spells, starting with Mage Hand.' },
     { name: 'Writhing Tide', level: 7, description: 'As a bonus action, gain a flying speed of 10 feet for 1 minute. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Mighty Swarm', level: 11, description: 'Gathered Swarm damage increases to 1d8. Push effect also knocks Medium or smaller targets prone, and move effect makes you difficult to hit.' },
     { name: 'Swarming Dispersal', level: 15, description: 'When you take damage, use your reaction to gain resistance against it and teleport up to 30 feet. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
-  ]},
+  ],
+    resources: [
+      // Writhing Tide (7th) and Swarming Dispersal (15th): each proficiency-bonus uses per long rest.
+      { name: 'Writhing Tide', key: 'writhing_tide', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Swarming Dispersal', key: 'swarming_dispersal', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } },
+    ],
+  },
 
   // ── TCE: ROGUE ───────────────────────────────────────────────────────
   { id: 'phantom', name: 'Phantom', classId: 'rogue', sourceBook: 'TCE', description: 'Some rogues remain tied to the realms of the living and the dead through powerful trauma or ritual.', features: [
@@ -765,14 +1047,34 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Tokens of the Departed', level: 9, description: 'As a reaction when a creature you can see dies within 30 feet, you can open your free hand and cause a Tiny soul trinket to appear there. You can hold a maximum number of soul trinkets equal to your proficiency bonus. Soul trinkets can be used in three ways: (1) While a trinket is on your person, you have advantage on death saving throws and Constitution saving throws. (2) When you deal Sneak Attack damage on your turn, you can destroy a trinket on your person to immediately use Wails from the Grave without expending a use. (3) As an action, destroy any soul trinket to ask the spirit one question; the spirit answers truthfully in a language it knew in life, as concisely as possible.' },
     { name: 'Ghost Walk', level: 13, description: 'As a bonus action, assume a spectral form for 10 minutes: flying speed 10 feet (hover), attack rolls against you have disadvantage, and you can move through creatures and objects as difficult terrain (take 1d10 force if you end a turn inside). Costs one Soul Trinket (or long rest to reuse).' },
     { name: 'Death\'s Friend', level: 17, description: 'Wails from the Grave now also deals necrotic damage to the first target (in addition to the second). At the end of a long rest, if you have no soul trinkets, one appears in your hand.' },
-  ]},
+  ],
+    // Wails from the Grave (3rd): proficiency-bonus uses per long rest — real max via override.
+    resources: [{ name: 'Wails from the Grave', key: 'wails_from_the_grave', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
   { id: 'soulknife', name: 'Soulknife', classId: 'rogue', sourceBook: 'TCE', description: 'A Soulknife strikes with imaginary blades formed of psionic energy that pierce mind and body.', features: [
     { name: 'Psionic Power', level: 3, description: 'You have a pool of Psionic Energy dice = 2 × proficiency bonus (d6; d8 at 5th, d10 at 11th, d12 at 17th); regain all on long rest or one die as bonus action (not until next rest). Use for Psi-Bolstered Knack (add a die to a failed proficient skill/tool check, expend only if it succeeds) or Psychic Whispers (action; for die-roll hours, telepathy within 1 mile among chosen creatures).' },
     { name: 'Psychic Blades', level: 3, description: 'When you take the Attack action, manifest a psychic blade as part of that attack — simple finesse melee weapon, thrown (range 60 ft, no disadvantage at long range), 1d6 psychic damage. After the attack, make one additional psychic blade attack as a bonus action (same turn, other hand free): deals 1d4 psychic instead of 1d6.' },
     { name: 'Soul Blades', level: 9, description: 'You learn Homing Strikes (spend an energy die to turn a missed Psychic Blade attack into a hit) and Psychic Teleportation (spend a die to teleport up to 30 ft).' },
     { name: 'Psychic Veil', level: 13, description: 'As an action, become invisible for 1 hour or until you deal damage to a creature or force a save. Once per long rest, or spend an energy die.' },
     { name: 'Rend Mind', level: 17, description: 'When you use Psychic Blades for Sneak Attack damage, force a Wis save (DC 8 + proficiency + Dex modifier) or be stunned for 1 minute (repeats save at end of each turn). Once per long rest; expending three Psionic Energy dice lets you use it again.' },
-  ]},
+  ],
+    // Same size of Psionic Energy pool as Psi Warrior (TCE): 2 x proficiency bonus, all back on
+    // a long rest — but a separate pool, hence a separate key. See the Psi Warrior note above.
+    resources: [
+      {
+        name: 'Psionic Energy Dice (Soulknife)', key: 'psionic_energy_soulknife', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+        resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+      },
+      // TCE p.63: both are once per long rest, or spend Psionic Energy dice to use again
+      // (one die for Psychic Veil, three for Rend Mind) — an alternative cost, not a recharge.
+      { name: 'Psychic Veil', key: 'psychic_veil', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Rend Mind', key: 'rend_mind', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: SORCERER ────────────────────────────────────────────────────
   { id: 'aberrant-mind', name: 'Aberrant Mind', classId: 'sorcerer', sourceBook: 'TCE', description: 'An alien influence has wrapped its tendrils around your mind, giving you psionic power.', features: [
@@ -782,14 +1084,26 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Psychic Defenses', level: 6, description: 'You gain resistance to psychic damage and advantage on saves to avoid being charmed or frightened.' },
     { name: 'Revelation in Flesh', level: 14, description: 'Bonus action — spend 1–4 sorcery points for 10 minutes (one benefit per point): see invisible creatures within 60 ft; flying speed = walking speed (hover); swimming speed = 2× walking speed + breathe underwater; move through spaces as narrow as 1 inch + escape nonmagical restraints by spending 5 ft.' },
     { name: 'Warping Implosion', level: 18, description: 'As an action, teleport up to 120 feet. Creatures within 30 feet of your starting space must make a Str save or take 3d10 force damage and be pulled toward your former space. On a success: half damage, not pulled. Once per long rest; can reuse by spending 5 sorcery points.' },
-  ]},
+  ],
+    // Warping Implosion (18th): once per long rest (a 5-sorcery-point reuse exists, not tracked).
+    resources: [{ name: 'Warping Implosion', key: 'warping_implosion', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } }],
+  },
   { id: 'clockwork-soul', name: 'Clockwork Soul', classId: 'sorcerer', sourceBook: 'TCE', description: 'The cosmic forces of order and chaos perpetually struggle. Some sorcerers draw their power from this struggle, embodying the perfection of order.', features: [
     { name: 'Clockwork Magic', level: 1, description: 'Always have these spells prepared (always known as sorcerer spells): 1st — Alarm, Protection from Evil and Good; 3rd — Aid, Lesser Restoration; 5th — Dispel Magic, Protection from Energy; 7th — Freedom of Movement, Summon Construct; 9th — Greater Restoration, Wall of Force. You can also swap sorcerer spells known for abjuration or transmutation spells.' },
     { name: 'Restore Balance', level: 1, description: 'When a creature within 60 feet rolls with advantage or disadvantage, you can use your reaction to cancel it. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Bastion of Law', level: 6, description: 'Spend 1-5 sorcery points to grant a creature within 30 feet that many d8s, used to cancel damage taken.' },
     { name: 'Trance of Order', level: 14, description: 'As a bonus action, you become unflappable for 1 minute: attack rolls vs you don\'t have advantage, and your d20 rolls for attacks, ability checks, and saves treat 9 or lower as 10.' },
     { name: 'Clockwork Cavalcade', level: 18, description: 'As an action, summon spirits of order in a 30-foot cube within 30 feet. They heal up to 100 HP among creatures, end one spell of 6th level or lower on each creature, and repair damaged objects. Once per long rest.' },
-  ]},
+  ],
+    resources: [
+      // Restore Balance (1st): prof bonus uses per long rest. Clockwork Cavalcade (18th): once per long rest.
+      { name: 'Restore Balance', key: 'restore_balance', rechargeOn: 'long',
+        maxPerLevel: { 1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Clockwork Cavalcade', key: 'clockwork_cavalcade', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: WARLOCK ─────────────────────────────────────────────────────
   { id: 'the-fathomless', name: 'The Fathomless', classId: 'warlock', sourceBook: 'TCE', description: 'You have plumbed the ocean\'s deepest trenches and found a creature of the depths willing to make a pact with you.', features: [
@@ -799,13 +1113,39 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Guardian Coil', level: 6, description: 'As a reaction when you or a creature within 10 feet of your tentacle takes damage, reduce it by 1d8 (2d8 at 10th).' },
     { name: 'Grasping Tentacles', level: 10, description: 'You learn Evard\'s Black Tentacles. You can cast it once per long rest without a slot, and gain temporary HP equal to your warlock level when you cast it.' },
     { name: 'Fathomless Plunge', level: 14, description: 'As an action, teleport yourself and up to 5 willing creatures within 30 feet through a portal to a body of water you have seen, up to 1 mile away. Once per short or long rest.' },
-  ], expandedSpells: { 1: ['create-or-destroy-water', 'thunderwave'], 3: ['gust-of-wind', 'silence'], 5: ['lightning-bolt', 'sleet-storm'], 7: ['control-water', 'summon-elemental'], 9: ['bigbys-hand', 'cone-of-cold'] }},
+  ],
+    // TCE p.71: Tentacle of the Deeps is prof-bonus uses per long rest (override below);
+    // Grasping Tentacles is one free casting per long rest; Fathomless Plunge is short rest.
+    resources: [
+      { name: 'Tentacle of the Deeps', key: 'tentacle_of_the_deeps', rechargeOn: 'long',
+        maxPerLevel: { 1:2,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'Grasping Tentacles', key: 'grasping_tentacles', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Fathomless Plunge', key: 'fathomless_plunge', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+    expandedSpells: { 1: ['create-or-destroy-water', 'thunderwave'], 3: ['gust-of-wind', 'silence'], 5: ['lightning-bolt', 'sleet-storm'], 7: ['control-water', 'summon-elemental'], 9: ['bigbys-hand', 'cone-of-cold'] }},
   { id: 'the-genie', name: 'The Genie', classId: 'warlock', sourceBook: 'TCE', description: 'You have made a pact with one of the rarest kinds of genie, a noble genie of an exotic court.', features: [
     { name: 'Genie\'s Vessel', level: 1, description: 'Your patron gifts you a Tiny vessel (an oil lamp, urn, ring, bottle, hollow statuette, or lantern) that serves as your spellcasting focus.\n\nBottled Respite: As an action, you magically vanish into the vessel. The interior is a 20-foot-radius, 20-foot-high extradimensional cylinder. While inside, you can hear the surroundings outside the vessel. You can remain inside for up to twice your proficiency bonus hours. You exit as a bonus action, or automatically if you die or the vessel is destroyed. You can\'t enter again until you finish a long rest.\n\nGenie\'s Wrath: Once per turn when you hit with an attack, you deal extra damage equal to your proficiency bonus. The type is bludgeoning (Dao), thunder (Djinni), fire (Efreeti), or cold (Marid).' },
     { name: 'Elemental Gift', level: 6, description: 'You gain resistance to a damage type based on your genie kind: bludgeoning (Dao), thunder (Djinni), fire (Efreeti), cold (Marid). As a bonus action, you gain a flying speed of 30 feet and can hover for 10 minutes. You can use this flight a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Sanctuary Vessel', level: 10, description: 'When entering the vessel via Bottled Respite, you can bring up to 5 willing creatures within 30 feet. Anyone inside who spends 10+ minutes gains a short rest benefit; they can add your proficiency bonus to HP regained from spending Hit Dice.' },
     { name: 'Limited Wish', level: 14, description: 'Action — speak to your Genie\'s Vessel to duplicate the effect of any spell of 6th level or lower with a 1-action casting time (from any class spell list, no requirements). Recharges after 1d4 long rests.' },
-  ]},
+  ],
+    // TCE p.75: Elemental Gift — the flight is prof-bonus uses per long rest (override below).
+    // Limited Wish (14th) is the reason rechargeOn grew a 'special' member: "after 1d4 long
+    // rests" is not a rest rule, and marking it 'long' would return it every night.
+    resources: [
+      { name: 'Elemental Gift', key: 'elemental_gift', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // TCE p.73: the limited part of Genie's Vessel is Bottled Respite — "can't enter
+      // again until long rest". Genie's Wrath is a once-per-turn rider with no daily cap.
+      { name: 'Genie\'s Vessel: Bottled Respite', key: 'bottled_respite', rechargeOn: 'long',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Limited Wish', key: 'limited_wish', rechargeOn: 'special',
+        rechargeNote: 'Recharges after 1d4 long rests — roll and reset by hand',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: WIZARD ──────────────────────────────────────────────────────
   { id: 'bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'TCE', description: 'Bladesingers are elves who use their wizardly training to perfect a deadly art that combines swordplay with magic.',
@@ -828,7 +1168,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Manifest Mind', level: 6, description: 'As a bonus action, project the consciousness of your spellbook as a luminous, incorporeal image within 60 feet for 1 hour. Cast spells through it. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
     { name: 'Master Scrivener', level: 10, description: 'After a long rest, create a single Spell Scroll containing one wizard spell of 1st or 2nd level from your spellbook.' },
     { name: 'One with the Word', level: 14, description: 'While spellbook is on your person: advantage on Int (Arcana) checks. Reaction when taking damage while spectral mind is manifested — dismiss the mind, prevent ALL that damage, then roll 3d6; your spellbook loses spells of your choice with combined level ≥ roll (you can\'t cast them for 1d6 long rests). Once per long rest.' },
-  ]},
+  ],
+    // TCE p.78: Manifest Mind is prof-bonus uses per long rest (override below). The other two
+    // are single long-rest uses — Awakened Spellbook's limited part is the ritual-without-the-
+    // extra-10-minutes casting, so the counter is named for that rather than the whole feature.
+    resources: [
+      { name: 'Awakened Spellbook: Ritual', key: 'awakened_spellbook_ritual', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Manifest Mind', key: 'manifest_mind', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      { name: 'One with the Word', key: 'one_with_the_word', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── FToD: MONK ───────────────────────────────────────────────────────
   { id: 'way-of-the-ascendant-dragon', name: 'Way of the Ascendant Dragon', classId: 'monk', sourceBook: 'FToD',
@@ -838,6 +1190,13 @@ export const ALL_SUBCLASSES: Subclass[] = [
       // bonus at each monk level (0 before the feature unlocks).
       { name: 'Wings Unfurled', key: 'wings_unfurled', rechargeOn: 'long' as const,
         maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+      // FToD p.20: Breath of the Dragon is prof-bonus uses per long rest, with 2 ki as the
+      // fallback once they run out (an alternative cost, not a recharge — ki is tracked).
+      // Draconic Presence, the reroll buried inside Draconic Disciple, is once per long rest.
+      { name: 'Breath of the Dragon', key: 'breath_of_the_dragon', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
+      { name: 'Draconic Presence', key: 'draconic_presence', rechargeOn: 'long' as const,
+        maxPerLevel: {1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1} },
       { name: 'Aspect of the Wyrm', key: 'aspect_of_the_wyrm', rechargeOn: 'long' as const,
         maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6} },
     ],
@@ -856,7 +1215,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Bond of Fang and Scale', level: 7, description: 'When summoned, your drake grows wings (flying speed = walking speed) and becomes Medium. You can ride it if Medium or smaller (no flying while riding). Magic Fang: drake\'s Bite deals +1d6 extra Draconic Essence damage. Resistance: while drake is summoned, you gain resistance to the drake\'s Draconic Essence damage type.' },
     { name: 'Drake\'s Breath', level: 11, description: 'As an action, you or your drake exhale a 30-ft cone of energy. All creatures in the area make a Dexterity save vs. your spell save DC — fail: 8d6 damage, success: half. Damage type can be any of acid/cold/fire/lightning/poison (need not match Draconic Essence). Increases to 10d6 at ranger level 15. Once per long rest; or expend a 3rd-level+ spell slot to use again.' },
     { name: 'Perfected Bond', level: 15, description: 'While drake is summoned: Empowered Bite — drake deals 2d6 extra Draconic Essence damage on its Bite. Large Drake — grows to Large; no longer prohibited from flying while you ride it. Reflexive Resistance — when you or the drake takes damage within 30 ft, you can use your reaction to give yourself or the drake resistance to that instance of damage. Uses = proficiency bonus; all regain on long rest.' },
-  ]},
+  ],
+    // Drakewarden Perfected Bond (15th): prof bonus uses, all back on a long rest.
+    resources: [
+      { name: 'Perfected Bond', key: 'perfected_bond', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } },
+      // FToD p.28: Drake Companion is summoned once per long rest (or a 1st-level+ slot to
+      // resummon); Drake's Breath is once per long rest on the same alternative-cost terms.
+      { name: 'Drake Companion', key: 'drake_companion', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: "Drake's Breath", key: 'drakes_breath', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // ── TCE: ARTIFICER SUBCLASSES ─────────────────────────────────────────
   { id: 'alchemist', name: 'Alchemist', classId: 'artificer', sourceBook: 'TCE', description: 'An Alchemist is an expert at combining reagents to produce mystical effects. Alchemists use their creations to give life and to leech it away.', features: [
@@ -866,7 +1237,17 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Alchemical Savant', level: 5, description: 'When you cast a spell using alchemist\'s supplies as a focus, you add your Intelligence modifier to one healing or acid/fire/necrotic/poison damage roll of the spell.' },
     { name: 'Restorative Reagents', level: 9, description: 'When a creature drinks one of your elixirs, it gains temporary HP equal to 2d6 + your Intelligence modifier. You can also cast Lesser Restoration without expending a spell slot, a number of times equal to your Int modifier per long rest.' },
     { name: 'Chemical Mastery', level: 15, description: 'You gain resistance to acid and poison damage and are immune to the poisoned condition. You can cast Greater Restoration and Heal once per long rest each without expending a spell slot.' },
-  ]},
+  ],
+    // Chemical Mastery (15th): the two free castings, one each per long rest.
+    resources: [
+      { name: 'Chemical Mastery', key: 'chemical_mastery', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:2,16:2,17:2,18:2,19:2,20:2 } },
+      // TCE p.14: Restorative Reagents — the free Lesser Restoration is Int modifier uses
+      // (min 1) per long rest. (The temp-HP rider on elixirs has no limit of its own.)
+      { name: 'Restorative Reagents', key: 'restorative_reagents', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
   { id: 'armorer', name: 'Armorer', classId: 'artificer', sourceBook: 'TCE', description: 'An artificer who specializes as an Armorer modifies armor to function almost like a second skin.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with heavy armor and smith\'s tools.' },
     { name: 'Armorer Spells', level: 3, description: 'You always have certain spells prepared: Magic Missile, Thunderwave (3rd), Mirror Image, Shatter (5th), Hypnotic Pattern, Lightning Bolt (9th), Fire Shield, Greater Invisibility (13th), Passwall, Wall of Force (17th).' },
@@ -875,7 +1256,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Extra Attack', level: 5, description: 'You can attack twice when you take the Attack action.' },
     { name: 'Armor Modifications', level: 9, description: 'You learn to extend infusion magic to your Arcane Armor. You can have up to 4 infusions in armor pieces. The number of infused items doesn\'t count against your max.' },
     { name: 'Perfected Armor', level: 15, description: 'Guardian: As a reaction when a Huge or smaller creature ends its turn within 30 feet of you, force it to make a Strength save (vs your spell save DC) or be pulled up to 30 feet toward you; if it ends within 5 feet, you can make one melee attack against it. You can use this reaction a number of times equal to your proficiency bonus, regaining all uses on a long rest. Infiltrator: Creatures hit by your Lightning Launcher shed dim light in a 5-foot radius, have disadvantage on their next attack roll against you, and the next attack roll against them has advantage (plus an extra 1d6 lightning damage on a hit), until the start of your next turn.' },
-  ]},
+  ],
+    // Perfected Armor (15th): proficiency-bonus uses, all back on a long rest.
+    resources: [{ name: 'Perfected Armor', key: 'perfected_armor', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }],
+  },
   { id: 'artillerist', name: 'Artillerist', classId: 'artificer', sourceBook: 'TCE', description: 'An Artillerist specializes in using magic to hurl energy, projectiles, and explosions on a battlefield.', features: [
     { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with woodcarver\'s tools. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
     { name: 'Artillerist Spells', level: 3, description: 'You always have certain spells prepared: Shield, Thunderwave (3rd), Scorching Ray, Shatter (5th), Fireball, Wind Wall (9th), Ice Storm, Wall of Fire (13th), Cone of Cold, Wall of Force (17th).' },
@@ -883,7 +1268,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Arcane Firearm', level: 5, description: 'You can turn a wand, staff, or rod into an arcane firearm — a magical conduit for your artificer spells. When you cast an artificer spell through it, you add 1d8 to the spell\'s damage roll.' },
     { name: 'Explosive Cannon', level: 9, description: 'Each cannon\'s damage increases by 1d8 (Flamethrower 3d8, Force Ballista 3d8, Protector 2d8). As an action (within 60 ft), command cannon to detonate: destroyed, each creature within 20 ft makes Dex save or takes 3d8 force (half on success).' },
     { name: 'Fortified Position', level: 15, description: 'You and your allies have half cover while within 10 feet of a cannon you create. You can have two cannons at the same time.' },
-  ]},
+  ],
+    // Eldritch Cannon (3rd): one per long rest without a spell slot (a slot may be spent for more).
+    resources: [{ name: 'Eldritch Cannon', key: 'eldritch_cannon', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'battle-smith', name: 'Battle Smith', classId: 'artificer', sourceBook: 'TCE', description: 'Armies require protection, and someone has to put things back together if defenses fail. A combination of protector and medic, a Battle Smith is an expert at defending allies and repairing both materiel and personnel.', features: [
     { name: 'Tools of the Trade', level: 3, description: 'You gain proficiency with martial weapons and smith\'s tools.' },
     { name: 'Battle Smith Spells', level: 3, description: 'You always have certain spells prepared: Heroism, Shield (3rd), Branding Smite, Warding Bond (5th), Aura of Vitality, Conjure Barrage (9th), Aura of Purity, Fire Shield (13th), Banishing Smite, Mass Cure Wounds (17th).' },
@@ -892,7 +1281,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Extra Attack', level: 5, description: 'You can attack twice when you take the Attack action.' },
     { name: 'Arcane Jolt', level: 9, description: 'When you hit a target with a magic weapon attack or your steel defender hits, you can channel magical energy: deal an extra 2d6 force damage, or restore 2d6 HP to one creature within 30 feet. Int-mod uses per long rest.' },
     { name: 'Improved Defender', level: 15, description: 'Your Arcane Jolt damage/healing increases to 4d6. When your steel defender uses its Deflect Attack reaction, the attacker takes force damage equal to 1d4 + Int mod.' },
-  ]},
+  ],
+    // TCE p.16: Arcane Jolt — Intelligence modifier uses (min 1) per long rest.
+    resources: [{ name: 'Arcane Jolt', key: 'arcane_jolt', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── EGtW: Explorer's Guide to Wildemount ────────────────────────────────
   { id: 'echo-knight', name: 'Echo Knight', classId: 'fighter', sourceBook: 'EGtW', description: 'A mysterious and feared frontline warrior of the Kryn Dynasty, the Echo Knight has mastered the art of using dunamis to summon the fading shades of unrealized timelines to aid them in battle. Passing through the shades of history, an Echo Knight can shroud themselves in the memory of conflict.', features: [
@@ -902,7 +1295,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Shadow Martyr', level: 10, description: 'You can make your echo throw itself in front of an attack directed at another creature that you can see. Before the attack roll is made, you can use your reaction to teleport the echo to an unoccupied space within 5 feet of the targeted creature. The attack roll that triggered the reaction is made against the echo instead. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Reclaim Potential', level: 15, description: 'You\'ve learned to absorb the fleeting magic of your echo. When an echo of yours is destroyed by an enemy\'s attack, you can gain a number of temporary hit points equal to 2d6 + your Constitution modifier, provided you don\'t already have temporary hit points.\n\nYou can use this feature a number of times equal to your Constitution modifier (minimum of once). You regain all expended uses when you finish a long rest.' },
     { name: 'Legion of One', level: 18, description: 'You can use a bonus action to create two echoes with your Manifest Echo feature, and these echoes can coexist. If you try to create a third echo, the previous two echoes are destroyed. Anything you can do from one echo\'s position can be done from the other\'s instead.\n\nIn addition, when you roll initiative and have no uses of Unleash Incarnation remaining, you regain one use of that feature.' },
-  ]},
+  ],
+    // Unleash Incarnation (3rd): Constitution modifier uses (min 1), all back on a long rest (EGtW).
+    resources: [
+      { name: 'Unleash Incarnation', key: 'unleash_incarnation', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // EGtW p.183: Shadow Martyr is once per short or long rest; Reclaim Potential is
+      // Constitution modifier uses (min 1) per long rest.
+      { name: 'Shadow Martyr', key: 'shadow_martyr', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Reclaim Potential', key: 'reclaim_potential', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   { id: 'chronurgy-magic', name: 'Chronurgy Magic', classId: 'wizard', sourceBook: 'EGtW', description: 'Focusing on the manipulation of time, those who follow the Chronurgy tradition learn to alter the pace of reality to their liking. Using the principles of dunamis, these mages can slow down or reverse time around a creature.', features: [
     { name: 'Chronal Shift', level: 2, description: 'You can magically exert limited control over the flow of time around a creature. As a reaction, after you or a creature you can see within 30 feet of you makes an attack roll, an ability check, or a saving throw, you can force the creature to reroll. You must use this ability before you know whether the roll succeeds or fails. The creature must use the second roll. You can use this ability twice, and you regain all expended uses when you finish a long rest.' },
@@ -910,17 +1315,36 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Momentary Stasis', level: 6, description: 'As an action, you can magically force a Large or smaller creature you can see within 60 feet of you to make a Constitution saving throw against your spell save DC. On a failed save, the creature is encased in a field of magical energy until the end of your next turn or until the creature takes any damage. While encased in this way, the creature is incapacitated and has a speed of 0.\n\nYou can use this feature a number of times equal to your Intelligence modifier (minimum of once). You regain all expended uses when you finish a long rest.' },
     { name: 'Arcane Abeyance', level: 10, description: 'When you cast a spell using a spell slot of 4th level or lower, you can condense the spell\'s magic into a gray mote of energy (a Tiny object; AC 15, 1 HP, immune to poison and psychic damage) and conjure it in your open hand. A creature can take the mote and use an action to release the stored spell within 1 hour. After that time, the mote\'s magic is lost. When the mote\'s magic is released or the mote is destroyed, it vanishes.\n\nIf you cast the spell with a saving throw, it uses your spell save DC. If the spell requires concentration, the releasing creature concentrates on it. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
     { name: 'Convergent Future', level: 14, description: 'You can peer through possible futures and magically pull one of them into reality. As a reaction, when you or a creature you can see within 60 feet of you makes an attack roll, an ability check, or a saving throw, you can ignore the roll and decide whether the roll succeeds or fails. When you use this feature, you gain one level of exhaustion. Only a long rest removes this exhaustion.' },
-  ]},
+  ],
+    // Momentary Stasis (6th): Intelligence modifier uses (min 1), all back on a long rest.
+    resources: [
+      { name: 'Momentary Stasis', key: 'momentary_stasis', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // EGtW p.184: Arcane Abeyance (10th) — once per short or long rest.
+      { name: 'Arcane Abeyance', key: 'arcane_abeyance', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      // EGtW p.184: Chronal Shift — a flat 2 uses per long rest, not an ability modifier.
+      { name: 'Chronal Shift', key: 'chronal_shift', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:2,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },
+    ],
+  },
 
   { id: 'graviturgy-magic', name: 'Graviturgy Magic', classId: 'wizard', sourceBook: 'EGtW', description: 'Understanding and mastering the forces that draw matter together or drive it apart, the School of Graviturgy opens up possibilities that other spellcasters can\'t consider. Some of the brightest arcane minds have been drawn to this school, seeking to master the forces that bind the universe together.', features: [
     { name: 'Adjust Density', level: 2, description: 'As an action, you can magically alter the weight of one object or creature you can see within 30 feet of you. The object or creature must be Large or smaller (Huge or smaller starting at 10th level). The target\'s weight is halved or doubled for up to 1 minute or until your concentration ends (as if concentrating on a spell).\n\nWhile the weight of a creature is halved by this effect, the creature\'s speed increases by 10 feet, it can jump twice as far as normal, and it has disadvantage on Strength checks and Strength saving throws. While the weight of a creature is doubled by this effect, the creature\'s speed is reduced by 10 feet, and it has disadvantage on Dexterity checks and Dexterity saving throws.\n\nYou can use this feature a number of times equal to your Intelligence modifier (minimum of once). You regain all expended uses when you finish a long rest.' },
-    { name: 'Gravity Well', level: 2, description: 'Whenever you cast a spell on a creature, you can move the target 5 feet to an unoccupied space of your choice if the target is willing, if the spell requires an attack roll and hits, or if the target fails a saving throw against the spell.' },
-    { name: 'Violent Attraction', level: 6, description: 'When another creature that you can see within 60 feet of you hits with a weapon attack, you can use your reaction to increase the attack\'s velocity, causing the attack\'s target to take an extra 1d10 damage of the weapon\'s type.\n\nAlternatively, if a creature within 60 feet of you takes damage from a fall, you can use your reaction to increase the fall\'s damage by 2d10.\n\nYou can use this feature a number of times equal to your Intelligence modifier (minimum of once). You regain all expended uses when you finish a long rest.' },
-    { name: 'Event Horizon', level: 10, description: 'As an action, you can magically emit a powerful field of gravitational energy that tugs at other creatures for up to 1 minute or until your concentration ends (as if concentrating on a spell). For the duration, whenever a creature hostile to you starts its turn within 30 feet of you, it must make a Strength saving throw against your spell save DC. On a failed save, it takes 2d10 force damage, and its speed is reduced to 0 until the start of its next turn. On a successful save, it takes half as much damage and each foot of its movement costs 2 extra feet until the start of your next turn.\n\nOnce you use this feature, you can\'t do so again until you finish a long rest.' },
-    { name: 'Deprive the Unworthy', level: 14, description: 'You can seize control of gravitational energy to strip it from another creature. As a bonus action, you can magically target a creature you can see within 30 feet of you. The target must make a Strength saving throw against your spell save DC. On a failed save, its flying speed (if any) is reduced to 0 feet for 1 minute. An airborne creature affected by this feature descends at 60 feet per round until it reaches the ground or the minute ends.\n\nIn addition, when a creature within 30 feet of you makes an attack roll using a ranged weapon, you can use your reaction to impose disadvantage on the roll. You can use this reaction a number of times equal to your Intelligence modifier (minimum of once). You regain all expended uses after a long rest.' },
-  ]},
+    { name: 'Gravity Well', level: 6, description: 'Whenever you cast a spell on a creature, you can move the target 5 feet to an unoccupied space of your choice if the target is willing, if the spell requires an attack roll and hits, or if the target fails a saving throw against the spell.' },
+    { name: 'Violent Attraction', level: 10, description: 'When another creature that you can see within 60 feet of you hits with a weapon attack, you can use your reaction to increase the attack\'s velocity, causing the attack\'s target to take an extra 1d10 damage of the weapon\'s type.\n\nAlternatively, if a creature within 60 feet of you takes damage from a fall, you can use your reaction to increase the fall\'s damage by 2d10.\n\nYou can use this feature a number of times equal to your Intelligence modifier (minimum of once). You regain all expended uses when you finish a long rest.' },
+    { name: 'Event Horizon', level: 14, description: 'As an action, you can magically emit a powerful field of gravitational energy that tugs at other creatures for up to 1 minute or until your concentration ends (as if concentrating on a spell). For the duration, whenever a creature hostile to you starts its turn within 30 feet of you, it must make a Strength saving throw against your spell save DC. On a failed save, it takes 2d10 force damage, and its speed is reduced to 0 until the start of its next turn. On a successful save, it takes half as much damage and each foot of its movement costs 2 extra feet until the start of your next turn.\n\nOnce you use this feature, you can\'t do so again until you finish a long rest.' },
+  ],
+    // EGtW p.185: Violent Attraction (10th) — Intelligence modifier uses (min 1) per long rest.
+    // Event Horizon (14th) is concentration with no use limit, so it gets no counter.
+    resources: [{ name: 'Violent Attraction', key: 'violent_attraction', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
-  { id: 'cobalt-soul', name: 'Way of the Cobalt Soul', classId: 'monk', sourceBook: 'EGtW', description: 'Driven by the pursuit of knowledge and the spirit of truth, monks of the Cobalt Soul are the enlightened agents of the Cobalt Reserve, a network of libraries and scholars across Exandria. These monks use their physical prowess and keen intellect to expose the secrets of the world.', features: [
+  // Attributed to EGtW here, but EGtW's own text names the Tal'Dorei Campaign Setting as the
+  // source — the subclass is not in Wildemount at all. Hidden from the pickers until TDCSR is
+  // registered as a book; the entry stays so an existing Cobalt Soul monk still resolves.
+  { id: 'cobalt-soul', hidden: true, name: 'Way of the Cobalt Soul', classId: 'monk', sourceBook: 'EGtW', description: 'Driven by the pursuit of knowledge and the spirit of truth, monks of the Cobalt Soul are the enlightened agents of the Cobalt Reserve, a network of libraries and scholars across Exandria. These monks use their physical prowess and keen intellect to expose the secrets of the world.', features: [
     { name: 'Extract Aspects', level: 3, description: 'When you hit a creature with one of the attacks granted by your Flurry of Blows, you can analyze its defenses. On a hit, you learn the following information about the creature: its damage vulnerabilities, damage resistances, damage immunities, and condition immunities.\n\nThe DM might determine that some information about the creature is too obscure to be ascertained in this way.' },
     { name: 'Extort Truth', level: 3, description: 'You can precisely strike a hidden pressure point to weaken a creature\'s defenses. Whenever you hit a creature with one of the attacks granted by your Flurry of Blows, you can spend 1 ki point to force the creature to make a Charisma saving throw. On a failed save, the creature is unable to speak a deliberate lie and has disadvantage on Deception checks for 1 minute.\n\nYou know if the creature failed or succeeded on its saving throw. An affected creature is aware of the effect and can thus avoid answering questions to which it would normally respond with a lie.' },
     { name: 'Mystical Erudition', level: 3, description: 'You have extensively studied the history and lore within the archives of the Cobalt Soul. You learn one language of your choice, and you gain proficiency with one of the following skills of your choice: Arcana, History, Investigation, Nature, or Religion. If you already have proficiency in one of the listed skills, you can choose to double your proficiency bonus for ability checks you make that use that skill.' },
@@ -958,7 +1382,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Siren Song', level: 3, description: 'When you choose this college at 3rd level, as an action you choose one creature within 60 feet that can hear you. That creature must make a Wisdom saving throw with disadvantage; on a failure it is incapacitated and its movement is reduced to 0 until the start of your next turn. You can spend a Bardic Inspiration to target one additional creature within 5 feet of the first. Usable twice per long rest.' },
     { name: 'Deep Dreams', level: 6, description: 'When you reach 6th level you learn the sleep spell; it doesn\'t count against your bard spells known. When you cast sleep you can expend one Bardic Inspiration die and add that roll plus your Charisma modifier to the hit points affected. You can also cast it once at its lowest level without expending a spell slot per long rest.' },
     { name: 'Blessing of the Enchantress', level: 14, description: 'Beginning at 14th level, as an action you can expend a spell slot to cure a number of conditions equal to the spell slot level (blinded, charmed, deafened, frightened, paralysed, poisoned, stunned, or the effects of spells like hex/bestow curse). These can target the same creature or multiple.' },
-  ]},
+  ],
+    // ToB p.9: Siren Song is 2 uses per long rest (a flat 2, not an ability modifier);
+    // Deep Dreams grants one free lowest-level Sleep per long rest.
+    resources: [
+      { name: 'Siren Song', key: 'siren_song', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },
+      { name: 'Deep Dreams: Free Sleep', key: 'deep_dreams_sleep', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Cleric
   { id: 'tob-island-domain', name: 'Island Domain', classId: 'cleric', sourceBook: 'ToB', description: 'A beacon of hope for sailors in a storm — you are a steady hand, a calming presence, a pillar of strength supporting your crew through the coming tides.', features: [
@@ -987,7 +1420,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Ocean Wildlife', level: 6, description: 'Starting at 6th level, whenever you transform into a beast or swarm without a swimming speed, you can convert their standard or flying speed into a swimming speed, and gain the ability to breathe underwater as that beast or swarm.' },
     { name: 'Druidic Rapids', level: 10, description: 'Starting from 10th level, your speed increases by 10 feet in natural form and by 20 feet in all Wild Shape forms. Any ally who starts their turn within 20 feet of you increases their speed by 10 feet and the range of your Breaking Waves increases to 20 feet.' },
     { name: 'Spawning Season', level: 14, description: 'Beginning at 14th level, when you use Wild Shape you can expend a second use to also transform up to 3 allied creatures you can see within 30 feet. Allied creatures gain Wild Shape benefits but cannot transform into anything with CR higher than 2. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.16: Spawning Season — once per long rest. (It also spends a second Wild Shape
+    // use, which the druid class resource already tracks.)
+    resources: [{ name: 'Spawning Season', key: 'spawning_season', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'tob-circle-of-the-tides', name: 'Circle of the Tides', classId: 'druid', sourceBook: 'ToB', description: 'You guard the waters of the world from pollution, hunting those who seek to bring death and ruin to those who cross the tides and dwell below the waters\' surface.', features: [
     { name: 'Tide Walker', level: 2, description: 'Starting from 2nd level you can use a bonus action to move an allied creature a number of feet equal to your Wisdom modifier multiplied by 5.' },
     { name: 'Rebuking Wave', level: 2, description: 'Starting from 2nd level whenever a creature comes within 5 ft of you, you can use your reaction to make a melee spell attack. On a hit the creature takes 1d8 magical bludgeoning damage and is knocked back 10 ft (2d8 at 5th, 3d8 at 11th, 4d8 at 17th).' },
@@ -1003,7 +1441,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Walk the Plank', level: 10, description: 'Starting at 10th level, you can give yourself a bonus to initiative rolls equal to your Charisma modifier. You also gain advantage on Acrobatics checks made when walking on a narrow space or boarding a ship.' },
     { name: 'No Quarter', level: 15, description: 'From 15th level, when you reduce a creature to 0 hit points, you can immediately use your reaction to move up to half your movement speed and make an attack using the weapon of the creature you defeated (including any magical properties).' },
     { name: 'Till the End of Our Days', level: 18, description: 'When you reach level 18, while within 60 feet of a body of water, you have advantage on death saving throws. Additionally, a roll of 18–20 on death saving throws counts as rolling a 20.' },
-  ]},
+  ],
+    // ToB p.22: Ferocious Presence — once per short or long rest.
+    resources: [{ name: 'Ferocious Presence', key: 'ferocious_presence', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
   { id: 'tob-captain', name: 'Captain', classId: 'fighter', sourceBook: 'ToB', description: 'A captain\'s word is final. Their charisma inspires crew to feats of great strength, and they never back down from a fight — leading from the front at all times.', features: [
     { name: 'Take to the Sea', level: 3, description: 'At 3rd level, you gain proficiency in vehicles (water) and navigator\'s tools.' },
     { name: 'Captain\'s Call', level: 3, description: 'Starting at level 3, as a bonus action you choose one ally within 60 feet who can hear you. That creature gains one Captain\'s Call die (d6) to add to one roll before the end of the next minute. Uses = 1 + Charisma modifier per long rest. Die grows to d8 at 10th, d10 at 18th.' },
@@ -1011,7 +1453,19 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Never Surrender', level: 10, description: 'At 10th level, when you use Second Wind you can also choose an ally within 30 feet; they regain the same number of hit points you do. In addition, Second Wind heals you by an additional amount equal to the value rolled on your Captain\'s Call die.' },
     { name: 'Leadership', level: 15, description: 'Starting at 15th level, whenever you give someone Captain\'s Call, all attacks you make on your next turn receive a +2 bonus to attack and damage rolls.' },
     { name: 'All for One', level: 18, description: 'From 18th level, as a bonus action expend a Captain\'s Call die to command allies equal to your Charisma modifier within 60 feet; they can use their reaction to immediately make a weapon attack or cast a cantrip targeting one creature. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.21: Captain's Call is 1 + Cha modifier uses (min 1) per long rest, with the die
+    // growing d6 -> d8 (10th) -> d10 (18th). This is the feature that exposed the sweep gap:
+    // the app phrases it "Uses = 1 + Charisma modifier per long rest", which matched none of
+    // the original patterns, and its escaped-apostrophe NAME hid it from the feature regex.
+    resources: [
+      { name: "Captain's Call", key: 'captains_call', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+        resourceDie: { 3: 6, 10: 8, 18: 10 } },
+      { name: 'All for One', key: 'all_for_one', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Monk
   { id: 'tob-way-of-the-depths', name: 'Way of the Depths', classId: 'monk', sourceBook: 'ToB', description: 'The essence of the cold, unforgiving depths empowers you to crush and drown your foes without hesitation or mercy.', features: [
@@ -1035,7 +1489,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aura of the Deep', level: 7, description: 'Starting from 7th level you emit a 15 ft aura while conscious. All allies within this area gain +5 to all Perception & Investigation checks.' },
     { name: 'More, More, More!', level: 15, description: 'At 15th level, if you are attuned to at least 1 magical item, you gain a +1 bonus to all saving throws. You also gain a +1 bonus to your AC for each magical item you are attuned to.' },
     { name: 'Avatar of Greed', level: 20, description: 'At 20th level, as an action you transform into a golden-skinned embodiment of greed for 1 minute. Once per turn you gain temporary hit points equal to half the damage you deal. Magical weapons do not have their magical bonuses when striking you. If you reduce a creature to 0 hit points, all items they carried are transported to a pocket dimension accessible only to you. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.30: Avatar of Greed — once per long rest.
+    resources: [{ name: 'Avatar of Greed', key: 'avatar_of_greed', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+  },
   { id: 'tob-oath-of-the-deep', name: 'Oath of the Deep', classId: 'paladin', sourceBook: 'ToB', description: 'You serve the Gods of the great beast of the ocean — every soul killed on the sea is an offering to its depths. The ocean devours the weak and you are its instrument.', features: [
     { name: 'Oath of the Deep Spells', level: 3, description: 'Paladin level 3 — Aquatic Volley, Cold Rebuke; 5th — Crushing Smite, Crushing Wave; 9th — Swell, Tidal Wave; 13th — Control Water, Watery Sphere; 17th — Drowning Smite, Reaching Cold.' },
     { name: 'Aura of the Deep', level: 3, description: 'Starting from 3rd level you emit an aura 15 feet in every direction while conscious. All allies in this area gain a swim speed equal to their movement speed, the ability to breathe underwater, can cast spells underwater, and have no penalty to ranged weapon range in this aura. Increases to 30 ft at 12th and 60 ft at 20th.' },
@@ -1061,7 +1519,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Quick Getaway', level: 9, description: 'From 9th level, your movement speed increases by 10 feet when you use Cunning Action to Hide or Dash. When an ally uses their Smuggler Token their movement also increases by 10 feet during their turn, and your movement increases by 10 feet until the end of your next turn.' },
     { name: 'Hidden Blades', level: 13, description: 'Beginning from 13th level, if you draw a weapon and attack with it on the same turn, you can deal an additional 1d8 psychic damage.' },
     { name: 'Smuggler\'s Ambush', level: 17, description: 'Once you reach 17th level, when you roll for initiative you can choose up to five allies within 60 feet. When attacking a surprised creature, once per turn they can deal damage equal to half your Sneak Attack damage dice (rounded down).' },
-  ]},
+  ],
+    // ToB p.33: People Person — Smuggler Tokens, 1 per short rest at 3rd, 2 at 11th, 3 at
+    // 19th. Level-scaled directly in the table, so no override is needed.
+    resources: [{ name: 'People Person: Smuggler Token', key: 'smuggler_token', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:3,20:3 } }],
+  },
 
   // Sorcerer
   { id: 'tob-salt-bloodline', name: 'Salt Bloodline', classId: 'sorcerer', sourceBook: 'ToB', description: 'Inside your blood flows a swarm of micro-organisms that once dwelled deep beneath the ocean. They grant incredible powers in exchange for chronic ailment.', features: [
@@ -1076,7 +1539,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Aspiring Alchemist', level: 6, description: 'When you reach 6th level, you can spend 10 minutes of concentration to transform copper or silver coins into silver and gold coins respectively (up to 50 coins at once, twice per long rest). You can also spend 2 sorcery points to cast identify without material components even if you don\'t know the spell.' },
     { name: 'Treasure Hunter', level: 14, description: 'Starting from 14th level, you gain a burrow speed equal to your walking speed. In addition, you can attune to up to five magic items rather than three.' },
     { name: 'Gold Hoarder', level: 18, description: 'At 18th level, as an action you can spend 100 gold pieces to transform into a golem-like creature of molten gold for 1 minute. You gain +2 AC, resistance to fire damage, and creatures starting their turn within 5 feet of you take 10 fire damage. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.35: Aspiring Alchemist is 2 per long rest (the coin transmutation only — the
+    // identify option costs 2 sorcery points, which the sorcery point pool already tracks).
+    resources: [
+      { name: 'Aspiring Alchemist', key: 'aspiring_alchemist', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:2,19:2,20:2 } },
+      { name: 'Gold Hoarder', key: 'gold_hoarder', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Warlock
   { id: 'tob-sea-goddess-patron', name: 'Sea Goddess Patron', classId: 'warlock', sourceBook: 'ToB', description: 'The Sea Goddess calms storms, sends guiding winds, and warns her children of coming dangers. While you sail on her seas, you are under her protection.', features: [
@@ -1093,7 +1565,15 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Dark Depths', level: 6, description: 'Starting at 6th level, you gain resistance to cold damage. As an action you can summon 2 sahuagin (undead type, immune to poison/poisoned, resistant to necrotic, vulnerable to radiant/fire) that defend you and your allies for 10 minutes. Once per long rest.' },
     { name: 'Black Sails at Midnight', level: 10, description: 'At 10th level, as a reaction you can armour yourself with the ghostly hull of the ship: +2 AC until the start of your next turn. Additionally, when you use this reaction your speed also increases by 15 feet until the end of your next turn.' },
     { name: 'Voyage of the Damned', level: 14, description: 'When you reach 14th level, as an action you can summon a large ghostly ship crashing into a point up to 60 feet away. Every creature within 15 ft must make a Dexterity save (vs spell save DC) or take 8d8 force damage (half on success). The area is difficult terrain for 1 minute and creatures moving into it must make a Wisdom save or be frightened until the start of your next turn. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.39: Dark Depths (6th) and Voyage of the Damned (14th) are each once per long rest.
+    resources: [
+      { name: 'Dark Depths', key: 'dark_depths', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Voyage of the Damned', key: 'voyage_of_the_damned', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Wizard
   { id: 'tob-school-of-navigators', name: 'School of Navigators', classId: 'wizard', sourceBook: 'ToB', description: 'Travelling the seas seeking knowledge from across the world, you\'ve mastered navigation using the maps you\'ve gathered and the stars in the sky.', features: [
@@ -1109,7 +1589,14 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Tidal Magic', level: 6, description: 'At 6th level, certain spells become Ocean Spells for you: Wizard level 3 — Tidal Wave, Wall of Water; 4th — Control Water, Watery Sphere; 5th — Maelstrom; 8th — Tsunami. When you cast an Ocean Spell, every hostile creature within 30 feet of the target takes 1d10 cold + 1d12 bludgeoning (both ignore resistances), your speed is doubled, and the first attack against you before your next turn has disadvantage. At 9th add Maelstrom; at 15th add Tsunami.' },
     { name: 'Flow of Current', level: 10, description: 'When you reach 10th level, you gain resistance to cold damage. Your speed cannot be reduced, and moving through magical or non-magical difficult terrain costs you no extra movement.' },
     { name: 'Ocean Form', level: 14, description: 'At 14th level, as an action you assume an oceanic form (body made entirely of water) for 1 minute: immunity to cold; resistance to bludgeoning, piercing, and slashing damage; can cast Ocean Spells unprepared; when hit you can teleport up to 30 feet as a reaction. Once per long rest.' },
-  ]},
+  ],
+    // ToB p.41: Ocean Form — once per long rest.
+    // NOT a resource: Pull of the Tides (2nd) picks a tidal aspect at the end of each long
+    // rest. The sweep flagged it on "per long rest", but it is a per-rest CHOICE with no use
+    // counter — the same shape as the Armorer's guardian/infiltrator mode.
+    resources: [{ name: 'Ocean Form', key: 'ocean_form', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
+  },
 
   // ── SCAG ──────────────────────────────────────────────────────────────────
 
@@ -1172,7 +1659,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Divine Allegiance', level: 7, description: 'Starting at 7th level, when a creature within 5 feet of you takes damage, you can use your reaction to magically substitute your own health for that of the target creature, causing that creature not to take the damage. Instead, you take the damage. This damage to you can\'t be reduced or prevented in any way.' },
     { name: 'Unyielding Spirit', level: 15, description: 'Starting at 15th level, you have advantage on saving throws to avoid becoming paralyzed or stunned.' },
     { name: 'Exalted Champion', level: 20, description: 'At 20th level, your presence on the field of battle is an inspiration to those dedicated to your cause. You can use your action to gain the following benefits for 1 hour: resistance to bludgeoning, piercing, and slashing damage from nonmagical weapons; your allies have advantage on death saving throws while within 30 feet of you; you have advantage on Wisdom saving throws, as do your allies within 30 feet of you. Once used, you can\'t use it again until you finish a long rest.' },
-  ], alwaysPreparedSpells: { 3: ['command', 'compelled-duel'], 5: ['warding-bond', 'zone-of-truth'], 9: ['aura-of-vitality', 'spirit-guardians'], 13: ['banishment', 'guardian-of-faith'], 17: ['circle-of-power', 'geas'] }},
+  ],
+    // SCAG p.87: Exalted Champion — once per long rest.
+    resources: [{ name: 'Exalted Champion', key: 'exalted_champion', rechargeOn: 'long',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 } }],
+    alwaysPreparedSpells: { 3: ['command', 'compelled-duel'], 5: ['warding-bond', 'zone-of-truth'], 9: ['aura-of-vitality', 'spirit-guardians'], 13: ['banishment', 'guardian-of-faith'], 17: ['circle-of-power', 'geas'] }},
 
   // Rogue: Mastermind
   { id: 'scag-mastermind', name: 'Mastermind', classId: 'rogue', sourceBook: 'SCAG', description: 'Your focus is on people and on the influence and secrets they have. Many spies, courtiers, and schemers follow this archetype, leading lives of intrigue.', features: [
@@ -1190,7 +1681,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Panache', level: 9, description: 'At 9th level, your charm becomes extraordinarily beguiling. As an action, you can make a Charisma (Persuasion) check contested by a creature\'s Wisdom (Insight) check. If you succeed and the creature is hostile, it has disadvantage on attack rolls against targets other than you for 1 minute. If you succeed and the creature isn\'t hostile, it is charmed by you for 1 minute.' },
     { name: 'Elegant Maneuver', level: 13, description: 'Starting at 13th level, you can use a bonus action on your turn to gain advantage on the next Dexterity (Acrobatics) or Strength (Athletics) check you make during the same turn.' },
     { name: 'Master Duelist', level: 17, description: 'Beginning at 17th level, your mastery of the blade lets you turn failure into success in combat. If you miss with an attack roll, you can roll it again with advantage. Once you do so, you can\'t use this feature again until you finish a short or long rest.' },
-  ]},
+  ],
+    // Same subclass as the XGtE Swashbuckler (SCAG itself says it was reprinted there with
+    // identical mechanics), so it shares the master_duelist key — a character can only pick one.
+    resources: [{ name: 'Master Duelist', key: 'master_duelist', rechargeOn: 'short',
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 } }],
+  },
 
   // Sorcerer: Storm Sorcery
   { id: 'scag-storm-sorcery', name: 'Storm Sorcery', classId: 'sorcerer', sourceBook: 'SCAG', description: 'Your innate magic comes from the power of elemental air. Many with this power can trace their magic back to a near-death experience caused by the Great Rain, or your lineage might include the influence of potent air creatures such as vaati or djinn.', features: [
@@ -1209,7 +1705,16 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Defy Death', level: 6, description: 'Starting at 6th level, you can give yourself vitality when you cheat death or when you help someone else cheat it. You can regain hit points equal to 1d8 + your Constitution modifier (minimum of 1 hit point) when you succeed on a death saving throw or when you stabilize a creature with Spare the Dying. Once you use this feature, you can\'t use it again until you finish a long rest.' },
     { name: 'Undying Nature', level: 10, description: 'Beginning at 10th level, you can hold your breath indefinitely, and you don\'t require food, water, or sleep, although you still require rest to reduce exhaustion and still benefit from finishing short and long rests. In addition, you age at a slower rate. For every 10 years that pass, your body ages only 1 year, and you are immune to being magically aged.' },
     { name: 'Indestructible Life', level: 14, description: 'When you reach 14th level, you partake of some of the true secrets of the Undying. On your turn, you can use a bonus action to regain hit points equal to 1d8 + your warlock level. Additionally, if you put a severed body part of yours back in place when you use this feature, the part reattaches. Once you use this feature, you can\'t use it again until you finish a short or long rest.' },
-  ]},
+  ],
+    // SCAG p.139: Defy Death (6th) is once per long rest; Indestructible Life (14th) recharges
+    // on a short or long rest.
+    resources: [
+      { name: 'Defy Death', key: 'defy_death', rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+      { name: 'Indestructible Life', key: 'indestructible_life', rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
+    ],
+  },
 
   // Wizard: Bladesinging
   { id: 'scag-bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'SCAG', description: 'Bladesingers are elves who bravely defend their people and lands. They are elf wizards who master a school of sword fighting grounded in a tradition of arcane magic. Note: Only elves and half-elves can choose this tradition in the Forgotten Realms.',

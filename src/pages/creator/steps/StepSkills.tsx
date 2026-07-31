@@ -1,12 +1,13 @@
 import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { SKILL_ABILITY, abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
-import { getClass } from '../../../data/classes';
+import { getClass, baseClassId } from '../../../data/classes';
 import { getBackground } from '../../../data/backgrounds';
 import { cn } from '../../../utils/cn';
 import type { SkillName } from '../../../types';
 
-function expertiseSlotsForClass(classId: string, classLevel: number): number {
+function expertiseSlotsForClass(rawClassId: string, classLevel: number): number {
+  const classId = baseClassId(rawClassId); // 'rogue-2024' gets Expertise too
   if (classId === 'rogue') {
     if (classLevel >= 6) return 4;
     if (classLevel >= 1) return 2;

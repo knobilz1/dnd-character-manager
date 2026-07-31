@@ -68,6 +68,8 @@ export function Badge({ color = 'slate', className, children, ...props }: BadgeP
     violet: 'bg-violet-900/50 text-violet-300 border-violet-700',
     rose: 'bg-rose-900/50 text-rose-300 border-rose-700',
     cyan: 'bg-cyan-900/50 text-cyan-300 border-cyan-700',
+    lime: 'bg-lime-900/50 text-lime-300 border-lime-700',
+    sky: 'bg-sky-900/50 text-sky-300 border-sky-700',
     gray: 'bg-gray-700/50 text-gray-300 border-gray-600',
     slate: 'bg-slate-700 text-slate-300 border-slate-600',
   };

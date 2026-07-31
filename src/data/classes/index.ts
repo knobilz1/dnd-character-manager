@@ -127,6 +127,16 @@ export const ALL_CLASSES: DClass[] = [
         rechargeOn: 'short',
         maxPerLevel: { 1:0,2:1,3:1,4:1,5:1,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:2,15:2,16:2,17:2,18:3,19:3,20:3 },
       },
+      {
+        // PHB p.59. The recharge depends on the OUTCOME: a failed percentile roll means you
+        // can try again after a long rest, but a success locks it for 7 days. No rest rule
+        // covers that, so 'long' would quietly restore it the morning after it worked.
+        name: 'Divine Intervention',
+        key: 'divine_intervention',
+        rechargeOn: 'special',
+        rechargeNote: 'Long rest if the roll failed; 7 days if your deity intervened',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
     ],
     subclassLabel: 'Divine Domain',
     subclassLevel: 1,
@@ -336,6 +346,21 @@ export const ALL_CLASSES: DClass[] = [
         rechargeOn: 'short',
         maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
       },
+      {
+        // PHB 1st: "Uses = 1 + Cha mod; regain all on long rest." Cha-based, so the real max comes from
+        // the divine_sense override; this table is the mirroring fallback (assumes +0 Cha).
+        name: 'Divine Sense',
+        key: 'divine_sense',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        // PHB 14th: "Uses = Cha mod (min 1); regain on long rest." Level-gated to 14+.
+        name: 'Cleansing Touch',
+        key: 'cleansing_touch',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
     ],
     subclassLabel: 'Sacred Oath',
     subclassLevel: 3,
@@ -420,7 +445,11 @@ export const ALL_CLASSES: DClass[] = [
     toolProficiencies: ['Thieves\' tools'],
     skillChoices: { count: 4, from: ['Acrobatics','Athletics','Deception','Insight','Intimidation','Investigation','Perception','Performance','Persuasion','Sleight of Hand','Stealth'] },
     spellcastingType: 'none',
-    resources: [],
+    resources: [
+      // PHB lv20 Stroke of Luck: "Once you use this feature, you can't use it again until you finish a
+      // short or long rest."
+      { name: 'Stroke of Luck', key: 'stroke_of_luck', rechargeOn: 'short', maxPerLevel: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1} },
+    ],
     subclassLabel: 'Roguish Archetype',
     subclassLevel: 3,
     multiclassPrerequisites: { dex: 13 },
@@ -624,4 +653,24 @@ export const ALL_CLASSES: DClass[] = [
 
 export function getClass(id: string): DClass | undefined {
   return ALL_CLASSES.find(c => c.id === id);
+}
+
+/** Collapse a PHB 2024 class id ('monk-2024') to its 2014 equivalent ('monk').
+ *
+ *  The 2024 classes are separate entries with their own ids, but their core mechanics —
+ *  Unarmored Defense, Sneak Attack dice, Martial Arts die, Rage damage, Bardic Inspiration
+ *  uses — are the same feature under the same name. Anything deriving those from a class id
+ *  must go through here, or a 2024 character is simply invisible to it (which is exactly what
+ *  happened: every such lookup matched 2014 ids only, so e.g. a 2024 Barbarian or Monk got no
+ *  Unarmored Defense and therefore the wrong AC).
+ *
+ *  Reuses the `spellListClassId` alias the 2024 defs already declare rather than string-munging
+ *  the suffix, so a class that ever needs a different mapping only declares it in one place. */
+export function baseClassId(id: string): string {
+  return getClass(id)?.spellListClassId ?? id;
+}
+
+/** Total level in a class, counting its PHB 2024 variant as the same class. */
+export function classLevel(classes: { classId: string; level: number }[], id: string): number {
+  return classes.reduce((n, c) => (baseClassId(c.classId) === id ? n + c.level : n), 0);
 }

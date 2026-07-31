@@ -195,6 +195,10 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const [spellLevelFilter, setSpellLevelFilter] = React.useState<number | 'all'>('all');
   const [pendingPactBoon, setPendingPactBoon] = React.useState<string | undefined>(undefined);
   const [pendingTotemSpirit, setPendingTotemSpirit] = React.useState<string | undefined>(undefined);
+  // Circle of the Land picks its land type at 3rd. Most characters reach 3rd by levelling
+  // up rather than by being created there, so without this the choice — and therefore every
+  // circle spell — is unreachable for them.
+  const [pendingLandType, setPendingLandType] = React.useState<string | undefined>(undefined);
   const [pendingAspectTotem, setPendingAspectTotem] = React.useState<string | undefined>(undefined);
   const [pendingTotemicAttunement, setPendingTotemicAttunement] = React.useState<string | undefined>(undefined);
   const [pendingInvocations, setPendingInvocations] = React.useState<string[]>([]);
@@ -290,12 +294,24 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     ...(sub?.features ?? []).filter(f => f.level === newLevel).map(f => ({ source: sub!.name, ...f })),
   ];
 
-  const needsSubclass = newLevel === classDef.subclassLevel && !primary?.subclassId;
+  // >= not ===: a character who passed their subclass level without picking one — multiclass entry, a
+  // character created above that level, a cancelled dialog, an import — was never prompted again at any
+  // level, and silently lost every subclass feature forever. Every analogous gate in this file already
+  // uses >= (needsPactBoon, needsTotemSpirit, needsAspectTotem).
+  const needsSubclass = newLevel >= classDef.subclassLevel && !primary?.subclassId;
   const availableSubclasses = needsSubclass
     ? ALL_SUBCLASSES.filter(s => s.classId === classDef.id && bookEnabled(s, character.enabledBooks))
     : [];
 
   const isASI = newFeatures.some(f => (f as any).isASI);
+  // PHB 2024's level-19 Epic Boon reaches this step like an ASI but grants a FEAT only —
+  // there is no "+2 ability points" alternative. Without this the dialog offered one.
+  const featOnly = newFeatures.some(f => (f as any).featOnly);
+  // Both places that reset the dialog default asiMode to 'asi'. Rather than special-case
+  // each of them, hold the invariant in one effect: a feat-only level is always in feat mode.
+  React.useEffect(() => {
+    if (featOnly) setASIMode('feat');
+  }, [featOnly]);
 
   // hpRoll is the raw die result (before Con mod) stored in hitPointsRolled history.
   // For average, this is always floor(hitDie/2)+1 — never derived from the clamped
@@ -382,10 +398,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     // Merge pending class options with existing
     const existing = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] };
     if (pendingPactBoon || pendingTotemSpirit || pendingAspectTotem || pendingTotemicAttunement ||
+        pendingLandType ||
         pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length ||
         pendingInfusions.length || pendingOptionalFeatures.length) {
       updateClassOptions({
         ...(pendingPactBoon ? { pactBoon: pendingPactBoon } : {}),
+        ...(pendingLandType ? { landType: pendingLandType } : {}),
         ...(pendingTotemSpirit ? { totemSpirit: pendingTotemSpirit } : {}),
         ...(pendingAspectTotem ? { aspectTotem: pendingAspectTotem } : {}),
         ...(pendingTotemicAttunement ? { totemicAttunement: pendingTotemicAttunement } : {}),
@@ -452,10 +470,16 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const hasSpellcasting = classDef.spellcastingType !== 'none' || isSubclassSpellcaster;
   // EK/AT are known casters with their own per-class-level spell table.
   const isSubclassKnownCaster = isSubclassSpellcaster && !!sub?.spellsKnownByClassLevel;
-  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger', 'bard-2024', 'sorcerer-2024', 'warlock-2024', 'ranger-2024'].includes(classId) || isSubclassKnownCaster;
+  // bard-2024 and ranger-2024 became PREPARED casters in PHB 2024 and have entries in
+  // PREPARED_SPELLS_2024, not SPELLS_KNOWN. Listing them here meant spellsKnownFor() returned 0 for
+  // them, so a 2024 Bard or Ranger was never offered a spell pick on level-up.
+  // sorcerer-2024 / warlock-2024 stay here deliberately: the 2024 book labels their column "Prepared",
+  // but this app models them via SPELLS_KNOWN (entries present, values matching the 2024 column), and
+  // that is self-consistent — moving them would break a working path.
+  const isKnownCaster = ['bard', 'sorcerer', 'warlock', 'ranger', 'sorcerer-2024', 'warlock-2024'].includes(classId) || isSubclassKnownCaster;
   // Wizard/Artificer: prepared casters but with a spellbook — gain exactly 2 free picks per level-up
   const isSpellbookCaster = ['wizard', 'wizard-2024'].includes(classId);
-  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer', 'cleric-2024', 'druid-2024', 'paladin-2024', 'wizard-2024'].includes(classId);
+  const isPreparedCaster = ['cleric', 'druid', 'paladin', 'wizard', 'artificer', 'bard-2024', 'cleric-2024', 'druid-2024', 'paladin-2024', 'ranger-2024', 'wizard-2024'].includes(classId);
 
   const spellsKnownGained = isSubclassKnownCaster
     ? Math.max(0, (sub!.spellsKnownByClassLevel![newLevel - 1] ?? 0) - (sub!.spellsKnownByClassLevel![currentLevel - 1] ?? 0))
@@ -506,6 +530,21 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     (pendingSubclass === 'totem-warrior' || pendingSubclass === 'scag-totem-warrior-elk-tiger')
   );
   const hasScagTotems = isTotemWarrior && enabledBooks.includes('SCAG');
+  const isLandDruid = classId === 'druid' && (
+    primary?.subclassId === 'circle-of-the-land' || pendingSubclass === 'circle-of-the-land'
+  );
+  const needsLandType = isLandDruid && newLevel >= 3 && !classOpts.landType;
+  const LAND_TYPE_OPTIONS: { id: string; emoji: string; name: string; description: string }[] = [
+    { id: 'arctic',    emoji: '🧊', name: 'Arctic',    description: 'hold person, spike growth · sleet storm, slow · freedom of movement, ice storm · commune with nature, cone of cold' },
+    { id: 'coast',     emoji: '🌊', name: 'Coast',     description: 'mirror image, misty step · water breathing, water walk · control water, freedom of movement · conjure elemental, scrying' },
+    { id: 'desert',    emoji: '🏜️', name: 'Desert',    description: 'blur, silence · create food and water, protection from energy · blight, hallucinatory terrain · insect plague, wall of stone' },
+    { id: 'forest',    emoji: '🌲', name: 'Forest',    description: 'barkskin, spider climb · call lightning, plant growth · divination, freedom of movement · commune with nature, tree stride' },
+    { id: 'grassland', emoji: '🌾', name: 'Grassland', description: 'invisibility, pass without trace · daylight, haste · divination, freedom of movement · dream, insect plague' },
+    { id: 'mountain',  emoji: '⛰️', name: 'Mountain',  description: 'spider climb, spike growth · lightning bolt, meld into stone · stone shape, stoneskin · passwall, wall of stone' },
+    { id: 'swamp',     emoji: '🐊', name: 'Swamp',     description: "darkness, Melf's acid arrow · water walk, stinking cloud · freedom of movement, locate creature · insect plague, scrying" },
+    { id: 'underdark', emoji: '🕳️', name: 'Underdark', description: 'spider climb, web · gaseous form, stinking cloud · greater invisibility, stone shape · cloudkill, insect plague' },
+  ];
+
   const needsTotemSpirit = isTotemWarrior && newLevel >= 3 && !classOpts.totemSpirit;
   const needsAspectTotem = isTotemWarrior && newLevel >= 6 && !classOpts.aspectTotem;
   const needsTotemicAttunement = isTotemWarrior && newLevel >= 14 && !classOpts.totemicAttunement;
@@ -561,6 +600,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     (!needsSubclass || pendingSubclass != null) &&
     (!needsPactBoon || pendingPactBoon != null) &&
     (!needsTotemSpirit || pendingTotemSpirit != null) &&
+    (!needsLandType || pendingLandType != null) &&
     (!needsAspectTotem || pendingAspectTotem != null) &&
     (!needsTotemicAttunement || pendingTotemicAttunement != null) &&
     asiChoiceValid &&
@@ -799,9 +839,15 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
         {isASI && (
           <section>
             <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
-              Ability Score Improvement or Feat
+              {featOnly ? 'Epic Boon Feat' : 'Ability Score Improvement or Feat'}
             </h3>
 
+            {featOnly ? (
+              <p className="text-xs text-slate-400 mb-4">
+                This level grants a feat — an Epic Boon feat is recommended. There is no
+                ability score increase to take instead.
+              </p>
+            ) : (
             <div className="grid grid-cols-2 gap-2 mb-4">
               <button
                 onClick={() => setASIMode('asi')}
@@ -826,6 +872,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                 </p>
               </button>
             </div>
+            )}
 
             {asiMode === 'asi' && (
               <div>
@@ -1244,6 +1291,39 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                     <p className="text-xs text-slate-400 line-clamp-2">{boon.description}</p>
                   </button>
                 </HoverCard>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Circle Spells land type (Circle of the Land lv.3+) ──────────── */}
+        {needsLandType && (
+          <section>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Circle Spells — Land Type</h3>
+              {pendingLandType
+                ? <span className="text-xs font-bold text-green-400">1/1 chosen</span>
+                : <span className="text-xs font-bold text-amber-300">0/1 chosen — required</span>}
+            </div>
+            <p className="text-xs text-slate-500 mb-2">
+              Sets which spells become always prepared at 3rd, 5th, 7th and 9th level. They don't count against your prepared total.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {LAND_TYPE_OPTIONS.map(l => (
+                <button
+                  key={l.id}
+                  onClick={() => setPendingLandType(pendingLandType === l.id ? undefined : l.id)}
+                  className={cn(
+                    'p-3 rounded-lg border-2 text-left transition-all',
+                    pendingLandType === l.id ? 'border-amber-500 bg-amber-950/20' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-bold text-white">{l.emoji} {l.name}</p>
+                    {pendingLandType === l.id && <span className="text-amber-400 text-xs">✓</span>}
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">{l.description}</p>
+                </button>
               ))}
             </div>
           </section>
