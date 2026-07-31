@@ -1994,3 +1994,92 @@ purely "is level N the level the book says", which needs per-subclass book readi
 Sweeps to date: **7 layers swept, 4 found defects (57%).** The three clean layers — spell-reference
 integrity, darkvision, and subclass feature reachability — are the regression baseline; recording a
 clean sweep is what makes the second pass able to detect drift.
+
+---
+
+# PHASE A — all 494 class features vs implementation (2026-07-30, log-only)
+
+`tools/audit/classfeatures.py`. R20 established this shape at subclass level by naming instances;
+this sweeps **every** class feature in both editions, so the result is a coverage number rather than
+a list of the ones somebody happened to look at.
+
+Parser note worth keeping: the first version demanded `name`/`level`/`description` in a fixed order
+and silently captured only **363 of 494** — `isASI`/`featOnly` sit between those fields in places.
+The `>= 470` assert caught it. Replaced with a brace-matching object reader that pulls each field
+independently. This is the fourth parser artifact in this audit and the fourth caught by an assert
+rather than by inspection.
+
+## Coverage
+**494 features across all 25 classes** (2014: 234, 2024: 260). Implementation evidence:
+
+| evidence | count |
+|---|---|
+| none | 222 (45%) |
+| ASI / feat slot (handled generically) | 131 |
+| hardcoded code reference | 111 |
+| resource key | 30 |
+
+The 45% with no evidence is **not** a defect count — most are narrative or DM-facing text that needs
+no mechanic. Flagging them all is the mistake the first D4 sweep made. Instead the sweep only reports
+features that make a **mechanical claim of a kind the app already has a field for**, which narrows
+494 to **13**.
+
+## A1 — `monk-2024` Disciplined Survivor (lv14): proficiency in all saving throws, unimplemented
+Its 2014 twin **is** implemented — `useCharacterDerived.ts:156`, "Monk Diamond Soul (lv.14):
+proficiency in all saving throws". The 2024 version has no equivalent branch. Textbook R1 family: the
+logic exists, keyed to the 2014 id only. A 2024 monk 14 is short a proficiency bonus on four saves.
+Severity: **high** (wrong number on a shipping build). Sole proficiency-claim gap in 494 features.
+
+## A2 — expertise gaps: exactly the two R20 already named, and nothing else
+`ranger-2024` Deft Explorer (lv2) and `wizard-2024` Scholar (lv2). This is a **corroboration**, not a
+new finding — an independent sweep over all 494 features found no expertise gap R20 had missed, which
+raises confidence in R20's own list.
+
+## A3 — five features claim advantage; the mechanism exists but nothing feeds it
+`barbarian` Danger Sense (2) and Feral Instinct (7), `fighter-2024` Studied Attacks (13), `ranger`
+Land's Stride (8), `sorcerer-2024` Innate Sorcery (1).
+
+This is **not** "the app has no advantage system". It does: `useDiceStore.ts:9,26` carry
+`mode?: 'normal' | 'advantage' | 'disadvantage'` end to end, and `DiceRoller.tsx` renders the
+side-by-side layout. What is missing is the wiring — the **only** things that auto-select a mode are
+exhaustion (`SheetPage.tsx:571,603` pass `'disadvantage'`) and the manual button at
+`DiceRoller.tsx:582`. No feature ever passes `'advantage'`.
+
+That makes this cheaper to fix than it looks and worth separating from R20: the mechanism is built and
+proven, and each feature needs one argument at an existing call site. Severity: **medium** — the
+player can select advantage by hand, so nothing is unreachable, but the sheet never volunteers it.
+
+## A4 — Extra Attack (5 classes) has no representation at all
+`barbarian`/`fighter`/`monk`/`paladin`/`ranger` level 5. `grep` for `Extra Attack`, `extraAttack`,
+`attacksPerAction`, `numAttacks` across `src/hooks` and `src/pages/sheet` returns **nothing**, and
+`WeaponAttacksPanel` (`SheetPage.tsx:1435-1470`) lists one row per equipped weapon with no attack
+count. Fighter's later 11th/20th upgrades are equally absent.
+
+Severity: **low** — no number is wrong, the sheet simply never states how many attacks the action
+buys. Recorded because a player reading only the sheet has no way to know, and because it is the kind
+of gap that looks like an oversight rather than a decision.
+
+## Clean in this sweep (baselines)
+- **speed claims: 0 unimplemented.** `useCharacterDerived.ts:243` already sums
+  `featSpeedBonus + monkSpeedBonus + barbFastMovement`.
+- **resistance claims: 0 unimplemented** at class level (C4's autognome is a *race*).
+- **spell-grant claims: 0 unimplemented** at class level.
+
+## ✏️ Correction to R20 — one of its notes is now stale
+R20 closes with "no infusion carries `alsoIn: ['ERLW']` (see R11)". Fix round 1 (`7586566`) added
+`alsoIn: ['ERLW']` to **all 17** infusions and the 4 Artificer specialists. The rest of that paragraph
+still stands: `bag-of-holding-infusion` is tagged TCE but is a Replicable Item there rather than an
+infusion, and ERLW's Armblade is still absent.
+
+## Running defect rate
+| Sweep | Entities | Defects |
+|---|---|---|
+| classfeatures — proficiency | 494 features | **1** (A1) |
+| classfeatures — expertise | 494 features | 2, both already known (A2) |
+| classfeatures — advantage wiring | 494 features | **5** (A3, one root cause) |
+| classfeatures — extra attack | 494 features | **5** (A4, one root cause) |
+| classfeatures — speed / resistance / spell-grant | 494 features | **0** |
+
+Sweeps to date: **8 layers swept, 5 found defects (63%).** Phase A's per-class feature pass is now
+covered by a single reproducible sweep rather than 16 hand passes; what remains for Phase A is
+per-class *level table* verification against the books, which cannot be swept.
