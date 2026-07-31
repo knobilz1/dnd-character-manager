@@ -2583,3 +2583,90 @@ wrong question is as dangerous as a sweep with no control: it manufactures work,
 just as easily report DONE for something broken (which is exactly what the A3 probe did by matching
 the word "advantage" inside two exhaustion comments). Every probe in `fixstatus.py` now states the
 behaviour it is testing for, not the presence of a symbol.
+
+---
+
+# FIX PHASE COMPLETE — 24 of 26 fix-plan items closed
+
+Run with `python tools/audit/fixstatus.py`, which re-checks every item in the fix plan in one pass
+and states the *behaviour* each probe tests for. Three probes were wrong when this session started
+and each is recorded below, because a bad probe is as dangerous as a sweep with no control.
+
+## Landed this session
+
+| item | what it was |
+|---|---|
+| **Phase B** | subclass feature levels swept against the books — 187 of 189, zero mismatches |
+| **B6** | 13 PHB 2024 subclasses displayed their 2014 name (Aberrant Mind → Aberrant Sorcery, School of Abjuration → Abjurer, …) |
+| **R15 / R16** | learning a spell had NO cap; three separate ceilings now enforced at the store chokepoint |
+| **C7** | every PHB 2024 character was missing its entire +2/+1 — the increase moved to the background in 2024 and had no field |
+| **A3** | five features grant advantage; the dice layer supported it and nothing ever selected it |
+| **armor proficiency** | wearing plate as a wizard cost nothing; now disadvantage on Str/Dex rolls and no spellcasting |
+| **G8** | all twelve 2024 classes started with an empty inventory |
+| **G10** | the 48 2024 subclasses had no gameplay tips |
+| **R5** | closed — already complete; the "outstanding" count was a bad probe |
+| **D4** | subclass build choices had no storage; generic mechanism + 8 option groups |
+
+## Not done, and why
+
+- **R6 — item charges. BLOCKED ON SOURCE, not on effort.** 39 items need `maxCharges`/`recharge`,
+  and the DMG markdown extract omits the recharge clauses entirely (recorded earlier at
+  "⛔ R6 IS BLOCKED ON SOURCE"). There is no DMG PDF to fall back on. Inventing recharge rules would
+  put wrong numbers on the sheet with an authoritative-looking counter, which is worse than an
+  untracked item. **Needs the DMG source before it can move.**
+- **`erlw-aberrant-dragonmark` — RE-FILED, not skipped.** Logged as an `innateSpells` gap, but the
+  trait grants a player-*chosen* cantrip and 1st-level spell from the sorcerer list and
+  `InnateSpell` requires a fixed `spellId`. It is a D4 build choice, and is recorded there.
+- **D4's remaining groups.** The mechanism ships with 8 option groups. Still owed: the twelve
+  proficiency/language choices, Four Elements disciplines, Kensei weapons, the 2014 Beast Master
+  companion, tob-sea-domain, and the 2024 Elemental Affinity. Data entry against the books, with
+  the mechanism already in place.
+
+## Three bad probes, and what they teach
+
+This session found **three** items whose "outstanding" or "done" status was an artifact of how the
+probe asked, not of the code:
+
+| probe | said | truth |
+|---|---|---|
+| A3 advantage | DONE | matched the word "advantage" inside two exhaustion **comments**. Nothing was wired. |
+| A1 Rage 99/99 | OUTSTANDING | 99 is the deliberate *unlimited* sentinel; the display fix already existed. |
+| R5 subclass resources | OUTSTANDING | counted `resources: [` arrays and wanted 141 — but most subclasses correctly have none, so it could never have said DONE. |
+
+Two more surfaced while fixing: the G8 probe read the wrong file, and the G10 probe counted ids
+ending in `-2024` — missing the four 2024 subclasses that have no 2014 namesake to disambiguate
+from (`wild-heart`, `world-tree`, `college-of-dance`, `circle-of-the-sea`).
+
+**The lesson, stated for the second pass:** a probe that asks the wrong question manufactures work
+in one direction and hides broken code in the other. Every probe in `fixstatus.py` now names the
+behaviour it tests for — a call site, a rendered string, a stored value — never the presence of a
+symbol.
+
+## A fix that verified falsely, and how it was caught
+
+The R15/R16 spell-cap fix read the spellbook length back out of `localStorage` and saw **no change
+in either the at-cap case or the below-cap control**. That looks like a working cap with an
+agreeing control. It was neither: persistence lags the store, and the click had registered fine.
+A refusal and an unregistered click are indistinguishable when you measure the wrong thing.
+Switching to the dialog's own row count — the added spell leaves the available list — separated
+them and turned a false pass into a real one.
+
+C7 produced the mirror image: it exposed a bug in **my own C6a fix**, where the creator read
+`racialAbilityChoice` while computing HP and then never wrote it onto the character it built. C6a
+had been "verified" by seeding `localStorage` directly, which skips the creator entirely.
+
+**Verify on the path a user actually takes, and measure the thing the code changes — not the thing
+that is convenient to read.**
+
+## Sweep state at the end of the fix phase
+
+```
+keycheck             0 dangling override keys
+spellrefs            223 / 223 spell references resolve
+maxtables            0 gaps
+subclassbooklevels   187 of 189 compared, 0 level mismatches, 94.5% pairing
+r5scan               0 subclasses, 0 features
+r5cover              70 of 72 fully covered; both exceptions resolved as non-defects
+tsc -b --force       clean
+npm run build        clean
+```
