@@ -3028,3 +3028,55 @@ population in the app, 362 subclass spell references, was invisible while the ch
 Nearly 5× the refs were being skipped. Saved as `tools/audit/spellrefs.js` with that written at the
 top, because a green result whose denominator nobody read is the exact failure this audit keeps
 producing.
+
+---
+
+## Phase D (racial level-gating) + Phase C2 (race structure) + G9 (book ids) — all clean
+
+### Racial innate-spell level gating — DONE, verified in the app
+
+Phase D listed "racial level-gating (`InnateSpell.minCharLevel`)" as owed. It is implemented and
+correct in both directions.
+
+**Enforced at five sites**, not just display: `SpellPanel.tsx:270`, `useCharacterStore` short rest
+(`:445`), long rest (`:1146`), level-up (`:901`), and `useCreatorStore.finalize` (`:292`).
+
+**Data: 119 racial innate spells — 65 gated, 54 not.** Both sides check out:
+- Every gate follows the 3rd/5th pattern. Verified against the book PDFs for the least-standard
+  cases: Earth Genasi *"Starting at 5th level … pass without trace"*, Aarakocra *"Wind Caller.
+  Starting at 3rd level … gust of wind"*, Yuan-ti *"Starting at 3rd level, you can also cast
+  suggestion"* (identical wording in **both** MMoM and VGM), Mark of Detection *"Starting at 3rd
+  level, you can also cast the see invisibility spell"*.
+- Of the 54 ungated, 35 are cantrips. The remaining 19 are 1st-level spells granted from level 1,
+  which is correct. **The two that are 2nd-level spells were checked specifically** — ERLW
+  *Spellsmith* (`magic weapon`) and *Magical Passage* (`misty step`) — and the book grants both with
+  **no level clause**, so ungated is right. That was the direction worth checking: a missing gate
+  hands a 1st-level character a 2nd-level spell.
+
+**Verified end-to-end** on the seeded Deep Gnome trio (gates: `disguise-self` 3, `nondetection` 5):
+
+| character | shown |
+|---|---|
+| Deep Gnome 2 | nothing — the Racial Innate Spells section doesn't render at all |
+| Deep Gnome 3 | **Disguise Self only** |
+| Deep Gnome 5 | Disguise Self **and** Nondetection |
+
+Harness note: the first read said level 5 showed *neither*, which looked like a live bug. It was the
+tab click and the `innerText` read happening in the same call, before React re-rendered — the same
+lag that made the charge-pip check look like a failure earlier. **Click and read must be separate
+calls.**
+
+### Race structure — 122 races, 10 checks, clean
+size in {Tiny, Small, Medium, Large}; name / sourceBook / traits present; `isSubrace` ⟺
+`parentRaceId` agree in both directions; no race carrying both a fixed `abilityScoreIncreases` and a
+`flexibleAsi`; speed 20–40 and a multiple of 5; darkvision in {30, 60, 120}; every trait entry has
+both a name and a description. Controls fire.
+
+### G9 — every `sourceBook` is a real BookId
+**2,015 entities across 12 collections**: classes 25, subclasses 189, races 122, spells 547, feats
+155, backgrounds 73, invocations 54, infusions 17, maneuvers 23, metamagic 10, fighting styles 15,
+items 785. Checked `sourceBook` **and every `alsoIn[]` entry** against the 16 ids in `BOOKS`.
+
+**Zero invalid, zero missing.** This one matters because the failure is silent in both directions: a
+typo'd book id makes content invisible no matter which books you enable, and a missing one makes it
+unconditionally visible.
