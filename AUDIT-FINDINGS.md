@@ -1486,3 +1486,85 @@ Both existing sweeps reproduce their recorded numbers exactly:
 
 The racial *resource* layer closed by R3 is therefore still closed. Phase C's remaining exposure is
 ASIs, speeds (C1), darkvision, resistances, proficiencies and languages — not limited-use tracking.
+
+---
+
+# ROOT CAUSE R11 — every build-option list is book-filtered against books its own class never enables
+
+Found by the Phase D workflow (two agents, independently, on different caps), then generalised and
+confirmed at runtime with matched controls.
+
+## The mechanism
+Three facts that are individually reasonable and jointly fatal:
+
+1. **The edition toggle is exclusive.** `StepBooks.tsx:17-27` — `selectPhbEdition('2024')` does
+   `next.delete('PHB'); next.add('PHB2024')`. A 2024 character's `enabledBooks` therefore contains
+   `PHB2024` and **not** `PHB`.
+2. **Every option list is filtered by `bookEnabled`.** `StepClassOptions.tsx:165,183,187,197,208,219,224`
+   and `LevelUpDialog.tsx:610,642,648,652,656,662` — thirteen sites, all the same predicate.
+3. **No option entry declares `PHB2024`, and none has an `alsoIn`.** Across all seven option files —
+   146 entries — the count of `PHB2024` is **0** and the count of `alsoIn` is **0**:
+
+| file | entries | sourceBooks present | `PHB2024` | `alsoIn` |
+|---|---|---|---|---|
+| `invocations.ts` | 54 | PHB 32, XGtE 14, TCE 8 | 0 | 0 |
+| `metamagic.ts` | 10 | PHB 8, TCE 1, XGtE 1 | 0 | 0 |
+| `maneuvers.ts` | 23 | PHB 16, TCE 7 | 0 | 0 |
+| `infusions.ts` | 17 | TCE 17 | 0 | 0 |
+| `pactBoons.ts` | 4 | PHB 3, TCE 1 | 0 | 0 |
+| `fightingStyles.ts` | 15 | PHB 6, TCE 6, XGtE 3 | 0 | 0 |
+| `optionalClassFeatures.ts` | 23 | TCE 24 | 0 | 0 |
+
+So the filter is arithmetically guaranteed to return an empty list for any 2024 class. The same
+mechanism fires on a second, unrelated book pair: **Artificer** is `sourceBook: 'TCE', alsoIn: ['ERLW']`
+(`classes/index.ts:598-601`), so a player who enables ERLW to get the Artificer — exactly what `alsoIn`
+is for — passes the class filter and then hits an infusion list that is 100% TCE.
+
+## Runtime confirmation — four builds, each against a matched control
+Seeded one level *below* a grant level so the picker must render, then read the dialog. The control is
+the identical class and level transition with only `enabledBooks` changed. (First attempt used level
+10→11, which grants no metamagic; the control read empty too and caught the bad harness — the picker
+was never rendered. Levels corrected before the run below.)
+
+| build | picker | filtered result | matched control | control result |
+|---|---|---|---|---|
+| `sorcerer-2024` 9→10, books `[PHB2024]` | METAMAGIC 0/1 | **"No results."** | `sorcerer` 9→10, `[PHB]` | Careful Spell … ✅ |
+| `fighter-2024` + `battle-master-2024` 6→7, `[PHB2024]` | MANEUVERS 0/2 | **"No results."** | `fighter` + `battle-master` 6→7, `[PHB]` | Commander's Strike … ✅ |
+| `warlock-2024` + `fiend-patron-2024` 4→5, `[PHB2024]` | INVOCATIONS 0/2 | **"No results."** | `warlock` + `the-fiend` 4→5, `[PHB]` | Agonizing Blast … ✅ |
+| `artificer` 9→10, books `[PHB, ERLW]` | INFUSIONS 0/2 | **"No results."** | `artificer` 9→10, `[PHB, TCE]` | Armor of Magical Strength … ✅ |
+
+## The part that makes it silent instead of merely broken
+**Confirm is enabled exactly when the picker is empty.** Measured on all four: `Confirm Level N` is
+`disabled === false` while the counter reads `0/2 chosen`. The 2014 warlock control has
+`disabled === true` — because it has real unmade choices — which proves the gate itself works. The gate
+compares chosen-count against required-count, and an empty candidate list means the requirement can
+never be satisfied, so the dialog lets the level through. The player advances and the feature is gone
+with no error, no warning, and no way to recover it later.
+
+*(An earlier reading of the 2024 warlock as hard-blocked was a seeding error on my part — that build
+had no patron, so the subclass gate was firing. With a patron assigned it behaves like the other three.)*
+
+## Blast radius
+**123 of 146 option entries are unreachable** for the affected builds:
+
+| build | loses | count |
+|---|---|---|
+| `sorcerer-2024` | all metamagic | 10 |
+| `fighter-2024` / `paladin-2024` / `ranger-2024` | all fighting styles | 15 |
+| `battle-master-2024` | all maneuvers | 23 |
+| `warlock-2024` | all invocations + all pact boons | 58 |
+| `artificer` with ERLW but not TCE | all infusions | 17 |
+
+`optionalClassFeatures.ts` (23, all TCE) is **excluded from the count deliberately** — TCE optional
+class features apply to the 2014 classes, so a 2024 character correctly receives none. Counting it
+would have inflated the finding.
+
+Severity: **high**. This is R1's family (2024 ids invisible to logic) but one layer down — R1 was code
+comparing `classId` to 2014 names; R11 is *data* carrying a book id that the class's own edition never
+enables. Fixing R1's call sites could not have fixed this.
+
+## Why no earlier sweep saw it
+The text-accuracy audit read descriptions, and every description is correct. The R5 limited-use sweep
+read resource definitions, and every definition is correct. Each file is internally consistent; the
+defect is in the **join** between `enabledBooks` and `sourceBook` — the third instance of that shape in
+this audit, after the AcqInc/ToB registry gap (B1) and racial speeds (C1).
