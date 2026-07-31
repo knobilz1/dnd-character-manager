@@ -1377,8 +1377,12 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
           />
           {itemsOpen && (
             <div className="mt-3 space-y-px">
-              {magicItems.map((item: any) => {
-                const key = `item-${item.id}`;
+              {magicItems.map((item: any, idx: number) => {
+                // Not `item-${item.id}`: inventory items are not guaranteed to carry an id
+                // (seeded and pre-migration characters have none), and an undefined id made
+                // every such item share the key "item-undefined" — React saw no key at all,
+                // and expanding one of them expanded the others with it.
+                const key = `item-${item.id ?? `${item.name}-${idx}`}`;
                 const hasCharges = item.maxCharges != null;
                 const currentCharges = item.charges ?? item.maxCharges ?? 0;
                 const isSpent = hasCharges && currentCharges <= 0;
@@ -1387,7 +1391,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
                   : item.recharge === 'short' ? 'Restores on short rest'
                   : null;
                 return (
-                  <div key={item.id} className="rounded-lg overflow-hidden">
+                  <div key={key} className="rounded-lg overflow-hidden">
                     {/* Summary row */}
                     <div className="flex items-center gap-2 w-full px-2 py-1.5">
                       <button
