@@ -205,6 +205,7 @@ interface CharacterState {
   setInnateSpellAbility: (ability: AbilityKey) => void;
   setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
+  setSubclassOptions: (v: Record<string, string[]>) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -1249,6 +1250,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setBackgroundAbilityChoice: (v) =>
     set((s) => s.character ? { character: { ...s.character, backgroundAbilityChoice: v } } : s),
+
+  setSubclassOptions: (v) =>
+    set((s) => s.character ? { character: { ...s.character, subclassOptions: v } } : s),
 
   setArmorerMode: (mode) =>
     set((s) => s.character ? { character: { ...s.character, armorerMode: mode } } : s),

@@ -262,6 +262,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       racialAbilityChoice: draft.racialAbilityChoice,
       backgroundAbilityChoice: draft.backgroundAbilityChoice,
       innateSpellAbility: draft.innateSpellAbility,
+      subclassOptions: draft.subclassOptions,
       backgroundId: draft.backgroundId!,
       backgroundCustom: draft.backgroundCustom,
       classes: draft.classes!,

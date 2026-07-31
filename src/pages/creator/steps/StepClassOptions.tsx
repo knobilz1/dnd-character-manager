@@ -1,4 +1,5 @@
 import React from 'react';
+import { SubclassOptionsPicker } from './SubclassOptionsPicker';
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
@@ -395,6 +396,16 @@ export function StepClassOptions() {
       )}
 
       {/* ── Circle of the Land: land type (lv.3+) ── */}
+      {/* D4 — generic subclass build choices (Dragon Ancestor, Runes, Arcane Shots, Hunter's Prey
+          and the rest). The named sections below it predate this and are left alone: they already
+          work end to end, and renaming their storage would orphan saved characters. */}
+      <SubclassOptionsPicker
+        subclassId={subclassId}
+        classLevel={level}
+        value={draft.subclassOptions}
+        onChange={(v) => updateDraft({ subclassOptions: v })}
+      />
+
       {isLandDruid && level >= 3 && (
         <OptionSection
           title="Circle Spells — Land Type"

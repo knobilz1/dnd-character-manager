@@ -206,6 +206,10 @@ export interface Subclass {
    *  apply unconditionally — merging the two would grant a Land druid all 8 lists at once.
    *  Named concretely rather than generalised: this is the only subclass with the shape. */
   landSpells?: Record<string, Record<number, string[]>>;
+  /** D4 — build choices this subclass asks the player to make once. Generic, unlike the named
+   *  `landType` / `totemSpirit` fields on ClassOptionsState, which predate this and are left alone:
+   *  they already work end to end and renaming them would orphan every saved character. */
+  options?: SubclassOptionGroup[];
   expandedSpells?: Record<number, string[]>;
   spellcastingType?: SpellcastingType;
   /** For subclass-granted spellcasting, the class whose spell list to use (e.g. 'wizard' for EK/AT). */
@@ -434,6 +438,26 @@ export interface InventoryItem {
 }
 
 // Equipment choice option: each option is a labeled bundle of items.
+/** D4 — a build choice a SUBCLASS asks the player to make once, and that must persist.
+ *
+ *  Distinct from a use-time choice, which is re-made every activation and correctly needs no
+ *  storage (Berserker's "choose one creature", Circle of Stars' Starry Form). The audit found 103
+ *  subclass features containing choice language and only two of them prompted; hand triage put 23
+ *  in this category and ~95 in the other. No regex separates them — the question is whether the
+ *  answer persists, and the descriptions do not say.
+ *
+ *  `picksByLevel` is CUMULATIVE, not a per-level delta: Arcane Archer knows 2 Arcane Shots at 3 and
+ *  3 at 7, so the map reads {3: 2, 7: 3}. Storing deltas would make a character who multiclassed
+ *  away and back accumulate extra picks.
+ */
+export interface SubclassOptionGroup {
+  key: string;
+  label: string;
+  /** Cumulative pick count keyed on the level in THIS class, matching `maxPerLevel` convention. */
+  picksByLevel: Record<number, number>;
+  choices: { id: string; name: string; description?: string }[];
+}
+
 export interface EquipmentOption {
   label: string;
   items: { name: string; quantity?: number; category?: ItemCategory; weight?: number }[];
@@ -602,6 +626,10 @@ export interface Character {
    *  `chosenAsi()` — never read `race.abilityScoreIncreases` directly, or a flexible race
    *  silently contributes nothing. */
   racialAbilityChoice?: Partial<Record<AbilityKey, number>>;
+  /** D4 — chosen subclass build options, keyed by SubclassOptionGroup.key. Values are choice ids.
+   *  Kept flat rather than nested per subclass: a key is unique across the data (asserted by the
+   *  audit sweep), and a flat map survives a character multiclassing into a second subclass. */
+  subclassOptions?: Record<string, string[]>;
   /** C7 — chosen BACKGROUND ability increases, for PHB 2024 backgrounds. Separate from
    *  `racialAbilityChoice` on purpose: a 2024 character can multiclass into nothing that changes
    *  its background, but merging the two would make an edition switch silently move the bonus. */

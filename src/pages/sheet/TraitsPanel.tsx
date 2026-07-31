@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
+import { getSubclassOptions } from '../../data/subclassOptions';
 import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
 import { SectionHeader, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
@@ -18,11 +20,12 @@ import { totalCharacterLevel } from '../../data/mechanics';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import type { Background, BackgroundCustom, Character, JournalEntry, AbilityKey } from '../../types';
 
-export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBackgroundAbilityChoice }: {
+export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBackgroundAbilityChoice, setSubclassOptions }: {
   character: Character;
   setNotes: (n: string) => void;
   setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
+  setSubclassOptions: (v: Record<string, string[]>) => void;
 }) {
   const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
   const bg = resolveBackground(character);
@@ -92,6 +95,23 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
           </div>
         </div>
       </div>
+
+      {/* D4 — subclass build choices, in their own card rather than under Racial Traits. On the
+          sheet as well as the creator because a character made before the choice existed, or
+          levelled past it, would otherwise never be able to supply it — exactly how Circle of the
+          Land's land type stayed unreachable. Renders nothing when the subclass offers none. */}
+      {subclass && getSubclassOptions(subclass.id).length > 0 && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>{subclass.name} — Choices</SectionHeader>
+          <SubclassOptionsPicker
+            subclassId={subclass.id}
+            classLevel={primaryClass?.level ?? 1}
+            value={character.subclassOptions}
+            onChange={setSubclassOptions}
+            compact
+          />
+        </div>
+      )}
 
       {/* Background Traits */}
       {bg && (
