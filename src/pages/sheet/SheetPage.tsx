@@ -9,8 +9,9 @@ import { useLibraryStore } from '../../store/useLibraryStore';
 import { useBorrowedStore } from '../../store/useBorrowedStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
-import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
+import { isPreparedCaster as isPreparedCasterId, SKILL_ABILITY } from '../../data/mechanics';
 import { isProficientWithWeapon } from '../../utils/weaponProficiency';
+import { armorPenalty } from '../../utils/armorProficiency';
 import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Condition, SlotLevel } from '../../types';
@@ -108,6 +109,15 @@ const PIP_LIMIT = 20;
  *  A level-20 paladin has 100 Lay on Hands points; spending one set the pool to 19,
  *  destroying 80 points silently. The rule the component enforces is that the display
  *  may be summarised, but the value written back is always derived from `current`. */
+/** PHB p.173: if circumstances grant both advantage and disadvantage, you have neither, however
+ *  many of each apply. Returned as the dice layer's mode so both callers stay honest. */
+function rollMode(adv: boolean, dis: boolean): 'advantage' | 'disadvantage' | undefined {
+  if (adv && dis) return undefined;
+  if (adv) return 'advantage';
+  if (dis) return 'disadvantage';
+  return undefined;
+}
+
 function ResourceCounter({ current, max, onChange }: {
   current: number; max: number; onChange: (next: number) => void;
 }) {
@@ -286,7 +296,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -518,7 +528,7 @@ export function SheetPage() {
               </div>
               {/* Initiative — clickable to roll */}
               <button
-                onClick={() => triggerRoll(20, initiative, 'Initiative')}
+                onClick={() => triggerRoll(20, initiative, 'Initiative', rollMode(advantage.initiative, false))}
                 className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center hover:border-blue-500/60 hover:bg-slate-800 transition-colors cursor-pointer group"
                 title="Click to roll initiative"
               >
@@ -558,6 +568,25 @@ export function SheetPage() {
           <div>
             <SectionHeader>Saving Throws</SectionHeader>
             <div className="space-y-1">
+              {/* A3 — features granting advantage. The two unconditional ones are applied to the
+                  roll itself; the rest are listed because they depend on state the sheet does not
+                  model (what you are saving against, whether you missed that creature, whether a
+                  1-minute effect is running), and auto-applying those would be wrong more often
+                  than right. */}
+              {advantageNotes.length > 0 && advantageNotes.map((n: string) => (
+                <p key={n} className="text-[11px] text-green-400 flex items-start gap-1 px-2 pb-0.5">
+                  <span>▲</span><span>{n}</span>
+                </p>
+              ))}
+              {armorPen.strDexDisadvantage && (
+                <p className="text-[11px] text-amber-400 flex items-start gap-1 px-2 pb-0.5">
+                  <span>⚠</span>
+                  <span>
+                    Not proficient with {armorPen.sources.join(' and ')} — disadvantage on Str/Dex
+                    checks, saves and attacks{armorPen.cannotCastSpells ? ', and you cannot cast spells' : ''}
+                  </span>
+                </p>
+              )}
               {exhaustionDisadvSaves && (
                 <p className="text-[11px] text-orange-400 flex items-center gap-1 px-2 pb-0.5">
                   <span>⚠</span> Disadvantage on all saves (Exhaustion {exhaustionLevel})
@@ -569,7 +598,7 @@ export function SheetPage() {
                 return (
                   <button
                     key={k}
-                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`, exhaustionDisadvSaves ? 'disadvantage' : undefined)}
+                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`, rollMode(k === 'dex' && advantage.dexSaves, exhaustionDisadvSaves || ((k === 'str' || k === 'dex') && armorPen.strDexDisadvantage)))}
                     className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
                     title={`Roll ${abilityLabels[k]} saving throw`}
                   >
@@ -601,7 +630,7 @@ export function SheetPage() {
                 return (
                   <button
                     key={skill}
-                    onClick={() => triggerRoll(20, bonus, `${skill} Check`, exhaustionDisadvChecks ? 'disadvantage' : undefined)}
+                    onClick={() => triggerRoll(20, bonus, `${skill} Check`, rollMode(false, exhaustionDisadvChecks || (armorPen.strDexDisadvantage && ['str','dex'].includes(SKILL_ABILITY[skill]))))}
                     className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
                     title={`Roll ${skill} check${hasExpertise ? ' (Expertise)' : ''}`}
                   >
@@ -1439,6 +1468,11 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
   if (equippedWeapons.length === 0) return null;
 
+  // Armor you lack proficiency with gives disadvantage on Str/Dex attack rolls (PHB p.144),
+  // and every weapon attack is Str or Dex. Derived here from `character` rather than threaded
+  // in as a prop, so the panel cannot be rendered without it.
+  const weaponArmorPen = armorPenalty(character);
+
   function abilityModForWeapon(w: ReturnType<typeof lookupWeapon>) {
     if (!w) return mods.str;
     if (w.ability === 'finesse') return Math.max(mods.str, mods.dex);
@@ -1487,7 +1521,7 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
               <div className="flex items-center gap-2">
                 {/* Attack roll */}
                 <button
-                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`)}
+                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`, rollMode(false, weaponArmorPen.strDexDisadvantage))}
                   className="flex-1 bg-red-900/40 hover:bg-red-800/50 border border-red-700/60 hover:border-red-500 rounded-lg py-1.5 text-center transition-colors group"
                   title={`Roll attack: d20 + ${toHit >= 0 ? '+' : ''}${toHit}`}
                 >

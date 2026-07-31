@@ -8,6 +8,7 @@ import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS } from '../data/feats';
 import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
+import { armorPenalty } from '../utils/armorProficiency';
 
 // Eldritch Knight and Arcane Trickster get spellcasting via subclass.
 // Look up the effective spellcasting type for a class+subclass combo.
@@ -238,6 +239,40 @@ export function computeCharacterDerived(character: Character) {
 
     // Initiative — Bard Jack of All Trades (lv.2+) adds half prof bonus
     const initiative = mods.dex + featInitiativeBonus + (bardLevel >= 2 ? Math.floor(profBonus / 2) : 0);
+
+    // A3 — features that grant ADVANTAGE. The dice layer has carried a mode end to end all along
+    // (useDiceStore 'normal' | 'advantage' | 'disadvantage'); the gap was that only exhaustion ever
+    // selected one, so no feature the character actually had was ever volunteered.
+    //
+    // Split deliberately into two kinds. Auto-applying a SITUATIONAL advantage would make the sheet
+    // assert something that is false more often than it is true, which is worse than staying quiet:
+    // the player can already pick advantage by hand, so the cost of omitting is a click and the cost
+    // of over-claiming is a wrong roll.
+    const rangerLevel   = classLevel(character.classes, 'ranger');
+    const fighterLevel  = classLevel(character.classes, 'fighter');
+    const sorcererLevel = classLevel(character.classes, 'sorcerer');
+
+    const advantage = {
+      // Danger Sense (Barbarian 2): Dex saves against effects you can see. Volunteered because at a
+      // table nearly every Dex save is against something visible; the roller's manual toggle is the
+      // escape hatch for the rare case that it isn't.
+      dexSaves: barbLevel >= 2,
+      // Feral Instinct (Barbarian 7): advantage on initiative, unconditionally.
+      initiative: barbLevel >= 7,
+    };
+
+    // Shown to the player, never auto-applied — each depends on state the sheet does not model.
+    // Armor you lack proficiency with (PHB p.144): disadvantage on any Str/Dex check, save or
+    // attack, and no spellcasting. The armorProficiencies lists existed on every class and were
+    // read only by the PDF exports, so wearing plate as a wizard cost nothing.
+    const armorPen = armorPenalty(character);
+
+    const advantageNotes: string[] = [];
+    if (barbLevel >= 2) advantageNotes.push('Danger Sense — advantage on Dex saves against effects you can see (not while blinded, deafened or incapacitated)');
+    if (barbLevel >= 7) advantageNotes.push('Feral Instinct — advantage on initiative');
+    if (rangerLevel >= 8) advantageNotes.push("Land's Stride — advantage on saves against plants that impede movement");
+    if (fighterLevel >= 13 && character.classes.some(c => c.classId === 'fighter-2024')) advantageNotes.push('Studied Attacks — advantage on your next attack against a creature you missed');
+    if (sorcererLevel >= 1 && character.classes.some(c => c.classId === 'sorcerer-2024')) advantageNotes.push('Innate Sorcery — advantage on Sorcerer spell attack rolls while active');
 
     // Class-based speed bonuses
     // Monk Unarmored Movement: +10 ft at level 2, scaling up, only while unarmored and no shield
@@ -552,6 +587,9 @@ export function computeCharacterDerived(character: Character) {
       exhaustionLevel,
       exhaustionDisadvChecks,
       exhaustionDisadvSaves,
+      advantage,
+      advantageNotes,
+      armorPen,
       exhaustionHpMaxHalved,
       passiveInsight,
       resourceMaxOverrides,

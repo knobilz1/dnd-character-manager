@@ -194,8 +194,10 @@ def a3_advantage():
 
 
 def armor_prof():
-    s = f('src/pages/sheet/SheetPage.tsx')
-    return 'isProficientWithArmor' in (s or '')
+    # The enforcement is the PENALTY reaching a roll, not merely the predicate existing — a helper
+    # nothing calls is exactly the C3 shape this audit keeps finding.
+    s = f('src/pages/sheet/SheetPage.tsx') or ''
+    return 'armorPen.strDexDisadvantage' in s and 'weaponArmorPen.strDexDisadvantage' in s
 
 
 def erlw_dragonmark():
