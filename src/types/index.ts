@@ -437,6 +437,10 @@ export interface InventoryItem {
 export interface EquipmentOption {
   label: string;
   items: { name: string; quantity?: number; category?: ItemCategory; weight?: number }[];
+  /** Coin bundled INTO this package, in gp. PHB 2024 only: its packages read
+   *  "Greataxe + 4 Handaxes + Explorer's Pack + 15 gp", so the gold is part of the option rather
+   *  than the 2014-style either/or alternative held in `ClassStartingEquipment.startingGold`. */
+  gold?: number;
 }
 
 export interface EquipmentChoice {

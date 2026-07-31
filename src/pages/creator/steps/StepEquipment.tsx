@@ -69,6 +69,9 @@ export function StepEquipment() {
       }
     }
 
+    // Coin bundled into the chosen package (PHB 2024 packages read "... + 15 gp"). Distinct from
+    // the 2014 either/or `startingGold`, which the takeGold branch below handles.
+    let classGP = 0;
     if (classEq && !takeGold) {
       for (const f of classEq.fixed) {
         pushItem(f.name, f.quantity ?? 1, f.category, f.weight, 'class');
@@ -81,6 +84,7 @@ export function StepEquipment() {
         for (const it of opt.items) {
           pushItem(it.name, it.quantity ?? 1, it.category, it.weight, 'class');
         }
+        classGP += opt.gold ?? 0;
       });
     }
 
@@ -111,8 +115,9 @@ export function StepEquipment() {
 
     // Route background gold into currencies rather than leaving it as an inventory item.
     const currentGP = draft.currencies?.gp ?? 0;
-    if (currentGP !== bgGP) {
-      updateDraft({ currencies: { cp: 0, sp: 0, ep: 0, gp: bgGP, pp: 0 } });
+    const totalGP = bgGP + classGP;
+    if (currentGP !== totalGP) {
+      updateDraft({ currencies: { cp: 0, sp: 0, ep: 0, gp: totalGP, pp: 0 } });
     }
   }, [primaryClass?.classId, draft.backgroundId, JSON.stringify(choices), takeGold]);
 
