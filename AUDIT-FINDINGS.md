@@ -1258,3 +1258,68 @@ at all. This is an **innateSpells coverage gap**, and it deserves its own sweep 
   daily budget. A counter would be noise.
 - `simic-hybrid` **Animal Enhancement** — a build choice (Manta Glide / Nimble Climber / …),
   belongs to D4.
+
+---
+
+## The four deferred decisions — resolved
+
+All four were saved for the user rather than guessed at. Their answers, and what shipped:
+
+### 1. Cobalt Soul's book attribution — hide it
+Way of the Cobalt Soul is filed under `EGtW`, but Wildemount's own text names the Tal'Dorei
+Campaign Setting as the source; the subclass is not in EGtW at all. Verdict: hide it until
+TDCSR is registered as a book.
+
+Implemented as `Subclass.hidden`, checked **inside `bookEnabled`** rather than at the two
+subclass pickers. That is the root-cause placement: all 24 callers of `bookEnabled` are
+availability filters and none of them render an already-chosen entry, so one guard hides the
+entry from every picker in the app and cannot make a feature vanish from a character who
+already took it. Verified both halves — an existing Cobalt Soul monk still renders its
+subclass name and features, and the level-up subclass list shows ten monk subclasses across
+PHB/XGtE/TCE/FToD with Cobalt Soul absent.
+
+The creator's `StepSubclass` filter is the same single `bookEnabled` call and has no second
+path, but it was **not** driven directly: the creator starts at level 1, where the subclass
+step is inert, so reaching it needs a level-3 start. Verified by shared predicate, not by
+observation.
+
+### 2. Shared `psionic_energy` key — split
+Psi Warrior and Soulknife each grant their own pool, so a Fighter/Rogue holding both drew
+them from one counter. Split into `psionic_energy_psi_warrior` / `psionic_energy_soulknife`,
+with the subclass named in the display label so the two rows are distinguishable.
+
+**The split needed a migration, and the reason is a render-path detail:** the resource panel
+falls back to `resourceDef?.name ?? r.key`, so a saved key no definition claims any more
+renders as its raw string. Renaming the key without migrating would have put a literal
+`psionic_energy` row on every existing Psi Warrior's sheet. `load()` renames the saved entry
+before `preexisting` is computed, so spent uses survive the migration.
+
+Verified on a seeded pre-split save (Fighter 3 Psi Warrior / Rogue 3 Soulknife carrying the
+old `psionic_energy` at 2/4): the migrated pool came back **2/6** — max corrected, spent uses
+kept, not refilled — and the newly inserted Soulknife pool **6/6**. Then spending one
+Soulknife die moved that pool to 5/6 and left Psi Warrior at 2/6. Independence proven by
+interaction, not by reading two counters.
+
+### 3. Typing `BOOKS` — keyed registry
+`BOOKS` is now `Object.values` of a `{ [K in BookId]: Book & { id: K } }` literal. A book id
+in the union with no registry entry is a compile error, and the mapped type pins each entry's
+`id` to its own key so a typo fails too. **Control run:** adding `'TDCSR'` to `BookId` with no
+registry entry produced `TS2741: Property 'TDCSR' is missing` at `books.ts:8`, then reverted.
+
+This closes the gap class that produced B1 — AcqInc and ToB content shipped citing books the
+registry had never heard of, which meant no badge, no book-picker entry, and no way to enable
+the content at all. That was a broken join between two files each internally consistent, which
+is precisely what no single-file sweep can see.
+
+### 4. Deep Gnome / Duergar spell ability — add a choice
+MMoM lets the player pick Int, Wis or Cha; the data held one value (Int). Added
+`Race.innateSpellAbilityChoice` + `Character.innateSpellAbility`, with each `InnateSpell`'s own
+`ability` as the fallback for characters saved before the choice existed.
+
+The picker sits in the sheet's Racial Innate Spells header, **not** in the creator. Race cannot
+change after creation, so one control on the sheet reaches new and existing characters alike —
+whereas a creator-only picker would have reproduced D4's exact failure (a choice that exists at
+creation and is unreachable afterwards). Verified: Deep Gnome shows an INT/WIS/CHA select,
+switching it to CHA changes both spell rows to CHA, the value persists to localStorage and
+survives a reload through `load()`. Negative control: Tiefling, which has innate spells but no
+choice, renders the panel with its fixed CHA and **no** select.

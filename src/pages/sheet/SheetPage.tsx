@@ -197,7 +197,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell,
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell, setInnateSpellAbility,
     activateWildShape, deactivateWildShape, damageWildShape, healWildShape, setArmorerMode, setPathOfBeastForm } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
@@ -726,6 +726,7 @@ export function SheetPage() {
                 usePactSlot={usePactSlot}
                 useInnateSpell={useInnateSpell}
                 useFeatSpell={useFeatSpell}
+                setInnateSpellAbility={setInnateSpellAbility}
               />
             )}
             {tab === 'inventory' && (

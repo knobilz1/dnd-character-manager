@@ -92,6 +92,12 @@ export interface Race {
   parentRaceId?: string;
   subraces?: Race[];
   innateSpells?: InnateSpell[];
+  /** Races whose book lets the player pick the spellcasting ability for their innate spells
+   *  (MMoM Duergar and Deep Gnome: "Intelligence, Wisdom, or Charisma... choose when you select
+   *  this race"). One choice covers the whole trait, so it lives on the race rather than on each
+   *  InnateSpell. The chosen value is stored as `Character.innateSpellAbility`; each spell's own
+   *  `ability` is the fallback for characters saved before the choice existed. */
+  innateSpellAbilityChoice?: AbilityKey[];
   hpBonusPerLevel?: number;
   /** Racial natural armor formula. base + optional ability mod. If canUseWithArmor is true,
    *  the character can also use this formula when wearing armor (taking the better value). */
@@ -179,6 +185,10 @@ export interface Subclass {
   sourceBook: BookId;
   /** Additional books this entry is available in (reprints). */
   alsoIn?: BookId[];
+  /** Kept in the data but not offered in any picker. For entries whose real source book is not
+   *  registered yet: hiding beats mis-attributing it to a book it isn't in, and beats deleting
+   *  it (which would break any character who already picked it). */
+  hidden?: boolean;
   description: string;
   features: ClassFeature[];
   alwaysPreparedSpells?: Record<number, string[]>;
@@ -561,6 +571,9 @@ export interface Character {
   pactMagic?: PactMagicState;
   resources: ResourceState[];
   innateSpellUses?: Record<string, number>;
+  /** Player's pick when the race offers a choice of innate-spell ability. Unset falls back to
+   *  the ability on each InnateSpell. See `Race.innateSpellAbilityChoice`. */
+  innateSpellAbility?: AbilityKey;
   inspiration: boolean;
   experiencePoints: number;
   notes: string;

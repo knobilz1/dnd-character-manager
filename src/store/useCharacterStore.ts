@@ -43,9 +43,12 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
     overrides['bladesong'] = profBonus;
   if (c.classes.some(cl => cl.subclassId === 'samurai'))
     overrides['fighting_spirit'] = 3;
-  // Psi Warrior / Soulknife (TCE): Psionic Energy pool = 2 x proficiency bonus.
-  if (c.classes.some(cl => cl.subclassId === 'psi-warrior' || cl.subclassId === 'soulknife'))
-    overrides['psionic_energy'] = profBonus * 2;
+  // Psi Warrior / Soulknife (TCE): each grants its own Psionic Energy pool of 2 x proficiency
+  // bonus. Separate keys, so a Fighter/Rogue holding both subclasses gets two pools, not one.
+  if (c.classes.some(cl => cl.subclassId === 'psi-warrior'))
+    overrides['psionic_energy_psi_warrior'] = profBonus * 2;
+  if (c.classes.some(cl => cl.subclassId === 'soulknife'))
+    overrides['psionic_energy_soulknife'] = profBonus * 2;
   // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
   if (c.classes.some(cl => cl.subclassId === 'phantom' && cl.level >= 3))
     overrides['wails_from_the_grave'] = profBonus;
@@ -197,6 +200,7 @@ interface CharacterState {
   endConcentration: () => void;
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
+  setInnateSpellAbility: (ability: AbilityKey) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -259,6 +263,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     // a second load saw the freshly-pushed pre-override entries as if they had been saved,
     // took the Math.min branch, and clamped every override-managed resource back down.
     let resources = [...(c.resources ?? [])];
+    // Psi Warrior and Soulknife used to share one 'psionic_energy' key. Splitting them leaves
+    // saved characters holding a key no definition claims any more, and the resource panel
+    // renders an unmatched key as its raw string — so rename rather than leave the orphan.
+    // A character with both subclasses can only carry one saved entry; the other is inserted
+    // fresh below. Neither subclass present means it was already dead data.
+    if (resources.some(r => r.key === 'psionic_energy')) {
+      const subs = (c.classes ?? []).map(cl => cl.subclassId);
+      const renamed = subs.includes('psi-warrior') ? 'psionic_energy_psi_warrior'
+        : subs.includes('soulknife') ? 'psionic_energy_soulknife'
+        : null;
+      resources = renamed
+        ? resources.map(r => (r.key === 'psionic_energy' ? { ...r, key: renamed } : r))
+        : resources.filter(r => r.key !== 'psionic_energy');
+    }
     // Keys the character actually arrived with. Everything else in `resources` after the
     // insertion passes below is brand new, and a brand-new resource must start full.
     // This matters because override-managed keys (ability-mod / prof-bonus maxes) carry a
@@ -1193,6 +1211,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const ws = s.character.activeWildShape;
       return { character: { ...s.character, activeWildShape: { ...ws, currentHp: Math.min(ws.currentHp + amount, ws.maxHp) } } };
     }),
+
+  setInnateSpellAbility: (ability) =>
+    set((s) => s.character ? { character: { ...s.character, innateSpellAbility: ability } } : s),
 
   setArmorerMode: (mode) =>
     set((s) => s.character ? { character: { ...s.character, armorerMode: mode } } : s),

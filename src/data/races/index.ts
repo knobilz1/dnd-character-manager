@@ -713,8 +713,9 @@ export const ALL_RACES: Race[] = [
     // MMoM p.16: Gift of the Svirfneblin — disguise self from 3rd, nondetection from 5th,
     // each once per long rest. Without these entries the spells never reached SpellPanel,
     // so the trait was not merely untracked — it could not be cast from the sheet at all.
-    // MMoM lets the player pick Int/Wis/Cha; InnateSpell holds a single ability, so this
-    // takes Int (the gnome default). Logged in AUDIT-FINDINGS.
+    // MMoM lets the player pick Int/Wis/Cha. The `ability` below is only the fallback for
+    // characters saved before the picker existed; the live value is Character.innateSpellAbility.
+    innateSpellAbilityChoice: ['int', 'wis', 'cha'],
     innateSpells: [
       { spellId: 'disguise-self', recharge: 'long', minCharLevel: 3, ability: 'int' },
       { spellId: 'nondetection', recharge: 'long', minCharLevel: 5, ability: 'int' },
@@ -744,6 +745,8 @@ export const ALL_RACES: Race[] = [
     // MMoM p.15: Duergar Magic — enlarge/reduce on yourself from 3rd, invisibility on
     // yourself from 5th, each once per long rest. Same fix as deep-gnome: with no
     // innateSpells entry these could not be cast from the sheet at all.
+    // Int/Wis/Cha is the player's pick here too — see the deep-gnome note above.
+    innateSpellAbilityChoice: ['int', 'wis', 'cha'],
     innateSpells: [
       { spellId: 'enlarge-reduce', recharge: 'long', minCharLevel: 3, ability: 'int' },
       { spellId: 'invisibility', recharge: 'long', minCharLevel: 5, ability: 'int' },

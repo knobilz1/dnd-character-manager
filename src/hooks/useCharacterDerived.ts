@@ -321,10 +321,14 @@ export function computeCharacterDerived(character: Character) {
       // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)
       resourceMaxOverrides['fighting_spirit'] = 3;
     }
-    // Psi Warrior / Soulknife (TCE): Psionic Energy pool = 2 x proficiency bonus.
+    // Psi Warrior / Soulknife (TCE): each grants its own Psionic Energy pool of 2 x proficiency
+    // bonus. Separate keys, so a Fighter/Rogue holding both subclasses gets two pools, not one.
     // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.
-    if (character.classes.some(c => c.subclassId === 'psi-warrior' || c.subclassId === 'soulknife')) {
-      resourceMaxOverrides['psionic_energy'] = profBonus * 2;
+    if (character.classes.some(c => c.subclassId === 'psi-warrior')) {
+      resourceMaxOverrides['psionic_energy_psi_warrior'] = profBonus * 2;
+    }
+    if (character.classes.some(c => c.subclassId === 'soulknife')) {
+      resourceMaxOverrides['psionic_energy_soulknife'] = profBonus * 2;
     }
     // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
     // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.

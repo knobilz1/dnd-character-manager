@@ -914,10 +914,12 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ],
     // TCE: pool = 2 x proficiency bonus, all back on a long rest (plus a bonus-action single regain,
     // which is a use-time action rather than a rest and so isn't modelled here). The maxPerLevel table
-    // mirrors 2 x PB as a fallback; the real max comes from the psionic_energy override.
+    // mirrors 2 x PB as a fallback; the real max comes from the override.
+    // Keyed per subclass, not a shared 'psionic_energy': Psi Warrior and Soulknife each grant
+    // their own pool, so a Fighter/Rogue with both used to draw them both from one counter.
     resources: [
       {
-        name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
+        name: 'Psionic Energy Dice (Psi Warrior)', key: 'psionic_energy_psi_warrior', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
         resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
       },
@@ -1057,10 +1059,11 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Psychic Veil', level: 13, description: 'As an action, become invisible for 1 hour or until you deal damage to a creature or force a save. Once per long rest, or spend an energy die.' },
     { name: 'Rend Mind', level: 17, description: 'When you use Psychic Blades for Sneak Attack damage, force a Wis save (DC 8 + proficiency + Dex modifier) or be stunned for 1 minute (repeats save at end of each turn). Once per long rest; expending three Psionic Energy dice lets you use it again.' },
   ],
-    // Same Psionic Energy pool as Psi Warrior (TCE): 2 x proficiency bonus, all back on a long rest.
+    // Same size of Psionic Energy pool as Psi Warrior (TCE): 2 x proficiency bonus, all back on
+    // a long rest — but a separate pool, hence a separate key. See the Psi Warrior note above.
     resources: [
       {
-        name: 'Psionic Energy Dice', key: 'psionic_energy', rechargeOn: 'long',
+        name: 'Psionic Energy Dice (Soulknife)', key: 'psionic_energy_soulknife', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
         resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
       },
@@ -1338,7 +1341,10 @@ export const ALL_SUBCLASSES: Subclass[] = [
       maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
   },
 
-  { id: 'cobalt-soul', name: 'Way of the Cobalt Soul', classId: 'monk', sourceBook: 'EGtW', description: 'Driven by the pursuit of knowledge and the spirit of truth, monks of the Cobalt Soul are the enlightened agents of the Cobalt Reserve, a network of libraries and scholars across Exandria. These monks use their physical prowess and keen intellect to expose the secrets of the world.', features: [
+  // Attributed to EGtW here, but EGtW's own text names the Tal'Dorei Campaign Setting as the
+  // source — the subclass is not in Wildemount at all. Hidden from the pickers until TDCSR is
+  // registered as a book; the entry stays so an existing Cobalt Soul monk still resolves.
+  { id: 'cobalt-soul', hidden: true, name: 'Way of the Cobalt Soul', classId: 'monk', sourceBook: 'EGtW', description: 'Driven by the pursuit of knowledge and the spirit of truth, monks of the Cobalt Soul are the enlightened agents of the Cobalt Reserve, a network of libraries and scholars across Exandria. These monks use their physical prowess and keen intellect to expose the secrets of the world.', features: [
     { name: 'Extract Aspects', level: 3, description: 'When you hit a creature with one of the attacks granted by your Flurry of Blows, you can analyze its defenses. On a hit, you learn the following information about the creature: its damage vulnerabilities, damage resistances, damage immunities, and condition immunities.\n\nThe DM might determine that some information about the creature is too obscure to be ascertained in this way.' },
     { name: 'Extort Truth', level: 3, description: 'You can precisely strike a hidden pressure point to weaken a creature\'s defenses. Whenever you hit a creature with one of the attacks granted by your Flurry of Blows, you can spend 1 ki point to force the creature to make a Charisma saving throw. On a failed save, the creature is unable to speak a deliberate lie and has disadvantage on Deception checks for 1 minute.\n\nYou know if the creature failed or succeeded on its saving throw. An affected creature is aware of the effect and can thus avoid answering questions to which it would normally respond with a lie.' },
     { name: 'Mystical Erudition', level: 3, description: 'You have extensively studied the history and lore within the archives of the Cobalt Soul. You learn one language of your choice, and you gain proficiency with one of the following skills of your choice: Arcana, History, Investigation, Nature, or Religion. If you already have proficiency in one of the listed skills, you can choose to double your proficiency bonus for ability checks you make that use that skill.' },

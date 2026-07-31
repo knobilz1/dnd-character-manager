@@ -5,7 +5,7 @@ import { ALL_FEATS } from '../../data/feats';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { SpellDetail } from '../creator/steps/StepSpells';
-import type { Character, Spell, SpellLevel, SlotLevel } from '../../types';
+import type { AbilityKey, Character, Spell, SpellLevel, SlotLevel } from '../../types';
 import { getClass } from '../../data/classes';
 import { getRace } from '../../data/races';
 
@@ -27,11 +27,12 @@ interface SpellPanelProps {
   usePactSlot: () => void;
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
+  setInnateSpellAbility: (ability: AbilityKey) => void;
 }
 
 const PREPARED_CASTER_CLASSES = ['cleric', 'druid', 'paladin', 'wizard', 'artificer'];
 
-export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell }: SpellPanelProps) {
+export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell, setInnateSpellAbility }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -265,11 +266,29 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
         const totalLevel = character.classes.reduce((sum, cl) => sum + cl.level, 0);
         const available = race.innateSpells.filter(s => (s.minCharLevel ?? 1) <= totalLevel);
         if (!available.length) return null;
+        // MMoM Duergar / Deep Gnome let the player pick Int, Wis or Cha for these spells.
+        // The picker lives here rather than in the creator because the race can't change after
+        // creation — so one control on the sheet reaches new and existing characters alike.
+        const abilityChoices = race.innateSpellAbilityChoice;
         return (
           <div className="bg-slate-800 border border-indigo-700/50 rounded-xl overflow-hidden">
             <div className="px-4 py-2 bg-slate-750 border-b border-slate-700 flex items-center gap-2">
               <h3 className="font-bold text-indigo-300 text-sm">Racial Innate Spells</h3>
               <span className="text-xs text-slate-500">({race.name})</span>
+              {abilityChoices && (
+                <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
+                  Ability
+                  <select
+                    className="bg-slate-900 border border-slate-600 rounded px-1.5 py-0.5 text-white"
+                    value={character.innateSpellAbility ?? available[0].ability}
+                    onChange={e => setInnateSpellAbility(e.target.value as AbilityKey)}
+                  >
+                    {abilityChoices.map(a => (
+                      <option key={a} value={a}>{a.toUpperCase()}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
             <div className="divide-y divide-slate-700/50">
               {available.map(innate => {
@@ -294,7 +313,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                         {spell.ritual && <span className="text-xs text-blue-400 bg-blue-900/30 px-1 rounded">R</span>}
                       </div>
                       <p className="text-xs text-slate-500">
-                        {spell.castingTime} · {spell.range} · {innate.ability.toUpperCase()}
+                        {spell.castingTime} · {spell.range} · {(abilityChoices ? (character.innateSpellAbility ?? innate.ability) : innate.ability).toUpperCase()}
                         {rechargeLabel && <span className="text-slate-600"> · {rechargeLabel}</span>}
                       </p>
                     </div>
