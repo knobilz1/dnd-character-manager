@@ -7,6 +7,7 @@ import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS } from '../data/feats';
 import { ARMOR_STATS } from '../data/items';
+import { racialAsi } from '../utils/racialAsi';
 
 // Eldritch Knight and Arcane Trickster get spellcasting via subclass.
 // Look up the effective spellcasting type for a class+subclass combo.
@@ -44,7 +45,9 @@ export function computeCharacterDerived(character: Character) {
     // Final ability scores = base + racial + feat bonuses
     const finalScores: AbilityScores = { ...character.baseAbilityScores };
     if (race) {
-      for (const [key, val] of Object.entries(race.abilityScoreIncreases)) {
+      // via racialAsi, not race.abilityScoreIncreases: flexible-ASI races store the real value on
+      // the character, and reading the race directly gave all 42 of them +0 forever.
+      for (const [key, val] of Object.entries(racialAsi(race, character.racialAbilityChoice))) {
         finalScores[key as AbilityKey] = (finalScores[key as AbilityKey] ?? 10) + (val ?? 0);
       }
     }

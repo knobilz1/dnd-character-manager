@@ -9,6 +9,7 @@ import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getSpell } from '../data/spells';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
+import { racialAsi } from '../utils/racialAsi';
 
 /** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
  *  Mirrors the logic in useCharacterDerived.ts so the store can apply correct maxes
@@ -19,7 +20,7 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
 
   // Final ability scores = base + racial + feat bonuses (mirrors useCharacterDerived.ts)
   const race = getRace(c.raceId);
-  const racial = race?.abilityScoreIncreases ?? {};
+  const racial = racialAsi(race, c.racialAbilityChoice);
   const baseScores: Record<string, number> = {};
   for (const k of Object.keys(c.baseAbilityScores)) {
     baseScores[k] = (c.baseAbilityScores[k as AbilityKey] ?? 10) + ((racial as Record<string, number>)[k] ?? 0);
@@ -201,6 +202,7 @@ interface CharacterState {
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
   setInnateSpellAbility: (ability: AbilityKey) => void;
+  setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -804,7 +806,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Apply ASI or feat choice
       // Hoist race/racial lookup so we can use racialCon in the CON-mod delta check below.
       const race = getRace(s.character.raceId);
-      const racialBonuses = race?.abilityScoreIncreases ?? {};
+      const racialBonuses = racialAsi(race, s.character.racialAbilityChoice);
       const racialCon = (racialBonuses as Partial<Record<AbilityKey, number>>).con ?? 0;
       // Old CON modifier (before this ASI) — used to detect a modifier increase.
       const oldConMod = Math.floor(((s.character.baseAbilityScores.con ?? 10) + racialCon - 10) / 2);
@@ -1214,6 +1216,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setInnateSpellAbility: (ability) =>
     set((s) => s.character ? { character: { ...s.character, innateSpellAbility: ability } } : s),
+
+  setRacialAbilityChoice: (v) =>
+    set((s) => s.character ? { character: { ...s.character, racialAbilityChoice: v } } : s),
 
   setArmorerMode: (mode) =>
     set((s) => s.character ? { character: { ...s.character, armorerMode: mode } } : s),

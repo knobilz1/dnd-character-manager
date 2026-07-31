@@ -4,6 +4,7 @@ import { SectionHeader, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { getBackground, resolveBackground } from '../../data/backgrounds';
 import { getRace } from '../../data/races';
+import { FlexibleAsiPicker } from '../creator/steps/FlexibleAsiPicker';
 import { getClass } from '../../data/classes';
 import { ALL_SUBCLASSES } from '../../data/subclasses';
 import { ALL_FEATS } from '../../data/feats';
@@ -15,9 +16,13 @@ import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { totalCharacterLevel } from '../../data/mechanics';
 import { useCharacterStore } from '../../store/useCharacterStore';
-import type { Background, BackgroundCustom, Character, JournalEntry } from '../../types';
+import type { Background, BackgroundCustom, Character, JournalEntry, AbilityKey } from '../../types';
 
-export function TraitsPanel({ character, setNotes }: { character: Character; setNotes: (n: string) => void }) {
+export function TraitsPanel({ character, setNotes, setRacialAbilityChoice }: {
+  character: Character;
+  setNotes: (n: string) => void;
+  setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
+}) {
   const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
   const bg = resolveBackground(character);
   const race = getRace(character.raceId);
@@ -100,6 +105,21 @@ export function TraitsPanel({ character, setNotes }: { character: Character; set
       {race && (
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
           <SectionHeader>Racial Traits: {race.name}</SectionHeader>
+          {/* Races printed from Tasha's on let the player choose where the ability increase goes.
+              The picker lives here as well as in the creator because race cannot change after
+              creation — a creator-only control would leave every existing character permanently
+              unable to supply the value, which is exactly how the Circle of the Land land type
+              and the Deep Gnome spell ability were both unreachable. */}
+          {race.flexibleAsi && (
+            <div className="bg-slate-900 border border-amber-700/40 rounded-lg p-3 mb-2">
+              <FlexibleAsiPicker
+                race={race}
+                value={character.racialAbilityChoice}
+                onChange={setRacialAbilityChoice}
+                compact
+              />
+            </div>
+          )}
           <div className="space-y-2">
             {race.traits.map(trait => (
               <div key={trait.name} className="bg-slate-900 rounded-lg p-3">

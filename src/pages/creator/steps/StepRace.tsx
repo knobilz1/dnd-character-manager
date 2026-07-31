@@ -4,6 +4,7 @@ import { ALL_RACES } from '../../../data/races';
 import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
+import { FlexibleAsiPicker } from './FlexibleAsiPicker';
 import type { Race, CharacterGender } from '../../../types';
 
 const CharacterViewport = React.lazy(() => import('../../sheet/CharacterViewport'));
@@ -40,7 +41,9 @@ export function StepRace() {
 
   function selectRace(race: Race) {
     setSelected(race);
-    updateDraft({ raceId: race.id });
+    // clear any increase chosen for the previous race — the shapes differ per race,
+    // and a stale choice would silently apply to the new one
+    updateDraft({ raceId: race.id, racialAbilityChoice: undefined });
   }
 
   function setGender(g: CharacterGender) {
@@ -67,7 +70,7 @@ export function StepRace() {
         <h4 className="font-bold text-white text-sm">{race.name}</h4>
         <Badge color="slate">{race.size}</Badge>
       </div>
-      <p className="text-xs text-slate-400 mb-1.5">{abilityStr(race.abilityScoreIncreases)}</p>
+      <p className="text-xs text-slate-400 mb-1.5">{race.flexibleAsi ? 'Flexible ability increase' : abilityStr(race.abilityScoreIncreases)}</p>
       <p className="text-xs text-slate-500">Speed: {race.speed}ft{race.darkvision ? ` · Darkvision ${race.darkvision}ft` : ''}</p>
     </div>
   );
@@ -173,13 +176,17 @@ export function StepRace() {
             <div className="mb-4">
               <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Ability Score Increases</h4>
               <div className="flex flex-wrap gap-2">
-                {Object.entries(selected.abilityScoreIncreases).length > 0
-                  ? Object.entries(selected.abilityScoreIncreases).map(([k, v]) => (
+                {selected.flexibleAsi
+                  ? <FlexibleAsiPicker
+                      race={selected}
+                      value={draft.racialAbilityChoice}
+                      onChange={v => updateDraft({ racialAbilityChoice: v })}
+                    />
+                  : Object.entries(selected.abilityScoreIncreases).map(([k, v]) => (
                     <span key={k} className="text-sm bg-slate-700 px-2 py-1 rounded text-white">
                       {k.toUpperCase()} <span className="text-green-400">+{v}</span>
                     </span>
                   ))
-                  : <span className="text-sm text-slate-500">Flexible (see traits)</span>
                 }
               </div>
             </div>

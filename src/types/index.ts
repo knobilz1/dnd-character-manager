@@ -83,6 +83,14 @@ export interface Race {
   fly?: number;
   climb?: number;
   abilityScoreIncreases: Partial<Record<AbilityKey, number>>;
+  /** The race's ability increase is chosen by the player rather than fixed, so
+   *  `abilityScoreIncreases` is empty and the real value lives on the character.
+   *  Each entry is one legal distribution, as a list of increments to assign to distinct
+   *  abilities. MMoM / SJA / FToD / SCoC races offer `[[2,1],[1,1,1]]`; Variant Human offers
+   *  `[[1,1]]` — a genuinely different rule, which is why this is a shape rather than a flag.
+   *  Note the ten PHB 2024 species are NOT flexible: in 2024 the *background* grants the
+   *  increase, so their empty `abilityScoreIncreases` is correct and they must not carry this. */
+  flexibleAsi?: number[][];
   traits: Trait[];
   darkvision?: number;
   resistances?: DamageType[];
@@ -580,6 +588,10 @@ export interface Character {
   /** Player's pick when the race offers a choice of innate-spell ability. Unset falls back to
    *  the ability on each InnateSpell. See `Race.innateSpellAbilityChoice`. */
   innateSpellAbility?: AbilityKey;
+  /** Chosen racial ability increases, for races with `flexibleAsi`. Read through
+   *  `racialAsi()` — never read `race.abilityScoreIncreases` directly, or a flexible race
+   *  silently contributes nothing. */
+  racialAbilityChoice?: Partial<Record<AbilityKey, number>>;
   inspiration: boolean;
   experiencePoints: number;
   notes: string;

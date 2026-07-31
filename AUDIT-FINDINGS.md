@@ -2261,3 +2261,96 @@ rather than swept, so a later pass does not spend effort on it.
 
 Sweeps to date: **10 layers swept, 7 found defects (70%).** Phase C is now COMPLETE: speeds (C1),
 resistances (C4), darkvision (C5, clean), proficiencies (C3), ASIs (C6), languages (n/a).
+
+---
+
+## ✏️ CORRECTION to C6 — it is TWO root causes, and the count of 52 was wrong
+
+Found while designing the fix, before writing any code. C6 claimed "52 of 122 races grant no ability
+score increase". The consequence is real and the runtime proof stands, but the diagnosis conflated
+two different defects, and one third of the count belongs to neither.
+
+### The 10 PHB 2024 species are NOT a race-side defect
+In the 2024 rules the **background** grants the ability score increase, not the species
+(`phb2024-players-handbook.md`: *"Each background grants: ability score increases (+2/+1 to two, or
++1/+1/+1 to all three listed)"*). So `abilityScoreIncreases: {}` on `elf-2024` and its nine siblings
+is **correct data**. My runtime check saw `elf-2024` at +0 and I attributed it to the race; the
+character was in fact missing a *background* bonus.
+
+### C6a — race-side flexible ASI, unreachable (42 races, confirmed)
+| book | count | rule, per the race's own trait text |
+|---|---|---|
+| MMoM | 31 | "Increase one score by 2 and a different score by 1, OR three different scores by 1" |
+| SJA | 6 | same Tasha-style wording (SJA book unavailable; the app's own trait text is unambiguous) |
+| FToD | 3 | chromatic/metallic/gem dragonborn, same wording — verified in the data |
+| SCoC | 1 | owlin — `scoc` extract states "Flexible ASI" explicitly |
+| PHB | 1 | `human-variant` — a **different** rule: "+1 to two different ability scores of your choice" |
+
+42, not 52. `human-variant` needs its own distribution shape, so a single hardcoded "+2/+1 or
++1/+1/+1" would have silently mis-modelled it.
+
+### C7 (new) — 2024 backgrounds carry the ASI in prose only
+`Background` (`types/index.ts:241-254`) has **no ability-score field at all**. The 2024 increase
+exists only inside `feature.description`, e.g. acolyte-2024: *"Ability Scores: +2/+1 to Intelligence,
+Wisdom, Charisma (or +1 each)"*. Nothing parses it. So **every** 2024 character is missing the entire
++2/+1, regardless of species — 16 backgrounds affected.
+
+This is the same shape as C1/C3/C6a once more: a mechanic that exists as prose beside a type with
+nowhere to put it.
+
+### Why this correction matters beyond the count
+Fixing C6 as originally written would have added a racial picker to the ten 2024 species — giving
+them an increase the 2024 rules do not grant, on top of the background one they are still missing.
+The audit's own methodology note applies: *check which source the app's entry names before assuming
+the defect is where the symptom appeared.*
+
+## FIX — C6a implemented and verified (racial flexible ASI now reachable)
+
+Fixed in the same pass that produced the correction above, so the ten PHB 2024 species were
+deliberately **not** touched.
+
+**Shape.** `Race.flexibleAsi?: number[][]` — each entry one legal distribution of increments.
+41 races carry `[[2,1],[1,1,1]]`; `human-variant` carries `[[1,1]]`, because its rule genuinely
+differs and a single hardcoded shape would have mis-modelled it. `Character.racialAbilityChoice`
+stores the assignment.
+
+**Merge point.** New `src/utils/racialAsi.ts` exports `racialAsi(race, chosen)` — returns the chosen
+map for a flexible race, the fixed table otherwise, so it is safe to call unconditionally. All 19
+read sites across 9 files now go through it: `useCharacterDerived`, `useCharacterStore` ×2,
+`useCreatorStore` ×4, `LevelUpDialog`, `feats.ts`, `StepAbilityScores` ×5, `StepFeats`, `StepReview`,
+`StepRace` ×2. A companion `needsRacialAsi()` reports an outstanding choice by comparing the multiset
+of picked increments against each legal distribution — so a lone +2 does not satisfy "+2/+1", and
+stray zeros never count.
+
+**Reachability.** `FlexibleAsiPicker` is rendered in **both** the creator's race step (replacing the
+dead "Flexible (see traits)" label) and the sheet's Character tab. Both, because race cannot change
+after creation — a creator-only picker would leave every existing character permanently unable to
+supply the value, which is precisely how the Circle of the Land land type and the Deep Gnome spell
+ability were each unreachable. Changing race in the creator clears any choice made for the previous
+one, since the shapes differ per race.
+
+**Runtime verification** — five builds, identical base scores 15/14/13/12/10/8, only race and choice differing:
+
+| build | rendered | verdict |
+|---|---|---|
+| `dwarf-hill` (fixed ASI) | CON15 WIS11 | unchanged — no regression on the 70 fixed races |
+| `shifter`, no choice yet | base | correctly +0 until chosen |
+| `shifter`, +2 STR / +1 CON | **STR17 CON14** | applied |
+| `human-variant`, +1 DEX / +1 WIS | **DEX15 WIS11** | applied — the `[[1,1]]` shape works |
+| `elf-2024` | base | correctly still +0; its increase is background-side |
+
+**Picker verified interactively**, both directions:
+
+| step | status | scores |
+|---|---|---|
+| start | choice required | STR15 CON13 |
+| assign +2 → STR | choice required *(partial)* | STR17 CON13 |
+| assign +1 → CON | **set** | STR17 **CON14** |
+
+A partial assignment applies what is chosen but keeps reporting the choice as outstanding; the flag
+flips only on a complete legal distribution.
+
+`npx tsc -b --force` clean, `npm run build` clean.
+
+**Not fixed here: C7** (2024 backgrounds carry the ASI in prose only). It is a different type, a
+different picker and a different rule — folding it into this commit would have hidden it.

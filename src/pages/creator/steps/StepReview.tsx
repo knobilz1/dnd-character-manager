@@ -8,6 +8,7 @@ import { ALL_SUBCLASSES } from '../../../data/subclasses';
 import { ALL_FEATS } from '../../../data/feats';
 import { ALL_SPELLS } from '../../../data/spells';
 import { abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
+import { racialAsi } from '../../../utils/racialAsi';
 
 const ALIGNMENTS = [
   'Lawful Good','Neutral Good','Chaotic Good',
@@ -32,7 +33,7 @@ export function StepReview() {
   // Compute final scores with racial bonuses
   const finalScores = { ...scores };
   if (race) {
-    for (const [k, v] of Object.entries(race.abilityScoreIncreases)) {
+    for (const [k, v] of Object.entries(racialAsi(race, draft.racialAbilityChoice))) {
       (finalScores as any)[k] = ((finalScores as any)[k] ?? 10) + (v ?? 0);
     }
   }

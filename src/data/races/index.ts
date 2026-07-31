@@ -44,6 +44,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'Two different ability scores of your choice increase by 1.' },
       { name: 'Skills', description: 'You gain proficiency in one skill of your choice.' },
@@ -664,6 +665,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Flight', description: 'You have a flying speed equal to your walking speed. To use this speed, you can\'t be wearing medium or heavy armor.' },
@@ -683,6 +685,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 40,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Fey.' },
       { name: 'Charge', description: 'If you move at least 30 feet straight toward a target and then hit it with a melee weapon attack on the same turn, you can immediately follow that attack with a bonus action to make one attack against the target with your Hooves.' },
@@ -700,6 +703,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Fey.' },
       { name: 'Changeling Instincts', description: 'You gain proficiency with two of the following skills of your choice: Deception, Insight, Intimidation, Performance, or Persuasion.' },
@@ -729,6 +733,7 @@ export const ALL_RACES: Race[] = [
     size: 'Small',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid. You are also considered a gnome for any prerequisite or effect that requires you to be a gnome.' },
       { name: 'Superior Darkvision', description: 'You can see in dim light within 120 feet of you as if it were bright light, and in darkness as if it were dim light.' },
@@ -756,6 +761,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid. You are also considered a dwarf for any prerequisite or effect that requires you to be a dwarf.' },
       { name: 'Superior Darkvision', description: 'You can see in dim light within 120 feet of you as if it were bright light, and in darkness as if it were dim light.' },
@@ -779,6 +785,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid (elf).' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
@@ -798,6 +805,7 @@ export const ALL_RACES: Race[] = [
     size: 'Small',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Fey.' },
       { name: 'Fairy Magic', description: 'You know the Druidcraft cantrip. At 3rd level, cast Faerie Fire; at 5th, Enlarge/Reduce. Once each per long rest. Use Int, Wis, or Cha (your choice).' },
@@ -818,6 +826,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 35,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
@@ -842,6 +851,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
@@ -863,6 +873,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
@@ -886,6 +897,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
@@ -911,6 +923,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid (gith).' },
       { name: 'Astral Knowledge', description: 'After finishing a long rest, gain proficiency in one skill of your choice AND one weapon or tool of your choice (from the Player\'s Handbook). These proficiencies last until the end of your next long rest.' },
@@ -933,6 +946,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid (gith).' },
       { name: 'Githzerai Psionics', description: 'You know Mage Hand (invisible). At 3rd, cast Shield; at 5th, Detect Thoughts. Once each per long rest.' },
@@ -959,6 +973,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Hare-Trigger', description: 'You can add your proficiency bonus to your initiative rolls.' },
@@ -980,6 +995,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 35,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Daunting Roar', description: 'As a bonus action, you let out an intimidating roar. Each creature of your choice within 10 feet of you must succeed on a Wisdom saving throw (DC 8 + your proficiency bonus + your Constitution modifier) or become frightened of you until the end of your next turn. You can use this trait a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
@@ -996,6 +1012,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Horns', description: 'You have horns that you can use to make unarmed strikes. When you hit with them, the strike deals 1d6 + your Strength modifier piercing damage.' },
@@ -1013,6 +1030,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 35,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Fey.' },
       { name: 'Magic Resistance', description: 'Advantage on saves against spells.' },
@@ -1031,6 +1049,7 @@ export const ALL_RACES: Race[] = [
     speed: 30,
     swim: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid. You are also considered an elf for any prerequisite or effect that requires you to be an elf.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },
@@ -1056,6 +1075,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid (elf).' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
@@ -1081,6 +1101,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
@@ -1098,6 +1119,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     naturalArmor: { base: 17 },
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
@@ -1125,6 +1147,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'Increase one ability score by 2 and a different one by 1, or increase three different ability scores by 1.' },
       { name: 'Chromatic Ancestry', description: 'Choose one chromatic dragon ancestor: Black (acid), Blue (lightning), Green (poison), Red (fire), or White (cold). This determines the damage type for your other traits.' },
@@ -1148,6 +1171,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'Increase one ability score by 2 and a different one by 1, or increase three different ability scores by 1.' },
       { name: 'Metallic Ancestry', description: 'Choose one metallic dragon ancestor: Brass (fire), Bronze (lightning), Copper (acid), Gold (fire), or Silver (cold). This determines the damage type for your other traits.' },
@@ -1171,6 +1195,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'Increase one ability score by 2 and a different one by 1, or increase three different ability scores by 1.' },
       { name: 'Gem Ancestry', description: 'Choose one gem dragon ancestor: Amethyst (force), Crystal (radiant), Emerald (psychic), Sapphire (thunder), or Topaz (necrotic). This determines the damage type for your other traits.' },
@@ -1191,6 +1216,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1213,6 +1239,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1235,6 +1262,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1257,6 +1285,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1279,6 +1308,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1301,6 +1331,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1323,6 +1354,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1345,6 +1377,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1367,6 +1400,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
       { name: 'Hellish Resistance', description: 'You have resistance to fire damage.' },
@@ -1495,6 +1529,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Creature Type', description: 'You are a Humanoid.' },
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' },
@@ -1576,6 +1611,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Astral Fire', description: 'You know one of the following cantrips of your choice: dancing lights, light, or sacred flame. Intelligence, Wisdom, or Charisma is your spellcasting ability for it (choose when you select this race).' },
@@ -1600,6 +1636,7 @@ export const ALL_RACES: Race[] = [
     size: 'Small',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Armored Casing', description: 'You are encased in thin metal or another durable material. While you aren\'t wearing armor, your base Armor Class is 13 + your Dexterity modifier.' },
@@ -1623,6 +1660,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Damage Dealer', description: 'Once per turn when you score a hit with an attack roll using a weapon, you can roll the weapon\'s damage die one additional time and add it to the damage roll.' },
@@ -1645,6 +1683,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Climb Speed', description: 'You have a climbing speed equal to your walking speed.' },
@@ -1662,6 +1701,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Amorphous', description: 'You can squeeze through a space as narrow as 1 inch wide, provided you are wearing and carrying nothing. You have advantage on ability checks you make to initiate or escape a grapple.' },
@@ -1682,6 +1722,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Chameleon Carapace', description: 'While you aren\'t wearing armor, your carapace gives you a base Armor Class of 13 + your Dexterity modifier. As an action, you can change the color of your carapace to match your surroundings, giving you advantage on Dexterity (Stealth) checks made to hide in those surroundings.' },
@@ -1703,6 +1744,7 @@ export const ALL_RACES: Race[] = [
     size: 'Medium',
     speed: 30,
     abilityScoreIncreases: {},
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
       { name: 'Size', description: 'You are Medium or Small. You choose the size when you select this race.' },

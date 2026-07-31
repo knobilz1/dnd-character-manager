@@ -22,6 +22,7 @@ import { bookEnabled } from '../../utils/bookEnabled';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import type { Character, AbilityKey, ASIChoice, BookId } from '../../types';
+import { racialAsi } from '../../utils/racialAsi';
 
 const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
 
@@ -339,7 +340,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
 
   // Effective scores (base + racial + feat bonuses) for display and cap-checking
   const race = getRace(character.raceId);
-  const racialBonuses = race?.abilityScoreIncreases ?? {};
+  const racialBonuses = racialAsi(race, character.racialAbilityChoice);
   const effectiveScore = (k: AbilityKey) =>
     derived?.finalScores[k] ?? ((character.baseAbilityScores[k] ?? 0) + ((racialBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0));
 

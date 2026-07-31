@@ -4,6 +4,7 @@ import { getClass } from './classes';
 import { getSubclass } from './subclasses';
 import { getRace } from './races';
 import { bookEnabled } from '../utils/bookEnabled';
+import { racialAsi } from '../utils/racialAsi';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -638,7 +639,7 @@ export function getEligibleFeats(character: Character, enabledBooks: BookId[]): 
   const totalLevel = character.classes.reduce((s, c) => s + c.level, 0);
 
   const race = getRace(character.raceId);
-  const racialBonuses = race?.abilityScoreIncreases ?? {};
+  const racialBonuses = racialAsi(race, character.racialAbilityChoice);
   const effectiveScore = (k: AbilityKey) =>
     (character.baseAbilityScores[k] ?? 0) + ((racialBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0);
 

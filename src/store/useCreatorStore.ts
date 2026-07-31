@@ -7,6 +7,7 @@ import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
+import { racialAsi } from '../utils/racialAsi';
 
 
 
@@ -166,13 +167,13 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (feat?.abilityScoreChoice && draftFeatChoices[featId]) {
         const key = draftFeatChoices[featId] as import('../types').AbilityKey;
-        const racialBonus = ((race?.abilityScoreIncreases ?? {}) as Record<string, number>)[key] ?? 0;
+        const racialBonus = (racialAsi(race, draft.racialAbilityChoice) as Record<string, number>)[key] ?? 0;
         const maxBase = 20 - racialBonus;
         finalBaseScores = { ...finalBaseScores, [key]: Math.min(maxBase, (finalBaseScores[key] ?? 0) + 1) };
       }
     }
 
-    const racialCon = (race?.abilityScoreIncreases as any)?.con ?? 0;
+    const racialCon = racialAsi(race, draft.racialAbilityChoice).con ?? 0;
     const effectiveCon = (finalBaseScores.con ?? 10) + racialCon;
     const conMod = Math.floor((effectiveCon - 10) / 2);
     const level = primaryClass.level;
@@ -201,8 +202,8 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
 
     // Compute ability mods needed for resource max overrides (Bardic Inspiration, Flash of Genius).
     // Mirrors computeResourceMaxOverrides in useCharacterStore: base + racial + feats.
-    const racialCha = (race?.abilityScoreIncreases as any)?.cha ?? 0;
-    const racialInt = (race?.abilityScoreIncreases as any)?.int ?? 0;
+    const racialCha = racialAsi(race, draft.racialAbilityChoice).cha ?? 0;
+    const racialInt = racialAsi(race, draft.racialAbilityChoice).int ?? 0;
     let featCha = 0, featInt = 0;
     for (const featId of (draft.selectedFeats ?? [])) {
       const feat = ALL_FEATS.find(f => f.id === featId);
