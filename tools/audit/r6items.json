@@ -1,0 +1,744 @@
+[
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Alchemy Jug",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Boots of Speed",
+  "maxCharges": "1",
+  "recharge": "long",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Circlet of Blasting",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Driftglobe",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Eyes of Charming",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Gem of Brightness",
+  "maxCharges": "50",
+  "recharge": null,
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Gem of Seeing",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Luck Blade",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Medallion of Thoughts",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Pearl of Power",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Pipes of Haunting",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Pipes of the Sewers",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Plate Armor of Etherealness",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Robe of Scintillating Colors",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Robe of Stars",
+  "maxCharges": "6",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Rod of Alertness",
+  "maxCharges": "8",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Rod of Rulership",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Ring of Animal Influence",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Ring of Djinni Summoning",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Ring of Evasion",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Ring of the Ram",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Ring of Three Wishes",
+  "maxCharges": "3",
+  "recharge": null,
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Scarab of Protection",
+  "maxCharges": "12",
+  "recharge": null,
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Charming",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Fire",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Frost",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Healing",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Power",
+  "maxCharges": "20",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Striking",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Swarming Insects",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of the Magi",
+  "maxCharges": "50",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of the Woodlands",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Thunder and Lightning",
+  "maxCharges": "5",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Staff of Withering",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Trident of Fish Command",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Binding",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Enemy Detection",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Fear",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Fireballs",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Lightning Bolts",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Magic Detection",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Magic Missiles",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Paralysis",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Polymorph",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Secrets",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Web",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wand of Wonder",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Wings of Flying",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Dagger of Venom",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Mace of Terror",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Bowl of Commanding Water Elementals",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Brazier of Commanding Fire Elementals",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Cape of the Mountebank",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Censer of Controlling Air Elementals",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Chime of Opening",
+  "maxCharges": "10",
+  "recharge": null,
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Cloak of Arachnida",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Cloak of the Bat",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Helm of Teleportation",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Stone of Controlling Earth Elementals",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "XGTE_ITEMS",
+  "name": "Hat of Vermin",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "XGTE_ITEMS",
+  "name": "Staff of Birdcalls",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "XGTE_ITEMS",
+  "name": "Staff of Flowers",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "XGTE_ITEMS",
+  "name": "Wand of Pyrotechnics",
+  "maxCharges": "7",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "XGTE_ITEMS",
+  "name": "Wand of Scowls",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "XGTE_ITEMS",
+  "name": "Wand of Smiles",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Eldritch Claw Tattoo",
+  "maxCharges": "1",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Ghost Step Tattoo",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Guardian Emblem",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Luba's Tarokka of Souls",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Teeth of Dahlver-Nar",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Bell Branch",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Blood Fury Tattoo",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Crook of Rao",
+  "maxCharges": "6",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Crystalline Chronicle",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Demonomicon of Iggwilv",
+  "maxCharges": "8",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "TCE_ITEMS",
+  "name": "Lyre of Building",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "EGTW_ITEMS",
+  "name": "Hunter's Coat",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "EGTW_ITEMS",
+  "name": "Kiss of the Changebringer",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "EGTW_ITEMS",
+  "name": "Ring of Obscuring",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "EGTW_ITEMS",
+  "name": "Battering Shield",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "EGTW_ITEMS",
+  "name": "Rod of Retribution",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "EGTW_ITEMS",
+  "name": "Staff of Dunamancy",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "GGR_ITEMS",
+  "name": "Guild Signet",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "GGR_ITEMS",
+  "name": "Mizzium Mortar",
+  "maxCharges": "4",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "GGR_ITEMS",
+  "name": "Voyager Staff",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "SCOC_ITEMS",
+  "name": "Lorehold Primer",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "SCOC_ITEMS",
+  "name": "Prismari Primer",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "SCOC_ITEMS",
+  "name": "Quandrix Primer",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "SCOC_ITEMS",
+  "name": "Silverquill Primer",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "SCOC_ITEMS",
+  "name": "Witherbloom Primer",
+  "maxCharges": "3",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "ERLW_ITEMS",
+  "name": "Belashyrra's Beholder Crown",
+  "maxCharges": "10",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "ERLW_ITEMS",
+  "name": "Earworm",
+  "maxCharges": "4",
+  "recharge": "dawn",
+  "state": "tracked"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Nine Lives Stealer",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "A"
+ },
+ {
+  "array": "MAGIC_ITEMS",
+  "name": "Crystal Ball",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Cloak of Invisibility",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Doss Lute)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Fochlucan Bandore)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Mac-Fuirmidh Cittern)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Canaith Mandolin)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Cli Lyre)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Anstruth Harp)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Instrument of the Bards (Ollamh Harp)",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Rod of the Pact Keeper, +1",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Rod of the Pact Keeper, +2",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "DMG_EXTRA",
+  "name": "Rod of the Pact Keeper, +3",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ },
+ {
+  "array": "ERLW_ITEMS",
+  "name": "Kyrzin's Ooze",
+  "maxCharges": null,
+  "recharge": null,
+  "state": "B"
+ }
+]

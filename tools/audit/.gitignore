@@ -1,2 +1,5 @@
 out-*.json
 __pycache__/
+
+# Extracted rulebook text — copyrighted, never commit
+.pdfcache/

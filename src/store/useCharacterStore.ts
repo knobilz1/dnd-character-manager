@@ -1081,9 +1081,12 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         }
         return merged;
       })();
-      // Restore charges on equipped items that recharge on short rest
+      // Restore charges on items that recharge on a short rest.
+      // NOT gated on `equipped`: every charged item template is category 'magic', and
+      // InventoryPanel only offers an equip toggle for armor/shield/weapon — so an
+      // `i.equipped` condition here silently meant no item ever recharged at all.
       const srInventory = (s.character.inventory ?? []).map(i =>
-        (i.equipped && i.maxCharges != null && i.recharge === 'short')
+        (i.maxCharges != null && i.recharge === 'short')
           ? { ...i, charges: i.maxCharges }
           : i
       );
@@ -1153,9 +1156,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         return merged;
       })();
 
-      // Restore charges on equipped items that recharge at dawn / long rest (both map to long rest here)
+      // Restore charges on items that recharge at dawn / long rest (both map to long rest here).
+      // See the short-rest note above for why this is not gated on `equipped`.
       const lrInventory = (s.character.inventory ?? []).map(i =>
-        (i.equipped && i.maxCharges != null && (i.recharge === 'dawn' || i.recharge === 'long' || i.recharge === 'short'))
+        (i.maxCharges != null && (i.recharge === 'dawn' || i.recharge === 'long' || i.recharge === 'short'))
           ? { ...i, charges: i.maxCharges }
           : i
       );

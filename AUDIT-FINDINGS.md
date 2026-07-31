@@ -2670,3 +2670,109 @@ r5cover              70 of 72 fully covered; both exceptions resolved as non-def
 tsc -b --force       clean
 npm run build        clean
 ```
+
+---
+
+## ✅ R6 IS COMPLETE — the "BLOCKED ON SOURCE" verdict above was WRONG (2026-07-31)
+
+**Retraction.** The section "⛔ R6 IS BLOCKED ON SOURCE" claimed the DMG markdown omits recharge
+clauses and that "there is no DMG PDF to fall back on". Both halves are false, and Nabil corrected
+it in two messages:
+
+- `reference-books/md/dmg-dungeon-masters-guide.md` carries recharge clauses throughout
+  (`"3 charges. Regains 1d3/dawn."`, `"10 charges, regains 1d6+4/dawn"`, …).
+- `reference-books/D&D 5E - Dungeon Master's Guide.pdf` exists (320 pages, OCR'd text layer).
+
+What I had actually consulted was a stale *memory note* listing DMG as a missing book. I never ran
+`ls`. The note has been corrected.
+
+**The second error compounded it:** the specific items I "checked and found missing" from the DMG —
+Hat of Vermin, Staff of Birdcalls, Staff of Flowers, Wand of Pyrotechnics/Scowls/Smiles — are
+**XGtE items, not DMG items**. They were absent because I was looking in the wrong book, and I read
+that absence as the extract being lossy.
+
+### Reading these PDFs (recorded so the next pass doesn't re-derive it)
+`Read` with `pages` fails here — **`pdftoppm is not installed`**. Use `pypdf` (installed;
+pdfplumber/fitz/PyPDF2/pdfminer are not). The text layer is OCR'd and noisy (`"meta l tube"`,
+`"Wondrous item , u ncommon"`), so a literal name search finds nothing — match on letters-only
+normalised text and keep a normalised→raw index map. `tools/audit/r6verify.py` does all of this and
+caches extraction to `tools/audit/.pdfcache/`. XGtE's PDF is an **AnyFlip web capture** containing
+only tables, no item entries — that book is not verifiable this way.
+
+### Sweep design — two probe bugs caught by controls, both of the documented shape
+1. **Matched the index, not the entry.** First run diffed the app against random-treasure table rows
+   (`"Ring of evasion 18 Armor of vulnerability 66"`) and paired Ring of Three Wishes with Alchemy
+   Jug's text. Fixed by scoring occurrences on a following type/rarity line and rejecting rows
+   followed by page numbers.
+2. **False OK from an unbounded slice.** A 1400-char window off *Chime of Opening* ran into
+   *Circlet of Blasting* ("until the next dawn") and reported the neighbour's recharge as the
+   chime's — a **false OK on an item that is genuinely wrong**. Fixed by clipping at the next
+   all-caps heading and taking the earliest match by *position*, not by pattern order.
+   Chime became the negative control for the rest of the sweep.
+3. **`recharge=3` on Lyre of Building** was a parser artifact: its description literally contains
+   `"(recharge: 3 charges at dawn)"` and the field regex matched inside the string. Field lookup now
+   blanks string bodies first. The data was correct all along.
+
+### 🔴 THE REAL R6 BUG — `recharge` had never done anything, for any item
+
+Rest restoration in `useCharacterStore.ts` (short rest ~:1085, long rest ~:1157) read:
+
+```ts
+(i.equipped && i.maxCharges != null && (i.recharge === 'dawn' || …))
+```
+
+But `InventoryPanel.tsx:415` sets `equippable = category === 'armor' | 'shield' | 'weapon'` —
+**category `'magic'` has no equip toggle in the UI at all.**
+
+Measured: **all 92 tracked charged items are category `'magic'`. 92 of 92 could never be equipped,
+so not one of them has ever regained a charge on a rest.** Every wand, staff, rod and ring in the
+app counted down and stayed down. The `recharge` field was inert from the day it was added.
+
+This is why the earlier "recharge wording is a FALSE POSITIVE, all 38 are fine" conclusion felt
+safe — nothing downstream consumed the field, so no wrong value could ever surface.
+
+**Fix:** dropped the `equipped` requirement from both rest paths. Per RAW a wand regains charges at
+dawn whether or not you are holding it. (The unrelated `i.equipped` gate on Bloodwell Vial is
+correct and untouched.)
+
+### Data fixes applied — 16 items, each read out of the book this session
+
+| Item | Book | was | now | evidence |
+|---|---|---|---|---|
+| Chime of Opening | DMG | 10 / **dawn** | 10 / **none** | *"can be used ten times. After the tenth time it cracks and becomes useless"* |
+| Lorehold / Prismari / Quandrix / Silverquill / Witherbloom Primer | SCoC | untracked | 3 / dawn | *"has 3 charges, and it regains 1d3 expended charges daily at dawn"* |
+| Belashyrra's Beholder Crown | ERLW | untracked | 10 / dawn | *"regains 1d6+3 expended charges daily at dawn"* |
+| Earworm | ERLW | untracked | 4 / dawn | *"has 4 charges … regains 1d4 expended charges daily at dawn"* |
+| Ghost Step Tattoo | TCE | untracked | 3 / dawn | *"has 3 charges, and it regains all expended charges daily at dawn"* |
+| Eldritch Claw Tattoo | TCE | untracked | 1 / dawn | *"Once used, this bonus action can't be used again until the next dawn"* |
+| Crook of Rao | TCE | untracked | 6 / dawn | *"The crook has 6 charges … regains 1d6 expended charges daily at dawn"* |
+| Demonomicon of Iggwilv | TCE | untracked | 8 / dawn | *"The book has 8 charges. It regains 1d8 expended charges daily at dawn"* |
+| Bowl / Brazier / Censer / Stone of Commanding … Elementals | DMG | untracked | 1 / dawn | *"can't be used this way again until the next dawn"* |
+
+Tracked charged items: **77 → 92**. Verification sweep over all of them: **52 agree, 1 mismatch
+(Chime, fixed), 39 unresolved** — unresolved means the clip or the OCR could not reach the recharge
+sentence, which fails safe as "unknown" rather than asserting a wrong value.
+
+### Deliberately left untracked (14) — the one-pool model does not fit, this is not an omission
+- **Instruments of the Bards ×7** — each *spell* is 1/day; that is seven independent timers, not one pool.
+- **Kyrzin's Ooze** — two separate 1/dawn properties (Amorphous, Acid Breath).
+- **Cloak of Invisibility** — 2 *hours* per day; a duration, not charges.
+- **Nine Lives Stealer** — `1d8+1` charges rolled when found, never regained; no fixed max to pre-fill.
+- **Crystal Ball** — has no charges.
+- **Rod of the Pact Keeper ×3** — XGtE, and that PDF is a web capture with no item entries. The
+  app's text already says 1/day. **Unverified, not verified-correct.**
+
+### Ring of Djinni Summoning — flagged by the sweep, left as-is deliberately
+The sweep read *"the ring becomes nonmagical if the djinni dies"* as a destruction clause. That is
+conditional on the djinni dying; the actual rule is *"can't be summoned again for 24 hours"*.
+`recharge` only allows `dawn | long | short`, and `'dawn'` is the closest of the three. Changing it
+would make the data less accurate, not more.
+
+**Verified in the running app** (real path — home → sheet → Inventory → Add Item → template
+pre-fill → spend → Long Rest → confirm):
+- Crook of Rao pre-filled `maxCharges: 6`, rendered 6 pips, spent to 5, **restored to 6/6** on a long rest.
+- Chime of Opening pre-filled `maxCharges: 10` with no recharge, spent to 9, **stayed 9/10**.
+
+One harness note worth keeping: **"Long Rest" opens a confirmation** (`setRestConfirm('long')`) —
+clicking it alone does nothing, you must then click **"Take Long Rest"**. Two earlier runs of this
+check looked like a failing fix when they were only an unconfirmed dialog.
