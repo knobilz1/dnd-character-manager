@@ -1,4 +1,14 @@
-import type { AbilityKey, Race } from '../types';
+import type { AbilityKey } from '../types';
+
+/** Anything that grants an ability increase, fixed or chosen.
+ *
+ *  Races (C6a) and PHB 2024 backgrounds (C7) have exactly the same shape here — three candidate
+ *  abilities and a set of legal distributions — so they share one implementation. Two copies
+ *  would drift the moment either gained a rule, which is how C1, C3 and C6a all arose. */
+export interface AsiSource {
+  flexibleAsi?: number[][];
+  abilityScoreIncreases?: Partial<Record<AbilityKey, number>>;
+}
 
 /**
  * The racial ability increases actually in effect for a character.
@@ -12,8 +22,8 @@ import type { AbilityKey, Race } from '../types';
  * Always read racial increases through this function. `chosen` is ignored for a fixed-ASI race, so
  * it is safe to pass unconditionally.
  */
-export function racialAsi(
-  race: Race | undefined,
+export function chosenAsi(
+  race: AsiSource | undefined,
   chosen: Partial<Record<AbilityKey, number>> | undefined,
 ): Partial<Record<AbilityKey, number>> {
   if (race?.flexibleAsi) return chosen ?? {};
@@ -27,8 +37,8 @@ export function racialAsi(
  * A distribution matches when the multiset of chosen increments equals it exactly — so "+2/+1" is
  * not satisfied by a lone +2, and stray zero entries never count.
  */
-export function needsRacialAsi(
-  race: Race | undefined,
+export function needsAsiChoice(
+  race: AsiSource | undefined,
   chosen: Partial<Record<AbilityKey, number>> | undefined,
 ): boolean {
   if (!race?.flexibleAsi) return false;

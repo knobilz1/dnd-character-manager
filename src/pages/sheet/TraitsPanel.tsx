@@ -18,14 +18,16 @@ import { totalCharacterLevel } from '../../data/mechanics';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import type { Background, BackgroundCustom, Character, JournalEntry, AbilityKey } from '../../types';
 
-export function TraitsPanel({ character, setNotes, setRacialAbilityChoice }: {
+export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBackgroundAbilityChoice }: {
   character: Character;
   setNotes: (n: string) => void;
   setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
+  setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
 }) {
   const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
   const bg = resolveBackground(character);
   const race = getRace(character.raceId);
+  const bgAsiSource = getBackground(character.backgroundId);
   const primaryClass = character.classes[0];
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
   const subclass = primaryClass?.subclassId ? ALL_SUBCLASSES.find(s => s.id === primaryClass.subclassId) : null;
@@ -113,9 +115,23 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice }: {
           {race.flexibleAsi && (
             <div className="bg-slate-900 border border-amber-700/40 rounded-lg p-3 mb-2">
               <FlexibleAsiPicker
-                race={race}
+                source={race}
                 value={character.racialAbilityChoice}
                 onChange={setRacialAbilityChoice}
+                compact
+              />
+            </div>
+          )}
+          {/* C7 — PHB 2024 puts the ability increase on the BACKGROUND. Same reasoning as the
+              racial picker above: background cannot change after creation, so an existing 2024
+              character needs this here or its +2/+1 is unreachable forever. */}
+          {bgAsiSource?.flexibleAsi && (
+            <div className="bg-slate-900 border border-amber-700/40 rounded-lg p-3 mb-2">
+              <FlexibleAsiPicker
+                source={bgAsiSource}
+                value={character.backgroundAbilityChoice}
+                onChange={setBackgroundAbilityChoice}
+                label="Background Ability Score Increase"
                 compact
               />
             </div>

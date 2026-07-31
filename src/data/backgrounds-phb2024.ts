@@ -8,6 +8,8 @@ import type { Background } from '../types';
 export const PHB2024_BACKGROUNDS: Background[] = [
   {
     id: 'acolyte-2024',
+    abilityScoreOptions: ['int', 'wis', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Acolyte',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Insight', 'Religion'],
@@ -22,6 +24,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'artisan-2024',
+    abilityScoreOptions: ['str', 'dex', 'int'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Artisan',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Investigation', 'Persuasion'],
@@ -36,6 +40,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'charlatan-2024',
+    abilityScoreOptions: ['dex', 'con', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Charlatan',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Deception', 'Sleight of Hand'],
@@ -50,6 +56,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'criminal-2024',
+    abilityScoreOptions: ['dex', 'con', 'int'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Criminal',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Sleight of Hand', 'Stealth'],
@@ -64,6 +72,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'entertainer-2024',
+    abilityScoreOptions: ['str', 'dex', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Entertainer',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Acrobatics', 'Performance'],
@@ -78,6 +88,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'farmer-2024',
+    abilityScoreOptions: ['str', 'con', 'wis'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Farmer',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Animal Handling', 'Nature'],
@@ -92,6 +104,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'guard-2024',
+    abilityScoreOptions: ['str', 'int', 'wis'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Guard',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Athletics', 'Perception'],
@@ -106,6 +120,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'guide-2024',
+    abilityScoreOptions: ['dex', 'con', 'wis'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Guide',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Stealth', 'Survival'],
@@ -120,6 +136,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'hermit-2024',
+    abilityScoreOptions: ['con', 'wis', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Hermit',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Medicine', 'Religion'],
@@ -134,6 +152,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'merchant-2024',
+    abilityScoreOptions: ['con', 'int', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Merchant',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Animal Handling', 'Persuasion'],
@@ -148,6 +168,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'noble-2024',
+    abilityScoreOptions: ['str', 'int', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Noble',
     sourceBook: 'PHB2024',
     skillProficiencies: ['History', 'Persuasion'],
@@ -162,6 +184,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'sage-2024',
+    abilityScoreOptions: ['con', 'int', 'wis'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Sage',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Arcana', 'History'],
@@ -176,6 +200,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'sailor-2024',
+    abilityScoreOptions: ['str', 'dex', 'wis'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Sailor',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Acrobatics', 'Perception'],
@@ -190,6 +216,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'scribe-2024',
+    abilityScoreOptions: ['dex', 'int', 'wis'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Scribe',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Investigation', 'Perception'],
@@ -204,6 +232,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'soldier-2024',
+    abilityScoreOptions: ['str', 'dex', 'con'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Soldier',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Athletics', 'Intimidation'],
@@ -218,6 +248,8 @@ export const PHB2024_BACKGROUNDS: Background[] = [
   },
   {
     id: 'wayfarer-2024',
+    abilityScoreOptions: ['dex', 'wis', 'cha'],
+    flexibleAsi: [[2, 1], [1, 1, 1]],
     name: 'Wayfarer',
     sourceBook: 'PHB2024',
     skillProficiencies: ['Insight', 'Stealth'],

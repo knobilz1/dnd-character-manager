@@ -2,6 +2,7 @@ import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_BACKGROUNDS } from '../../../data/backgrounds';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
+import { FlexibleAsiPicker } from './FlexibleAsiPicker';
 import type { BackgroundCustom } from '../../../types';
 
 export function StepBackground() {
@@ -53,6 +54,20 @@ export function StepBackground() {
           <>
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
             <h3 className="text-xl font-bold text-white mb-3">{custom.name?.trim() || selected.name}</h3>
+
+            {/* C7 — PHB 2024 grants the ability score increase through the background rather than
+                the species, so it has to be chosen here. 2014 and GGR backgrounds carry no
+                flexibleAsi and render nothing, which is correct: their race grants it instead. */}
+            {selected.flexibleAsi && (
+              <div className="bg-slate-900 border border-amber-700/40 rounded-lg p-3 mb-4">
+                <FlexibleAsiPicker
+                  source={selected}
+                  value={draft.backgroundAbilityChoice}
+                  onChange={v => updateDraft({ backgroundAbilityChoice: v })}
+                  label="Ability Score Increase (2024)"
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
               <div className="bg-slate-900 rounded-lg p-3">

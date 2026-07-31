@@ -250,6 +250,12 @@ export interface Background {
   id: string;
   name: string;
   sourceBook: BookId;
+  /** C7 — PHB 2024 only. The 2024 rules moved the ability score increase off the species and onto
+   *  the background: three candidate abilities, distributed as +2/+1 or +1/+1/+1. 2014 and GGR
+   *  backgrounds leave both fields undefined because in those rules the RACE grants the increase,
+   *  and setting them here would hand a 2014 character a bonus the rules never gave them. */
+  abilityScoreOptions?: AbilityKey[];
+  flexibleAsi?: number[][];
   skillProficiencies: [SkillName, SkillName];
   toolProficiencies: string[];
   languages: number;
@@ -589,9 +595,13 @@ export interface Character {
    *  the ability on each InnateSpell. See `Race.innateSpellAbilityChoice`. */
   innateSpellAbility?: AbilityKey;
   /** Chosen racial ability increases, for races with `flexibleAsi`. Read through
-   *  `racialAsi()` — never read `race.abilityScoreIncreases` directly, or a flexible race
+   *  `chosenAsi()` — never read `race.abilityScoreIncreases` directly, or a flexible race
    *  silently contributes nothing. */
   racialAbilityChoice?: Partial<Record<AbilityKey, number>>;
+  /** C7 — chosen BACKGROUND ability increases, for PHB 2024 backgrounds. Separate from
+   *  `racialAbilityChoice` on purpose: a 2024 character can multiclass into nothing that changes
+   *  its background, but merging the two would make an edition switch silently move the bonus. */
+  backgroundAbilityChoice?: Partial<Record<AbilityKey, number>>;
   inspiration: boolean;
   experiencePoints: number;
   notes: string;

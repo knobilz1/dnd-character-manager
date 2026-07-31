@@ -199,7 +199,7 @@ export function SheetPage() {
     restorePactSlots, toggleSpellPrepared, startConcentration, endConcentration,
     setResource, shortRest, longRest, toggleInspiration, setNotes, addSpellToBook,
     removeSpellFromBook, addInventoryItem, removeInventoryItem, setInventoryQuantity,
-    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell, setInnateSpellAbility, setRacialAbilityChoice,
+    toggleInventoryEquipped, renameInventoryItem, setInventoryDescription, setItemCharges, useItemCharge, levelUp, useHitDie, restoreHitDie, setPortrait, updateCurrency, useInnateSpell, useFeatSpell, setInnateSpellAbility, setRacialAbilityChoice, setBackgroundAbilityChoice,
     activateWildShape, deactivateWildShape, damageWildShape, healWildShape, setArmorerMode, setPathOfBeastForm } = useCharacterStore();
 
   const [tab, setTab] = React.useState('combat');
@@ -746,7 +746,7 @@ export function SheetPage() {
               />
             )}
             {tab === 'character' && (
-              <TraitsPanel character={character} setNotes={setNotes} setRacialAbilityChoice={setRacialAbilityChoice} />
+              <TraitsPanel character={character} setNotes={setNotes} setRacialAbilityChoice={setRacialAbilityChoice} setBackgroundAbilityChoice={setBackgroundAbilityChoice} />
             )}
           </div>
         </div>

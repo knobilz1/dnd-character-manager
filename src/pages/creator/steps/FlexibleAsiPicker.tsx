@@ -1,28 +1,35 @@
 import React from 'react';
 import { cn } from '../../../utils/cn';
-import { needsRacialAsi } from '../../../utils/racialAsi';
-import type { AbilityKey, Race } from '../../../types';
+import { needsAsiChoice } from '../../../utils/racialAsi';
+import type { AbilityKey } from '../../../types';
+import type { AsiSource } from '../../../utils/racialAsi';
 
 const ABILITIES: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
 /**
- * Picker for races whose ability increase the player chooses (MMoM, SJA, FToD, SCoC, Variant Human).
+ * Picker for any ability increase the player chooses: races (MMoM, SJA, FToD, SCoC, Variant Human)
+ * and PHB 2024 backgrounds, which is where the 2024 rules put the increase.
  *
- * Shared by the creator's race step and the sheet, because race cannot change after creation — a
- * creator-only picker would leave every existing character permanently unable to supply the value.
- * That is the same trap the Circle of the Land land-type choice fell into.
+ * Shared by the creator and the sheet, because neither race nor background can change after
+ * creation — a creator-only picker would leave every EXISTING character permanently unable to
+ * supply the value. That is the same trap the Circle of the Land land-type choice fell into.
+ *
+ * `abilityScoreOptions` restricts which abilities may receive the increase. A 2024 background lists
+ * exactly three; races that offer a free choice leave it undefined and get all six.
  *
  * Each distribution is offered as a row of slots; assigning an ability to a slot writes the whole
- * map at once, so a partially-filled row simply is not a legal answer and `needsRacialAsi` keeps
+ * map at once, so a partially-filled row simply is not a legal answer and `needsAsiChoice` keeps
  * reporting it as outstanding.
  */
-export function FlexibleAsiPicker({ race, value, onChange, compact }: {
-  race: Race;
+export function FlexibleAsiPicker({ source, value, onChange, compact, label }: {
+  source: AsiSource & { abilityScoreOptions?: AbilityKey[] };
   value: Partial<Record<AbilityKey, number>> | undefined;
   onChange: (v: Partial<Record<AbilityKey, number>>) => void;
   compact?: boolean;
+  label?: string;
 }) {
-  const dists = race.flexibleAsi ?? [];
+  const dists = source.flexibleAsi ?? [];
+  const choices = source.abilityScoreOptions ?? ABILITIES;
   const current = value ?? {};
 
   // which distribution does the current choice belong to? (-1 = none yet)
@@ -59,12 +66,12 @@ export function FlexibleAsiPicker({ race, value, onChange, compact }: {
     return match ?? '';
   }
 
-  const outstanding = needsRacialAsi(race, value);
+  const outstanding = needsAsiChoice(source, value);
 
   return (
     <div className={cn('w-full', compact ? 'space-y-1.5' : 'space-y-2')}>
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-400">Ability Score Increase</span>
+        <span className="text-xs text-slate-400">{label ?? 'Ability Score Increase'}</span>
         <span className={cn('text-xs font-bold', outstanding ? 'text-amber-300' : 'text-green-400')}>
           {outstanding ? 'choice required' : 'set'}
         </span>
@@ -95,7 +102,7 @@ export function FlexibleAsiPicker({ race, value, onChange, compact }: {
               onChange={e => assign(dists[openIdx], i, e.target.value as AbilityKey | '')}
             >
               <option value="">—</option>
-              {ABILITIES.map(a => (
+              {choices.map(a => (
                 <option key={a} value={a}>{a.toUpperCase()}</option>
               ))}
             </select>

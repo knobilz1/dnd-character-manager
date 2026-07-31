@@ -5,7 +5,7 @@ import { cn } from '../../../utils/cn';
 import { abilityMod } from '../../../data/mechanics';
 import type { AbilityKey, AbilityScoreMethod } from '../../../types';
 import { getRace } from '../../../data/races';
-import { racialAsi } from '../../../utils/racialAsi';
+import { chosenAsi } from '../../../utils/racialAsi';
 
 const ABILITIES: { key: AbilityKey; label: string }[] = [
   { key: 'str', label: 'Strength' },
@@ -44,7 +44,7 @@ export function StepAbilityScores() {
 
   const finalScore = (key: AbilityKey) => {
     const base = scores[key];
-    const racial = racialAsi(race, draft.racialAbilityChoice)[key] ?? 0;
+    const racial = chosenAsi(race, draft.racialAbilityChoice)[key] ?? 0;
     return base + racial;
   };
 
@@ -71,7 +71,7 @@ export function StepAbilityScores() {
             remaining={pointBuyRemaining}
             onSet={setPointBuyScore}
             finalScore={finalScore}
-            racialBonus={racialAsi(race, draft.racialAbilityChoice)}
+            racialBonus={chosenAsi(race, draft.racialAbilityChoice)}
           />
         )}
         {method === 'standard_array' && (
@@ -80,7 +80,7 @@ export function StepAbilityScores() {
             unassigned={standardArrayUnassigned}
             onAssign={assignStandardArray}
             finalScore={finalScore}
-            racialBonus={racialAsi(race, draft.racialAbilityChoice)}
+            racialBonus={chosenAsi(race, draft.racialAbilityChoice)}
           />
         )}
         {method === 'roll' && (
@@ -91,7 +91,7 @@ export function StepAbilityScores() {
             onRollAll={rollAllDice}
             onAssign={(k, v) => updateDraft({ baseAbilityScores: { ...scores, [k]: v } })}
             finalScore={finalScore}
-            racialBonus={racialAsi(race, draft.racialAbilityChoice)}
+            racialBonus={chosenAsi(race, draft.racialAbilityChoice)}
           />
         )}
         {method === 'manual' && (
@@ -99,7 +99,7 @@ export function StepAbilityScores() {
             scores={scores}
             onChange={(k, v) => updateDraft({ baseAbilityScores: { ...scores, [k]: v } })}
             finalScore={finalScore}
-            racialBonus={racialAsi(race, draft.racialAbilityChoice)}
+            racialBonus={chosenAsi(race, draft.racialAbilityChoice)}
           />
         )}
       </div>

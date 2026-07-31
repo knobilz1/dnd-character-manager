@@ -3,8 +3,9 @@ import { PHB2024_FEATS } from './feats-phb2024';
 import { getClass } from './classes';
 import { getSubclass } from './subclasses';
 import { getRace } from './races';
+import { getBackground } from './backgrounds';
 import { bookEnabled } from '../utils/bookEnabled';
-import { racialAsi } from '../utils/racialAsi';
+import { chosenAsi } from '../utils/racialAsi';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -639,9 +640,15 @@ export function getEligibleFeats(character: Character, enabledBooks: BookId[]): 
   const totalLevel = character.classes.reduce((s, c) => s + c.level, 0);
 
   const race = getRace(character.raceId);
-  const racialBonuses = racialAsi(race, character.racialAbilityChoice);
+  const racialBonuses = chosenAsi(race, character.racialAbilityChoice);
+  // C7 — a PHB 2024 character's increase comes from the background, and it counts toward feat
+  // prerequisites exactly as a racial one does. Omitting it here would deny a 2024 character feats
+  // they legitimately qualify for, which is the same silent-denial shape as the original bug.
+  const bgBonuses = chosenAsi(getBackground(character.backgroundId), character.backgroundAbilityChoice);
   const effectiveScore = (k: AbilityKey) =>
-    (character.baseAbilityScores[k] ?? 0) + ((racialBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0);
+    (character.baseAbilityScores[k] ?? 0)
+    + ((racialBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0)
+    + ((bgBonuses as Partial<Record<AbilityKey, number>>)[k] ?? 0);
 
   const canCast = character.classes.some(cl => {
     const def = getClass(cl.classId);

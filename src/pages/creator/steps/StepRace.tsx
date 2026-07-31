@@ -178,7 +178,7 @@ export function StepRace() {
               <div className="flex flex-wrap gap-2">
                 {selected.flexibleAsi
                   ? <FlexibleAsiPicker
-                      race={selected}
+                      source={selected}
                       value={draft.racialAbilityChoice}
                       onChange={v => updateDraft({ racialAbilityChoice: v })}
                     />

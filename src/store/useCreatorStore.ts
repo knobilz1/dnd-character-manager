@@ -5,9 +5,10 @@ import { PACT_MAGIC_TABLE, emptySlotState } from '../data/mechanics';
 import { getClass, baseClassId } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
+import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS } from '../data/feats';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
-import { racialAsi } from '../utils/racialAsi';
+import { chosenAsi } from '../utils/racialAsi';
 
 
 
@@ -158,6 +159,12 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
     // minimum of 1 hit point per level (even with very low Con).
     const hitDie = classDef?.hitDie ?? 8;
     const race = getRace(draft.raceId!);
+    // C7 — under PHB 2024 the ability increase comes from the BACKGROUND, so every place that
+    // previously asked only the race has to ask for the origin total instead. Getting this
+    // wrong is silent: HP would be computed from a CON that is 2 lower than the sheet shows.
+    const originAsi = (k: import('../types').AbilityKey) =>
+      ((chosenAsi(race, draft.racialAbilityChoice) as Record<string, number>)[k] ?? 0)
+      + ((chosenAsi(getBackground(draft.backgroundId!), draft.backgroundAbilityChoice) as Record<string, number>)[k] ?? 0);
 
     // Apply player-choice feat ability increases to baseAbilityScores (mirrors levelUp logic).
     // Done early so HP calculation uses the correct post-feat CON.
@@ -167,13 +174,13 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (feat?.abilityScoreChoice && draftFeatChoices[featId]) {
         const key = draftFeatChoices[featId] as import('../types').AbilityKey;
-        const racialBonus = (racialAsi(race, draft.racialAbilityChoice) as Record<string, number>)[key] ?? 0;
+        const racialBonus = originAsi(key);
         const maxBase = 20 - racialBonus;
         finalBaseScores = { ...finalBaseScores, [key]: Math.min(maxBase, (finalBaseScores[key] ?? 0) + 1) };
       }
     }
 
-    const racialCon = racialAsi(race, draft.racialAbilityChoice).con ?? 0;
+    const racialCon = originAsi('con');
     const effectiveCon = (finalBaseScores.con ?? 10) + racialCon;
     const conMod = Math.floor((effectiveCon - 10) / 2);
     const level = primaryClass.level;
@@ -202,8 +209,8 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
 
     // Compute ability mods needed for resource max overrides (Bardic Inspiration, Flash of Genius).
     // Mirrors computeResourceMaxOverrides in useCharacterStore: base + racial + feats.
-    const racialCha = racialAsi(race, draft.racialAbilityChoice).cha ?? 0;
-    const racialInt = racialAsi(race, draft.racialAbilityChoice).int ?? 0;
+    const racialCha = originAsi('cha');
+    const racialInt = originAsi('int');
     let featCha = 0, featInt = 0;
     for (const featId of (draft.selectedFeats ?? [])) {
       const feat = ALL_FEATS.find(f => f.id === featId);
@@ -246,6 +253,15 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       alignment: draft.alignment,
       enabledBooks: draft.enabledBooks,
       raceId: draft.raceId!,
+      // These three are CHOICES the creator collects and then had no way to hand on: they were read
+      // while computing HP and resource maxima but never written onto the character, so a
+      // creator-built character arrived at the sheet with the picker blank and the bonus at +0.
+      // Found while adding the background picker — the racial one (C6a) had the same hole, and it
+      // went unnoticed because C6a was verified by seeding localStorage directly, which skips the
+      // creator entirely. Verify a fix on the path a user actually takes.
+      racialAbilityChoice: draft.racialAbilityChoice,
+      backgroundAbilityChoice: draft.backgroundAbilityChoice,
+      innateSpellAbility: draft.innateSpellAbility,
       backgroundId: draft.backgroundId!,
       backgroundCustom: draft.backgroundCustom,
       classes: draft.classes!,

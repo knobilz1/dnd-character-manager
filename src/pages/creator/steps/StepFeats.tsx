@@ -9,7 +9,7 @@ import { getRace } from '../../../data/races';
 import { BOOKS } from '../../../data/books';
 import { bookEnabled } from '../../../utils/bookEnabled';
 import type { Feat, BookId, AbilityKey } from '../../../types';
-import { racialAsi } from '../../../utils/racialAsi';
+import { chosenAsi } from '../../../utils/racialAsi';
 
 const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
 const ABILITY_LABELS: Record<AbilityKey, string> = {
@@ -33,7 +33,7 @@ export function StepFeats() {
   // Effective scores: base + racial (needed for accurate cap check)
   const baseScores = draft.baseAbilityScores ?? { str:10,dex:10,con:10,int:10,wis:10,cha:10 };
   const raceDef = draft.raceId ? getRace(draft.raceId) : null;
-  const racialASI = racialAsi(raceDef ?? undefined, draft.racialAbilityChoice);
+  const racialASI = chosenAsi(raceDef ?? undefined, draft.racialAbilityChoice);
   const effectiveScore = (key: AbilityKey) => (baseScores[key] ?? 10) + (racialASI[key] ?? 0);
 
   function toggle(featId: string) {
