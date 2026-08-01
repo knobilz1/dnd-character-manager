@@ -353,6 +353,13 @@ def trait_variants(name):
     # heads it, so only the base name can be found.
     if re.search(r'\bimprovements?$', bare, re.I):
         out.append(re.sub(r'\s*\bimprovements?$', '', bare, flags=re.I).strip())
+    # "Totem Spirit — Elk" is the app splitting ONE printed feature into its per-option variants so
+    # each gets its own row. SCAG heads "Totem Spirit" once, nine times over, with Elk and Tiger as
+    # choices underneath — so the app's composed name appears nowhere and all six of that
+    # subclass's features read as missing.
+    head = re.split(r'\s+[—–-]\s+', bare)[0].strip()
+    if head and head != bare:
+        out.append(head)
     parts = bare.split()
     if len(parts) > 2:
         out.append(' '.join(parts[1:]))

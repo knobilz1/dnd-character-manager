@@ -78,7 +78,7 @@ def subclasses(bundle=None):
          'const {pathToFileURL}=await import("node:url");'
          'const m=await import(pathToFileURL(process.argv[1]).href);'
          'console.log(JSON.stringify(m.ALL_SUBCLASSES.map(s=>({id:s.id,name:s.name,'
-         'cls:s.classId,book:s.sourceBook,'
+         'cls:s.classId,book:s.sourceBook,hidden:!!s.hidden,'
          'features:(s.features??[]).map(f=>({name:f.name,level:f.level,d:f.description??""}))}))));',
          scratch],
         capture_output=True, text=True, encoding='utf-8')
@@ -91,9 +91,17 @@ def sweep(all_subs, only=None):
     """Returns (stats, findings, notes, paired, unpaired, nobook)."""
     stats, findings, notes = {}, [], []
     paired = unpaired = nobook = 0
+    hidden = [0]
 
     for s in all_subs:
         if only and s['book'] != only:
+            continue
+        # A subclass withheld from the picker is not a coverage gap. Way of the Cobalt Soul is
+        # hidden precisely BECAUSE it is not in the book it claims — reporting it as "not located"
+        # is the audit re-deriving a decision already taken, and it inflates the finding count with
+        # something nobody should act on. Counted, never silently skipped.
+        if s.get('hidden'):
+            hidden[0] += 1
             continue
         st = stats.setdefault(s['book'], {'paired': 0, 'total': 0, 'nobook': 0,
                                           'feats': 0, 'found': 0})
@@ -109,7 +117,12 @@ def sweep(all_subs, only=None):
         # Score every occurrence of the subclass name by how many of ITS OWN feature names sit
         # nearby. A contents line scores 0; the real entry holds most of them. This is exactly how
         # racepdf separates two elf subraces, and it is NOT scored on the mechanics under test.
-        keys = [flat(f['name']) for f in s['features'] if flat(f['name'])]
+        # Score on the feature-name VARIANTS, not the raw names. SCAG heads "Totem Spirit" once
+        # with Elk and Tiger as choices under it, while the app splits that into "Totem Spirit —
+        # Elk" and "Totem Spirit — Tiger" so each gets a row; scoring on the composed strings finds
+        # nothing and the whole subclass fails to locate.
+        keys = [k for f in s['features'] for k in
+                {flat(v) for v in trait_variants(f['name']) if len(flat(v)) >= 4}]
         names = [flat(v) for v in name_variants(s['name']) if len(flat(v)) >= 4]
         span = _best_window(book, names, keys, SPAN, raw=raw, raw_idx=idx) if names and keys else None
         if span is None:
