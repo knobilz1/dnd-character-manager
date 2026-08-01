@@ -319,6 +319,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Artificer Initiate',
     sourceBook: 'TCE',
     description: 'You\'ve learned some of an artificer\'s inventiveness:\n• You learn one cantrip of your choice from the artificer spell list, and you learn one 1st-level spell of your choice from that list. Intelligence is your spellcasting ability for these spells.\n• You can cast this feat\'s 1st-level spell without a spell slot, and you must finish a long rest before you can cast it in this way again. You can also cast the spell using any spell slots you have.\n• You gain proficiency with one type of artisan\'s tools of your choice, and you can use that type of tool as a spellcasting focus for any spell you cast that uses Intelligence as its spellcasting ability.',
+    grantsTools: ["One type of artisan's tools of your choice"],
   },
   {
     id: 'fighting-initiate',
@@ -374,6 +375,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'PHB',
     description: 'You have studied languages and codes, gaining the following benefits:\n• Increase your Intelligence score by 1, to a maximum of 20.\n• You learn three languages of your choice.\n• You can ably create written ciphers. Others can\'t decipher a code you create unless you teach them, they succeed on an Intelligence check (DC equal to your Intelligence score + your proficiency bonus), or they use magic to decipher it.',
     abilityScoreIncrease: { int: 1 },
+    grantsLanguages: 3,
   },
   {
     id: 'medium-armor-master',
@@ -495,6 +497,7 @@ export const ALL_FEATS: Feat[] = [
     description: 'Time spent mastering the culinary arts has paid off:\n• Increase your Constitution or Wisdom score by 1, to a maximum of 20.\n• You gain proficiency with cook\'s utensils if you don\'t already have it.\n• As part of a short rest, you can cook special food, provided you have ingredients and cook\'s utensils on hand. You can prepare enough food for a number of creatures equal to 4 + your proficiency bonus. At the end of the short rest, any creature who eats the food and spends at least one Hit Die regains an extra 1d8 hit points.\n• With one hour of work or when you finish a long rest, you can cook a number of treats equal to your proficiency bonus. These treats last 8 hours after being made. A creature can use a bonus action to eat one of those treats to gain temporary hit points equal to your proficiency bonus.',
     abilityScoreChoice: ['con', 'wis'],
     grantedResources: [{ key: 'chef_treats', name: 'Chef Treats', max: 2, rechargeOn: 'long' }],
+    grantsTools: ["Cook's utensils"],
   },
   {
     id: 'crusher',
@@ -538,6 +541,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'You can prepare and deliver deadly poisons:\n• When you make a damage roll that deals poison damage, it ignores resistance to poison damage.\n• You can apply poison to a weapon or piece of ammunition as a bonus action, instead of an action.\n• You gain proficiency with the poisoner\'s kit if you don\'t already have it. With one hour of work and 50 gp worth of materials, you can produce a number of doses of potent poison equal to your proficiency bonus. The poison retains potency for 1 hour. When you hit a creature with a weapon coated with this poison, the creature takes an extra 2d8 poison damage and must succeed on a DC 14 Constitution save or be poisoned until the end of your next turn.',
     grantedResources: [{ key: 'poisoner_doses', name: 'Poison Doses', max: 2, rechargeOn: 'long' }],
+    grantsTools: ["Poisoner's kit"],
   },
   {
     id: 'slasher',

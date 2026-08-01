@@ -1,6 +1,7 @@
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { getSubclassOptions } from '../data/subclassOptions';
+import { ALL_FEATS } from '../data/feats';
 import { lookupWeapon } from '../data/weapons';
 import type { Character } from '../types';
 
@@ -37,6 +38,13 @@ export function isProficientWithWeapon(character: Character, weaponName: string)
     }
   }
   grants.push(...(getRace(character.raceId)?.proficiencies ?? []));
+  // Feats, which this had never read — so PHB 2024's Martial Weapon Training granted nothing.
+  // (Gunner's "firearms" and Tavern Brawler's "improvised weapons" are deliberately absent from
+  // the data: the weapon catalog has neither, and an unknown weapon already counts as proficient
+  // above, so adding those strings would change nothing in either direction.)
+  for (const featId of character.selectedFeats ?? []) {
+    grants.push(...(ALL_FEATS.find(f => f.id === featId)?.grantsProficiency ?? []));
+  }
 
   for (const raw of grants) {
     const g = raw.trim().toLowerCase();

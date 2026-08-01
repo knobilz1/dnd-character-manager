@@ -421,6 +421,11 @@ export function computeCharacterDerived(character: Character) {
     const toolSources = [
       ...character.classes.flatMap(cl => getClass(cl.classId)?.toolProficiencies ?? []),
       ...(bgDef?.toolProficiencies ?? []),
+      // Feats grant tools too — Chef's cook's utensils outright, Crafter's three artisan's tools
+      // as a choice. They use `grantsTools` rather than `grantsProficiency` because anything the
+      // grammar can't parse falls through to `fixedTools`, so an armour or weapon entry mixed in
+      // here would print on the sheet as a tool proficiency.
+      ...(character.selectedFeats ?? []).flatMap(id => ALL_FEATS.find(f => f.id === id)?.grantsTools ?? []),
     ];
     const chosenTools = character.selectedToolProficiencies ?? {};
     // One entry per grant, so each keeps its own allowed categories.
@@ -442,6 +447,8 @@ export function computeCharacterDerived(character: Character) {
     const languagesOwed =
       racialLanguagePicks(race?.languages)
       + (bgDef?.languages ?? 0)
+      // Linguist's three languages were prose: the feat had no field and nothing counted them.
+      + (character.selectedFeats ?? []).reduce((n, id) => n + (ALL_FEATS.find(f => f.id === id)?.grantsLanguages ?? 0), 0)
       + character.classes.reduce((n, cl) => n + (cl.subclassId ? getSubclassOptions(cl.subclassId)
           .filter(g => g.grants === 'language' && cl.level >= Math.min(...Object.keys(g.picksByLevel).map(Number)))
           .reduce((m, g) => m + picksAllowed(g, cl.level), 0) : 0), 0);

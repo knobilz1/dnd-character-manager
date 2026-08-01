@@ -320,7 +320,16 @@ export interface Feat {
   /** NOTE: there is deliberately no `grantsSpell` here. It existed, seven feats populated it, and
    *  nothing ever read it — so the four PHB 2024 feats that carried only that field granted no
    *  spell at all. `grantedSpells` below is the one the sheet and the rest handlers consume. */
+  /** ARMOUR and WEAPON grants only — the two things `armorGrants` and `isProficientWithWeapon`
+   *  match against ("Heavy armor", "Shields", "Martial weapons"). Tools and languages have their
+   *  own fields below: the tool pipeline treats anything it cannot parse as a fixed tool, so a
+   *  "Martial weapons" entry in here would print on the sheet as a tool proficiency. */
   grantsProficiency?: string[];
+  /** Tool-proficiency grants, in the same grammar class and background `toolProficiencies` use —
+   *  so "Cook's utensils" is fixed and "Three artisan's tools of your choice" becomes a picker. */
+  grantsTools?: string[];
+  /** How many languages of the player's choice this feat grants (Linguist: 3, Prodigy: 1). */
+  grantsLanguages?: number;
   /** Extra HP gained each time a level is gained while this feat is held. */
   hpBonusPerLevel?: number;
   /** One-time retroactive HP bonus per level already gained when this feat is first taken

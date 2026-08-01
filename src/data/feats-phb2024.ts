@@ -26,6 +26,7 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Crafter',
     sourceBook: 'PHB2024',
     description: 'Origin feat.\n• Tool Proficiency: Gain proficiency with 3 Artisan\'s Tools of your choice.\n• Discount: When purchasing a nonmagical item, you can get it at 20% off.\n• Fast Crafting: During a Long Rest, you can craft one piece of gear from the Fast Crafting table (lasts until next Long Rest).',
+    grantsTools: ["Three artisan's tools of your choice"],
   },
   {
     id: 'healer-2024',
@@ -54,6 +55,7 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Musician',
     sourceBook: 'PHB2024',
     description: 'Origin feat.\n• Instrument Proficiency: Gain proficiency with 3 Musical Instruments.\n• Encouraging Song: When you finish a Short or Long Rest, you can play a song to grant Heroic Inspiration to a number of allies equal to your Proficiency Bonus who can hear you.',
+    grantsTools: ["Three musical instruments of your choice"],
   },
   {
     id: 'savage-attacker-2024',
@@ -123,6 +125,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Constitution or Wisdom (max 20).\n• Cook\'s Utensils proficiency.\n• Replenishing Meal: on a Short Rest, cook a meal for up to 4+Prof Bonus creatures; each that spends a Hit Die also regains +1d8 HP.\n• Bolstering Treats: 1 hr work → Prof Bonus treats (last 8 hrs); a creature can Bonus Action eat one to gain Temp HP = Prof Bonus.',
     abilityScoreChoice: ['con', 'wis'],
+    grantsTools: ["Cook's utensils"],
   },
   {
     id: 'crossbow-expert-2024',
@@ -257,6 +260,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Strength or Dexterity (max 20).\n• Proficiency with all Martial weapons.',
     abilityScoreChoice: ['str', 'dex'],
+    grantsProficiency: ["Martial weapons"],
   },
   {
     id: 'medium-armor-master-2024',
@@ -306,6 +310,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Dexterity or Intelligence (max 20).\n• Potent Poison: Poison damage you deal ignores Resistance.\n• Brew Poison: gain Poisoner\'s Kit proficiency + 1 hr work + 50 gp → craft Prof Bonus poison doses. Bonus Action: apply to weapon/ammo (1 min or until hit). Hit target: Con save (DC 8+feat ability+Prof) or 2d8 Poison + Poisoned until end of your next turn.',
     abilityScoreChoice: ['dex', 'int'],
+    grantsTools: ["Poisoner's kit"],
   },
   {
     id: 'polearm-master-2024',
