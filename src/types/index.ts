@@ -341,7 +341,14 @@ export interface Feat {
    * When `count` covers the whole of `options` the picks are granted outright with no picker —
    * Boon of Skill grants every skill, and making the player click all eighteen is not a choice.
    */
-  grantsPicks?: { count: number; label: string; options: string[] };
+  grantsPicks?: {
+    count: number;
+    label: string;
+    options: string[];
+    /** Keen Mind / Observant (2024): "gain proficiency OR Expertise" — a pick you were
+     *  already proficient in becomes Expertise instead of a second proficiency. */
+    upgradeToExpertise?: boolean;
+  };
   /** Expertise slots (doubled proficiency) this feat grants, chosen from skills already held. */
   grantsExpertise?: number;
   /**

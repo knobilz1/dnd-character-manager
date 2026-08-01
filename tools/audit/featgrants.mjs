@@ -19,8 +19,11 @@ const SYSTEMS = [
   ['invocation',     /eldritch invocation/i,                                      ['grantsPicks']],
   ['metamagic',      /metamagic option/i,                                         ['grantsPicks']],
   ['maneuver',       /\bmaneuvers? of your choice\b/i,                            ['grantsPicks']],
-  ['spell',          /you learn .{0,30}\bspell|learn the .{0,30}\bspell|\bcantrips?\b|always (have .{0,20})?prepared/i, ['grantedSpells']],
-  ['resource',       /\bonce\b.{0,60}\b(long|short) rest|\buses? equal to\b|number of .{0,30}equal to your proficiency/i, ['grantedResources']],
+  ['spell',          /you learn .{0,30}\bspell|learn the .{0,30}\bspell|\bcantrips?\b|always (have .{0,20})?prepared/i, ['grantedSpells', 'grantsSpellPicks']],
+  // A spell that recharges on a rest is tracked BY that spell's entry, not by a separate counter —
+  // so grantedSpells/grantsSpellPicks satisfy the resource claim too. Without this the probe
+  // reported Fey Touched as an untracked resource while its Misty Step was tracked correctly.
+  ['resource',       /\bonce\b.{0,60}\b(long|short) rest|\buses? equal to\b|number of .{0,30}equal to your proficiency/i, ['grantedResources', 'grantedSpells', 'grantsSpellPicks']],
 ];
 
 let gaps = 0, covered = 0;

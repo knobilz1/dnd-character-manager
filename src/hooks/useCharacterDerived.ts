@@ -237,9 +237,15 @@ export function computeCharacterDerived(character: Character) {
     const featPicksOwed = featPicks.reduce(
       (n, g) => n + (g.auto ? 0 : Math.max(0, g.count - g.picked.length)), 0);
 
-    const skillProfs = new Set<string>([
+    // Held BEFORE any feat pick, which is what decides whether Keen Mind and Observant hand out
+    // proficiency or Expertise. Kept as its own set rather than computed after the fact: once the
+    // picks are merged in, "were you already proficient" is unanswerable.
+    const skillsBeforeFeats = new Set<string>([
       ...(character.selectedSkillProficiencies ?? []),
       ...(bg?.skillProficiencies ?? []),
+    ]);
+    const skillProfs = new Set<string>([
+      ...skillsBeforeFeats,
       // Skilled, Skill Expert, Prodigy, Squat Nimbleness, Keen Mind, Observant and Boon of Skill
       // all named a skill in prose and granted none. Merged here, at the one place skills are
       // composed, rather than special-cased per feat.
@@ -255,9 +261,19 @@ export function computeCharacterDerived(character: Character) {
       for (const group of getSubclassOptions(cl.subclassId)) {
         if (group.grants !== 'skill') continue;
         if (cl.level < Math.min(...Object.keys(group.picksByLevel).map(Number))) continue;
-        for (const picked of character.subclassOptions?.[group.key] ?? []) skillProfs.add(picked);
+        for (const picked of character.subclassOptions?.[group.key] ?? []) {
+          skillProfs.add(picked);
+          skillsBeforeFeats.add(picked);
+        }
       }
     }
+    // Keen Mind and Observant (2024) read "gain proficiency OR Expertise" — Expertise when you
+    // already had the proficiency. The pick above covers the first half; this is the second, and
+    // without it the feat did nothing at all for the characters most likely to take it.
+    const featUpgradeExpertise = featPicks
+      .filter(g => ALL_FEATS.find(f => f.id === g.featId)?.grantsPicks?.upgradeToExpertise)
+      .flatMap(g => g.picked)
+      .filter(s => skillsBeforeFeats.has(s));
     const expertiseSet = new Set<string>(character.expertiseSkills ?? []);
     // Feat-granted expertise. Its own slots and its own storage, because `expertiseSkills` is
     // sized by Rogue/Bard level in the creator — a feat's expertise put in there would either be
@@ -267,7 +283,7 @@ export function computeCharacterDerived(character: Character) {
     const featExpertise = (character.selectedFeatExpertise ?? []).slice(0, featExpertiseOwed);
 
     // Subclass auto-expertise (fixed skills, no player choice required)
-    const effectiveExpertiseSet = new Set<string>([...expertiseSet, ...featExpertise]);
+    const effectiveExpertiseSet = new Set<string>([...expertiseSet, ...featExpertise, ...featUpgradeExpertise]);
     for (const cl of character.classes) {
       // Corsair (ToB) Ferocious Presence (lv.7): doubled proficiency in Intimidation
       if (cl.subclassId === 'tob-corsair' && cl.level >= 7) effectiveExpertiseSet.add('Intimidation');

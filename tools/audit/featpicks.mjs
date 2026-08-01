@@ -97,5 +97,16 @@ check('NEGATIVE: a feat with no expertise grants no slots', d(['skilled']).featE
 check('Arcana expertise doubles the bonus (+3 prof -> +6)',
   d(['skill-expert'], {}, ['Arcana']).skills['Arcana'] - d([]).skills['Arcana'], 3);
 
+// ── Keen Mind / Observant (2024): "gain proficiency OR Expertise". A pick you already had
+// becomes Expertise; one you didn't becomes plain proficiency. Both directions, because a rule
+// that only ever upgrades and a rule that never upgrades both pass a one-sided check.
+const arcanaAlready = d(['keen-mind-2024'], { 'keen-mind-2024': ['Arcana'] });   // Arcana IS a class pick above
+const natureNew     = d(['keen-mind-2024'], { 'keen-mind-2024': ['Nature'] });   // Nature is not
+check('Keen Mind on an already-proficient skill grants Expertise',
+  [...arcanaAlready.expertiseSkills], ['Arcana']);
+check('NEGATIVE: Keen Mind on a NEW skill grants proficiency, not Expertise',
+  [[...natureNew.expertiseSkills], [...natureNew.allSkillProficiencies].includes('Nature')], [[], true]);
+check('NEGATIVE: Skilled does not upgrade, even on a skill you have',
+  [...d(['skilled'], { skilled: ['Arcana'] }).expertiseSkills], []);
 console.log(failures ? `\n${failures} FAILURES` : '\nall checks passed');
 process.exit(failures ? 1 : 0);

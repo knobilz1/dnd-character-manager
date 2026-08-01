@@ -239,7 +239,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { ability: { int: 13 }, minLevel: 4 },
     description: 'General feat (Int 13+, level 4+).\n• +1 Intelligence (max 20).\n• Lore Knowledge: gain proficiency or Expertise in Arcana, History, Investigation, Nature, or Religion (choose 1).\n• Quick Study: take the Study action as a Bonus Action.',
     abilityScoreIncrease: { int: 1 },
-    grantsPicks: { count: 1, label: 'Lore Knowledge — one skill', options: ['Arcana', 'History', 'Investigation', 'Nature', 'Religion'] },
+    grantsPicks: { count: 1, label: 'Lore Knowledge — one skill', options: ['Arcana', 'History', 'Investigation', 'Nature', 'Religion'], upgradeToExpertise: true },
   },
   {
     id: 'lightly-armored-2024',
@@ -302,7 +302,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { ability: { int: 13 }, minLevel: 4 },
     description: 'General feat (Int or Wis 13+, level 4+).\n• +1 Intelligence or Wisdom (max 20).\n• Keen Observer: gain proficiency or Expertise in Insight, Investigation, or Perception (choose 1).\n• Quick Search: take the Search action as a Bonus Action.',
     abilityScoreChoice: ['int', 'wis'],
-    grantsPicks: { count: 1, label: 'Keen Observer — one skill', options: ['Insight', 'Investigation', 'Perception'] },
+    grantsPicks: { count: 1, label: 'Keen Observer — one skill', options: ['Insight', 'Investigation', 'Perception'], upgradeToExpertise: true },
   },
   {
     id: 'piercer-2024',
