@@ -1,14 +1,16 @@
 import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
-import { ALL_FEATS } from '../../../data/feats';
+import { ALL_FEATS, OPTION_LABELS, featPickGroups, featSpellChoices, spellPickOptions } from '../../../data/feats';
+import { ProficiencyPicker } from '../../../components/ProficiencyPicker';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
-import { ASI_LEVELS } from '../../../data/mechanics';
+import { ASI_LEVELS, PROFICIENCY_BONUS, SKILL_NAMES, totalCharacterLevel } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
 import { getRace } from '../../../data/races';
+import { getBackground } from '../../../data/backgrounds';
 import { BOOKS } from '../../../data/books';
 import { bookEnabled } from '../../../utils/bookEnabled';
-import type { Feat, BookId, AbilityKey } from '../../../types';
+import type { Feat, BookId, AbilityKey, Character } from '../../../types';
 import { chosenAsi } from '../../../utils/racialAsi';
 
 const BOOK_COLOR = Object.fromEntries(BOOKS.map(b => [b.id, b.color])) as Record<BookId, string>;
@@ -35,6 +37,19 @@ export function StepFeats() {
   const raceDef = draft.raceId ? getRace(draft.raceId) : null;
   const racialASI = chosenAsi(raceDef ?? undefined, draft.racialAbilityChoice);
   const effectiveScore = (key: AbilityKey) => (baseScores[key] ?? 10) + (racialASI[key] ?? 0);
+
+  const profBonus = PROFICIENCY_BONUS[Math.min(totalCharacterLevel(draft.classes ?? []), 20)] ?? 2;
+  const featExpertiseOwed = (draft.selectedFeats ?? [])
+    .reduce((n, id) => n + (ALL_FEATS.find(f => f.id === id)?.grantsExpertise ?? 0), 0);
+  // Class picks + background + whatever a feat pick just granted, which is the pool Expertise may
+  // be spent on. Feat picks are included because Skill Expert grants a skill AND expertise, and
+  // spending the expertise on the skill you just took is the point of the feat.
+  const featPicked = new Set(Object.values(draft.selectedFeatPicks ?? {}).flat());
+  const proficientSkills = [...new Set([
+    ...(draft.selectedSkillProficiencies ?? []),
+    ...(getBackground(draft.backgroundId ?? '')?.skillProficiencies ?? []),
+    ...SKILL_NAMES.filter(sk => featPicked.has(sk)),
+  ])].sort();
 
   function toggle(featId: string) {
     const next = new Set(selected);
@@ -193,6 +208,56 @@ export function StepFeats() {
           </div>
         );
       })}
+
+      {/* Everything else a feat makes you choose: proficiencies, expertise and spells.
+          The same components and the same resolvers the sheet uses — a character who finishes
+          the creator should not have to go hunting on the sheet for a choice the feat owed them
+          at level 1. Renders nothing when no selected feat owes a choice. */}
+      <div className="mt-3 space-y-2">
+        <ProficiencyPicker
+          choices={featPickGroups(draft as Character).filter(g => !g.auto).map(g => ({
+            key: g.featId,
+            label: `${g.featName} — ${g.label}`,
+            count: g.count,
+            options: g.options,
+            labels: OPTION_LABELS,
+          }))}
+          value={draft.selectedFeatPicks}
+          onChange={(v) => updateDraft({ selectedFeatPicks: v })}
+          compact
+        />
+        {featExpertiseOwed > 0 && (
+          <ProficiencyPicker
+            choices={[{
+              key: 'feat-expertise',
+              label: `Expertise — choose ${featExpertiseOwed}`,
+              count: featExpertiseOwed,
+              // Expertise doubles a proficiency you have, so the pool is what the character is
+              // already proficient in at this point in the creator.
+              options: proficientSkills,
+            }]}
+            value={{ 'feat-expertise': draft.selectedFeatExpertise ?? [] }}
+            onChange={(v) => updateDraft({ selectedFeatExpertise: v['feat-expertise'] ?? [] })}
+            compact
+          />
+        )}
+        <ProficiencyPicker
+          title="Feat spells"
+          choices={featSpellChoices(draft as Character, profBonus).map(c => {
+            const options = spellPickOptions(c.grant, draft.enabledBooks ?? ['PHB']);
+            return {
+              key: c.key,
+              label: `${c.featName} — ${c.label}`,
+              count: c.count,
+              options: options.map(sp => sp.id),
+              labels: Object.fromEntries(options.map(sp => [sp.id, sp.name])),
+            };
+          })}
+          value={draft.selectedFeatSpells}
+          onChange={(v) => updateDraft({ selectedFeatSpells: v })}
+          compact
+        />
+      </div>
 
       {/* Feat detail dialog */}
       <Dialog open={!!detailFeat} onClose={() => setDetailFeat(null)} title={detailFeat?.name}>

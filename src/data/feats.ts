@@ -887,3 +887,12 @@ export function spellPickOptions(
     .filter(s => bookEnabled(s, enabledBooks))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/**
+ * id → printed name for the option pools that store ids (fighting styles, invocations, metamagic,
+ * maneuvers). Lives here rather than beside a picker because both the sheet and the creator render
+ * the same grants, and a second copy is a second thing to keep in step.
+ */
+export const OPTION_LABELS: Record<string, string> = Object.fromEntries(
+  [...ALL_FIGHTING_STYLES, ...ALL_INVOCATIONS, ...ALL_METAMAGIC, ...ALL_MANEUVERS].map(x => [x.id, x.name]),
+);

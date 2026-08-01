@@ -12,7 +12,7 @@ import { getRace } from '../../data/races';
 import { FlexibleAsiPicker } from '../creator/steps/FlexibleAsiPicker';
 import { getClass } from '../../data/classes';
 import { ALL_SUBCLASSES } from '../../data/subclasses';
-import { ALL_FEATS } from '../../data/feats';
+import { ALL_FEATS, OPTION_LABELS } from '../../data/feats';
 import { ALL_FIGHTING_STYLES, activeFightingStyles } from '../../data/fightingStyles';
 import { ALL_INVOCATIONS } from '../../data/invocations';
 import { ALL_PACT_BOONS } from '../../data/pactBoons';
@@ -23,13 +23,6 @@ import { totalCharacterLevel } from '../../data/mechanics';
 import { toolOptions } from '../../data/tools';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import type { Background, BackgroundCustom, Character, JournalEntry, AbilityKey } from '../../types';
-
-/** id → printed name, for the option pools that store ids. Built from the same catalogs the
- *  grants draw their options from, so a renamed entry cannot leave a stale label behind. */
-const OPTION_LABELS: Record<string, string> = Object.fromEntries(
-  [...ALL_FIGHTING_STYLES, ...ALL_INVOCATIONS, ...ALL_METAMAGIC, ...ALL_MANEUVERS]
-    .map(x => [x.id, x.name]),
-);
 
 export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBackgroundAbilityChoice, setSubclassOptions }: {
   character: Character;

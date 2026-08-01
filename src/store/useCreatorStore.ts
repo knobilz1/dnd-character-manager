@@ -6,7 +6,7 @@ import { getClass, baseClassId } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
-import { ALL_FEATS } from '../data/feats';
+import { ALL_FEATS, featGrantedSpells } from '../data/feats';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
 import { chosenAsi } from '../utils/racialAsi';
 
@@ -291,6 +291,13 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
           if (spell.recharge === 'cantrip') continue;
           if ((spell.minCharLevel ?? 1) <= totalCharLevel) uses[spell.spellId] = 1;
         }
+        // Feat spells too — a character made with Magic Initiate should walk out of the creator
+        // with its once-per-rest spell available. `load()` also seeds these, so this is belt and
+        // braces; the alternative is depending on which path a new character takes to the sheet.
+        for (const gs of featGrantedSpells(draft as Character)) {
+          if (gs.recharge === 'cantrip') continue;
+          uses[`feat:${gs.featId}:${gs.spellId}`] = 1;
+        }
         return uses;
       })(),
       currentHP: maxHP,
@@ -308,6 +315,16 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       currencies: draft.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
       expertiseSkills: (draft.expertiseSkills as string[] | undefined) ?? [],
       featChoices: draftFeatChoices,
+      // This object is a WHITELIST: a field the draft carries but this block doesn't name is
+      // silently dropped on finish. `selectedLanguages` and `selectedToolProficiencies` were
+      // already missing — harmless only because the creator offered no picker for them, and live
+      // data loss the moment one is added. Copied through explicitly rather than spreading the
+      // draft, because half these fields are re-derived above and a spread would undo that.
+      selectedLanguages: draft.selectedLanguages ?? [],
+      selectedToolProficiencies: draft.selectedToolProficiencies ?? {},
+      selectedFeatPicks: draft.selectedFeatPicks ?? {},
+      selectedFeatExpertise: draft.selectedFeatExpertise ?? [],
+      selectedFeatSpells: draft.selectedFeatSpells ?? {},
       knowledgeDomainSkills: (draft.knowledgeDomainSkills as string[] | undefined) ?? [],
       appearance: draft.appearance ?? { gender: 'male' },
     };
