@@ -95,6 +95,32 @@ MECH = re.compile(
     re.I)
 
 
+# Damage the OCR does to the SOURCE text, each pattern confirmed by counting before it was
+# handled — never guessed at from a failing case:
+#   ligature-as-NUL   FToD writes "pro<NUL>ciency bonus" 21 times; "proficiency" appears 0 times
+#                     in 690k chars, which is impossible for a real rulebook.
+#   real ligatures    GGR carries 259 U+FB0x characters.
+#   1 read as l       MMoM has "ld6" 202 times against "1d6" twice; VGM 174 against 5. PHB and
+#                     FToD are clean, which is why this only showed up in some books.
+# Without these, ~40 of the sweep's findings were the tool failing to read the book rather than
+# the app stating anything wrong.
+LIGATURES = {
+    '\ufb00': 'ff', '\ufb01': 'fi', '\ufb02': 'fl', '\ufb03': 'ffi', '\ufb04': 'ffl',
+    # FToD encodes the fi-ligature as a NUL byte: 'pro\\x00ciency bonus', 21 times.
+    '\x00': 'fi',
+}
+
+
+def debook(s):
+    """Undo known OCR damage in PDF text. A no-op on the app's own text."""
+    for bad, good in LIGATURES.items():
+        s = s.replace(bad, good)
+    # 'ld6' / 'l d6' / '1 d6' are all 1d6. Bounded to the dice shape, so an ordinary word with
+    # l-before-d is untouched.
+    s = re.sub(r'\b[l1I]\s*[dD]\s*(\d+)', r'1d\1', s)
+    return s
+
+
 def mech_tokens(s):
     """The mechanical vocabulary of a trait, normalised.
 
@@ -104,7 +130,7 @@ def mech_tokens(s):
     Charisma is a live bug and reads identically to a paraphrase otherwise.
     """
     out = set()
-    for m in MECH.finditer(re.sub(r'\s+', ' ', s or '')):
+    for m in MECH.finditer(re.sub(r'\s+', ' ', debook(s or ''))):
         tok = m.group(0).lower()
         tok = re.sub(r'\s+', '', tok)
         tok = tok.replace('foot', 'ft').replace('feet', 'ft')
