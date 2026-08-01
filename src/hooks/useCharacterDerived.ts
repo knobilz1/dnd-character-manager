@@ -475,10 +475,21 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'bladesinging')) {
       resourceMaxOverrides['bladesong'] = profBonus;
     }
-    // 2024 Lucky: Luck Points equal your proficiency bonus. (The 2014 feat is a flat 3 and needs
-    // no override — different key, so a character can't hold both pools by accident.)
-    if ((character.selectedFeats ?? []).includes('lucky-2024')) {
-      resourceMaxOverrides['luck_points'] = profBonus;
+    // Feat counters whose size is your proficiency bonus. Their `grantedResources.max` is only a
+    // level-1 seed; without an entry here the counter would freeze at that seed for the whole
+    // campaign — the same bug that kept every racial prof-bonus trait at its level-1 value.
+    // (2014 Lucky is a flat 3 and needs no override; it uses a different key, so a character
+    // cannot end up holding both pools.)
+    const feats = new Set(character.selectedFeats ?? []);
+    for (const [featId, key] of [
+      ['lucky-2024',                   'luck_points'],
+      ['chef',                         'chef_treats'],
+      ['poisoner',                     'poisoner_doses'],
+      ['gift-of-the-chromatic-dragon', 'reactive_resistance'],
+      ['gift-of-the-gem-dragon',       'telekinetic_reprisal'],
+      ['gift-of-the-metallic-dragon',  'protective_wings'],
+    ] as const) {
+      if (feats.has(featId)) resourceMaxOverrides[key] = profBonus;
     }
     if (character.classes.some(c => c.subclassId === 'samurai')) {
       // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)

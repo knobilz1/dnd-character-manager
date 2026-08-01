@@ -244,6 +244,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Strength or Dexterity (max 20).\n• Concentration Breaker: when you damage a concentrating creature → Disadvantage on its concentration save.\n• Guarded Mind: when you fail an Int/Wis/Cha save → Reaction to cause yourself to succeed instead. Once per Short/Long Rest.',
     abilityScoreChoice: ['str', 'dex'],
+    grantedResources: [{ key: 'guarded_mind', name: 'Guarded Mind', max: 1, rechargeOn: 'short' }],
   },
   {
     id: 'martial-weapon-training-2024',
@@ -541,6 +542,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 19 },
     description: 'Epic Boon feat (level 19+).\n• +1 to one ability score (max 30).\n• Improve Fate: when you or a creature within 60 ft succeeds or fails a D20 Test, roll 2d4 and apply as bonus (+) or penalty (−) to the roll. Once per Initiative roll or Short/Long Rest.',
     abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+    grantedResources: [{ key: 'improve_fate', name: 'Improve Fate', max: 1, rechargeOn: 'short' }],
   },
   {
     id: 'boon-of-fortitude',
@@ -565,6 +567,10 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 19 },
     description: 'Epic Boon feat (level 19+).\n• +1 to one ability score (max 30).\n• Last Stand: once per Long Rest when reduced to 0 HP, drop to 1 HP instead + regain half your HP maximum.\n• Recover Vitality: pool of 10d10s; Bonus Action → expend any number of dice, roll them, regain that many HP. Regain all dice on Long Rest.',
     abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+    grantedResources: [
+      { key: 'last_stand', name: 'Last Stand', max: 1, rechargeOn: 'long' },
+      { key: 'recover_vitality', name: 'Recover Vitality (d10s)', max: 10, rechargeOn: 'long' },
+    ],
   },
   {
     id: 'boon-of-skill',

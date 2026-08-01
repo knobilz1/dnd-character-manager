@@ -158,6 +158,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Martial Adept',
     sourceBook: 'PHB',
     description: 'You have martial training that allows you to perform special combat maneuvers. You gain the following benefits:\n• You learn two maneuvers of your choice from among those available to the Battle Master archetype in the fighter class. If a maneuver you use requires your target to make a saving throw to resist the maneuver\'s effects, the saving throw DC equals 8 + your proficiency bonus + your Strength or Dexterity modifier (your choice).\n• If you already have superiority dice, you gain one more; otherwise, you have one superiority die, which is a d6. This die is used to fuel your maneuvers. A superiority die is expended when you use it. You regain your expended superiority dice when you finish a short or long rest.',
+    grantedResources: [{ key: 'martial_adept_dice', name: 'Superiority Die (Martial Adept)', max: 1, rechargeOn: 'short' }],
   },
   {
     id: 'moderately-armored',
@@ -493,6 +494,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'Time spent mastering the culinary arts has paid off:\n• Increase your Constitution or Wisdom score by 1, to a maximum of 20.\n• You gain proficiency with cook\'s utensils if you don\'t already have it.\n• As part of a short rest, you can cook special food, provided you have ingredients and cook\'s utensils on hand. You can prepare enough food for a number of creatures equal to 4 + your proficiency bonus. At the end of the short rest, any creature who eats the food and spends at least one Hit Die regains an extra 1d8 hit points.\n• With one hour of work or when you finish a long rest, you can cook a number of treats equal to your proficiency bonus. These treats last 8 hours after being made. A creature can use a bonus action to eat one of those treats to gain temporary hit points equal to your proficiency bonus.',
     abilityScoreChoice: ['con', 'wis'],
+    grantedResources: [{ key: 'chef_treats', name: 'Chef Treats', max: 2, rechargeOn: 'long' }],
   },
   {
     id: 'crusher',
@@ -521,6 +523,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     prerequisite: { other: 'Spellcasting or Pact Magic feature' },
     description: 'You\'ve learned how to exert your will on your spells:\n• You learn two Metamagic options of your choice from the sorcerer class. You can use only one Metamagic option on a spell when you cast it, unless the option says otherwise.\n• You gain 2 sorcery points to spend on Metamagic. You regain all spent sorcery points when you finish a long rest.',
+    grantedResources: [{ key: 'metamagic_adept_points', name: 'Sorcery Points (Metamagic Adept)', max: 2, rechargeOn: 'long' }],
   },
   {
     id: 'piercer',
@@ -534,6 +537,7 @@ export const ALL_FEATS: Feat[] = [
     name: 'Poisoner',
     sourceBook: 'TCE',
     description: 'You can prepare and deliver deadly poisons:\n• When you make a damage roll that deals poison damage, it ignores resistance to poison damage.\n• You can apply poison to a weapon or piece of ammunition as a bonus action, instead of an action.\n• You gain proficiency with the poisoner\'s kit if you don\'t already have it. With one hour of work and 50 gp worth of materials, you can produce a number of doses of potent poison equal to your proficiency bonus. The poison retains potency for 1 hour. When you hit a creature with a weapon coated with this poison, the creature takes an extra 2d8 poison damage and must succeed on a DC 14 Constitution save or be poisoned until the end of your next turn.',
+    grantedResources: [{ key: 'poisoner_doses', name: 'Poison Doses', max: 2, rechargeOn: 'long' }],
   },
   {
     id: 'slasher',
@@ -549,6 +553,10 @@ export const ALL_FEATS: Feat[] = [
     name: 'Gift of the Chromatic Dragon',
     sourceBook: 'FToD',
     description: 'You have been gifted with the power of chromatic dragons:\n• Chromatic Infusion. As a bonus action, you can touch one simple or martial weapon and infuse it with one of: acid, cold, fire, lightning, or poison. For the next minute, the weapon deals an extra 1d4 damage of the chosen type. Once per long rest.\n• Reactive Resistance. When you take acid, cold, fire, lightning, or poison damage, you can use your reaction to give yourself resistance to that instance of damage. You can use this reaction a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
+    grantedResources: [
+      { key: 'chromatic_infusion', name: 'Chromatic Infusion', max: 1, rechargeOn: 'long' },
+      { key: 'reactive_resistance', name: 'Reactive Resistance', max: 2, rechargeOn: 'long' },
+    ],
   },
   {
     id: 'gift-of-the-gem-dragon',
@@ -556,6 +564,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'FToD',
     description: 'You have manifested the power of gem dragons:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• Telekinetic Reprisal. When you take damage from a creature within 10 feet of you, you can use your reaction to emanate telekinetic energy. The creature must make a Strength saving throw (DC 8 + your proficiency bonus + the ability modifier of the score increased by this feat). On a failed save, the creature takes 2d8 force damage and is pushed up to 10 feet from you; on a successful save, the creature takes half as much damage and isn\'t pushed. You can use this reaction a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
+    grantedResources: [{ key: 'telekinetic_reprisal', name: 'Telekinetic Reprisal', max: 2, rechargeOn: 'long' }],
   },
   {
     id: 'gift-of-the-metallic-dragon',
@@ -563,6 +572,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'FToD',
     description: 'You bear a gift bestowed by metallic dragons:\n• Draconic Healing. You learn the Cure Wounds spell. You can cast it once without expending a spell slot, and you can also cast it using any spell slots you have. You regain the ability to cast it without a slot when you finish a long rest. Your spellcasting ability for this spell is Intelligence, Wisdom, or Charisma (choose when you gain this feat).\n• Protective Wings. When you or a creature you can see within 5 feet of you is hit by an attack, you can use your reaction to extend spectral wings, granting a bonus to AC against the attack equal to your proficiency bonus. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.',
     grantedSpells: [{ spellId: 'cure-wounds', recharge: 'long', ability: 'wis' }],
+    grantedResources: [{ key: 'protective_wings', name: 'Protective Wings', max: 2, rechargeOn: 'long' }],
   },
 
   // ── ERLW FEATS ─────────────────────────────────────────────────────────
@@ -604,6 +614,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'SCoC',
     prerequisite: { minLevel: 4, other: 'Strixhaven Initiate feat' },
     description: 'You have learned how to summon a Strixhaven mascot to assist you, granting you these benefits:\n• You can cast the find familiar spell as a ritual. Your familiar can take the form of the mascot associated with the college you chose for the Strixhaven Initiate feat: a spirit statue mascot (Lorehold), an art elemental mascot (Prismari), a fractal mascot (Quandrix), an inkling mascot (Silverquill), or a pest mascot (Witherbloom).\n• When you take the Attack action on your turn, you can forgo one attack to allow your mascot familiar to make one attack of its own with its reaction.\n• If your mascot familiar is within 60 feet of you, you can teleport as an action, swapping places with the familiar. If your destination space is too small for you to occupy, the teleportation fails and is wasted. Once you teleport in this way, you can\'t do so again until you finish a long rest, unless you expend a spell slot of 2nd level or higher to do it again.',
+    grantedResources: [{ key: 'mascot_teleport', name: 'Mascot Teleport', max: 1, rechargeOn: 'long' }],
   },
   // PHB 2024 Feats
   ...PHB2024_FEATS,
