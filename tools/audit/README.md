@@ -58,6 +58,29 @@ This matters because ERLW still writes `ld6` 54 times and CANNOT be fixed by OCR
 born-digital book has to be repaired at comparison time by `debook()`. Do not queue an OCR run for
 one and conclude the tool failed.
 
+## Keep BOTH extractions of every book
+
+Re-OCRing fixes damage and loses text, and which one wins differs per book. Measured over the seven
+scanned books re-OCR'd on 2026-08-01: VGM gained 4 race trait names, MMoM and SCoC each lost 1.
+**PHB 2024 was the worst case** — its OCR fixed character-mangling but dropped whole subclass
+feature headings: "Cutting Words", "War Magic", "Holy Nimbus" and "Circle Forms" appear ZERO times
+in the OCR and once each in the text layer, which is also 58,000 characters longer.
+
+`ocrall.py` keeps the pre-OCR text as a `.txt.textlayer` sibling, and `racepdf.alt_flat` /
+`alt_text` read it. A book OCR'd before that habit existed has no sibling; regenerate it with:
+
+```python
+from pypdf import PdfReader
+layer = '
+'.join((p.extract_text() or '') for p in PdfReader(<pdf>).pages)
+open(<cache>/<key>.txt.textlayer, 'w', encoding='utf-8').write(layer)
+```
+
+**Finding a name only in the other extraction is not an explanation — go and CHECK it there.**
+Noting it and moving on leaves the feature unverified while the report reads as though it were
+accounted for. The subclass control caught exactly that, missing a corrupted Draconic Sorcery whose
+feature name exists only in the text layer.
+
 ## The data's own quirks
 
 - `parentRaceId` is **dangling**: the app flattens base races away, so there is no race with id

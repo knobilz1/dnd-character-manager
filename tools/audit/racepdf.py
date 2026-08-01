@@ -263,6 +263,22 @@ def phb_flat():
     return _PHB_FLAT[0]
 
 
+def alt_text(book):
+    """The other extraction as (raw, flat, idx), so a sweep can COMPARE there and not merely
+    notice the name is present. Without this, a feature the primary extraction dropped is quietly
+    never checked at all — the subclass control caught exactly that, missing a corrupted Draconic
+    Sorcery because its feature name only exists in the text layer."""
+    pdf = BOOK_PDF.get(book)
+    path = os.path.join(V.CACHE, V.norm(pdf)[:60] + '.txt.textlayer') if pdf else None
+    try:
+        with open(path, encoding='utf-8') as f:
+            raw = f.read()
+    except (OSError, TypeError):
+        return None
+    flatb, idx = V._flatten(raw)
+    return raw, flatb, idx
+
+
 def alt_flat(book):
     """The OTHER extraction of this book, if one was kept.
 
@@ -300,6 +316,17 @@ def trait_variants(name):
     out = [name]
     bare = re.sub(r'\s*\([^)]*\)', '', name).strip()
     out.append(bare)
+    # "Channel Divinity: Abjure Enemy" is the app FILING the feature under the resource it spends.
+    # The book heads it "Abjure Enemy" and puts Channel Divinity in the section above, so the full
+    # string appears nowhere — 13 subclass features were reported missing on this alone.
+    if ':' in bare:
+        head, _, tail = bare.partition(':')
+        out += [tail.strip(), head.strip()]
+    # "Fighting Spirit Improvement" / "Aura of Conquest Improvement" are the app naming a LEVEL-UP
+    # of an existing feature. The book prints the improvement inside the original entry and never
+    # heads it, so only the base name can be found.
+    if re.search(r'\bimprovements?$', bare, re.I):
+        out.append(re.sub(r'\s*\bimprovements?$', '', bare, flags=re.I).strip())
     parts = bare.split()
     if len(parts) > 2:
         out.append(' '.join(parts[1:]))
