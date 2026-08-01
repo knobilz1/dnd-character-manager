@@ -115,8 +115,14 @@ def main():
                       flush=True)
     text = '\n'.join(out)
     if rng:
-        print(text[:3000])
-        print(f'\n[{len(pages)} pages, {len(text):,} chars — sample only, cache not written]')
+        # Statistics, never the prose itself — see the module docstring. What tells you an OCR run
+        # worked is density and word shape: a failed page yields a handful of 1-2 letter fragments,
+        # a good one yields ~2,500 chars of mostly real words.
+        words = re.findall(r'[A-Za-z]+', text)
+        frag = 100 * sum(1 for w in words if len(w) <= 2) / max(1, len(words))
+        n = len(list(pages))
+        print(f'[{n} pages, {len(text):,} chars, {len(text) // max(1, n):,}/page, '
+              f'{len(words):,} words, {frag:.1f}% fragments — sample only, cache not written]')
         return
     os.makedirs(V.CACHE, exist_ok=True)
     with open(key, 'w', encoding='utf-8') as f:
