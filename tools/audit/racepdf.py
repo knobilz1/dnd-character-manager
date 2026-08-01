@@ -123,6 +123,12 @@ def debook(s):
     # 17 occurrences across all books, every one unambiguously dice (2d 12, 1d 8, 10d 10) — the
     # digits before the d must be contiguous with it, so "level 3 d 4" cannot be swept up.
     s = re.sub(r'\b(\d+d)\s+(\d+)\b', r'\1\2', s)
+    # A space injected INSIDE the unit word: TCE prints "you can move it 5 fe et to an unoccupied
+    # space" — 183 times, and in no other book. \b\d+\s*feet\b therefore matched none of them, and
+    # Crusher, Gunner and Telekinetic were all reported as inventing the 5 feet they state, with
+    # their headings sitting 207 characters away the whole time. TCE is born-digital, so debook is
+    # the only repair it can ever get. Anchored to a preceding digit so ordinary prose is untouched.
+    s = re.sub(r'(?<=\d)(\s*)fe\s+et\b', r'\1feet', s)
     return s
 
 

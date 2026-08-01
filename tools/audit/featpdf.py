@@ -20,7 +20,7 @@ find.
 STATE 2026-08-01 — TRUSTWORTHY, in the only sense that matters: it CANNOT silently miss.
 
   coverage    155 of 155 feats located (from 122)
-  findings    7 (from 60) — 4.5% of located
+  findings    4 (from 60) — 2.6% of located, and NONE is a confirmed data bug
   control     43 of 43 corrupted feats detected, 0 missed
 
 The control is the claim. Every distance and die in every feat description is bumped (30 ft -> 930
@@ -28,7 +28,7 @@ ft, 2d6 -> 92d6) and the sweep must report all of them; a sweep that has gone qu
 indistinguishable from a correct one without it. Re-run it after ANY scoring change:
 that is how the bare-dice reading below was caught putting both Lucky halflings on the list.
 
-Six instrument bugs found on the way here, none of them in the app's data:
+Seven instrument bugs found on the way here, none of them in the app's data:
   1. racepdf's BOOK_PDF covers only books with RACES, so every TCE and XGtE feat was silently
      skipped as "no PDF" — 30 of 155 — while the run looked healthy.
   2. Sibling-density scoring finds the densest cluster of feat names, which is a LIST every time.
@@ -43,6 +43,18 @@ Six instrument bugs found on the way here, none of them in the app's data:
      (first, last) — an 807,000-character "chapter". It takes the densest window now.
   6. Flat identity counts let a window full of common words outscore the right entry; weights are
      by rarity now, from one tokenisation per book.
+  7. TCE injects a space INSIDE the unit word — "you can move it 5 fe et to an unoccupied space",
+     183 times and in no other book — so Crusher, Gunner and Telekinetic were all reported as
+     inventing the 5 feet they state, with their headings 207 characters away the whole time.
+     Repaired in debook(); TCE is born-digital, so that is the only fix it can ever get.
+
+THE REMAINING 4, none of them confirmed:
+  Gift of the Gem Dragon  FToD writes save DCs as "8 + your ..." and never the literal "DC 8" —
+                          0 occurrences book-wide. A MECH pattern gap, like "4 extra feet".
+  Greater Dragonmark      known-blocked: ERLW's house tables are not in the extract.
+  Mage Slayer             the 2024 entry truncates at the next heading and loses its own body —
+                          it lacks "Disadvantage" too, which app and 2024 rules both have.
+  Heavily Armored         the only one not yet explained; it has no uppercase heading to bound.
 
 WHY IT REPORTS CONSERVATIVELY. Headings and bodies extract from different columns, inconsistently:
 "Boon of Truesight" sits 493 characters above its body, "Blind Fighting" and "Polearm Master" have
