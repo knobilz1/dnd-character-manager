@@ -1,5 +1,6 @@
 import type { ClassLevel, ClassOptionsState, PreparedSpell } from '../types';
 import { getSubclass } from '../data/subclasses';
+import { getSubclassOptions } from '../data/subclassOptions';
 
 /** Shared by useCharacterStore and useCreatorStore.
  *
@@ -12,11 +13,23 @@ import { getSubclass } from '../data/subclasses';
 export function computeAlwaysPreparedIds(
   classes: ClassLevel[],
   classOptions?: ClassOptionsState,
+  subclassOptions?: Record<string, string[]>,
 ): string[] {
   const ids: string[] = [];
   for (const cl of classes) {
     const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
     if (!sub) continue;
+    // Cantrips the PLAYER chose off another class's list — Acolyte of Nature's druid cantrip,
+    // Arcane Initiate's two wizard cantrips. Routed through always-prepared so the cantrip
+    // actually lands in the spellbook, and so it is exempt from the cantrips-known count the
+    // same way the eleven fixed grants are. Gated on class level, so a level-1 Land druid
+    // doesn't get the 2nd-level Bonus Cantrip early.
+    for (const group of getSubclassOptions(sub.id)) {
+      if (group.grants !== 'cantrip') continue;
+      const minLevel = Math.min(...Object.keys(group.picksByLevel).map(Number));
+      if (cl.level < minLevel) continue;
+      ids.push(...(subclassOptions?.[group.key] ?? []));
+    }
     for (const [minLevelStr, spellIds] of Object.entries(sub.alwaysPreparedSpells ?? {})) {
       if (cl.level >= Number(minLevelStr)) ids.push(...spellIds);
     }

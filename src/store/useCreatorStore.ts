@@ -282,7 +282,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       hitDiceUsed: {},
       spellbook: syncAlwaysPrepared(
         draft.spellbook ?? [],
-        computeAlwaysPreparedIds(draft.classes ?? [], draft.classOptions),
+        computeAlwaysPreparedIds(draft.classes ?? [], draft.classOptions, draft.subclassOptions),
       ),
       innateSpellUses: (() => {
         const totalCharLevel = (draft.classes ?? []).reduce((sum, cl) => sum + cl.level, 0);

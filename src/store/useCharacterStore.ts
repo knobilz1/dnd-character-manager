@@ -307,7 +307,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
         spellbook: syncAlwaysPrepared(
           c.spellbook ?? [],
-          computeAlwaysPreparedIds(c.classes ?? [], c.classOptions),
+          computeAlwaysPreparedIds(c.classes ?? [], c.classOptions, c.subclassOptions),
         ),
         // Migrate existing characters: add innate spell uses for any unlocked spells
         // that weren't tracked yet (cantrips are unlimited and not stored).
@@ -763,7 +763,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Sync always-prepared spells for newly unlocked subclass spell tables.
       const newSpellbook = syncAlwaysPrepared(
         s.character.spellbook,
-        computeAlwaysPreparedIds(classes, s.character.classOptions),
+        computeAlwaysPreparedIds(classes, s.character.classOptions, s.character.subclassOptions),
       );
 
       // Unlock any newly accessible innate spells (based on new total character level).
@@ -1164,7 +1164,23 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     set((s) => s.character ? { character: { ...s.character, backgroundAbilityChoice: v } } : s),
 
   setSubclassOptions: (v) =>
-    set((s) => s.character ? { character: { ...s.character, subclassOptions: v } } : s),
+    set((s) => {
+      if (!s.character) return s;
+      // Re-sync the spellbook: a `grants: 'cantrip'` group (Acolyte of Nature, Arcane Initiate,
+      // Land's Bonus Cantrip) puts the CHOSEN cantrip into always-prepared, so picking one here
+      // has to land it in the book now. Without this the pick sat in subclassOptions and the
+      // cantrip only appeared after the next load or level-up.
+      const character = { ...s.character, subclassOptions: v };
+      return {
+        character: {
+          ...character,
+          spellbook: syncAlwaysPrepared(
+            character.spellbook ?? [],
+            computeAlwaysPreparedIds(character.classes ?? [], character.classOptions, v),
+          ),
+        },
+      };
+    }),
 
   setArmorerMode: (mode) =>
     set((s) => s.character ? { character: { ...s.character, armorerMode: mode } } : s),

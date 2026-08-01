@@ -1599,6 +1599,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
             <SubclassOptionsPicker
               subclassId={subclassForOptions?.id}
               classLevel={newLevel}
+              enabledBooks={character.enabledBooks}
               value={pendingSubclassOptions ?? character.subclassOptions}
               onChange={setPendingSubclassOptions}
               compact

@@ -115,6 +115,7 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
           <SubclassOptionsPicker
             subclassId={subclass.id}
             classLevel={cl.level}
+            enabledBooks={character.enabledBooks}
             value={character.subclassOptions}
             onChange={setSubclassOptions}
             compact

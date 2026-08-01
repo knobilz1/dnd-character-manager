@@ -460,7 +460,10 @@ export interface SubclassOptionGroup {
   label: string;
   /** Cumulative pick count keyed on the level in THIS class, matching `maxPerLevel` convention. */
   picksByLevel: Record<number, number>;
-  choices: { id: string; name: string; description?: string }[];
+  /** `sourceBook` is only set where the choice list spans books and must be filtered by what
+   *  the table owns — cantrip grants draw on 20 druid / 35 wizard cantrips across seven
+   *  books. Skills and weapons are book-agnostic and leave it unset. */
+  choices: { id: string; name: string; description?: string; sourceBook?: BookId }[];
   /**
    * What the picks CONFER, when they confer something the rest of the sheet must act on.
    * Omit for choices that are purely descriptive (Dragon Ancestor, Hunter's Prey…).
@@ -468,8 +471,12 @@ export interface SubclassOptionGroup {
    * `'skill'` is the load-bearing one: `useCharacterDerived` merges those picks into the skill
    * proficiency set, which is what makes College of Lore's three skills actually exist. For it to
    * work each choice `id` MUST be a `SkillName` exactly as spelled in `ALL_SKILLS`.
+   *
+   * `'cantrip'` choices carry SPELL ids: they are merged into the always-prepared set so the
+   * cantrip lands in the spellbook, and are therefore not counted against cantrips known —
+   * a subclass cantrip is gained IN ADDITION to the class's own.
    */
-  grants?: 'skill' | 'language' | 'tool' | 'weapon';
+  grants?: 'skill' | 'language' | 'tool' | 'weapon' | 'cantrip';
 }
 
 export interface EquipmentOption {

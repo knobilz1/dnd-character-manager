@@ -1,5 +1,6 @@
 import { cn } from '../../../utils/cn';
 import { getSubclassOptions, picksAllowed } from '../../../data/subclassOptions';
+import type { BookId } from '../../../types';
 
 /**
  * D4 — picker for a subclass's persistent build choices.
@@ -12,14 +13,24 @@ import { getSubclassOptions, picksAllowed } from '../../../data/subclassOptions'
  * Over-picking is prevented by disabling unchosen options once the allowance is spent, rather than
  * by silently dropping the extra: a click that does nothing with no explanation reads as a bug.
  */
-export function SubclassOptionsPicker({ subclassId, classLevel, value, onChange, compact }: {
+export function SubclassOptionsPicker({ subclassId, classLevel, value, onChange, compact, enabledBooks }: {
   subclassId: string | undefined;
   classLevel: number;
   value: Record<string, string[]> | undefined;
   onChange: (next: Record<string, string[]>) => void;
   compact?: boolean;
+  /** Books this table plays with. Only cantrip groups carry `sourceBook` — their lists span seven
+   *  books — so without this a Nature Domain cleric would be offered druid cantrips from books
+   *  nobody at the table can look up. Skills and weapons are book-agnostic and unaffected. */
+  enabledBooks?: BookId[];
 }) {
-  const groups = getSubclassOptions(subclassId).filter(g => picksAllowed(g, classLevel) > 0);
+  const books = enabledBooks ? new Set(enabledBooks) : null;
+  const groups = getSubclassOptions(subclassId)
+    .filter(g => picksAllowed(g, classLevel) > 0)
+    .map(g => (books
+      ? { ...g, choices: g.choices.filter(c => !c.sourceBook || books.has(c.sourceBook)) }
+      : g))
+    .filter(g => g.choices.length > 0);
   if (groups.length === 0) return null;
 
   const current = value ?? {};

@@ -402,6 +402,7 @@ export function StepClassOptions() {
       <SubclassOptionsPicker
         subclassId={subclassId}
         classLevel={level}
+        enabledBooks={draft.enabledBooks}
         value={draft.subclassOptions}
         onChange={(v) => updateDraft({ subclassOptions: v })}
       />

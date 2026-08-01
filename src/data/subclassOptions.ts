@@ -1,4 +1,5 @@
 import type { SubclassOptionGroup } from '../types';
+import { ALL_SPELLS } from './spells';
 
 /**
  * D4 — subclass BUILD choices, the ones that persist and must be prompted once.
@@ -26,7 +27,55 @@ const ALL_SKILL_CHOICES = [
   'Performance', 'Persuasion', 'Religion', 'Sleight of Hand', 'Stealth', 'Survival',
 ].map(s => ({ id: s, name: s }));
 
+
+/** Cantrips from one class's spell list, as option choices.
+ *
+ *  Built from ALL_SPELLS rather than transcribed, because the list genuinely spans books — 20 druid
+ *  and 35 wizard cantrips across seven of them — and a hand-copied list would silently rot every
+ *  time a book was added. `sourceBook` rides along so the picker can hide what the table doesn't
+ *  own, the same rule every other content filter in the app follows.
+ */
+function cantripChoices(spellListClassId: string) {
+  return ALL_SPELLS
+    .filter(s => s.level === 0 && s.classes.includes(spellListClassId))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      description: `${s.school}${s.damageType ? ' \u00b7 ' + s.damageType : ''}`,
+      sourceBook: s.sourceBook,
+    }));
+}
+
+/** The named pair Arcane Archer Lore offers, rather than a whole class list. */
+function namedCantripChoices(ids: string[]) {
+  return ids
+    .map(id => ALL_SPELLS.find(s => s.id === id))
+    .filter((s): s is NonNullable<typeof s> => !!s)
+    .map(s => ({ id: s.id, name: s.name, description: s.school, sourceBook: s.sourceBook }));
+}
+
 export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
+  'scag-arcana-domain': [
+    {
+      key: 'arcaneInitiateCantrips',
+      label: 'Arcane Initiate — Wizard Cantrips',
+      picksByLevel: { 1: 2 },
+      choices: cantripChoices('wizard'),
+      grants: 'cantrip',
+    },
+  ],
+
+  'circle-of-the-land': [
+    {
+      key: 'landBonusCantrip',
+      label: 'Bonus Cantrip — Druid Cantrip',
+      picksByLevel: { 2: 1 },
+      choices: cantripChoices('druid'),
+      grants: 'cantrip',
+    },
+  ],
+
 
   // PHB p.102. The chosen dragon determines a damage type, which Elemental Affinity (6th) then
   // keys off — this is the one D4 choice with a directly mechanical consequence, which is why it
@@ -95,7 +144,15 @@ export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
   }],
 
   // XGtE p.29.
-  'arcane-archer': [{
+  'arcane-archer': [
+    {
+      key: 'arcaneArcherLoreCantrip',
+      label: 'Arcane Archer Lore — Cantrip',
+      picksByLevel: { 3: 1 },
+      choices: namedCantripChoices(['prestidigitation', 'druidcraft']),
+      grants: 'cantrip',
+    },
+  {
     key: 'arcaneShots',
     label: 'Arcane Shot options',
     picksByLevel: { 3: 2, 7: 3, 10: 4, 15: 5, 18: 6 },
@@ -259,7 +316,15 @@ export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
   // choice. You also gain proficiency in one of the following skills of your choice: Animal
   // Handling, Nature, or Survival." (The cantrip half is not modelled here — cantrips live in the
   // spellbook, not in this mechanism.)
-  'nature-domain': [{
+  'nature-domain': [
+    {
+      key: 'acolyteOfNatureCantrip',
+      label: 'Acolyte of Nature — Druid Cantrip',
+      picksByLevel: { 1: 1 },
+      choices: cantripChoices('druid'),
+      grants: 'cantrip',
+    },
+  {
     key: 'acolyteOfNatureSkill',
     label: 'Acolyte of Nature — skill proficiency',
     picksByLevel: { 1: 1 },
