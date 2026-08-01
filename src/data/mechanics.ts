@@ -164,13 +164,17 @@ export function getSpellSlots(
   return table[Math.min(Math.max(level, 1), 20)] ?? Array(9).fill(0);
 }
 
+/** `roundUp` marks the artificer, the one half-caster whose levels round UP in the multiclass
+ *  total — "Add half artificer levels (rounded up)", TCE p.10. Paladin and ranger round down.
+ *  Flooring it cost a level-1 or level-3 artificer a whole effective caster level, so an
+ *  artificer 1 / wizard 1 got a single-caster's slots instead of a two-caster's. */
 export function getMulticlassSpellSlots(
-  classes: Array<{ type: 'full' | 'half' | 'third' | 'pact' | 'none'; level: number }>
+  classes: Array<{ type: 'full' | 'half' | 'third' | 'pact' | 'none'; level: number; roundUp?: boolean }>
 ): number[] {
   let effective = 0;
   for (const c of classes) {
     if (c.type === 'full')  effective += c.level;
-    if (c.type === 'half')  effective += Math.floor(c.level / 2);
+    if (c.type === 'half')  effective += c.roundUp ? Math.ceil(c.level / 2) : Math.floor(c.level / 2);
     if (c.type === 'third') effective += Math.floor(c.level / 3);
   }
   if (effective === 0) return Array(9).fill(0);

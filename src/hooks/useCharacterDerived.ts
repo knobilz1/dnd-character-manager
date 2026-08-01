@@ -31,7 +31,16 @@ function effectiveSpellcasting(classId: string, subclassId: string | undefined) 
 export function computeCharacterDerived(character: Character) {
     const race = getRace(character.raceId);
     const primaryClassLevel = character.classes[0];
-    const primaryClassDef = primaryClassLevel ? getClass(primaryClassLevel.classId) : null;
+    // Which class the character's spellcasting is read from. NOT `classes[0]`: a fighter 5 / wizard 5
+    // is stored with the fighter first, and taking spellcasting from a non-caster left the wizard
+    // holding correct spell slots with a save DC of 0, a +0 attack bonus and no cantrips at all.
+    // The first class that actually casts is the honest answer for the one-caster builds that are
+    // the overwhelming majority. Pact counts: a warlock is a caster even though its slots are
+    // tracked separately from the multiclass table below.
+    const casterClassLevel = character.classes.find(
+      cl => effectiveSpellcasting(cl.classId, cl.subclassId)?.ability,
+    ) ?? primaryClassLevel;
+    const casterClassDef = casterClassLevel ? getClass(casterClassLevel.classId) : null;
     const totalLevel = totalCharacterLevel(character.classes);
     const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;
 
@@ -309,8 +318,8 @@ export function computeCharacterDerived(character: Character) {
       : _baseSpeed;
 
     // Spellcasting (incl. third-caster subclasses Eldritch Knight / Arcane Trickster).
-    const primaryEff = primaryClassLevel
-      ? effectiveSpellcasting(primaryClassLevel.classId, primaryClassLevel.subclassId)
+    const primaryEff = casterClassLevel
+      ? effectiveSpellcasting(casterClassLevel.classId, casterClassLevel.subclassId)
       : null;
     let spellcastingAbility: AbilityKey | null = null;
     let spellSaveDC = 0;
@@ -336,7 +345,9 @@ export function computeCharacterDerived(character: Character) {
       row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
     } else if (spellcasterClasses.length > 1) {
       const row = getMulticlassSpellSlots(
-        spellcasterClasses.map(({ cl, eff }) => ({ type: eff.type, level: cl.level }))
+        spellcasterClasses.map(({ cl, eff }) => ({
+          type: eff.type, level: cl.level, roundUp: cl.classId === 'artificer',
+        }))
       );
       row.forEach((count, idx) => { slotTotals[idx + 1] = count; });
     }
@@ -346,16 +357,16 @@ export function computeCharacterDerived(character: Character) {
     let cantripsKnown = 0;
     let spellsKnown: number | null = null;
     let spellbookLimit: number | null = null;
-    if (primaryClassDef && spellcastingAbility) {
-      const casterLevel = primaryClassLevel?.level ?? 0;
+    if (casterClassDef && spellcastingAbility) {
+      const casterLevel = casterClassLevel?.level ?? 0;
       const spellMod = mods[spellcastingAbility];
-      maxPreparedSpells = maxPreparedSpellsFor(primaryClassDef.id, casterLevel, spellMod);
-      cantripsKnown = cantripsKnownFor(primaryClassDef.id, casterLevel);
+      maxPreparedSpells = maxPreparedSpellsFor(casterClassDef.id, casterLevel, spellMod);
+      cantripsKnown = cantripsKnownFor(casterClassDef.id, casterLevel);
       // Eldritch Knight and Arcane Trickster learn cantrips via their subclass
       // (2 at level 3, 3 at level 10). The base Fighter/Rogue class has 0 cantrips
       // so cantripsKnownFor returns 0 — override it here.
-      if (cantripsKnown === 0 && primaryClassLevel?.subclassId) {
-        const sub = getSubclass(primaryClassLevel.subclassId);
+      if (cantripsKnown === 0 && casterClassLevel?.subclassId) {
+        const sub = getSubclass(casterClassLevel.subclassId);
         if (sub?.spellcastingType === 'third') {
           cantripsKnown = casterLevel >= 10 ? 3 : casterLevel >= 3 ? 2 : 0;
         }
@@ -372,14 +383,14 @@ export function computeCharacterDerived(character: Character) {
       //   prepared casters (cleric, druid, paladin, artificer, 2024 bard/ranger) have NO book limit
       //     at all — their whole class list is available and only preparation is capped.
       // null therefore means "no limit applies", which is different from 0.
-      spellsKnown = spellsKnownFor(primaryClassDef.id, casterLevel) || null;
-      if (spellsKnown === null && primaryClassLevel?.subclassId) {
-        const sub = getSubclass(primaryClassLevel.subclassId);
+      spellsKnown = spellsKnownFor(casterClassDef.id, casterLevel) || null;
+      if (spellsKnown === null && casterClassLevel?.subclassId) {
+        const sub = getSubclass(casterClassLevel.subclassId);
         if (sub?.spellcastingType === 'third') {
-          spellsKnown = spellsKnownFor(sub.spellListClassId ?? primaryClassDef.id, casterLevel) || null;
+          spellsKnown = spellsKnownFor(sub.spellListClassId ?? casterClassDef.id, casterLevel) || null;
         }
       }
-      if (['wizard', 'wizard-2024'].includes(primaryClassDef.id)) {
+      if (['wizard', 'wizard-2024'].includes(casterClassDef.id)) {
         spellbookLimit = 6 + 2 * Math.max(0, casterLevel - 1);
       }
     }
@@ -601,7 +612,6 @@ export function computeCharacterDerived(character: Character) {
       spellsKnown,
       spellbookLimit,
       totalLevel,
-      primaryClassDef,
       exhaustionLevel,
       exhaustionDisadvChecks,
       exhaustionDisadvSaves,
