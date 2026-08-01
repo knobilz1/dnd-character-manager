@@ -80,7 +80,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // modifier (minimum once). You regain all expended uses when you finish a long rest."
     resources: [{ name: 'Warding Flare', key: 'warding_flare', rechargeOn: 'long',
       maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
-    alwaysPreparedSpells: { 1: ['burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
+    alwaysPreparedSpells: { 1: ['light', 'burning-hands', 'faerie-fire'], 3: ['flaming-sphere', 'scorching-ray'], 5: ['daylight', 'fireball'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'scrying'] }},
   // Fighter
   { id: 'champion', name: 'Champion', classId: 'fighter', sourceBook: 'PHB', description: 'The archetypal Champion focuses on the development of raw physical power honed to deadly perfection.', features: [
     { name: 'Improved Critical', level: 3, description: 'Beginning when you choose this archetype at 3rd level, your weapon attacks score a critical hit on a roll of 19 or 20.' },
@@ -134,7 +134,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Shadow Step', level: 6, description: 'At 6th level, you gain the ability to step from one shadow into another. When you are in dim light or darkness, as a bonus action you can teleport up to 60 feet to an unoccupied space you can see that is also in dim light or darkness. You then have advantage on the first melee attack you make before the end of the turn.' },
     { name: 'Cloak of Shadows', level: 11, description: 'By 11th level, you have learned to become one with the shadows. When you are in an area of dim light or darkness, you can use your action to become invisible. You remain invisible until you make an attack, cast a spell, or are in an area of bright light.' },
     { name: 'Opportunist', level: 17, description: 'At 17th level, you can exploit a creature\'s momentary distraction when it is hit by an attack. Whenever a creature within 5 feet of you is hit by an attack made by a creature other than you, you can use your reaction to make a melee attack against that creature.' },
-  ]},
+  ], alwaysPreparedSpells: { 3: ['minor-illusion'] } },
   // Paladin
   { id: 'oath-of-devotion', name: 'Oath of Devotion', classId: 'paladin', sourceBook: 'PHB', description: 'The Oath of Devotion binds a paladin to the loftiest ideals of justice, virtue, and order. Sometimes called cavaliers, white knights, or holy warriors.', features: [
     { name: 'Sacred Weapon', level: 3, description: 'As an action, you can imbue one weapon that you are holding with positive energy, using your Channel Divinity. For 1 minute, you add your Charisma modifier to attack rolls made with that weapon (with a minimum bonus of +1). The weapon also emits bright light in a 20-foot radius and dim light 20 feet beyond that. If the weapon is not already magical, it becomes magical for the duration.' },
@@ -287,7 +287,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Malleable Illusions', level: 6, description: 'Starting at 6th level, when you cast an illusion spell that has a duration of 1 minute or longer, you can use your action to change the nature of that illusion (using the spell\'s normal parameters for the illusion), provided that you can see the illusion.' },
     { name: 'Illusory Self', level: 10, description: 'Beginning at 10th level, you can create an illusory duplicate of yourself as an instant, almost instinctual reaction to danger.' },
     { name: 'Illusory Reality', level: 14, description: 'By 14th level, you have learned the secret of weaving shadow magic into your illusions to give them a semi-reality. When you cast an illusion spell of 1st level or higher, you can choose one inanimate, nonmagical object that is part of the illusion and make that object real.' },
-  ]},
+  ], alwaysPreparedSpells: { 2: ['minor-illusion'] } },
 
   // ── PHB: REMAINING CLERIC DOMAINS ─────────────────────────────────────
   { id: 'nature-domain', name: 'Nature Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods of nature are as varied as the natural world itself. Druids revere nature as a whole, while clerics of nature gods serve specific aspects of the natural world.', features: [
@@ -496,7 +496,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
       { name: "Sentinel at Death's Door", key: 'sentinel_at_deaths_door', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
     ],
-    alwaysPreparedSpells: { 1: ['bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
+    alwaysPreparedSpells: { 1: ['spare-the-dying', 'bane', 'false-life'], 3: ['gentle-repose', 'ray-of-enfeeblement'], 5: ['revivify', 'vampiric-touch'], 7: ['blight', 'death-ward'], 9: ['antilife-shell', 'raise-dead'] }},
 
   // ── XGtE: DRUID ──────────────────────────────────────────────────────
   { id: 'circle-of-dreams', name: 'Circle of Dreams', classId: 'druid', sourceBook: 'XGtE', description: 'Druids who are members of the Circle of Dreams hail from regions that have strong ties to the Feywild and its dreamlike realms.', features: [
@@ -747,7 +747,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // XGtE p.55: Searing Vengeance — "Once you use this feature, you can't use it again until you finish a long rest."
     resources: [{ name: 'Searing Vengeance', key: 'searing_vengeance', rechargeOn: 'long',
       maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
-    expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }},
+    expandedSpells: { 1: ['cure-wounds', 'guiding-bolt'], 3: ['flaming-sphere', 'lesser-restoration'], 5: ['daylight', 'revivify'], 7: ['guardian-of-faith', 'wall-of-fire'], 9: ['flame-strike', 'greater-restoration'] }, alwaysPreparedSpells: { 1: ['light', 'sacred-flame'] } },
 
   // ── XGtE: WIZARD ─────────────────────────────────────────────────────
   { id: 'war-magic', name: 'War Magic', classId: 'wizard', sourceBook: 'XGtE', description: 'Practitioners of War Magic stand bravely on the front lines of battle, balancing offense and defense as they wield powerful evocations and abjurations.', features: [
@@ -885,8 +885,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
         maxPerLevel: { 1:0,2:2,3:2,4:2,5:3,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
       { name: 'Cosmic Omen', key: 'cosmic_omen', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } },
-    ],
-  },
+    ], alwaysPreparedSpells: { 2: ['guidance'] } },
   { id: 'circle-of-wildfire', name: 'Circle of Wildfire', classId: 'druid', sourceBook: 'TCE', description: 'Druids of the Circle of Wildfire understand that destruction sometimes paves the way for greater growth.', features: [
     { name: 'Circle Spells', level: 2, description: 'You always have these spells prepared: 1st — Burning Hands, Cure Wounds; 3rd — Flaming Sphere, Scorching Ray; 5th — Plant Growth, Revivify; 7th — Aura of Life, Fire Shield; 9th — Flame Strike, Mass Cure Wounds.' },
     { name: 'Summon Wildfire Spirit', level: 2, description: 'As an action, expend a Wild Shape use to summon a wildfire spirit (Small elemental) in an unoccupied space within 30 feet. It can use Fiery Teleportation to teleport and deal fire damage.' },
@@ -1087,8 +1086,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ],
     // Warping Implosion (18th): once per long rest (a 5-sorcery-point reuse exists, not tracked).
     resources: [{ name: 'Warping Implosion', key: 'warping_implosion', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } }],
-  },
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 } }], alwaysPreparedSpells: { 1: ['mind-sliver'] } },
   { id: 'clockwork-soul', name: 'Clockwork Soul', classId: 'sorcerer', sourceBook: 'TCE', description: 'The cosmic forces of order and chaos perpetually struggle. Some sorcerers draw their power from this struggle, embodying the perfection of order.', features: [
     { name: 'Clockwork Magic', level: 1, description: 'Always have these spells prepared (always known as sorcerer spells): 1st — Alarm, Protection from Evil and Good; 3rd — Aid, Lesser Restoration; 5th — Dispel Magic, Protection from Energy; 7th — Freedom of Movement, Summon Construct; 9th — Greater Restoration, Wall of Force. You can also swap sorcerer spells known for abjuration or transmutation spells.' },
     { name: 'Restore Balance', level: 1, description: 'When a creature within 60 feet rolls with advantage or disadvantage, you can use your reaction to cancel it. You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
@@ -1226,8 +1224,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
         maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
       { name: "Drake's Breath", key: 'drakes_breath', rechargeOn: 'long',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
-    ],
-  },
+    ], alwaysPreparedSpells: { 3: ['thaumaturgy'] } },
 
   // ── TCE: ARTIFICER SUBCLASSES ─────────────────────────────────────────
   { id: 'alchemist', name: 'Alchemist', classId: 'artificer', sourceBook: 'TCE', alsoIn: ['ERLW'], description: 'An Alchemist is an expert at combining reagents to produce mystical effects. Alchemists use their creations to give life and to leech it away.', features: [
@@ -1595,8 +1592,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // rest. The sweep flagged it on "per long rest", but it is a per-rest CHOICE with no use
     // counter — the same shape as the Armorer's guardian/infiltrator mode.
     resources: [{ name: 'Ocean Form', key: 'ocean_form', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
-  },
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }], alwaysPreparedSpells: { 2: ['shape-water'] } },
 
   // ── SCAG ──────────────────────────────────────────────────────────────────
 
@@ -1713,8 +1709,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
       { name: 'Indestructible Life', key: 'indestructible_life', rechargeOn: 'short',
         maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } },
-    ],
-  },
+    ], alwaysPreparedSpells: { 1: ['spare-the-dying'] } },
 
   // Wizard: Bladesinging
   { id: 'scag-bladesinging', name: 'Bladesinging', classId: 'wizard', sourceBook: 'SCAG', description: 'Bladesingers are elves who bravely defend their people and lands. They are elf wizards who master a school of sword fighting grounded in a tradition of arcane magic. Note: Only elves and half-elves can choose this tradition in the Forgotten Realms.',

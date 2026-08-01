@@ -102,7 +102,13 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           {/* Cantrips */}
           {cantripsKnown > 0 && (() => {
-            const cantripCount = (byLevel[0]?.length ?? 0);
+            // Subclass-granted cantrips (Light Domain's Light, Shadow Arts' Minor Illusion, and
+            // nine more) arrive flagged alwaysPrepared and are gained IN ADDITION to the cantrips
+            // the class knows — so counting them here would eat a chosen cantrip and show the
+            // total in red. Slightly generous in one edge case: a player who had already chosen
+            // Light and then takes Light Domain gets that pick back, where the book says they
+            // simply gain nothing.
+            const cantripCount = (byLevel[0] ?? []).filter(e => !e.alwaysPrepared).length;
             const ok = cantripCount <= cantripsKnown;
             return (
               <span className="text-slate-400">

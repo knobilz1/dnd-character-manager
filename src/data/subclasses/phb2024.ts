@@ -567,6 +567,5 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
       { name: 'Phantasmal Creatures', level: 6, description: 'Always have Summon Beast and Summon Fey prepared; can change their school to Illusion (creature appears spectral). Can cast the Illusion version without a slot once per Long Rest per spell (half HP when cast without slot).' },
       { name: 'Illusory Self', level: 10, description: 'Reaction when a creature hits you with an attack: interpose an illusory duplicate — the attack auto-misses, illusion dissipates. Once per Short/Long Rest; restore with level 2+ slot (no action).' },
       { name: 'Illusory Reality', level: 14, description: 'When casting an Illusion spell with a slot: Bonus Action to make 1 inanimate nonmagical object within the illusion real for 1 minute (can\'t deal damage or inflict conditions).' },
-    ],
-  },
+    ], alwaysPreparedSpells: { 3: ['minor-illusion'] } },
 ];
