@@ -30,9 +30,21 @@ Ten fewer findings costs sixteen points of real detection, and the impossible co
 the whole way down. **A quieter report is not a better one — prove the difference before taking
 it.** 2,400 is the widest window that costs nothing measurable.
 
-93% is not 100%, and that is the honest ceiling here: 9 plausible corruptions go unreported
-(Circle of Spores, School of Abjuration, Sea Domain and 6 more) because a neighbouring feature
-genuinely states the swapped value. Findings are trustworthy; ABSENCE of a finding is weaker.
+Not 100%, and that is the honest ceiling: a few plausible corruptions go unreported because a
+neighbouring feature genuinely states the swapped value. Findings are trustworthy; the ABSENCE of a
+finding is weaker.
+
+WHAT THE CONTROL REACHES, which matters as much as the rate. Corrupting only distances and dice
+touched 51 of 494 class features — a rate measured over a tenth of the data. `_swap_words` also
+swaps ability, action, rest, damage and advantage terms, one per description:
+
+    features corrupted     classes 51 -> 170 of 494 (10% -> 34%)
+                        subclasses 414 -> 676 of 957 (43% -> 70%)
+
+READ THE RATE CAREFULLY: it is per ENTITY, not per error. Broadening the corruption gave each
+subclass more wrong values, so per-entity detection rose 93% -> 97% WITHOUT the sweep changing at
+all. That number moved because the control got easier, not because the audit got better. Measuring
+per-error detection would mean corrupting one token at a time — 957 runs — and has not been done.
 
 Usage: SUBCLASS_BUNDLE=<bundled subclasses.mjs> python tools/audit/subclasspdf.py [book] [--full]
        ... --control      run the negative control instead and report the detection rate
@@ -211,12 +223,39 @@ def _impossible(d):
 PLAUSIBLE_FT = {'5': '15', '10': '30', '15': '5', '20': '10', '30': '10', '60': '30', '120': '60'}
 PLAUSIBLE_DIE = {'4': '6', '6': '8', '8': '10', '10': '12', '12': '6', '20': '12'}
 
+# Numbers alone reach only a tenth of the population: of 494 class features, just 51 contain a
+# distance or a die, so a detection rate measured on those is a rate for 10% of the data. Every
+# token MECH matches is corruptible, and swapping Wisdom for Charisma or a Bonus Action for a
+# Reaction is exactly the kind of error this audit exists to catch.
+PLAUSIBLE_WORD = {
+    'strength': 'charisma', 'dexterity': 'strength', 'constitution': 'wisdom',
+    'intelligence': 'constitution', 'wisdom': 'intelligence', 'charisma': 'dexterity',
+    'bonus action': 'reaction', 'reaction': 'bonus action',
+    'long rest': 'short rest', 'short rest': 'long rest',
+    'advantage': 'disadvantage', 'disadvantage': 'advantage',
+    'resistance': 'immunity', 'immunity': 'resistance',
+    'fire damage': 'cold damage', 'cold damage': 'fire damage',
+    'necrotic damage': 'radiant damage', 'radiant damage': 'necrotic damage',
+    'psychic damage': 'force damage', 'force damage': 'psychic damage',
+    'poison damage': 'acid damage', 'acid damage': 'poison damage',
+    'lightning damage': 'thunder damage', 'thunder damage': 'lightning damage',
+}
+_WORD_RE = re.compile(r'\b(' + '|'.join(sorted(PLAUSIBLE_WORD, key=len, reverse=True)) + r')\b',
+                      re.I)
+
+
+def _swap_words(d):
+    """Swap one mechanical word per description — enough to be detectable, few enough that the
+    corrupted text still reads like a real feature rather than noise."""
+    return _WORD_RE.sub(lambda m: PLAUSIBLE_WORD[m.group(1).lower()], d, count=1)
+
 
 def _plausible(d):
     d = re.sub(r'\b(\d+)(\s*(?:feet|foot|ft)\b)',
                lambda m: PLAUSIBLE_FT.get(m.group(1), m.group(1)) + m.group(2), d)
-    return re.sub(r'\b(\d+)d(\d+)\b',
-                  lambda m: f'{m.group(1)}d{PLAUSIBLE_DIE.get(m.group(2), m.group(2))}', d)
+    d = re.sub(r'\b(\d+)d(\d+)\b',
+               lambda m: f'{m.group(1)}d{PLAUSIBLE_DIE.get(m.group(2), m.group(2))}', d)
+    return _swap_words(d)
 
 
 def control(all_subs, mode='impossible'):
