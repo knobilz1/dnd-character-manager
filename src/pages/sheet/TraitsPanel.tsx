@@ -31,9 +31,18 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
   const bg = resolveBackground(character);
   const race = getRace(character.raceId);
   const bgAsiSource = getBackground(character.backgroundId);
-  const primaryClass = character.classes[0];
-  const classDef = primaryClass ? getClass(primaryClass.classId) : null;
-  const subclass = primaryClass?.subclassId ? ALL_SUBCLASSES.find(s => s.id === primaryClass.subclassId) : null;
+  // Every class this character has, not just `classes[0]`. A multiclass character carries a level,
+  // a feature list and a subclass PER class, and this panel used to render only the first one — so
+  // a monk taken as a second class showed "Class: Fighter / Subclass: —", listed no monk features,
+  // and (the part that isn't merely cosmetic) offered no subclass Choices picker, leaving Four
+  // Elements disciplines and Kensei weapon proficiencies unreachable for the whole character.
+  // Each row carries its OWN level: a group's allowance is keyed to the class's level, never the
+  // character's total, or a monk 3 / fighter 3 would draw a 6th-level monk's second discipline.
+  const classRows = character.classes.map((cl) => ({
+    cl,
+    def: getClass(cl.classId),
+    subclass: cl.subclassId ? ALL_SUBCLASSES.find(s => s.id === cl.subclassId) ?? null : null,
+  }));
   const feats = ALL_FEATS.filter(f => character.selectedFeats.includes(f.id));
   const totalLevel = totalCharacterLevel(character.classes);
 
@@ -56,8 +65,8 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
             { label: 'XP', value: character.experiencePoints.toLocaleString() },
             { label: 'Race', value: race?.name ?? '—' },
             { label: 'Background', value: bg?.name ?? '—' },
-            { label: 'Class', value: classDef?.name ?? '—' },
-            { label: 'Subclass', value: subclass?.name ?? '—' },
+            { label: 'Class', value: classRows.map(r => r.def?.name ?? '—').join(' / ') || '—' },
+            { label: 'Subclass', value: classRows.filter(r => r.subclass).map(r => r.subclass!.name).join(' / ') || '—' },
             { label: 'Alignment', value: character.alignment },
             { label: 'Player', value: character.playerName || '—' },
           ].map(({ label, value }) => (
@@ -100,18 +109,18 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
           sheet as well as the creator because a character made before the choice existed, or
           levelled past it, would otherwise never be able to supply it — exactly how Circle of the
           Land's land type stayed unreachable. Renders nothing when the subclass offers none. */}
-      {subclass && getSubclassOptions(subclass.id).length > 0 && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      {classRows.map(({ cl, subclass }) => subclass && getSubclassOptions(subclass.id).length > 0 && (
+        <div key={`choices-${cl.classId}`} className="bg-slate-800 border border-slate-700 rounded-xl p-4">
           <SectionHeader>{subclass.name} — Choices</SectionHeader>
           <SubclassOptionsPicker
             subclassId={subclass.id}
-            classLevel={primaryClass?.level ?? 1}
+            classLevel={cl.level}
             value={character.subclassOptions}
             onChange={setSubclassOptions}
             compact
           />
         </div>
-      )}
+      ))}
 
       {/* Background Traits */}
       {bg && (
@@ -173,13 +182,14 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
         </div>
       )}
 
-      {/* Class Features */}
-      {classDef && primaryClass && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-          <SectionHeader>Class Features: {classDef.name} {primaryClass.level}</SectionHeader>
+      {/* Class Features — one card per class, so a multiclass character's second class is listed
+          rather than silently dropped. */}
+      {classRows.map(({ cl, def }) => def && (
+        <div key={`feat-${cl.classId}`} className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>Class Features: {def.name} {cl.level}</SectionHeader>
           <div className="space-y-2">
-            {classDef.features
-              .filter(f => f.level <= primaryClass.level)
+            {def.features
+              .filter(f => f.level <= cl.level)
               .sort((a, b) => a.level - b.level)
               .map((f, i) => (
                 <HoverCard
@@ -205,15 +215,15 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
               ))}
           </div>
         </div>
-      )}
+      ))}
 
-      {/* Subclass Features */}
-      {subclass && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-          <SectionHeader>{classDef?.subclassLabel}: {subclass.name}</SectionHeader>
+      {/* Subclass Features — likewise per class, and gated on that class's own level. */}
+      {classRows.map(({ cl, def, subclass }) => subclass && (
+        <div key={`sub-${cl.classId}`} className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <SectionHeader>{def?.subclassLabel}: {subclass.name}</SectionHeader>
           <div className="space-y-2">
             {subclass.features
-              .filter(f => f.level <= (primaryClass?.level ?? 1))
+              .filter(f => f.level <= cl.level)
               .sort((a, b) => a.level - b.level)
               .map((f, i) => (
                 <div key={i} className="bg-slate-900 rounded-lg p-3">
@@ -226,7 +236,7 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
               ))}
           </div>
         </div>
-      )}
+      ))}
 
       {/* Feats */}
       {feats.length > 0 && (
