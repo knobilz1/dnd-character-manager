@@ -310,7 +310,6 @@ export const ALL_FEATS: Feat[] = [
     prerequisite: { race: 'elf-high' },
     description: 'Your study of high elven lore has unlocked fey power that few other elves possess, except your eladrin cousins. Drawing on your fey ancestry, you can momentarily stride through the Feywild to shorten your path from one place to another. You gain the following benefits:\n• Increase your Intelligence or Charisma score by 1, to a maximum of 20.\n• You learn to speak, read, and write Sylvan.\n• You can cast the misty step spell once using this trait. You regain the ability to do so when you finish a short or long rest. Intelligence is your spellcasting ability for this spell.',
     abilityScoreChoice: ['int', 'cha'],
-    grantsSpell: ['misty-step'],
     grantedSpells: [{ spellId: 'misty-step', recharge: 'short', ability: 'int' }],
   },
   // TCE Feats
@@ -333,7 +332,6 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'Your exposure to the Feywild\'s magic has changed you, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You learn the misty step spell and one 1st-level spell of your choice. The 1st-level spell must be from the divination or enchantment school of magic. You can cast each of these spells without expending a spell slot. Once you cast either of these spells in this way, you can\'t cast that spell in this way again until you finish a long rest. You can also cast these spells using spell slots you have of the appropriate level. The spells\' spellcasting ability is the ability increased by this feat.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
-    grantsSpell: ['misty-step'],
     grantedSpells: [{ spellId: 'misty-step', recharge: 'long', ability: 'cha' }],
   },
   {
@@ -342,7 +340,6 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'Your exposure to the Shadowfell\'s magic has changed you, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You learn the invisibility spell and one 1st-level spell of your choice. The 1st-level spell must be from the illusion or necromancy school of magic. You can cast each of these spells without expending a spell slot. Once you cast either of these spells in this way, you can\'t cast that spell in this way again until you finish a long rest. You can also cast these spells using spell slots you have of the appropriate level. The spells\' spellcasting ability is the ability increased by this feat.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
-    grantsSpell: ['invisibility'],
     grantedSpells: [{ spellId: 'invisibility', recharge: 'long', ability: 'cha' }],
   },
   {
@@ -358,6 +355,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'You learn to move things with your mind, granting you the following benefits:\n• Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 20.\n• You learn the mage hand cantrip. You can cast it without verbal or somatic components, and you can make the spectral hand invisible. If you already know this cantrip, its range increases by 30 feet when you cast it. Its spellcasting ability is the ability increased by this feat.\n• As a bonus action, you can try to telekinetically shove one creature you can see within 30 feet of you. When you do so, the target must succeed on a Strength saving throw (DC 8 + your proficiency bonus + the ability modifier of the score increased by this feat) or be moved 5 feet toward you or away from you. A creature can willingly fail this save.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
+    grantedSpells: [{ spellId: 'mage-hand', recharge: 'cantrip', ability: 'int' }],
   },
   {
     id: 'telepathic',

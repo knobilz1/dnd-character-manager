@@ -317,7 +317,9 @@ export interface Feat {
   prerequisite?: FeatPrerequisite;
   description: string;
   abilityScoreIncrease?: Partial<Record<AbilityKey, number>>;
-  grantsSpell?: string[];
+  /** NOTE: there is deliberately no `grantsSpell` here. It existed, seven feats populated it, and
+   *  nothing ever read it — so the four PHB 2024 feats that carried only that field granted no
+   *  spell at all. `grantedSpells` below is the one the sheet and the rest handlers consume. */
   grantsProficiency?: string[];
   /** Extra HP gained each time a level is gained while this feat is held. */
   hpBonusPerLevel?: number;

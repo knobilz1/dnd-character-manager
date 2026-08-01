@@ -18,7 +18,8 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Alert',
     sourceBook: 'PHB2024',
     description: 'Origin feat.\n• Initiative Bonus: Add your Proficiency Bonus to Initiative rolls.\n• Initiative Swap: Immediately after rolling Initiative, you can swap your roll with one willing ally\'s roll (neither of you can be Incapacitated).',
-    initiativeBonus: 0, // handled via prof bonus
+    // No `initiativeBonus`: the 2024 feat adds your proficiency bonus, not a flat number.
+    // useCharacterDerived adds it by id where the flat bonuses are summed.
   },
   {
     id: 'crafter-2024',
@@ -37,7 +38,10 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Lucky',
     sourceBook: 'PHB2024',
     description: 'Origin feat.\n• Luck Points: You have a number of Luck Points equal to your Proficiency Bonus; regain all on a Long Rest.\n• Advantage: Spend 1 Luck Point to give yourself Advantage on a D20 Test.\n• Disadvantage: Spend 1 Luck Point to impose Disadvantage on an attack roll against you.',
-    grantedResources: [{ key: 'luck_points', name: 'Luck Points', max: 4, rechargeOn: 'long' }],
+    // `max` here is only the level-1 seed; the real value is proficiency bonus, applied by
+    // resourceMaxOverrides['luck_points'] in useCharacterDerived. A flat 4 gave a level-1
+    // character double the Luck Points the 2024 feat grants.
+    grantedResources: [{ key: 'luck_points', name: 'Luck Points', max: 2, rechargeOn: 'long' }],
   },
   {
     id: 'magic-initiate-2024',
@@ -74,6 +78,8 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Tough',
     sourceBook: 'PHB2024',
     description: 'Origin feat.\n• HP maximum increases by 2 × your character level when you take this feat.\n• Each time you gain a level after taking this feat, your HP maximum increases by an additional 2.',
+    hpBonusPerLevel: 2,
+    hpRetroactiveBonusPerPastLevel: 2,
   },
 
   // ══════════════════════════ GENERAL FEATS ═════════════════════════════════
@@ -173,7 +179,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Intelligence, Wisdom, or Charisma (max 20).\n• Fey Magic: learn Misty Step + 1 level 1 Divination or Enchantment spell from any list; always prepared; cast each without a slot once per Long Rest (can also use slots). Spellcasting ability = ability increased.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
-    grantsSpell: ['misty-step'],
+    grantedSpells: [{ spellId: 'misty-step', recharge: 'long', ability: 'cha' }],
   },
   {
     id: 'grappler-2024',
@@ -335,7 +341,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Intelligence, Wisdom, or Charisma (max 20).\n• Shadow Magic: learn Invisibility + 1 level 1 Illusion or Necromancy spell from any list; always prepared; cast each without a slot once per Long Rest (can also use slots). Spellcasting ability = ability increased.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
-    grantsSpell: ['invisibility'],
+    grantedSpells: [{ spellId: 'invisibility', recharge: 'long', ability: 'cha' }],
   },
   {
     id: 'sharpshooter-2024',
@@ -401,7 +407,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Intelligence, Wisdom, or Charisma (max 20).\n• Minor Telekinesis: know Mage Hand; cast without V/S; spectral hand can be Invisible; range +30 ft.\n• Telekinetic Shove: Bonus Action → creature within 30 ft makes Str save (DC 8+feat ability+Prof) or moves 5 ft toward or away from you.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
-    grantsSpell: ['mage-hand'],
+    grantedSpells: [{ spellId: 'mage-hand', recharge: 'cantrip', ability: 'int' }],
   },
   {
     id: 'telepathic-2024',
@@ -410,7 +416,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Intelligence, Wisdom, or Charisma (max 20).\n• Telepathic Utterance: speak telepathically to a creature within 60 ft (one-way; must know a language you use).\n• Detect Thoughts: always have Detect Thoughts prepared; cast without slot or components once per Long Rest (can also use slots). Spellcasting ability = feat ability.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
-    grantsSpell: ['detect-thoughts'],
+    grantedSpells: [{ spellId: 'detect-thoughts', recharge: 'long', ability: 'int' }],
   },
   {
     id: 'war-caster-2024',

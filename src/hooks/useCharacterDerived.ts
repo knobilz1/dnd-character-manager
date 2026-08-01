@@ -9,6 +9,7 @@ import { getBackground } from '../data/backgrounds';
 import { fixedLanguages, racialLanguagePicks } from '../data/languages';
 import { fixedTools, parseToolGrant } from '../data/tools';
 import { ALL_FEATS } from '../data/feats';
+import { activeFightingStyles } from '../data/fightingStyles';
 import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
 import { armorPenalty } from '../utils/armorProficiency';
@@ -116,12 +117,15 @@ export function computeCharacterDerived(character: Character) {
       // Wearing armor: use its base AC + DEX (capped per armor type)
       const stats = ARMOR_STATS[equippedArmor.name];
       if (stats) {
-        // Medium Armor Master feat: raises DEX cap from +2 to +3 when DEX score ≥ 16
+        // Medium Armor Master feat: raises DEX cap from +2 to +3 when DEX score ≥ 16.
+        // Both editions carry the rule (PHB 2024 calls it Dexterous Wearer), and only the
+        // 2014 id was checked — so the 2024 feat granted no AC at all.
         let effectiveDexCap = stats.dexCap;
         if (
           stats.armorType === 'medium' &&
           effectiveDexCap === 2 &&
-          character.selectedFeats.includes('medium-armor-master') &&
+          (character.selectedFeats.includes('medium-armor-master')
+            || character.selectedFeats.includes('medium-armor-master-2024')) &&
           (finalScores.dex ?? 10) >= 16
         ) {
           effectiveDexCap = 3;
@@ -163,7 +167,8 @@ export function computeCharacterDerived(character: Character) {
     if (equippedShield) ac += 2;
 
     // Fighting style AC bonuses
-    const fightingStyles: string[] = character.classOptions?.fightingStyles ?? [];
+    // Includes styles taken as PHB 2024 feats, which land in selectedFeats rather than here.
+    const fightingStyles: string[] = activeFightingStyles(character);
     const armorStats = equippedArmor ? ARMOR_STATS[equippedArmor.name] : null;
     if (fightingStyles.includes('defense') && equippedArmor) ac += 1;
     if (fightingStyles.includes('mariner') && armorStats?.armorType !== 'heavy' && !equippedShield) ac += 1;
@@ -209,6 +214,11 @@ export function computeCharacterDerived(character: Character) {
       featSpeedBonus                  += feat.speedBonus                  ?? 0;
       featPassivePerceptionBonus      += feat.passivePerceptionBonus      ?? 0;
       featPassiveInvestigationBonus   += feat.passiveInvestigationBonus   ?? 0;
+      // 2024 Alert scales with proficiency bonus rather than the flat +5 of the 2014 feat, so it
+      // has no `initiativeBonus` to add. The entry used to carry `initiativeBonus: 0` with a
+      // comment claiming it was "handled via prof bonus"; nothing handled it, and the feat added
+      // nothing to initiative at all.
+      if (feat.id === 'alert-2024') featInitiativeBonus += profBonus;
     }
 
     // Skill bonuses — merge class choices with background-granted proficiencies
@@ -464,6 +474,11 @@ export function computeCharacterDerived(character: Character) {
     }
     if (character.classes.some(c => c.subclassId === 'bladesinging')) {
       resourceMaxOverrides['bladesong'] = profBonus;
+    }
+    // 2024 Lucky: Luck Points equal your proficiency bonus. (The 2014 feat is a flat 3 and needs
+    // no override — different key, so a character can't hold both pools by accident.)
+    if ((character.selectedFeats ?? []).includes('lucky-2024')) {
+      resourceMaxOverrides['luck_points'] = profBonus;
     }
     if (character.classes.some(c => c.subclassId === 'samurai')) {
       // Fighting Spirit is 3 fixed uses (not WIS-mod based in RAW XGtE)

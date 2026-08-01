@@ -51,3 +51,43 @@ export function fightingStylesAllowed(
   if ((baseId === 'paladin' || baseId === 'ranger') && level >= 2) return 1;
   return 0;
 }
+
+/**
+ * Every fighting style a character actually has: the ones picked as a class option, plus the ones
+ * a feat granted.
+ *
+ * PHB 2024 turned the ten fighting styles into feats as well, and they land in `selectedFeats` —
+ * a different array from `classOptions.fightingStyles`, which is the only one anything read. So
+ * the Defense feat granted no AC, exactly as if it had never been taken. Anything asking "does
+ * this character have style X" must ask here, not the raw array.
+ */
+export function activeFightingStyles(character: {
+  classOptions?: { fightingStyles?: string[] };
+  selectedFeats?: string[];
+}): string[] {
+  const out = new Set(character.classOptions?.fightingStyles ?? []);
+  for (const featId of character.selectedFeats ?? []) {
+    const styleId = FEAT_TO_STYLE.get(featId);
+    if (styleId) out.add(styleId);
+  }
+  return [...out];
+}
+
+/**
+ * The ten PHB 2024 fighting-style feats, mapped to the style they grant. Spelled out rather than
+ * derived from the id because three of the ids are abbreviated (`-thrown-weapon-`, `-two-weapon-`,
+ * `-unarmed-`) while the styles they name are not. `tools/audit/featmirror.mjs` asserts the
+ * Defense case end to end, against the same character holding the style as a class option.
+ */
+const FEAT_TO_STYLE = new Map<string, string>([
+  ['fighting-style-archery-2024', 'archery'],
+  ['fighting-style-blind-fighting-2024', 'blind-fighting'],
+  ['fighting-style-defense-2024', 'defense'],
+  ['fighting-style-dueling-2024', 'dueling'],
+  ['fighting-style-great-weapon-fighting-2024', 'great-weapon-fighting'],
+  ['fighting-style-interception-2024', 'interception'],
+  ['fighting-style-protection-2024', 'protection'],
+  ['fighting-style-thrown-weapon-2024', 'thrown-weapon-fighting'],
+  ['fighting-style-two-weapon-2024', 'two-weapon-fighting'],
+  ['fighting-style-unarmed-2024', 'unarmed-fighting'],
+]);
