@@ -27,19 +27,26 @@ function effectiveSpellcasting(classId: string, subclassId: string | undefined) 
   return null;
 }
 
+/** The class a character's spellcasting is read from — the first one that actually casts, NOT
+ *  `classes[0]`. A fighter 5 / wizard 5 is stored fighter-first, and reading spellcasting off the
+ *  fighter left the wizard with correct spell slots, a save DC of 0 and no cantrips.
+ *
+ *  Exported because the sheet, the sidebar and the spell panel each need this answer without
+ *  running the whole derive, and each of them previously reached for `classes[0]` on its own —
+ *  which is how a fighter/wizard got rendered as a known-caster rather than a prepared one.
+ *  One definition, so they cannot drift apart again.
+ *
+ *  Pact counts: a warlock casts, even though its slots live outside the multiclass slot table. */
+export function casterClassOf(character: Character) {
+  return character.classes.find(
+    cl => effectiveSpellcasting(cl.classId, cl.subclassId)?.ability,
+  ) ?? character.classes[0];
+}
+
 /** Pure computation — safe to call outside React (no hooks). */
 export function computeCharacterDerived(character: Character) {
     const race = getRace(character.raceId);
-    const primaryClassLevel = character.classes[0];
-    // Which class the character's spellcasting is read from. NOT `classes[0]`: a fighter 5 / wizard 5
-    // is stored with the fighter first, and taking spellcasting from a non-caster left the wizard
-    // holding correct spell slots with a save DC of 0, a +0 attack bonus and no cantrips at all.
-    // The first class that actually casts is the honest answer for the one-caster builds that are
-    // the overwhelming majority. Pact counts: a warlock is a caster even though its slots are
-    // tracked separately from the multiclass table below.
-    const casterClassLevel = character.classes.find(
-      cl => effectiveSpellcasting(cl.classId, cl.subclassId)?.ability,
-    ) ?? primaryClassLevel;
+    const casterClassLevel = casterClassOf(character);
     const casterClassDef = casterClassLevel ? getClass(casterClassLevel.classId) : null;
     const totalLevel = totalCharacterLevel(character.classes);
     const profBonus = PROFICIENCY_BONUS[Math.min(totalLevel, 20)] ?? 2;
@@ -612,6 +619,10 @@ export function computeCharacterDerived(character: Character) {
       spellsKnown,
       spellbookLimit,
       totalLevel,
+      // Exported so the sheet, sidebar and spell panel all ask the SAME question the derive asked.
+      // Each used to recompute `classes[0]` for itself, which is how a fighter/wizard got rendered
+      // as a known-caster: the fighter isn't in the prepared-caster list, and nothing else looked.
+      casterClassDef,
       exhaustionLevel,
       exhaustionDisadvChecks,
       exhaustionDisadvSaves,

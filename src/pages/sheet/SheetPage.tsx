@@ -8,7 +8,7 @@ import { ArrowLeft, Moon, Sun, Star, Plus, RefreshCw, Sparkles, ChevronUp, Dice5
 import { useLibraryStore } from '../../store/useLibraryStore';
 import { useBorrowedStore } from '../../store/useBorrowedStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
-import { useCharacterDerived } from '../../hooks/useCharacterDerived';
+import { useCharacterDerived, casterClassOf } from '../../hooks/useCharacterDerived';
 import { isPreparedCaster as isPreparedCasterId, SKILL_ABILITY } from '../../data/mechanics';
 import { isProficientWithWeapon } from '../../utils/weaponProficiency';
 import { armorPenalty } from '../../utils/armorProficiency';
@@ -1088,8 +1088,9 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
     setExpandedKey(prev => prev === key ? null : key);
   }
 
-  const primaryClassId  = character.classes[0]?.classId ?? '';
-  const isPreparedCaster = isPreparedCasterId(primaryClassId);
+  // The CASTING class, not classes[0] — a fighter/wizard is stored fighter-first, and the fighter
+  // isn't a prepared caster, so this panel rendered a wizard with the known-caster layout.
+  const isPreparedCaster = isPreparedCasterId(casterClassOf(character)?.classId ?? '');
 
   const totalSlots = Object.values(slotTotals ?? {}).reduce((s: number, n) => s + (n as number), 0);
   const hasAnyCastingResource = totalSlots > 0 || (pactMagic && pactMagic.slotsTotal > 0);

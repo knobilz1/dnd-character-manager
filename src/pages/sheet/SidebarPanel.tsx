@@ -8,7 +8,7 @@ import {
   type SidebarModuleId,
 } from '../../store/useSidebarStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
-import { useCharacterDerived } from '../../hooks/useCharacterDerived';
+import { useCharacterDerived, casterClassOf } from '../../hooks/useCharacterDerived';
 import { useDiceStore } from '../../store/useDiceStore';
 import { cn } from '../../utils/cn';
 import { lookupWeapon, damageLine } from '../../data/weapons';
@@ -77,8 +77,9 @@ function CharacterGlanceModule() {
   if (!character || !derived) return null;
 
   const { totalLevel } = derived;
-  const primaryClass = character.classes[0];
-  const classDef = primaryClass ? getClass(primaryClass.classId) : null;
+  // Every class, like the sheet header — the glance card used to name only the first, so a
+  // fighter/wizard read as a plain "Fighter" in the one place meant for a quick check.
+  const classLine = character.classes.map(cl => getClass(cl.classId)?.name ?? cl.classId).join(' / ');
   const effectiveMaxHP = (character.exhaustionLevel ?? 0) >= 4
     ? Math.floor(character.maxHP / 2)
     : character.maxHP;
@@ -99,7 +100,7 @@ function CharacterGlanceModule() {
         </div>
         <div className="min-w-0">
           <p className="text-sm font-bold text-white truncate">{character.name}</p>
-          <p className="text-[10px] text-slate-400">Lv{totalLevel} · {classDef?.name ?? '?'}</p>
+          <p className="text-[10px] text-slate-400">Lv{totalLevel} · {classLine || '?'}</p>
         </div>
       </div>
 
@@ -536,7 +537,7 @@ function CombatAbilitiesSideModule() {
   const { slotTotals, spellSaveDC, spellAttackBonus } = derived;
   // From mechanics.ts, not a local list — the hardcoded 2014-only array this replaced meant a
   // 2024 prepared caster got the known-caster rendering in the sidebar.
-  const isPreparedCaster = isPreparedCasterId(character.classes[0]?.classId ?? '');
+  const isPreparedCaster = isPreparedCasterId(casterClassOf(character)?.classId ?? '');
 
   type SpellEntry = { spell: ReturnType<typeof getSpell>; alwaysPrepared: boolean };
   const combatSpells: SpellEntry[] = ((character.spellbook ?? [])

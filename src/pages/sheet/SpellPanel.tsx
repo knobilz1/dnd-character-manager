@@ -9,6 +9,7 @@ import type { AbilityKey, Character, Spell, SpellLevel, SlotLevel } from '../../
 import { getClass } from '../../data/classes';
 import { getRace } from '../../data/races';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
+import { casterClassOf } from '../../hooks/useCharacterDerived';
 
 const SCHOOL_COLORS: Record<string, string> = {
   Abjuration: 'blue', Conjuration: 'purple', Divination: 'indigo',
@@ -43,7 +44,10 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
 
   const [castSpell, setCastSpell] = React.useState<Spell | null>(null);
 
-  const primaryClass = character.classes[0];
+  // Everything below reads the CASTING class, not classes[0]. On a fighter/wizard the latter meant
+  // the known-caster layout for a prepared caster, and the "Paladins gain spellcasting at level 2"
+  // hint never appearing for a fighter/paladin.
+  const primaryClass = casterClassOf(character);
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
   const { maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel, spellsKnown, spellbookLimit } = derived;
   const slotsUsed = character.spellSlotsUsed;
