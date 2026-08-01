@@ -230,6 +230,7 @@ def name_variants(name):
 
 
 _PHB_FLAT = []
+_ALT = {}
 
 
 def phb_flat():
@@ -237,6 +238,26 @@ def phb_flat():
     if not _PHB_FLAT:
         _PHB_FLAT.append(V._flatten(V.book_text(BOOK_PDF['PHB']))[0])
     return _PHB_FLAT[0]
+
+
+def alt_flat(book):
+    """The OTHER extraction of this book, if one was kept.
+
+    Re-OCRing a scanned book fixes its dice and loses a little text: measured over the seven books
+    re-OCR'd on 2026-08-01, VGM gained 4 trait names while MMoM and SCoC each lost 1 — SCoC's
+    "Silent Feathers" is in the text layer and not in the OCR. Neither extraction dominates, and
+    both are on disk (`ocrall.py` keeps the layer as a `.txt.textlayer` sibling), so a name absent
+    from one but present in the other is a fact about extraction, never about the app.
+    """
+    if book not in _ALT:
+        pdf = BOOK_PDF.get(book)
+        path = os.path.join(V.CACHE, V.norm(pdf)[:60] + '.txt.textlayer') if pdf else None
+        try:
+            with open(path, encoding='utf-8') as f:
+                _ALT[book] = V._flatten(f.read())[0]
+        except (OSError, TypeError):
+            _ALT[book] = ''
+    return _ALT[book]
 
 
 def trait_variants(name):
@@ -422,6 +443,8 @@ def main():
                     kind = 'NAME OUTSIDE ENTRY (locator, not data)'
                 elif any(phb_flat().count(k) for k in where):
                     kind = 'INHERITED — printed in the base book'
+                elif any(alt_flat(r['book']).count(k) for k in where):
+                    kind = 'ONLY IN THE OTHER EXTRACTION (this OCR dropped it)'
                 else:
                     kind = 'TRAIT NAME NOT IN SOURCE'
                 (findings if kind == 'TRAIT NAME NOT IN SOURCE' else notes).append(
