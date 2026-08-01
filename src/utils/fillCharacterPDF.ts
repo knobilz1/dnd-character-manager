@@ -116,9 +116,6 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
   const race = getRace(character.raceId);
   const primary = character.classes[0];
   const classDef = primary ? getClass(primary.classId) : null;
-  const subclass = primary?.subclassId
-    ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId)
-    : null;
   const bg = resolveBackground(character);
 
   const multiclassLabel = character.classes.length > 1
@@ -322,17 +319,20 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
 
   // ── Features & Traits ─────────────────────────────────────────────────────
 
+  // Every class, not just classes[0]. This list is exhaustive (unlike the HTML sheet's fixed-height
+  // highlights box), so a multiclass character simply lost their second class's features here while
+  // the "Class & Level" field above already read them out correctly.
   const featureLines: string[] = [];
   (race?.traits ?? []).forEach(t => featureLines.push(`${t.name}: ${t.description}`));
-  if (classDef && primary) {
-    classDef.features
-      .filter((f: any) => f.level <= primary.level && !f.isASI)
-      .forEach((f: any) => featureLines.push(`${f.name} (${classDef.name}): ${f.description}`));
-  }
-  if (subclass && primary) {
-    subclass.features
-      .filter((f: any) => f.level <= primary.level)
-      .forEach((f: any) => featureLines.push(`${f.name} (${subclass.name}): ${f.description}`));
+  for (const cl of character.classes) {
+    const def = getClass(cl.classId);
+    const sub = cl.subclassId ? ALL_SUBCLASSES.find(s => s.id === cl.subclassId) : undefined;
+    def?.features
+      .filter((f: any) => f.level <= cl.level && !f.isASI)
+      .forEach((f: any) => featureLines.push(`${f.name} (${def.name}): ${f.description}`));
+    sub?.features
+      .filter((f: any) => f.level <= cl.level)
+      .forEach((f: any) => featureLines.push(`${f.name} (${sub.name}): ${f.description}`));
   }
   setTextField(form, 'Features and Traits', featureLines.join('\n\n'));
 

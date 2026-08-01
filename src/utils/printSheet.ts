@@ -1075,32 +1075,42 @@ function buildCombatCol(
   `;
 }
 
-function buildRightCol(character: Character, classDef: any, subclass: any, bg: any): string {
+function buildRightCol(character: Character, bg: any): string {
   // Personality boxes: pull from background tables if no custom data
   const bgPT = (bg?.personalityTraits ?? []).slice(0, 1).join(' ');
   const bgI  = (bg?.ideals ?? []).slice(0, 1).join(' ');
   const bgB  = (bg?.bonds ?? []).slice(0, 1).join(' ');
   const bgF  = (bg?.flaws ?? []).slice(0, 1).join(' ');
 
-  // Features
+  // Features. This panel is a fixed-height highlights box, not an exhaustive list — it has always
+  // shown the last few features rather than all of them. What it used to do wrong was take those
+  // few from `classes[0]` ONLY, so a multiclass character's second class was missing entirely
+  // while the header above it correctly read "Fighter 5 / Monk 6". The budget is now split across
+  // classes instead of spent on the first, so every class the character has is represented.
   const race = getRace(character.raceId);
-  const primary = character.classes[0];
   const items: { name: string; source: string; desc: string }[] = [];
 
   (race?.traits ?? []).slice(0, 2).forEach(t =>
     items.push({ name: t.name, source: race!.name, desc: t.description })
   );
-  if (classDef && primary) {
-    classDef.features
-      .filter((f: any) => f.level <= primary.level && !f.isASI)
-      .slice(-5)
-      .forEach((f: any) => items.push({ name: f.name, source: classDef.name, desc: f.description }));
-  }
-  if (subclass && primary) {
-    subclass.features
-      .filter((f: any) => f.level <= primary.level)
-      .slice(-2)
-      .forEach((f: any) => items.push({ name: f.name, source: subclass.name, desc: f.description }));
+  const n = Math.max(1, character.classes.length);
+  const classBudget = Math.max(1, Math.floor(5 / n));
+  const subBudget = Math.max(1, Math.floor(2 / n));
+  for (const cl of character.classes) {
+    const def = getClass(cl.classId);
+    const sub = cl.subclassId ? ALL_SUBCLASSES.find(s => s.id === cl.subclassId) : undefined;
+    if (def) {
+      def.features
+        .filter((f: any) => f.level <= cl.level && !f.isASI)
+        .slice(-classBudget)
+        .forEach((f: any) => items.push({ name: f.name, source: def.name, desc: f.description }));
+    }
+    if (sub) {
+      sub.features
+        .filter((f: any) => f.level <= cl.level)
+        .slice(-subBudget)
+        .forEach((f: any) => items.push({ name: f.name, source: sub.name, desc: f.description }));
+    }
   }
 
   const featureHtml = items.map(it => `
@@ -1305,9 +1315,6 @@ function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefo
   const race = getRace(character.raceId);
   const primary = character.classes[0];
   const classDef = primary ? getClass(primary.classId) : null;
-  const subclass = primary?.subclassId
-    ? ALL_SUBCLASSES.find(s => s.id === primary.subclassId)
-    : null;
   const bg = resolveBackground(character);
   const totalLevel = totalCharacterLevel(character.classes);
 
@@ -1356,7 +1363,7 @@ function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefo
       d.passivePerception, proficiencies, languages, race?.darkvision,
     )}
     ${buildCombatCol(character, d.ac, d.initiative, d.speed, d.mods, d.profBonus, d.slotTotals)}
-    ${buildRightCol(character, classDef, subclass, bg)}
+    ${buildRightCol(character, bg)}
   </div>
 
   <div class="sheet-footer">
