@@ -19,7 +19,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'one extra language'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Celestial Resistance', description: 'You have Resistance to Necrotic and Radiant damage.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 60 feet.' },
       { name: 'Healing Hands', description: 'As a Magic action, you can touch a creature and roll a number of d4s equal to your Proficiency Bonus. The creature regains a number of Hit Points equal to the total rolled. Once you use this trait, you can\'t use it again until you finish a Long Rest.' },
@@ -41,7 +41,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Draconic'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Draconic Ancestry', description: 'Choose a dragon type: Black/Copper (Acid), Blue/Bronze (Lightning), Brass/Gold/Red (Fire), Green (Poison), Silver/White (Cold). Determines your Breath Weapon damage type and Damage Resistance.' },
       { name: 'Breath Weapon', description: 'When you take the Attack action, replace one attack with an exhalation: 15-ft Cone or 30-ft Line (5 ft wide). Each creature makes a Dex save (DC 8 + Con mod + Prof Bonus). Fail: 1d10 damage (ancestry type); success: half. Scales: 2d10 at level 5, 3d10 at 11, 4d10 at 17. Uses = Prof Bonus; all regain on Long Rest.' },
       { name: 'Damage Resistance', description: 'You have Resistance to the damage type associated with your Draconic Ancestry.' },
@@ -63,7 +63,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Dwarvish'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 120 feet.' },
       { name: 'Dwarven Resilience', description: 'You have Resistance to Poison damage and Advantage on saving throws to avoid or end the Poisoned condition.' },
       { name: 'Dwarven Toughness', description: 'Your Hit Point maximum increases by 1, and it increases by 1 again whenever you gain a level.' },
@@ -84,7 +84,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Elvish'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 60 feet.' },
       { name: 'Elven Lineage', description: 'Choose one lineage — each grants a level 1 benefit and prepared spells (cast once/Long Rest or use slots; Int/Wis/Cha spellcasting, chosen at selection): Drow (Darkvision 120 ft, Dancing Lights; level 3: Faerie Fire; level 5: Darkness); High Elf (Prestidigitation cantrip, replaceable on Long Rest; level 3: Detect Magic; level 5: Misty Step); Wood Elf (Speed 35 ft, Druidcraft; level 3: Longstrider; level 5: Pass without Trace).' },
       { name: 'Fey Ancestry', description: 'You have Advantage on saving throws to avoid or end the Charmed condition.' },
@@ -105,7 +105,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Gnomish'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 60 feet.' },
       { name: 'Gnomish Cunning', description: 'You have Advantage on Intelligence, Wisdom, and Charisma saving throws.' },
       { name: 'Gnomish Lineage', description: 'Choose one (spellcasting ability: Int/Wis/Cha, chosen at selection): Forest Gnome — know Minor Illusion; always have Speak with Animals prepared (cast without slot = Prof Bonus times/Long Rest, or use slots); Rock Gnome — know Mending and Prestidigitation; spend 10 min casting Prestidigitation to create a Tiny clockwork device (AC 5, 1 HP, one Prestidigitation effect; max 3 at a time, each lasts 8 hrs).' },
@@ -123,7 +123,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Giant'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Giant Ancestry', description: 'Choose one boon (uses = Prof Bonus; regain on Long Rest): Cloud\'s Jaunt — Bonus Action: teleport 30 ft to unoccupied space you can see; Fire\'s Burn — on hit dealing damage, deal +1d10 Fire; Frost\'s Chill — on hit dealing damage, deal +1d6 Cold and reduce target Speed by 10 ft until your next turn starts; Hill\'s Tumble — on hit dealing damage to Large-or-smaller creature, give it the Prone condition; Stone\'s Endurance — Reaction when taking damage: roll 1d12 + Con mod and reduce the damage by that total; Storm\'s Thunder — Reaction when a creature within 60 ft hits you: deal 1d8 Thunder to that creature.' },
       { name: 'Large Form (Level 5)', description: 'Starting at level 5, as a Bonus Action you can change size to Large for 10 minutes (Advantage on Strength checks, Speed +10 ft). Once per Long Rest.' },
       { name: 'Powerful Build', description: 'Advantage on saves to end the Grappled condition. Count as one size larger when determining carrying capacity.' },
@@ -141,7 +141,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'one extra language'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Brave', description: 'You have Advantage on saving throws to avoid or end the Frightened condition.' },
       { name: 'Halfling Nimbleness', description: 'You can move through the space of any creature that is a size larger than you, but you can\'t stop in the same space.' },
       { name: 'Luck', description: 'When you roll a 1 on the d20 of a D20 Test, you can reroll the die and must use the new roll.' },
@@ -160,7 +160,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'one extra language'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Size Choice', description: 'Your size is Medium (4–7 ft) or Small (2–4 ft), chosen when you select this species.' },
       { name: 'Resourceful', description: 'You gain Heroic Inspiration whenever you finish a Long Rest.' },
       { name: 'Skillful', description: 'You gain proficiency in one skill of your choice.' },
@@ -180,7 +180,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Orc'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Adrenaline Rush', description: 'As a Bonus Action, you can take the Dash action and gain Temporary Hit Points equal to your Proficiency Bonus. Uses = Prof Bonus; all regained on Short or Long Rest.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 120 feet.' },
       { name: 'Relentless Endurance', description: 'When you are reduced to 0 Hit Points but not killed outright, you can drop to 1 HP instead. Once per Long Rest.' },
@@ -199,7 +199,7 @@ export const PHB2024_RACES: Race[] = [
     languages: ['Common', 'Infernal'],
     isSubrace: false,
     traits: [
-      { name: 'Flexible ASI (2024)', description: 'Increase one ability score by 2 and another by 1, or increase three different scores by 1 each.' },
+      { name: 'Ability Scores (from Background)', description: 'In 2024 rules your species grants no ability score increase — your background does. It gives +2 to one score and +1 to another, or +1 to three different scores, chosen from the three that background lists.' },
       { name: 'Darkvision', description: 'You have Darkvision with a range of 60 feet.' },
       { name: 'Fiendish Legacy', description: 'Choose one legacy (spellcasting ability: Int/Wis/Cha, chosen at selection): Abyssal — Resistance to Poison; know Poison Spray; level 3: Ray of Sickness; level 5: Hold Person. Chthonic — Resistance to Necrotic; know Chill Touch; level 3: False Life; level 5: Ray of Enfeeblement. Infernal — Resistance to Fire; know Fire Bolt; level 3: Hellish Rebuke; level 5: Darkness. Each level 3/5 spell always prepared, cast once without slot per Long Rest (can use slots).' },
       { name: 'Size Choice', description: 'Your size is Medium (4–7 ft) or Small (3–4 ft), chosen when you select this species.' },
