@@ -204,6 +204,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { proficiency: 'Medium Armor', minLevel: 4 },
     description: 'General feat (Medium Armor Training, level 4+).\n• +1 Constitution or Strength (max 20).\n• Heavy armor training.',
     abilityScoreChoice: ['con', 'str'],
+    grantsProficiency: ['Heavy armor'],
   },
   {
     id: 'heavy-armor-master-2024',
@@ -236,6 +237,9 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 Strength or Dexterity (max 20).\n• Light armor and Shield training.',
     abilityScoreChoice: ['str', 'dex'],
+    // 2024 moved shields here from Moderately Armored, which is where the 2014 feat grants them.
+    // Copying the 2014 twin would have given shields to the wrong feat in both directions.
+    grantsProficiency: ['Light armor', 'Shields'],
   },
   {
     id: 'mage-slayer-2024',
@@ -269,6 +273,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { proficiency: 'Light Armor', minLevel: 4 },
     description: 'General feat (Light Armor Training, level 4+).\n• +1 Strength or Dexterity (max 20).\n• Medium armor training.',
     abilityScoreChoice: ['str', 'dex'],
+    grantsProficiency: ['Medium armor'],
   },
   {
     id: 'mounted-combatant-2024',

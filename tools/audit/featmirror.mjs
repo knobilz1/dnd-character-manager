@@ -82,5 +82,17 @@ check('NEGATIVE: a different style feat gives no AC', acStyle([], ['fighting-sty
 check('NEGATIVE: not double-counted when held both ways',
   acStyle(['defense'], ['fighting-style-defense-2024']), 17);
 
+
+// ── Armour training feats. The 2024 trio granted nothing; note 2024 moved SHIELDS from
+// Moderately to Lightly Armored, so the two editions must NOT agree here.
+const profs = (id) => (feat(id).grantsProficiency ?? []).map(s => s.toLowerCase()).sort();
+check('Heavily Armored 2014 vs 2024 both grant heavy',
+  [profs('heavily-armored'), profs('heavily-armored-2024')], [['heavy armor'], ['heavy armor']]);
+check('Lightly Armored: 2014 light only, 2024 light + shields',
+  [profs('lightly-armored'), profs('lightly-armored-2024')], [['light armor'], ['light armor', 'shields']]);
+check('Moderately Armored: 2014 medium + shields, 2024 medium only',
+  [profs('moderately-armored'), profs('moderately-armored-2024')], [['medium armor', 'shields'], ['medium armor']]);
+check('NEGATIVE: Medium Armor Master grants no proficiency (it is a prereq, not a grant)',
+  [profs('medium-armor-master'), profs('medium-armor-master-2024')], [[], []]);
 console.log(failures ? `\n${failures} FAILURES` : '\nall checks passed');
 process.exit(failures ? 1 : 0);
