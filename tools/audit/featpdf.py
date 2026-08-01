@@ -20,7 +20,7 @@ find.
 STATE 2026-08-01 — TRUSTWORTHY, in the only sense that matters: it CANNOT silently miss.
 
   coverage    155 of 155 feats located (from 122)
-  findings    4 (from 60) — 2.6% of located, and NONE is a confirmed data bug
+  findings    4 (from 60) — 2.6% of located, and ALL FOUR are explained: none is a data bug
   control     43 of 43 corrupted feats detected, 0 missed
 
 The control is the claim. Every distance and die in every feat description is bumped (30 ft -> 930
