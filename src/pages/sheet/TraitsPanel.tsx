@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
+import { LanguagePicker } from '../../components/LanguagePicker';
+import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import { getSubclassOptions } from '../../data/subclassOptions';
 import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
 import { SectionHeader, HoverCard } from '../../components/ui';
@@ -27,7 +29,10 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
 }) {
-  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry } = useCharacterStore();
+  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages } = useCharacterStore();
+  const derived = useCharacterDerived(character);
+  const languages: string[] = derived?.languages ?? [];
+  const languagesOwed: number = derived?.languagesOwed ?? 0;
   const bg = resolveBackground(character);
   const race = getRace(character.raceId);
   const bgAsiSource = getBackground(character.backgroundId);
@@ -182,6 +187,22 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
                 <p className="text-xs text-slate-400">{race.darkvision} ft</p>
               </div>
             )}
+            {/* Languages were shown NOWHERE on the sheet, and the printed sheet listed the race's
+                raw array — placeholder strings and all. This is the resolved list; the picker
+                below appears only while a choice is still owed. */}
+            {languages.length > 0 && (
+              <div className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">Languages</p>
+                <p className="text-xs text-slate-400">{languages.join(', ')}</p>
+              </div>
+            )}
+            <LanguagePicker
+              known={languages}
+              owed={languagesOwed}
+              selected={character.selectedLanguages ?? []}
+              onChange={setSelectedLanguages}
+              compact
+            />
             {(race.resistances?.length ?? 0) > 0 && (
               <div className="bg-slate-900 rounded-lg p-3">
                 <p className="text-xs font-bold text-white mb-1">Damage Resistances</p>

@@ -78,6 +78,7 @@ interface CharacterState {
   setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
+  setSelectedLanguages: (v: string[]) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -1169,6 +1170,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setBackgroundAbilityChoice: (v) =>
     set((s) => s.character ? { character: { ...s.character, backgroundAbilityChoice: v } } : s),
+
+  setSelectedLanguages: (v) =>
+    set((s) => s.character ? { character: { ...s.character, selectedLanguages: v } } : s),
 
   setSubclassOptions: (v) =>
     set((s) => {

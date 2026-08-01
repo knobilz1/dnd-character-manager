@@ -241,10 +241,21 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
 
   const proficiencies: string[] = [];
   if (bg?.toolProficiencies?.length)  proficiencies.push(...bg.toolProficiencies);
-  if (classDef?.weaponProficiencies)  proficiencies.push(...classDef.weaponProficiencies);
-  if (classDef?.armorProficiencies)   proficiencies.push(...classDef.armorProficiencies);
+  // Every class, and its TOOLS as well as its weapons and armour. This read classes[0] only, and
+  // omitted class tool proficiencies entirely — so a bard's three instruments and a druid's
+  // herbalism kit never appeared on the exported sheet.
+  for (const cl of character.classes) {
+    const def = getClass(cl.classId);
+    if (!def) continue;
+    proficiencies.push(...def.weaponProficiencies, ...def.armorProficiencies, ...def.toolProficiencies);
+    if (cl.subclassId) {
+      proficiencies.push(...(ALL_SUBCLASSES.find(s => s.id === cl.subclassId)?.armorProficiencies ?? []));
+    }
+  }
   if (race?.proficiencies?.length)    proficiencies.push(...race.proficiencies);
-  const languages = race?.languages ?? [];
+  // d.languages, not race.languages: the raw array mixes in placeholder strings for unmade
+  // choices, so this field used to print "Common, one extra language of your choice".
+  const languages = d.languages ?? [];
   const profLangText = [
     proficiencies.length ? `Proficiencies: ${proficiencies.join(', ')}` : '',
     languages.length     ? `Languages: ${languages.join(', ')}` : '',

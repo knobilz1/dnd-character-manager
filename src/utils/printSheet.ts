@@ -1292,6 +1292,8 @@ function buildJournalPage(character: Character): string {
 // ── Public interface ──────────────────────────────────────────────────────────
 
 export interface SheetDerivedData {
+  /** Resolved language list — placeholders for unmade choices already stripped. */
+  languages?: string[];
   finalScores: Record<string, number>;
   mods: Record<string, number>;
   profBonus: number;
@@ -1329,7 +1331,9 @@ function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefo
   if (classDef?.weaponProficiencies) proficiencies.push(...classDef.weaponProficiencies);
   if (classDef?.armorProficiencies)  proficiencies.push(...classDef.armorProficiencies);
   if (race?.proficiencies?.length)   proficiencies.push(...race.proficiencies);
-  const languages = race?.languages ?? [];
+  // Derived, not raw: race.languages carries placeholder strings for choices the player
+  // hasn't made, and they were being printed as if they were languages.
+  const languages = d.languages ?? [];
 
   const spellPage = buildSpellPage(character, d.spellSaveDC, d.spellAttackBonus, d.slotTotals, classDef);
   const journalPage = buildJournalPage(character);

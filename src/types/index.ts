@@ -676,6 +676,11 @@ export interface Character {
   classes: ClassLevel[];
   abilityScoreMethod: AbilityScoreMethod;
   baseAbilityScores: AbilityScores;
+  /** Languages the player CHOSE, for the picks their race and background grant. Race data
+   *  stores an unchosen language as a literal placeholder string ("one extra language of your
+   *  choice"), which used to be printed on the sheet as though it were a language — see
+   *  data/languages.ts. */
+  selectedLanguages?: string[];
   selectedSkillProficiencies: SkillName[];
   selectedFeats: string[];
   classOptions: ClassOptionsState;

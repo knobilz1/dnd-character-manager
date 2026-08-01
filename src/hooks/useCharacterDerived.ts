@@ -3,9 +3,10 @@ import type { Character, AbilityKey, AbilityScores } from '../types';
 import { PROFICIENCY_BONUS, SKILL_ABILITY, abilityMod, totalCharacterLevel, FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor, getMulticlassSpellSlots } from '../data/mechanics';
 import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
-import { getSubclassOptions } from '../data/subclassOptions';
+import { getSubclassOptions, picksAllowed } from '../data/subclassOptions';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
+import { fixedLanguages, racialLanguagePicks } from '../data/languages';
 import { ALL_FEATS } from '../data/feats';
 import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
@@ -402,6 +403,27 @@ export function computeCharacterDerived(character: Character) {
       }
     }
 
+    // ── Languages ────────────────────────────────────────────────────────────
+    // The race's languages array mixes real languages with placeholder strings for choices the
+    // player hasn't made ("one extra language of your choice"). Those placeholders were being
+    // rendered as languages on the sheet and the printed sheet; here they become a COUNT instead,
+    // and `character.selectedLanguages` supplies what was actually chosen.
+    const languagesOwed =
+      racialLanguagePicks(race?.languages)
+      + (bgDef?.languages ?? 0)
+      + character.classes.reduce((n, cl) => n + (cl.subclassId ? getSubclassOptions(cl.subclassId)
+          .filter(g => g.grants === 'language' && cl.level >= Math.min(...Object.keys(g.picksByLevel).map(Number)))
+          .reduce((m, g) => m + picksAllowed(g, cl.level), 0) : 0), 0);
+    const languages = [...new Set([
+      ...fixedLanguages(race?.languages),
+      ...(character.selectedLanguages ?? []),
+      ...character.classes.flatMap(cl => cl.subclassId
+        ? getSubclassOptions(cl.subclassId)
+            .filter(g => g.grants === 'language')
+            .flatMap(g => character.subclassOptions?.[g.key] ?? [])
+        : []),
+    ])];
+
     // Highest leveled slot the character has access to
     let maxSpellLevel = 0;
     for (let lvl = 9; lvl >= 1; lvl--) {
@@ -619,6 +641,8 @@ export function computeCharacterDerived(character: Character) {
       spellsKnown,
       spellbookLimit,
       totalLevel,
+      languages,
+      languagesOwed,
       // Exported so the sheet, sidebar and spell panel all ask the SAME question the derive asked.
       // Each used to recompute `classes[0]` for itself, which is how a fighter/wizard got rendered
       // as a known-caster: the fighter isn't in the prepared-caster list, and nothing else looked.
