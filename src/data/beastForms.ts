@@ -85,7 +85,7 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     specialAbilities: ['Keen Smell'],
   },
   {
-    id: 'eagle', name: 'Eagle', cr: 0, size: 'Small', hp: 4, ac: 12,
+    id: 'eagle', name: 'Eagle', cr: 0, size: 'Small', hp: 3, ac: 12,
     str: 6, dex: 15, con: 10,
     speed: { walk: 10, fly: 60 },
     attacks: [{ name: 'Talons', toHit: 4, damage: '1d4+2', damageType: 'slashing' }],
@@ -102,7 +102,7 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     id: 'octopus', name: 'Octopus', cr: 0, size: 'Small', hp: 3, ac: 12,
     str: 4, dex: 15, con: 11,
     speed: { walk: 5, swim: 30 },
-    attacks: [{ name: 'Tentacles', toHit: 4, damage: '1d4+2', damageType: 'bludgeoning', notes: 'Grapple on hit (DC 10)' }],
+    attacks: [{ name: 'Tentacles', toHit: 4, damage: '1', damageType: 'bludgeoning', notes: 'Grapple on hit (DC 10)' }],
     specialAbilities: ['Underwater Camouflage', 'Water Breathing'],
   },
   {
@@ -115,7 +115,7 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
 
   // ── CR 1/8 ──────────────────────────────────────────────────────────────
   {
-    id: 'blood-hawk', name: 'Blood Hawk', cr: '1/8', size: 'Small', hp: 7, ac: 13,
+    id: 'blood-hawk', name: 'Blood Hawk', cr: '1/8', size: 'Small', hp: 7, ac: 12,
     str: 6, dex: 14, con: 10,
     speed: { walk: 10, fly: 60 },
     attacks: [{ name: 'Beak', toHit: 4, damage: '1d4+2', damageType: 'piercing' }],
@@ -139,14 +139,14 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     id: 'poisonous-snake', name: 'Poisonous Snake', cr: '1/8', size: 'Tiny', hp: 2, ac: 13,
     str: 2, dex: 16, con: 11,
     speed: { walk: 30, swim: 30 },
-    attacks: [{ name: 'Bite', toHit: 5, damage: '1d4+3', damageType: 'piercing', notes: 'DC 10 CON or 2d4 poison dmg' }],
+    attacks: [{ name: 'Bite', toHit: 5, damage: '1', damageType: 'piercing', notes: 'DC 10 CON or 2d4 poison dmg' }],
     specialAbilities: [],
   },
 
   // ── CR 1/4 ──────────────────────────────────────────────────────────────
   {
     id: 'constrictor-snake', name: 'Constrictor Snake', cr: '1/4', size: 'Large', hp: 13, ac: 12,
-    str: 15, dex: 14, con: 11,
+    str: 15, dex: 14, con: 12,
     speed: { walk: 30, swim: 30 },
     attacks: [
       { name: 'Bite', toHit: 4, damage: '1d6+2', damageType: 'piercing' },
@@ -193,8 +193,8 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     str: 15, dex: 10, con: 14,
     speed: { walk: 40, climb: 30 },
     attacks: [
-      { name: 'Bite', toHit: 4, damage: '1d6+2', damageType: 'piercing' },
-      { name: 'Claws', toHit: 4, damage: '2d6+2', damageType: 'slashing' },
+      { name: 'Bite', toHit: 3, damage: '1d6+2', damageType: 'piercing' },
+      { name: 'Claws', toHit: 3, damage: '2d4+2', damageType: 'slashing' },
     ],
     specialAbilities: ['Keen Smell'],
   },
@@ -243,7 +243,7 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
   },
   {
     id: 'giant-toad', name: 'Giant Toad', cr: 1, size: 'Large', hp: 39, ac: 11,
-    str: 15, dex: 13, con: 11,
+    str: 15, dex: 13, con: 13,
     speed: { walk: 20, swim: 40 },
     attacks: [{ name: 'Bite', toHit: 4, damage: '1d10+2', damageType: 'piercing', notes: 'Grapple on hit (DC 13), swallow if grappled (2d6 acid/turn)' }],
     specialAbilities: ['Amphibious', 'Standing Leap', 'Swallow'],
@@ -272,7 +272,7 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     str: 19, dex: 14, con: 12,
     speed: { walk: 30, swim: 30 },
     attacks: [
-      { name: 'Bite', toHit: 6, damage: '1d8+4', damageType: 'piercing' },
+      { name: 'Bite', toHit: 6, damage: '2d6+4', damageType: 'piercing' },
       { name: 'Constrict', toHit: 6, damage: '2d8+4', damageType: 'bludgeoning', notes: 'Grapple on hit (escape DC 16), restrained' },
     ],
   },
@@ -324,7 +324,7 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     specialAbilities: ['Trampling Charge (DC 12 STR or prone + stomp)'],
   },
   {
-    id: 'triceratops', name: 'Triceratops', cr: 5, size: 'Huge', hp: 114, ac: 13,
+    id: 'triceratops', name: 'Triceratops', cr: 5, size: 'Huge', hp: 95, ac: 13,
     str: 22, dex: 9, con: 17,
     speed: { walk: 50 },
     attacks: [{ name: 'Gore', toHit: 9, damage: '4d8+6', damageType: 'piercing', notes: 'Trampling Charge: DC 13 STR or knocked prone' }],
@@ -335,8 +335,8 @@ export const ALL_BEAST_FORMS: BeastForm[] = [
     str: 24, dex: 9, con: 21,
     speed: { walk: 40 },
     attacks: [
-      { name: 'Gore', toHit: 11, damage: '4d8+7', damageType: 'piercing' },
-      { name: 'Stomp', toHit: 11, damage: '4d10+7', damageType: 'bludgeoning', notes: 'Only vs prone targets' },
+      { name: 'Gore', toHit: 10, damage: '4d8+7', damageType: 'piercing' },
+      { name: 'Stomp', toHit: 10, damage: '4d10+7', damageType: 'bludgeoning', notes: 'Only vs prone targets' },
     ],
     specialAbilities: ['Trampling Charge (DC 18 STR or prone + stomp)'],
   },

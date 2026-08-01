@@ -3364,3 +3364,54 @@ Hawk, Owl, Deer and others that are all legal here.
 Modelling an open choice as a closed one is worse than leaving it: a picker that refuses a legal
 beast reads as a bug, whereas the feature text at least states the rule correctly. This needs a
 free-text field or a real beast index, and is filed rather than half-built.
+
+---
+
+## Phase K — beastForms.ts verified against the SRD: 10 of 33 stat blocks were wrong
+
+`beastForms.ts` carries the comment `// ── Beast Stat Blocks (Monster Manual) ──` while **no Monster
+Manual exists on disk**. The 31 entries were typed from memory in an earlier session and had never
+been checked against anything. These are live **Wild Shape** numbers — a wrong AC or damage die is
+wrong at the table.
+
+Nabil supplied the **SRD** (System Reference Document — Wizards' own open-content subset of 5e,
+released under **CC-BY-4.0** in 2023, so unlike the reference PDFs its content may legitimately be
+used here). Fetched as structured JSON from `5e-bits/5e-database`
+(`src/2014/en/5e-SRD-Monsters.json`, 1.3 MB, 334 monsters) to
+`reference-books/srd/` — outside the repo, like the other reference material.
+
+No OCR, no extraction guesswork: `tools/audit/beastcheck.py` compares size, CR, AC, HP, STR/DEX/CON
+and every attack's to-hit and damage dice directly.
+
+**33 of 35 entries verifiable — 23 clean, 10 wrong.**
+
+| beast | was | SRD |
+|---|---|---|
+| Eagle | HP 4 | **3** |
+| Blood Hawk | AC 13 | **12** |
+| Constrictor Snake | CON 11 | **12** |
+| Giant Toad | CON 11 | **13** |
+| Triceratops | HP 114 | **95** |
+| Black Bear | Bite +4, Claws +4, Claws 2d6+2 | **+3, +3, 2d4+2** |
+| Mammoth | Gore +11, Stomp +11 | **+10, +10** |
+| Giant Constrictor Snake | Bite 1d8+4 | **2d6+4** |
+| Octopus | Tentacles 1d4+2 | **flat 1** bludgeoning |
+| Poisonous Snake | Bite 1d4+3 | **flat 1** piercing (the 2d4 poison is separate) |
+
+Re-verified after the fix: **33 clean, 0 differences.**
+
+Two entries (**Cave Bear**, **Ankylosaurus**) are not SRD content and remain unverifiable — reported
+by the script every run rather than counted as clean.
+
+### Notes
+- The flat-`1` damage entries are correct, not truncation: MM/SRD Octopus and Poisonous Snake really
+  do deal 1 damage with no die. `parseDamageDie` returns `null` for a string with no `d`, so those
+  degrade to "no dice button" rather than crashing — checked before applying.
+- **The SRD confirmed a value that looked wrong.** MM Wolf is `Bite +4` on STR 12 with proficiency
+  +2, which "should" be +3. I had considered an internal-consistency sweep (does to-hit equal prof +
+  ability mod?) as a substitute for a real source and rejected it for exactly this reason — it would
+  have "corrected" the Wolf into being wrong. Real stat blocks break that arithmetic often enough
+  that arithmetic is not a source.
+- The SRD also holds **43 beasts at CR ≤ 1/4 and size ≤ Medium**, against the 12 currently in
+  `beastForms.ts` — which is what makes a real Beast Master companion picker possible. Not built
+  yet; see the companion design note.
