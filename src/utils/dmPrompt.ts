@@ -3,6 +3,7 @@ import type { BattleLog, BattleMode } from './dmActions';
 import { BATTLE_MODE_LABELS } from './dmActions';
 import { BOOKS } from '../data/books';
 import { hasKnownHp } from './partyHp';
+import { activeCompanions, computeCompanionDerived } from './companion';
 
 /**
  * dmPrompt.ts — builds what gets sent to the Claude DM each turn.
@@ -86,6 +87,29 @@ function statusLine(c: Character, absent?: AbsenceMap): string {
   return `${c.name} (${c.playerName || '?'}) — L${totalLevel(c)} ${classLine(c)} | HP ${hp} | ${cond}${exh}${insp}${ds}${away}`;
 }
 
+/** A companion that is OUT is a real creature standing on the battlefield, so the DM has to place
+ *  it and track it like any other combatant — it can't do that if it never hears the beast exists.
+ *  One indented line under its owner, and only while it's out: nothing at all for the tables that
+ *  have no companions, which is most of them.
+ *
+ *  Sent as pure data. What the DM should DO with it (an ally combatant, a body in the party's start
+ *  zone, whose HP its own player tracks) is a standing rule in DM_RULES, paid for once in the cached
+ *  block rather than restated every single turn. */
+function companionLines(c: Character): string[] {
+  return activeCompanions(c).map((k) => {
+    const d = computeCompanionDerived(c, k);
+    // A stat block that no longer resolves still gets a line: the beast is on the table either way,
+    // and silence would read as "no companion out".
+    if (!d) return `  ↳ ${k.name} — ${c.name}'s companion, out (stat block unavailable)`;
+    const speed = Object.entries(d.speed).map(([k2, v]) => `${k2} ${v}`).join(', ');
+    const attacks = d.attacks
+      .map((a) => `${a.name} ${a.toHit >= 0 ? '+' : ''}${a.toHit} to hit, ${a.damage} ${a.damageType}`)
+      .join('; ');
+    const multi = d.attacksPerAction > 1 ? ` (${d.attacksPerAction} attacks per Attack action)` : '';
+    return `  ↳ ${k.name} — ${c.name}'s companion, OUT: ${d.beastName}, ${d.size} beast, AC ${d.ac}, HP ${k.currentHP}/${d.maxHP}, speed ${speed} | ${attacks}${multi}`;
+  });
+}
+
 /** `absent` marks who isn't at the table tonight and how their character is
  *  being covered (see the roll call in DMConsolePage). Threaded here rather
  *  than pushed as its own prompt section because every character already gets
@@ -93,7 +117,7 @@ function statusLine(c: Character, absent?: AbsenceMap): string {
  *  when everyone showed up. */
 export function partyStatusText(party: Character[], absent?: AbsenceMap): string {
   if (party.length === 0) return 'No characters at the table yet.';
-  return party.map((c) => statusLine(c, absent)).join('\n');
+  return party.flatMap((c) => [statusLine(c, absent), ...companionLines(c)]).join('\n');
 }
 
 /** Which sourcebooks this table actually plays with — the union of every

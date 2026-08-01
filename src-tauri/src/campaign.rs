@@ -406,6 +406,7 @@ If you're unsure of the mode, look at the `Battle mode:` line; when in doubt, na
 ### The Active Battle Log — never lose the state of a fight
 Combat state — round, initiative order, whose turn it is, each combatant's rough health and conditions, where everyone is, and any ongoing effects or hazards — is tracked OUTSIDE your own memory, by the app, and handed back to you fresh every turn as an "Active battle log" block. Treat that block as ground truth: it is authoritative over your own recollection, and it survives even if you lose track of the conversation. Your job is to keep it current.
 - When a fight starts, open the log: send a `battleLog` with the `combatants` you're placing (PCs, monsters, NPCs — each with a `name`, a `side` of "party"/"enemy"/"ally"/"neutral", a rough `hp` band like "healthy"/"bloodied"/"12/28"/"down", any `conditions`, and a `position` (Theater) or `coord` (Grid/Hex)), plus `round`, `initiative` (names in order), and `active` (whose turn it is). Set `environment` for lighting, hazards, cover, or terrain that matters.
+- **Companions that are OUT are combatants too.** A party status line may carry an indented `↳ <name> — <player character>'s companion, OUT:` entry — a ranger's beast, a familiar, a steel defender. That is a real creature standing on the battlefield, not a feature on its owner's sheet, so it gets everything any other combatant gets: its own entry in `combatants` with `side: "ally"`, its own place in `initiative`, and its own `position`/`coord` that you update whenever it moves. It is also a physical miniature on the table, so it needs a real starting square: on a prepared map, count it as one more body inside the `Party:` start zone and give it a specific cell there, exactly as you would a player. Never fold it into its owner's entry, and never leave it off the log because the fight "is really about" the players — an untracked beast is one nobody can act around. Its HP belongs to its own player, who tracks it on their sheet: keep only the rough band in the log, and do NOT send `damage`, `heal` or `addCondition` for it — those keys reach player characters only, so aiming one at a beast either does nothing or lands on the wrong person. Say what happened to it in your narration and let its player mark it down. Like the player characters themselves, a companion is not an NPC — never `rememberEntity` it.
 - Each following turn, send a `battleLog` with ONLY what changed — a combatant is upserted by name, so anyone you don't mention is left exactly as-is (you never have to restate the whole roster to avoid losing someone). Update `active`/`round` as the turn order advances, and a combatant's `hp`/`conditions`/`position` as they take hits, gain conditions, or move.
 - Use `removeCombatant: ["Goblin2"]` when someone leaves the fight for good (dead and gone, fled off the scene). A downed-but-present PC should stay in the log with `hp: "down"`, not be removed.
 - When the fight is over, send `endBattle: true` together with a one- or two-sentence `battleResult` — who won, any casualties or lasting conditions, and notable loot or consequences. Only that result is saved to the campaign's memory; the blow-by-blow log is wiped. Don't separately `remember` the same outcome — `battleResult` already records it (do still use `rememberEntity`/`rememberLocation` for a new NPC or place that combat introduced).
@@ -11214,6 +11215,26 @@ Tactics:
         }
         // And filtering actually saves real per-turn weight.
         assert!(theater.len() < DM_RULES.len() - 2000, "expected a real saving, got {} vs {}", theater.len(), DM_RULES.len());
+    }
+
+    /// A companion that is out is a creature on the battlefield in EVERY battle
+    /// mode — a ranger's beast exists whether the table is pushing miniatures or
+    /// picturing it. The rule lives in the Active Battle Log section for exactly
+    /// that reason; parked one section lower it would land inside
+    /// `dm_rules_for_mode`'s prepared-map skip window and vanish off Grid, which
+    /// is the failure this test exists to catch.
+    #[test]
+    fn dm_rules_carry_the_companion_protocol_in_every_battle_mode() {
+        for mode in ["theater", "grid", "hex"] {
+            let r = dm_rules_for_mode(mode);
+            assert!(r.contains("Companions that are OUT are combatants too"), "{mode} lost the companion rule:\n{r}");
+            // The three things it has to actually say: it's an ally combatant, it
+            // gets its own tracked spot, and its HP is not the DM's to apply.
+            assert!(r.contains(r#"side: "ally""#), "{mode} must say which side a companion fights on");
+            assert!(r.contains("its own `position`/`coord`"), "{mode} must say the companion is tracked positionally");
+            assert!(r.contains("do NOT send `damage`, `heal` or `addCondition` for it"),
+                "{mode} must keep companion HP off the character-only action keys");
+        }
     }
 
     /// The absent-player rules must reach every table regardless of battle mode.
