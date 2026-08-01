@@ -251,6 +251,9 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
   const profLangText = [
     proficiencies.length ? `Proficiencies: ${proficiencies.join(', ')}` : '',
     languages.length     ? `Languages: ${languages.join(', ')}` : '',
+    // The WotC form has no senses field, so darkvision rides here — the same place a player
+    // writes it by hand. It was previously nowhere on the exported sheet at all.
+    race?.darkvision ? `Senses: Darkvision ${race.darkvision} ft` : '',
   ].filter(Boolean).join('\n');
   setTextField(form, 'ProficienciesLang', profLangText);
 

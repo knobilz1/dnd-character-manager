@@ -173,6 +173,15 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
                 <p className="text-xs text-slate-400 leading-relaxed">{trait.description}</p>
               </div>
             ))}
+            {/* Darkvision was stored on 74 races and read ONLY by the creator's race badge, so it
+                never reached the sheet, the print sheet or the PDF — the number you actually want
+                mid-dungeon was the one place it wasn't. */}
+            {race.darkvision != null && (
+              <div className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">Darkvision</p>
+                <p className="text-xs text-slate-400">{race.darkvision} ft</p>
+              </div>
+            )}
             {(race.resistances?.length ?? 0) > 0 && (
               <div className="bg-slate-900 rounded-lg p-3">
                 <p className="text-xs font-bold text-white mb-1">Damage Resistances</p>

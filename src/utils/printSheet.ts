@@ -840,6 +840,7 @@ function buildLeftStatsCol(
   passivePerception: number,
   proficiencies: string[],
   languages: string[],
+  darkvision: number | undefined,
 ): string {
   const savingRows = ABILITY_KEYS.map(k => `
     <div class="ck-row">
@@ -861,6 +862,10 @@ function buildLeftStatsCol(
     ? `<div style="margin-bottom:3px;"><span style="font-weight:700;">Proficiencies:</span> ${proficiencies.map(esc).join(', ')}</div>` : '';
   const langText = languages.length
     ? `<div><span style="font-weight:700;">Languages:</span> ${languages.map(esc).join(', ')}</div>` : '';
+  // Darkvision has no panel of its own on the WotC layout, so it goes here with the other
+  // at-a-glance facts. It reached neither printed sheet before this.
+  const darkvisionText = darkvision
+    ? `<div><span style="font-weight:700;">Senses:</span> Darkvision ${darkvision} ft</div>` : '';
 
   return `
     <div class="left-stats-col">
@@ -896,7 +901,7 @@ function buildLeftStatsCol(
 
       <!-- Other Proficiencies & Languages -->
       <div class="other-prof-panel">
-        ${profText}${langText}
+        ${profText}${langText}${darkvisionText}
         <span class="pl">Other Proficiencies &amp; Languages</span>
       </div>
     </div>
@@ -1348,7 +1353,7 @@ function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefo
       d.mods, d.profBonus, character.inspiration,
       d.savingThrows, d.savingThrowProficiencies,
       d.skills, d.allSkillProficiencies,
-      d.passivePerception, proficiencies, languages,
+      d.passivePerception, proficiencies, languages, race?.darkvision,
     )}
     ${buildCombatCol(character, d.ac, d.initiative, d.speed, d.mods, d.profBonus, d.slotTotals)}
     ${buildRightCol(character, classDef, subclass, bg)}
