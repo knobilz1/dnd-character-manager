@@ -152,6 +152,7 @@ def mech_tokens(s, source=False):
     # Both forms are scanned and the tokens unioned, so de-hyphenating can never LOSE a match that
     # the hyphenated form would have made (joining "half-\nelf" is harmless — no MECH token has a
     # hyphen in it, but the union means we do not have to prove that).
+    out = set()
     forms = {re.sub(r'\s+', ' ', fixed)}
     forms.add(re.sub(r'\s+', ' ', re.sub(r'[-‐­]\s*\n\s*', '', fixed)))
     # "each foot of movement costs you 4 extra feet" is how the books write a movement penalty —
@@ -168,7 +169,14 @@ def mech_tokens(s, source=False):
     # Generous when READING the book, strict about what the app is held to.
     if source:
         forms |= {re.sub(r'(?<![\dd])\bd(\d+)\b', r'1d\1', f) for f in forms}
-    out = set()
+        # "your spell save DC" IS "8 + your proficiency bonus + your ability modifier" — that is
+        # the definition, not an approximation. The books use the shorthand (PHB 39 times, TCE 19)
+        # and print the literal "DC 8" essentially never (PHB once), while the app spells the
+        # formula out. Reporting that difference is pure noise.
+        # Strict where it matters: this supplies dc8 only. An app claiming DC 10 still finds no
+        # dc10 in the book and is still reported.
+        if re.search(r'save\s+DC', ' '.join(forms), re.I):
+            out.update({'dc8', 'proficiencybonus'})
     for form in forms:
         for m in MECH.finditer(form):
             tok = re.sub(r'\s+', '', m.group(0).lower())
