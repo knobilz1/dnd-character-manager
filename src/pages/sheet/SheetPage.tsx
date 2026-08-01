@@ -9,12 +9,13 @@ import { useLibraryStore } from '../../store/useLibraryStore';
 import { useBorrowedStore } from '../../store/useBorrowedStore';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived, casterClassOf } from '../../hooks/useCharacterDerived';
+import { resistancesOf } from '../../utils/damageResistance';
 import { isPreparedCaster as isPreparedCasterId, SKILL_ABILITY } from '../../data/mechanics';
 import { isProficientWithWeapon } from '../../utils/weaponProficiency';
 import { armorPenalty } from '../../utils/armorProficiency';
 import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
-import type { Condition, SlotLevel } from '../../types';
+import type { Condition, DamageType, SlotLevel } from '../../types';
 import { SpellPanel } from './SpellPanel';
 import { LevelUpDialog } from './LevelUpDialog';
 import { TraitsPanel } from './TraitsPanel';
@@ -222,6 +223,9 @@ export function SheetPage() {
   const prevDeathFailures = React.useRef<number | null>(null);
   const [hpInput, setHpInput] = React.useState('');
   const [hpMode, setHpMode] = React.useState<'heal'|'damage'>('damage');
+  // Optional damage type, offered ONLY to characters with a resistance to apply it to — for
+  // everyone else it would be a dropdown that can never change the result.
+  const [hpDamageType, setHpDamageType] = React.useState<DamageType | ''>('');
   const [addConditionOpen, setAddConditionOpen] = React.useState(false);
   const [restConfirm, setRestConfirm] = React.useState<'short'|'long'|null>(null);
   const [arcaneOpen, setArcaneOpen] = React.useState(false);
@@ -323,7 +327,7 @@ export function SheetPage() {
     const amount = parseInt(hpInput);
     if (isNaN(amount) || amount <= 0) return;
     const m = mode ?? hpMode;
-    if (m === 'heal') healHP(amount); else damageHP(amount);
+    if (m === 'heal') healHP(amount); else damageHP(amount, hpDamageType || undefined);
     setHpInput('');
   }
 
@@ -683,6 +687,9 @@ export function SheetPage() {
                 setRound={setRound}
                 hpPercent={hpPercent}
                 hpInput={hpInput}
+                hpDamageType={hpDamageType}
+                setHpDamageType={setHpDamageType}
+                resistances={resistancesOf(character)}
                 hpMode={hpMode}
                 setHpInput={setHpInput}
                 setHpMode={setHpMode}
@@ -1690,6 +1697,7 @@ function Character3DCard() {
 }
 
 function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput, applyHP,
+  hpDamageType, setHpDamageType, resistances,
   setCurrentHP, setTempHP, setMaxHP, addDeathSuccess, addDeathFailure, resetDeathSaves,
   addConditionOpen, setAddConditionOpen, addCondition, removeCondition, setExhaustion,
   resources, setResource, spellSaveDC, spellAttackBonus, slotTotals,
@@ -1878,7 +1886,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
         </div>
 
         {/* HP controls — type amount, then click Damage or Heal */}
-        <div className="mb-2">
+        <div className="mb-2 flex gap-2">
           <input
             type="number"
             min={1}
@@ -1886,8 +1894,24 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
             onChange={e => setHpInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applyHP('damage')}
             placeholder="Amount..."
-            className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-slate-400"
+            className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-slate-400"
           />
+          {/* Only the character's OWN resistances are offered: any other damage type would leave
+              the number untouched, so listing all thirteen would be thirteen ways to change
+              nothing. Blank is the default, and behaves exactly as before typed damage existed. */}
+          {resistances.length > 0 && (
+            <select
+              value={hpDamageType}
+              onChange={(e: any) => setHpDamageType(e.target.value)}
+              title="Damage type — resistance halves it"
+              className="shrink-0 bg-slate-900 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-slate-400 capitalize"
+            >
+              <option value="">any type</option>
+              {resistances.map((r: string) => (
+                <option key={r} value={r}>{r} ½</option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="flex gap-2">
           <button

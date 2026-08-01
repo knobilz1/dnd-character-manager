@@ -1,4 +1,5 @@
-import type { Character, Condition } from '../types';
+import type { Character, Condition, DamageType } from '../types';
+import { applyResistance } from './damageResistance';
 import { hasKnownHp } from './partyHp';
 
 /**
@@ -11,7 +12,10 @@ import { hasKnownHp } from './partyHp';
  * of a party-tools protocol.
  */
 
-interface NameAmount { name: string; amount: number }
+/** `type` is only meaningful on `damage`, and is optional there: the DM bot knows the dragon's
+ *  breath was fire, so typing it costs the model nothing and lets racial resistance halve it.
+ *  Omitted, damage behaves exactly as it always has. */
+interface NameAmount { name: string; amount: number; type?: DamageType }
 interface NameCondition { name: string; condition: string }
 interface NameLevel { name: string; level: number }
 interface NameBool { name: string; value: boolean }
@@ -525,10 +529,13 @@ export function applyDmActions(party: Character[], actions: DmActionSet): ApplyD
       return fn(c);
     });
 
-  for (const { name, amount } of actions.damage ?? []) {
+  for (const { name, amount, type } of actions.damage ?? []) {
     const dmgAmount = clampAmount(name, 'damage', amount);
     withKnownHp(name, 'damage', (c) => {
-      let dmg = dmgAmount;
+      // Resistance halves first, then temp HP soaks the remainder (PHB p.197). Untyped damage —
+      // which is most of it — is unchanged, and a type the character isn't resistant to changes
+      // nothing either, so a wrong or unrecognised type can only ever be a no-op.
+      let dmg = applyResistance(c, dmgAmount, type);
       let tempHP = c.tempHP ?? 0;
       if (tempHP > 0) { const absorbed = Math.min(tempHP, dmg); tempHP -= absorbed; dmg -= absorbed; }
       return { ...c, tempHP, currentHP: Math.max(0, c.currentHP - dmg) };

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Condition, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, JournalEntry } from '../types';
+import type { Character, Condition, DamageType, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, JournalEntry } from '../types';
 import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
@@ -11,6 +11,7 @@ import { getSpell } from '../data/spells';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
 import { chosenAsi } from '../utils/racialAsi';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
+import { applyResistance } from '../utils/damageResistance';
 
 /**
  * Resource maxima that scale off an ability modifier or proficiency bonus.
@@ -39,7 +40,9 @@ interface CharacterState {
   // HP
   setCurrentHP: (hp: number) => void;
   healHP: (amount: number) => void;
-  damageHP: (amount: number) => void;
+  /** `type` is optional: with it, racial resistance halves the damage; without it, behaviour is
+   *  unchanged. See utils/damageResistance.ts for why typed damage is opt-in. */
+  damageHP: (amount: number, type?: DamageType) => void;
   setTempHP: (hp: number) => void;
   setMaxHP: (hp: number) => void;
 
@@ -392,13 +395,17 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       return { character: { ...s.character, currentHP: next } };
     }),
 
-  damageHP: (amount) =>
+  damageHP: (amount, type) =>
     set((s) => {
       if (!s.character) return s;
+      // Resistance halves BEFORE temp HP absorbs anything (PHB p.197: halving is the last step of
+      // computing the damage; temp HP then soaks what's left). Untyped damage is unchanged, which
+      // is every call site that predates this.
+      const dealt = applyResistance(s.character, amount, type);
       let { tempHP, currentHP } = s.character;
-      const tempAbsorb = Math.min(tempHP, amount);
+      const tempAbsorb = Math.min(tempHP, dealt);
       tempHP -= tempAbsorb;
-      currentHP = Math.max(0, currentHP - (amount - tempAbsorb));
+      currentHP = Math.max(0, currentHP - (dealt - tempAbsorb));
       return { character: { ...s.character, currentHP, tempHP } };
     }),
 
