@@ -24,6 +24,13 @@ import { toolOptions } from '../../data/tools';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import type { Background, BackgroundCustom, Character, JournalEntry, AbilityKey } from '../../types';
 
+/** id → printed name, for the option pools that store ids. Built from the same catalogs the
+ *  grants draw their options from, so a renamed entry cannot leave a stale label behind. */
+const OPTION_LABELS: Record<string, string> = Object.fromEntries(
+  [...ALL_FIGHTING_STYLES, ...ALL_INVOCATIONS, ...ALL_METAMAGIC, ...ALL_MANEUVERS]
+    .map(x => [x.id, x.name]),
+);
+
 export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBackgroundAbilityChoice, setSubclassOptions }: {
   character: Character;
   setNotes: (n: string) => void;
@@ -236,6 +243,10 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
             <ProficiencyPicker
               choices={featPicks.filter(g => !g.auto).map(g => ({
                 key: g.featId, label: `${g.featName} — ${g.label}`, count: g.count, options: g.options,
+                // Fighting styles, invocations, metamagic and maneuvers are stored by id, so
+                // without this the buttons would read "two-weapon-fighting". Skills, tools and
+                // weapons store their printed name and fall through unchanged.
+                labels: OPTION_LABELS,
               }))}
               value={character.selectedFeatPicks}
               onChange={setSelectedFeatPicks}
