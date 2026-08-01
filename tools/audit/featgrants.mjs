@@ -31,7 +31,12 @@ const byId = new Map();
 for (const f of FEATS) {
   for (const [system, re, fields] of SYSTEMS) {
     if (!re.test(f.description)) continue;
-    if (fields.some(k => f[k] !== undefined)) { covered++; continue; }
+    // `upgradeToExpertise` lives INSIDE grantsPicks, so a top-level field check cannot see it.
+    // Without this Keen Mind and Observant read as uncovered forever — the same "probe that
+    // cannot pass" shape as a probe that cannot fail.
+    const covers = fields.some(k => f[k] !== undefined)
+      || (system === 'expertise' && f.grantsPicks?.upgradeToExpertise);
+    if (covers) { covered++; continue; }
     gaps++;
     if (!byId.has(f.id)) byId.set(f.id, []);
     byId.get(f.id).push(system);
