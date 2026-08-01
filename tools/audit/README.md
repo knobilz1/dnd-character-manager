@@ -45,6 +45,19 @@ The four false ones and the two true ones were indistinguishable by inspection.
   way, and **never print book prose** to a terminal or transcript — to check an OCR run, measure
   character density and the share of well-formed words instead.
 
+## Born-digital vs scanned — decides whether OCR can help at all
+
+A book with **one large image per page** (MMoM 216 KB, Volo's 2.8 MB JPEG-2000) is a SCAN: its
+text layer came from someone else's OCR, and re-running OCR can beat it.
+
+A book whose pages hold **several small images** (ERLW, EGtW: 5–6 images, largest 16–68 KB) is
+BORN-DIGITAL — those are illustrations, the text layer is the real text, and there is nothing for
+OCR to recover. `ocrcompare.py` reports "keep the text layer" for these, and it is right.
+
+This matters because ERLW still writes `ld6` 54 times and CANNOT be fixed by OCR. Damage in a
+born-digital book has to be repaired at comparison time by `debook()`. Do not queue an OCR run for
+one and conclude the tool failed.
+
 ## The data's own quirks
 
 - `parentRaceId` is **dangling**: the app flattens base races away, so there is no race with id
