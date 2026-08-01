@@ -3269,3 +3269,53 @@ noise.
 
 **Widening a function's blast radius means re-testing the whole population against it**, not just
 the case you were fixing.
+
+---
+
+## Phase J — PHB 2014 spell BODY numbers: 15 spells were missing their upcast scaling
+
+Phase I verified every spell's *header*. This is the other half — the numbers inside the
+description, where a wrong value actually changes play. `tools/audit/spellbody.py` compares
+extracted facts rather than prose: the set of dice tokens, the save ability the spell forces, and
+the damage types named.
+
+**361 of 361 PHB spells compared (100% coverage).**
+
+### 🔴 15 of 334 levelled PHB spells had NO `atHigherLevels` at all
+The book body carries a "Higher Levels" clause and the app had no field, so casting these with a
+higher slot silently did nothing:
+
+Enhance Ability · Glyph of Warding · Major Image · Conjure Minor Elementals · Conjure Woodland
+Beings · Mordenkainen's Private Sanctum · **Bigby's Hand** · Conjure Elemental · Creation · Modify
+Memory · Planar Binding · Conjure Fey · Create Undead · Globe of Invulnerability · Etherealness
+
+Bigby's Hand is the sharpest: a 5th-level spell upcast to 9th should gain **+2d8** on the clenched
+fist and **+2d6** on the grasping hand, and gained nothing.
+
+All 15 written in the app's existing full-sentence PHB style. Create Undead and Etherealness are
+quoted verbatim from the PHB PDF; the rest are PHB wording for clauses the extract states in
+shorthand. **The reverse direction was clean — no spell invents scaling the book doesn't grant.**
+Re-swept after the fix: 0 missing, 0 invented.
+
+### Dice: no invented numbers
+Dice sets match on **340 of 361**. Critically, **"app has dice the book does not" is ZERO** — the
+app never states a damage number the book doesn't. The 21 differences are all the other direction
+and all the app's summary being terser than the book (`app —` = the description mentions no dice at
+all), or the book listing *scaled* values where the app stores base + increment. Checked
+individually: Flame Blade (app 3d6 + 1d6/2 levels is correct; the extract lists 4d6/5d6/6d6 as
+worked examples) and Tsunami (app 6d10 base; the extract's 1d10 is the per-round reduction).
+
+### Two investigated and left alone
+- **Earthquake** — probe said save=con, app says dex. The PHB forces a **Dexterity** save (prone)
+  *and* a Constitution save (concentration); the app records the primary one. Probe artifact.
+- **Flame Strike** — app `damageType: 'fire'`, book names radiant too. The spell deals **half fire,
+  half radiant**, and `damageType` is a single field, so this can't be represented without a schema
+  change. The app's `atHigherLevels` already says "the fire damage or the radiant damage (your
+  choice)", so nothing is lost. Recorded, not "fixed".
+
+### Probe correction
+The save check first reported **21** mismatches including Haste, Beacon of Hope and Heroes' Feast —
+spells with no save at all. It was matching *"advantage on Dex saves"*, which is a benefit the spell
+**grants**, not a save it **forces**. Excluding `(dis)advantage on` / `succeeds on` / `immune to`
+dropped it to 17, of which 16 are simply spells with a real save whose optional `savingThrow` field
+is unset (a display nicety, not a mechanical error) and 1 was Earthquake above.
