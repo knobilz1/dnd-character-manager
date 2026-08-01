@@ -4,160 +4,29 @@ import { getRace } from '../data/races';
 import { ALL_FEATS } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
 import { useBorrowedStore } from './useBorrowedStore';
-import { emptySlotState, PACT_MAGIC_TABLE, PROFICIENCY_BONUS, abilityMod, totalCharacterLevel } from '../data/mechanics';
+import { emptySlotState, PACT_MAGIC_TABLE, totalCharacterLevel } from '../data/mechanics';
 import { getClass, baseClassId, classLevel } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getSpell } from '../data/spells';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
 import { chosenAsi } from '../utils/racialAsi';
+import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 
-/** Compute ability-mod / prof-bonus overrides for resources that scale off stats.
- *  Mirrors the logic in useCharacterDerived.ts so the store can apply correct maxes
- *  during long rest and level-up without depending on the hook. */
+/**
+ * Resource maxima that scale off an ability modifier or proficiency bonus.
+ *
+ * This used to be a hand-maintained copy of the same 52 rules in useCharacterDerived, kept in step
+ * by a comment. It drifted: the display side gained the PHB 2024 background ASI (C7), the level-20
+ * Primal Champion bonus and the score cap at 20/24, and this copy did not — so a bard whose
+ * background raised Charisma showed four Bardic Inspiration pips and was restored to three by a
+ * long rest. Delegating removes the possibility rather than re-syncing it.
+ *
+ * computeCharacterDerived is pure and takes a Character, and neither module imports the other, so
+ * this is a straight call. It computes more than the overrides, but only runs on load, level-up
+ * and rest — never in a render path.
+ */
 function computeResourceMaxOverrides(c: Character): Record<string, number> {
-  const totalLvl = totalCharacterLevel(c.classes);
-  const profBonus = PROFICIENCY_BONUS[Math.min(totalLvl, 20)] ?? 2;
-
-  // Final ability scores = base + racial + feat bonuses (mirrors useCharacterDerived.ts)
-  const race = getRace(c.raceId);
-  const racial = chosenAsi(race, c.racialAbilityChoice);
-  const baseScores: Record<string, number> = {};
-  for (const k of Object.keys(c.baseAbilityScores)) {
-    baseScores[k] = (c.baseAbilityScores[k as AbilityKey] ?? 10) + ((racial as Record<string, number>)[k] ?? 0);
-  }
-  for (const featId of (c.selectedFeats ?? [])) {
-    const feat = ALL_FEATS.find(f => f.id === featId);
-    if (feat?.abilityScoreIncrease) {
-      for (const [k, v] of Object.entries(feat.abilityScoreIncrease)) {
-        baseScores[k] = (baseScores[k] ?? 10) + (v ?? 0);
-      }
-    }
-  }
-  const score = (key: AbilityKey) => baseScores[key] ?? 10;
-
-  const overrides: Record<string, number> = {};
-  if (c.classes.some(cl => baseClassId(cl.classId) === 'bard'))
-    overrides['bardic_inspiration'] = Math.max(1, abilityMod(score('cha')));
-  if (c.classes.some(cl => baseClassId(cl.classId) === 'artificer'))
-    overrides['flash_of_genius'] = Math.max(1, abilityMod(score('int')));
-  if (c.classes.some(cl => cl.subclassId === 'bladesinging'))
-    overrides['bladesong'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'samurai'))
-    overrides['fighting_spirit'] = 3;
-  // Psi Warrior / Soulknife (TCE): each grants its own Psionic Energy pool of 2 x proficiency
-  // bonus. Separate keys, so a Fighter/Rogue holding both subclasses gets two pools, not one.
-  if (c.classes.some(cl => cl.subclassId === 'psi-warrior'))
-    overrides['psionic_energy_psi_warrior'] = profBonus * 2;
-  if (c.classes.some(cl => cl.subclassId === 'soulknife'))
-    overrides['psionic_energy_soulknife'] = profBonus * 2;
-  // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
-  if (c.classes.some(cl => cl.subclassId === 'phantom' && cl.level >= 3))
-    overrides['wails_from_the_grave'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'circle-of-wildfire' && cl.level >= 10))
-    overrides['cauterizing_flames'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'college-of-creation' && cl.level >= 3))
-    overrides['performance_of_creation'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'peace-domain'))
-    overrides['emboldening_bond'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'swarmkeeper' && cl.level >= 7))
-    overrides['writhing_tide'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'swarmkeeper' && cl.level >= 15))
-    overrides['swarming_dispersal'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'circle-of-stars' && cl.level >= 2))
-    overrides['star_map'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'circle-of-stars' && cl.level >= 6))
-    overrides['cosmic_omen'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'armorer' && cl.level >= 15))
-    overrides['perfected_armor'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'clockwork-soul'))
-    overrides['restore_balance'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'drakewarden' && cl.level >= 15))
-    overrides['perfected_bond'] = profBonus;
-  // Echo Knight Unleash Incarnation (EGtW): Constitution modifier uses, minimum 1.
-  if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 3))
-    overrides['unleash_incarnation'] = Math.max(1, abilityMod(score('con')));
-  // Dunamancy (EGtW): both are Intelligence modifier uses, minimum 1.
-  if (c.classes.some(cl => cl.subclassId === 'chronurgy-magic' && cl.level >= 6))
-    overrides['momentary_stasis'] = Math.max(1, abilityMod(score('int')));
-  if (c.classes.some(cl => cl.subclassId === 'graviturgy-magic' && cl.level >= 10))
-    overrides['violent_attraction'] = Math.max(1, abilityMod(score('int')));
-  // TCE prof-bonus-per-long-rest features.
-  if (c.classes.some(cl => cl.subclassId === 'the-fathomless'))
-    overrides['tentacle_of_the_deeps'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'order-of-scribes' && cl.level >= 6))
-    overrides['manifest_mind'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'path-of-wild-magic' && cl.level >= 3))
-    overrides['magic_awareness'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'path-of-wild-magic' && cl.level >= 6))
-    overrides['bolstering_magic'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'path-of-the-beast' && cl.level >= 10))
-    overrides['infectious_fury'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'path-of-the-beast' && cl.level >= 14))
-    overrides['call_the_hunt'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'twilight-domain' && cl.level >= 6))
-    overrides['steps_of_night'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'rune-knight' && cl.level >= 7))
-    overrides['runic_shield'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'the-genie' && cl.level >= 6))
-    overrides['elemental_gift'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'rune-knight' && cl.level >= 3))
-    overrides['giants_might'] = profBonus;
-  if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon' && cl.level >= 3))
-    overrides['breath_of_the_dragon'] = profBonus;
-  // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
-  if (c.classes.some(cl => cl.subclassId === 'light-domain'))
-    overrides['warding_flare'] = Math.max(1, abilityMod(score('wis')));
-  // Wisdom-modifier-per-long-rest features (PHB / XGtE / TCE), minimum 1 use each.
-  {
-    const wisUses = Math.max(1, abilityMod(score('wis')));
-    const has = (id: string, lvl = 1) => c.classes.some(cl => cl.subclassId === id && cl.level >= lvl);
-    if (has('tempest-domain')) overrides['wrath_of_the_storm'] = wisUses;
-    if (has('war-domain')) overrides['war_priest'] = wisUses;
-    if (has('grave-domain')) overrides['eyes_of_the_grave'] = wisUses;
-    if (has('grave-domain', 6)) overrides['sentinel_at_deaths_door'] = wisUses;
-    if (has('monster-slayer', 3)) overrides['hunters_sense'] = wisUses;
-    if (has('order-domain', 6)) overrides['embodiment_of_the_law'] = wisUses;
-    if (has('circle-of-spores', 6)) overrides['fungal_infestation'] = wisUses;
-  }
-  // Battle Smith Arcane Jolt (TCE): Int modifier; Eloquence Infectious Inspiration: Cha modifier.
-  if (c.classes.some(cl => cl.subclassId === 'battle-smith' && cl.level >= 9))
-    overrides['arcane_jolt'] = Math.max(1, abilityMod(score('int')));
-  if (c.classes.some(cl => cl.subclassId === 'college-of-eloquence' && cl.level >= 14))
-    overrides['infectious_inspiration'] = Math.max(1, abilityMod(score('cha')));
-  // Features found by the second-pass gap check: limited uses inside subclasses that
-  // already had a resources block, so the main sweep skipped the whole entry.
-  if (c.classes.some(cl => cl.subclassId === 'circle-of-dreams' && cl.level >= 10))
-    overrides['hidden_paths'] = Math.max(1, abilityMod(score('wis')));
-  if (c.classes.some(cl => cl.subclassId === 'fey-wanderer' && cl.level >= 15))
-    overrides['misty_wanderer'] = Math.max(1, abilityMod(score('wis')));
-  if (c.classes.some(cl => cl.subclassId === 'oath-of-glory' && cl.level >= 15))
-    overrides['glorious_defense'] = Math.max(1, abilityMod(score('cha')));
-  if (c.classes.some(cl => cl.subclassId === 'alchemist' && cl.level >= 9))
-    overrides['restorative_reagents'] = Math.max(1, abilityMod(score('int')));
-  if (c.classes.some(cl => cl.subclassId === 'echo-knight' && cl.level >= 15))
-    overrides['reclaim_potential'] = Math.max(1, abilityMod(score('con')));
-  // ToB Captain's Call: 1 + Charisma modifier uses (minimum 1) per long rest.
-  if (c.classes.some(cl => cl.subclassId === 'tob-captain' && cl.level >= 3))
-    overrides['captains_call'] = Math.max(1, 1 + abilityMod(score('cha')));
-  // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
-  if (c.classes.some(cl => cl.subclassId === 'school-of-abjuration'))
-    overrides['arcane_ward'] = classLevel(c.classes, 'wizard') * 2 + abilityMod(score('int'));
-  // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
-  {
-    const palLvl = classLevel(c.classes, 'paladin');
-    if (palLvl > 0) {
-      overrides['divine_sense'] = Math.max(1, 1 + abilityMod(score('cha')));
-      if (palLvl >= 14) overrides['cleansing_touch'] = Math.max(1, abilityMod(score('cha')));
-    }
-  }
-  // Way of the Ascendant Dragon: Wings Unfurled (monk 6) + Aspect of the Wyrm
-  // (monk 11) — proficiency-bonus uses per long rest, level-gated.
-  if (c.classes.some(cl => cl.subclassId === 'way-of-the-ascendant-dragon')) {
-    const monkLvl = classLevel(c.classes, 'monk');
-    if (monkLvl >= 6)  overrides['wings_unfurled']     = profBonus;
-    if (monkLvl >= 11) overrides['aspect_of_the_wyrm'] = profBonus;
-  }
-  return overrides;
+  return computeCharacterDerived(c).resourceMaxOverrides;
 }
 
 

@@ -60,7 +60,7 @@ export function computeCharacterDerived(character: Character) {
     for (const [key, val] of Object.entries(chosenAsi(bgDef, character.backgroundAbilityChoice))) {
       finalScores[key as AbilityKey] = (finalScores[key as AbilityKey] ?? 10) + (val ?? 0);
     }
-    for (const featId of character.selectedFeats) {
+    for (const featId of character.selectedFeats ?? []) {
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (feat?.abilityScoreIncrease) {
         for (const [key, val] of Object.entries(feat.abilityScoreIncrease)) {
@@ -184,7 +184,7 @@ export function computeCharacterDerived(character: Character) {
     let featSpeedBonus = 0;
     let featPassivePerceptionBonus = 0;
     let featPassiveInvestigationBonus = 0;
-    for (const featId of character.selectedFeats) {
+    for (const featId of character.selectedFeats ?? []) {
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (!feat) continue;
       featInitiativeBonus             += feat.initiativeBonus             ?? 0;
@@ -195,8 +195,12 @@ export function computeCharacterDerived(character: Character) {
 
     // Skill bonuses — merge class choices with background-granted proficiencies
     const bg = getBackground(character.backgroundId);
+    // `?? []` is load-bearing, not defensive noise: characters saved before this field existed
+    // carry it as undefined, and spreading undefined throws. That was survivable while only the
+    // display used this function, but the store now delegates its resource maxima here — so a
+    // throw would take out load() itself and make the character unopenable.
     const skillProfs = new Set<string>([
-      ...character.selectedSkillProficiencies,
+      ...(character.selectedSkillProficiencies ?? []),
       ...(bg?.skillProficiencies ?? []),
     ]);
 

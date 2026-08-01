@@ -3226,3 +3226,46 @@ Probe note: the first extraction reported the store side had **0** override keys
 on the variable name used in the *other* file. Zero was the tell — a population count that collapses
 to nothing is a broken probe, not a clean result. Same instinct that caught the 129-vs-615 spell
 reference gap.
+
+---
+
+## 🔴 The resource-override duplication HAD already drifted — found, proven, fixed
+
+The previous entry recorded the 52-key duplication as "in sync, but fragile". That was true of the
+**override rules** and false of the **ability scores they read**. Looking harder found a live bug.
+
+`computeResourceMaxOverrides` composed scores as *base + racial + feats*. `computeCharacterDerived`
+does three further things it did not:
+
+1. **PHB 2024 background ASI** (the C7 fix) — the big one
+2. Primal Champion's +4 STR/CON at Barbarian 20
+3. The score **cap** at 20 / 24 — the store never capped at all
+
+So any character whose background raises an ability had one maximum on screen and a different one in
+storage, and **the long rest wrote the lower one**.
+
+**Reproduced on a bard with base Cha 15 and a 2024 background granting +2:**
+
+| | display | stored | after long rest |
+|---|---|---|---|
+| before | Cha 18 (+4), **4 pips** | `max: 3` | `current: 3` — **a use silently lost** |
+| after | Cha 18 (+4), 4 pips | `max: 4` | `current: 4 / 4` |
+
+### Fix: delete the copy rather than re-sync it
+`computeCharacterDerived` is already exported and pure, takes a `Character`, and **neither module
+imports the other** — so the store's 148-line duplicate became a one-line delegation. Net −131 lines.
+It computes more than the overrides, but only runs on load, level-up and rest, never in a render
+path.
+
+Re-syncing would have restored the same standing invitation to drift. This removes the possibility.
+
+### One regression the fix introduced, caught before commit
+Delegating means `load()` now runs the *whole* derive, so anything that throws in it makes a
+character **unopenable** — a much higher bar than "the display is wrong". Running all 115 saved
+characters through it surfaced one: `selectedSkillProficiencies is not iterable` on a character
+saved before that field existed. Guarded that spread and the two `selectedFeats` loops; all 115 now
+compute clean, and the guards carry a comment saying why they are load-bearing rather than defensive
+noise.
+
+**Widening a function's blast radius means re-testing the whole population against it**, not just
+the case you were fixing.
