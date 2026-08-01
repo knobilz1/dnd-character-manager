@@ -269,7 +269,8 @@ def races():
         ['node', '-e',
          'const m=await import(process.argv[1]);'
          'const f=[];const w=r=>{f.push({id:r.id,name:r.name,book:r.sourceBook,'
-         'parent:r.parentRaceId??null,traits:(r.traits??[]).map(t=>({name:t.name,d:t.description}))});'
+         'parent:r.parentRaceId??null,hidden:!!r.hidden,'
+         'traits:(r.traits??[]).map(t=>({name:t.name,d:t.description}))});'
          '(r.subraces??[]).forEach(w)};m.ALL_RACES.forEach(w);console.log(JSON.stringify(f));',
          scratch],
         capture_output=True, text=True, encoding='utf-8')
@@ -286,10 +287,15 @@ def main():
     all_races = races()
     by_id = {r['id']: r for r in all_races}
     stats, findings = {}, []
-    paired = unpaired = nobook = 0
+    paired = unpaired = nobook = hidden = 0
 
     for r in all_races:
         if only and r['book'] != only:
+            continue
+        # A race withheld from the picker is not a coverage gap. Counted separately rather than
+        # skipped silently, so "hidden" can never quietly become "audited".
+        if r.get('hidden'):
+            hidden += 1
             continue
         st = stats.setdefault(r['book'], {'paired': 0, 'total': 0, 'nobook': 0, 'traits': 0, 'found': 0})
         st['total'] += 1

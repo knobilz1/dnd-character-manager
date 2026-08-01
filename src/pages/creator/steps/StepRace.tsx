@@ -23,11 +23,13 @@ export function StepRace() {
 
   const gender = draft.appearance?.gender ?? 'male';
 
+  // `!r.hidden` withholds a race whose source is in doubt from the picker. It stays in ALL_RACES
+  // so `getRace` resolves it and an existing character built as one still opens.
   const availableRaces = ALL_RACES.filter(r =>
-    bookEnabled(r, draft.enabledBooks) && !r.isSubrace
+    bookEnabled(r, draft.enabledBooks) && !r.isSubrace && !r.hidden
   );
   const subraceRaces = ALL_RACES.filter(r =>
-    bookEnabled(r, draft.enabledBooks) && r.isSubrace
+    bookEnabled(r, draft.enabledBooks) && r.isSubrace && !r.hidden
   );
 
   const subGroupIds = [...new Set(

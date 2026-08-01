@@ -988,7 +988,20 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'leonin',
-    // MMoM p.23: Daunting Roar — proficiency bonus uses per long rest.
+    // HIDDEN — source in doubt, not deleted. `getRace('leonin')` still resolves, so any character
+    // already built as one keeps working; it is only withheld from the picker.
+    //
+    // The old comment here cited "MMoM p.23", and MMoM does not contain Leonin at all: the book's
+    // own contents run Kenku → Kobold → Lizardfolk → Minotaur with 67 characters between Kobold
+    // and Minotaur, and neither "Daunting Roar" nor "Hunter's Instincts" appears anywhere in it.
+    // Leonin is from Mythic Odysseys of Theros, which is not a book this app knows and is not on
+    // disk to verify against.
+    //
+    // The traits below do not match MOoT either — that Leonin has a fixed Con +2 / Str +1 and a
+    // Daunting Roar usable once per short or long rest, where this one has a flexible ASI and
+    // proficiency-bonus uses. So this is a modernised version whose provenance is unclear, and it
+    // stays hidden until there is a source to check it against.
+    hidden: true,
     resources: [
       { name: 'Daunting Roar', key: 'daunting_roar', rechargeOn: 'long', maxPerLevel: profBonusByLevel() },
     ],

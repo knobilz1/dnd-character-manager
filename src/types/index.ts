@@ -96,6 +96,10 @@ export interface Race {
   resistances?: DamageType[];
   languages: string[];
   proficiencies?: string[];
+  /** Withheld from the race picker while its source is in doubt, WITHOUT deleting it — `getRace`
+   *  still resolves the id, so a character already built as this race keeps working. Removing the
+   *  entry outright would make that character unopenable. */
+  hidden?: boolean;
   isSubrace: boolean;
   parentRaceId?: string;
   subraces?: Race[];
