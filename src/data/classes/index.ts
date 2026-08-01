@@ -1,4 +1,4 @@
-import type { DClass } from '../../types';
+import type { AbilityKey, AbilityScores, DClass } from '../../types';
 import { PHB2024_CLASSES } from './phb2024';
 
 export const ALL_CLASSES: DClass[] = [
@@ -241,7 +241,8 @@ export const ALL_CLASSES: DClass[] = [
     ],
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
-    multiclassPrerequisites: { str: 13 }, // Source: Str 13 OR Dex 13; type can't express OR
+    multiclassPrerequisites: { str: 13 },
+    multiclassPrerequisitesAlt: { dex: 13 }, // Fighter is Str 13 OR Dex 13 (PHB p.163)
     // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
     multiclassGains: ['Light armor', 'Medium armor', 'Shields', 'Simple weapons', 'Martial weapons'],
     features: [
@@ -673,4 +674,64 @@ export function baseClassId(id: string): string {
 /** Total level in a class, counting its PHB 2024 variant as the same class. */
 export function classLevel(classes: { classId: string; level: number }[], id: string): number {
   return classes.reduce((n, c) => (baseClassId(c.classId) === id ? n + c.level : n), 0);
+}
+
+// ── Multiclassing ────────────────────────────────────────────────────────────
+
+const ABILITY_LABEL: Record<string, string> = {
+  str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA',
+};
+
+function meetsOneSet(req: Partial<Record<AbilityKey, number>>, scores: AbilityScores): boolean {
+  return Object.entries(req).every(([ability, min]) => (scores[ability as AbilityKey] ?? 0) >= (min ?? 0));
+}
+
+function describeSet(req: Partial<Record<AbilityKey, number>>): string {
+  return Object.entries(req)
+    .map(([ability, min]) => `${ABILITY_LABEL[ability] ?? ability.toUpperCase()} ${min}`)
+    .join(' and ');
+}
+
+/** Human-readable form of a class's multiclass requirement, e.g. "STR 13 or DEX 13". */
+export function multiclassRequirementText(def: DClass): string {
+  const main = describeSet(def.multiclassPrerequisites);
+  return def.multiclassPrerequisitesAlt
+    ? `${main} or ${describeSet(def.multiclassPrerequisitesAlt)}`
+    : main;
+}
+
+/** Whether a character's scores satisfy one class's multiclass requirement. */
+export function meetsMulticlassPrereq(def: DClass, scores: AbilityScores): boolean {
+  if (meetsOneSet(def.multiclassPrerequisites, scores)) return true;
+  return !!def.multiclassPrerequisitesAlt && meetsOneSet(def.multiclassPrerequisitesAlt, scores);
+}
+
+/**
+ * Why a character may NOT take their first level in `targetClassId` — empty means they may.
+ *
+ * PHB p.163: you must meet the prerequisites of the class you are LEAVING as well as the one you
+ * are entering, which is why this checks every class already on the sheet and not just the target.
+ *
+ * `scores` are FINAL ability scores (racial bonuses, ASIs and feats included) — that is what the
+ * book means by "your ability scores". They are passed in rather than computed here so this module
+ * never has to import the derive, which imports this one.
+ *
+ * Note the data carried `multiclassPrerequisites` on all 25 classes for months with no reader at
+ * all, so nothing enforced this and no UI existed to reach it. This function is that reader.
+ */
+export function multiclassBlockers(
+  scores: AbilityScores,
+  currentClassIds: string[],
+  targetClassId: string,
+): string[] {
+  const blockers: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...currentClassIds, targetClassId]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const def = getClass(id);
+    if (!def || meetsMulticlassPrereq(def, scores)) continue;
+    blockers.push(`${def.name} needs ${multiclassRequirementText(def)}`);
+  }
+  return blockers;
 }

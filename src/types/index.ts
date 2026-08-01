@@ -175,6 +175,11 @@ export interface DClass {
   subclassLabel: string;
   subclassLevel: number;
   multiclassPrerequisites: Partial<Record<AbilityKey, number>>;
+  /** A SECOND set that also qualifies, for the one class whose prerequisite is an OR rather than
+   *  an AND: fighter is "Str 13 or Dex 13" (PHB p.163). Every other class ANDs its requirements,
+   *  so this is left unset. Without it a dexterous fighter with Str 8 would be refused a
+   *  multiclass the book allows. */
+  multiclassPrerequisitesAlt?: Partial<Record<AbilityKey, number>>;
   /** Proficiencies gained when this is your SECOND (multiclass) entry — not granted at 1st-level start.
    *  Source: PHB p.163 multiclassing table (2014); PHB 2024 per-class "As a Multiclass Character" section.
    *  Empty array = no additional proficiencies (Sorcerer, Wizard, Monk 2024). */

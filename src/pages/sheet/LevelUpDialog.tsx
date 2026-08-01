@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, Button, Badge, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
-import { getClass } from '../../data/classes';
+import { getClass, ALL_CLASSES, baseClassId, multiclassBlockers } from '../../data/classes';
 import { getSubclass, ALL_SUBCLASSES } from '../../data/subclasses';
 import { getRace } from '../../data/races';
 import { getBackground } from '../../data/backgrounds';
@@ -164,10 +164,31 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const derived = useCharacterDerived(character);
   const [selectedClassIdx, setSelectedClassIdx] = React.useState(0);
   const [pendingSubclass, setPendingSubclass] = React.useState<string | undefined>(undefined);
+  // Set when the player is taking their FIRST level in a class they don't have yet. The store has
+  // always appended a new ClassLevel for this (useCharacterStore.levelUp) and this dialog has
+  // always had a `currentLevel === 0` branch for it — there was simply no way to ask for it, since
+  // the class picker below only ever listed classes already on the sheet.
+  const [newClassId, setNewClassId] = React.useState<string | null>(null);
 
-  const primary = character.classes[selectedClassIdx] ?? character.classes[0];
-  const classDef = primary ? getClass(primary.classId) : null;
-  const currentLevel = primary?.level ?? 1;
+  // Classes the character could dip into, each with the reason it's refused (empty = allowed).
+  // Shown-but-disabled rather than hidden: "why can't I take Paladin?" is answerable at a glance,
+  // and a silently missing option reads as a bug.
+  const multiclassOptions = React.useMemo(() => {
+    const scores = derived?.finalScores ?? character.baseAbilityScores;
+    const have = new Set(character.classes.map(cl => cl.classId));
+    const currentIds = character.classes.map(cl => cl.classId);
+    return ALL_CLASSES
+      .filter(def => !have.has(def.id))
+      // Don't offer the 2024 twin of a class already taken in its 2014 form, or vice versa —
+      // that isn't multiclassing, it's the same class listed twice.
+      .filter(def => !currentIds.some(id => baseClassId(id) === baseClassId(def.id)))
+      .filter(def => bookEnabled(def, character.enabledBooks))
+      .map(def => ({ def, blockers: multiclassBlockers(scores, currentIds, def.id) }));
+  }, [character.classes, character.enabledBooks, character.baseAbilityScores, derived?.finalScores]);
+
+  const primary = newClassId ? undefined : (character.classes[selectedClassIdx] ?? character.classes[0]);
+  const classDef = newClassId ? (getClass(newClassId) ?? null) : (primary ? getClass(primary.classId) : null);
+  const currentLevel = newClassId ? 0 : (primary?.level ?? 1);
   const newLevel = currentLevel + 1;
 
   const conMod = derived?.mods.con ?? abilityMod(character.baseAbilityScores.con);
@@ -236,11 +257,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     setPendingInfusions([]);
     setPendingOptionalFeatures([]);
     setPendingExpertise([]);
-  }, [selectedClassIdx]);
+  }, [selectedClassIdx, newClassId]);
 
   React.useEffect(() => {
     if (open) {
       setSelectedClassIdx(0);
+      setNewClassId(null);
       setMethod('average');
       setRollResult(null);
       setPendingSubclass(undefined);
@@ -393,7 +415,9 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   }
 
   function confirm() {
-    if (!primary) return;
+    // Guard on classDef, not `primary`: on a multiclass dip there IS no existing ClassLevel, and
+    // bailing on its absence made the Confirm button a silent no-op.
+    if (!classDef) return;
     if (needsSubclass && !pendingSubclass) return;
 
     // Add spells and cantrips to the spellbook.
@@ -425,7 +449,9 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
       });
     }
 
-    onConfirm(primary.classId, hpGained, hpRoll, pendingSubclass, buildASIChoice(), pendingExpertise.length > 0 ? pendingExpertise : undefined);
+    // `classId` (= classDef.id), not `primary.classId`: on a multiclass dip there is no `primary`
+    // yet, and the store keys off this to decide whether to bump a class or append a new one.
+    onConfirm(classId, hpGained, hpRoll, pendingSubclass, buildASIChoice(), pendingExpertise.length > 0 ? pendingExpertise : undefined);
     onClose();
   }
 
@@ -705,10 +731,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     .filter(f => f.minLevel === newLevel);
 
   return (
-    <Dialog open={open} onClose={onClose} title={currentLevel === 0 && character.classes.length > 1 ? `New Class: ${classDef.name}` : `Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
+    <Dialog open={open} onClose={onClose} title={currentLevel === 0 ? `New Class: ${classDef.name}` : `Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
       <div className="space-y-5">
-        {/* Multiclass proficiency gains — only shown when taking first level in a new class */}
-        {currentLevel === 0 && character.classes.length > 1 && (
+        {/* Multiclass proficiency gains — only shown when taking first level in a new class.
+            Was also gated on classes.length > 1, so it could never render on the dip that MAKES
+            a character multiclass — the only dip where these proficiencies are the whole point. */}
+        {currentLevel === 0 && (
           <section>
             <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
               Multiclass Proficiency Gains
@@ -730,31 +758,60 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
           </section>
         )}
 
-        {/* Class selector — only shown for multiclass characters */}
-        {character.classes.length > 1 && (
-          <section>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Level Up Which Class?</h3>
-            <div className="flex flex-wrap gap-2">
-              {character.classes.map((cl, idx) => {
-                const def = getClass(cl.classId);
-                return (
-                  <button
-                    key={cl.classId}
-                    onClick={() => setSelectedClassIdx(idx)}
-                    className={cn(
-                      'px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all',
-                      selectedClassIdx === idx
-                        ? 'border-red-500 bg-red-950/30 text-white'
-                        : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-500 hover:text-white',
-                    )}
-                  >
-                    {def?.name ?? cl.classId} <span className="text-slate-500 font-normal">Lv{cl.level}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        {/* Class selector — every class the character has, plus every class they could take a
+            first level in. Previously this listed only existing classes and rendered at all only
+            for characters who were ALREADY multiclass, which meant nothing could ever become
+            multiclass in the first place. */}
+        <section>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Level Up Which Class?</h3>
+          <div className="flex flex-wrap gap-2">
+            {character.classes.map((cl, idx) => {
+              const def = getClass(cl.classId);
+              return (
+                <button
+                  key={cl.classId}
+                  onClick={() => { setNewClassId(null); setSelectedClassIdx(idx); }}
+                  className={cn(
+                    'px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all',
+                    !newClassId && selectedClassIdx === idx
+                      ? 'border-red-500 bg-red-950/30 text-white'
+                      : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-500 hover:text-white',
+                  )}
+                >
+                  {def?.name ?? cl.classId} <span className="text-slate-500 font-normal">Lv{cl.level}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-[11px] text-slate-500 mt-3 mb-1.5">
+            Or take your first level in a new class. You must meet the ability requirements of the
+            class you already have as well as the one you're entering.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {multiclassOptions.map(({ def, blockers }) => {
+              const locked = blockers.length > 0;
+              return (
+                <button
+                  key={def.id}
+                  disabled={locked}
+                  onClick={() => setNewClassId(def.id)}
+                  title={locked ? blockers.join('; ') : `Take your first level in ${def.name}`}
+                  className={cn(
+                    'px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all',
+                    newClassId === def.id
+                      ? 'border-red-500 bg-red-950/30 text-white'
+                      : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-500 hover:text-white',
+                    locked && 'opacity-30 cursor-not-allowed hover:border-slate-700 hover:text-slate-400',
+                  )}
+                >
+                  + {def.name}
+                  {locked && <span className="block text-[10px] text-amber-400/80 font-normal">{blockers.join(' · ')}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
         {/* HP gain */}
         <section>

@@ -224,7 +224,8 @@ export const PHB2024_CLASSES: DClass[] = [
     ],
     subclassLabel: 'Martial Archetype',
     subclassLevel: 3,
-    multiclassPrerequisites: { str: 13 }, // Source: Str 13 OR Dex 13; type can't express OR
+    multiclassPrerequisites: { str: 13 },
+    multiclassPrerequisitesAlt: { dex: 13 }, // Fighter is Str 13 OR Dex 13 (PHB p.163)
     // Source: PHB p.163 (2014) / PHB 2024 per-class "As a Multiclass Character" section
     multiclassGains: ['Martial weapons', 'Light armor', 'Medium armor', 'Shields'],
     features: [
