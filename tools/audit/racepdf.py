@@ -145,6 +145,11 @@ def mech_tokens(s):
     # hyphen in it, but the union means we do not have to prove that).
     forms = {re.sub(r'\s+', ' ', fixed)}
     forms.add(re.sub(r'\s+', ' ', re.sub(r'[-‐­]\s*\n\s*', '', fixed)))
+    # "each foot of movement costs you 4 extra feet" is how the books write a movement penalty —
+    # 24 occurrences across 8 of them. The app states the same thing as "4 ft per ft", so the
+    # number and its unit never sit next to each other on the book's side and MMoM's Centaur was
+    # reported as inventing its own Equine Build.
+    forms |= {re.sub(r'(\d+)\s+extra\s+(feet|foot|ft)\b', r'\1 \2', f, flags=re.I) for f in forms}
     out = set()
     for form in forms:
         for m in MECH.finditer(form):
