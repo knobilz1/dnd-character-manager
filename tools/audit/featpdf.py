@@ -177,7 +177,11 @@ def locate(book, raw, idx, names, keys, want_words=None, chapter=None, weight=No
     # immediately), every candidate word was filtered as too common, and it fell back to the
     # heading — which in the 2024 PHB is a table entry 109,000 characters from the real text.
     if chapter:
-        lo, hi = chapter
+        # Clamp: feat_chapter returns a fixed 130,000-character width, which runs off the end of a
+        # shorter book. Latent here because every feat book is large; it crashed the moment the
+        # same locator was pointed at backgrounds.
+        lo = max(0, min(chapter[0], len(idx) - 1))
+        hi = max(lo, min(chapter[1], len(idx) - 1))
         cands.extend(range(lo, hi, 250))
 
     want, weight = want_words or set(), weight or {}
