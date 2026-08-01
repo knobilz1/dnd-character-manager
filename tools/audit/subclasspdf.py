@@ -48,6 +48,7 @@ import r6verify as V  # noqa: E402
 from racepdf import (_best_window, alt_flat, alt_text, flat, mech_tokens,  # noqa: E402
                      name_variants, trait_variants)
 from bookquality import BOOK_PDF  # noqa: E402
+from featpdf import content_words  # noqa: E402
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
@@ -167,8 +168,17 @@ def sweep(all_subs, only=None):
             # Conservative, for the reason featpdf documents: a feature's text can be columns away
             # from its heading, and that cannot be scored away. A token counts as present if it
             # appears near ANY occurrence of the feature name inside the entry.
+            # RANK the occurrences, never take the first 8 in document order. "Rage" appears 94
+            # times in the PHB and a class chapter is 90,000 characters wide, so the first eight
+            # are a contents line and seven table rows — the real entry never got read and
+            # Barbarian was reported as missing advantage, bonus action AND resistance.
+            # Ranked by the feature's own identity words, which are disjoint from the mechanics
+            # under test, so this cannot pull the window toward agreeing with the app.
+            ident = content_words(f['d'])
+            ranked = sorted(cands, key=lambda p: -len(ident & content_words(
+                raw[idx[p]: idx[min(len(idx) - 1, p + 900)]])))
             have = set()
-            for p in cands[:8]:
+            for p in ranked[:8]:
                 a = max(0, p - 500)
                 b = min(len(idx) - 1, p + max(len(flat(f['d'])) * 2, 2400))
                 have |= mech_tokens(raw[idx[a]: idx[b]], source=True)
