@@ -186,7 +186,14 @@ def _is_entry(raw, raw_idx, p, klen):
     """
     j = raw_idx[min(p + klen, len(raw_idx) - 1)]
     tail = raw[j:j + 40]
-    return not re.match(r'^[\s.,·—-]*\d', tail)
+    m = re.match(r'^[\s.,·—-]*(\d+)', tail)
+    if not m:
+        return True
+    # A BARE number is a folio: "Dwarven Resilience 20". Digits carrying an ordinal or running
+    # straight into a word are prose — TCE heads every subclass feature "Wild Surge / 3rd-level
+    # Path of Wild Magic feature", and rejecting those scored eight real TCE and EGtW entries at
+    # zero, so they failed to locate at all while their names and every feature sat in the book.
+    return bool(re.match(r'\s*(?:st|nd|rd|th|[A-Za-z])', tail[m.end():]))
 
 
 def _best_window(book, names, keys, span, raw=None, raw_idx=None):
