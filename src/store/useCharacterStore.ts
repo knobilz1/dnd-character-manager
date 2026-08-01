@@ -110,6 +110,13 @@ interface CharacterState {
   setPortrait: (dataUrl: string | undefined) => void;
 
   // Alternate Forms (Wild Shape, Path of the Beast, Armorer)
+  // Companions (creatures the character controls but is not)
+  addCompanion: (c: import('../types').Companion) => void;
+  removeCompanion: (id: string) => void;
+  setCompanionHP: (id: string, hp: number) => void;
+  setCompanionActive: (id: string, active: boolean) => void;
+  renameCompanion: (id: string, name: string) => void;
+
   activateWildShape: (form: import('../types').ActiveWildShape) => void;
   deactivateWildShape: () => void;
   damageWildShape: (amount: number) => void;
@@ -1091,6 +1098,38 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     set((s) => s.character ? { character: { ...s.character, portrait: dataUrl } } : s),
 
   // ── Alternate Forms ────────────────────────────────────────────────────
+  // ── Companions ─────────────────────────────────────────────────────────────
+  // A companion is a separate creature, so unlike Wild Shape its HP is its own pool and running
+  // it to 0 does NOT revert or damage the character — a downed companion stays in the list at 0
+  // so it can be healed or, for a beast, replaced by bonding a new one over 8 hours.
+  addCompanion: (c) =>
+    set((s) => s.character
+      ? { character: { ...s.character, companions: [...(s.character.companions ?? []), c] } }
+      : s),
+
+  removeCompanion: (id) =>
+    set((s) => s.character
+      ? { character: { ...s.character, companions: (s.character.companions ?? []).filter(c => c.id !== id) } }
+      : s),
+
+  setCompanionHP: (id, hp) =>
+    set((s) => s.character
+      ? { character: { ...s.character, companions: (s.character.companions ?? []).map(c =>
+          c.id === id ? { ...c, currentHP: Math.max(0, hp) } : c) } }
+      : s),
+
+  setCompanionActive: (id, active) =>
+    set((s) => s.character
+      ? { character: { ...s.character, companions: (s.character.companions ?? []).map(c =>
+          c.id === id ? { ...c, active } : c) } }
+      : s),
+
+  renameCompanion: (id, name) =>
+    set((s) => s.character
+      ? { character: { ...s.character, companions: (s.character.companions ?? []).map(c =>
+          c.id === id ? { ...c, name } : c) } }
+      : s),
+
   activateWildShape: (form) =>
     set((s) => s.character ? { character: { ...s.character, activeWildShape: form } } : s),
 

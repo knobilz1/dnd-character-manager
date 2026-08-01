@@ -49,6 +49,8 @@ import { ALL_FEATS } from '../../data/feats';
 import { useSidebarStore, type SidebarModuleId } from '../../store/useSidebarStore';
 import { SidebarPanel } from './SidebarPanel';
 import { AlternateFormPanel } from '../../components/AlternateFormPanel';
+import { CompanionPanel } from '../../components/CompanionPanel';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { WildShapeModal } from '../../components/WildShapeModal';
 
 // Find a resource definition by key, checking both class and subclass.
@@ -1701,6 +1703,23 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
+  /** Open a companion in its own window so it can sit beside the sheet while you run both.
+   *  Copies openBorrowedWindow in HomePage — same getByLabel-to-focus (re-opening focuses the
+   *  existing window rather than spawning a duplicate) and the same tauri://error guard. */
+  async function openCompanionWindow(c: import('../../types').Companion) {
+    const label = `companion-${c.id}`;
+    const existing = await WebviewWindow.getByLabel(label);
+    if (existing) { await existing.setFocus().catch(() => {}); return; }
+    const w = new WebviewWindow(label, {
+      url: `/companion/${character.id}/${c.id}`,
+      title: `${c.name} — companion`,
+      width: 460,
+      height: 640,
+      focus: true,
+    });
+    w.once('tauri://error', (e) => console.warn('Companion window:', e.payload ?? e));
+  }
+
   // ── Death-save die ──────────────────────────────────────────────────────
   const { triggerRoll: dsTrigger, lastResult } = useDiceStore();
   const seenDeathNonce = React.useRef<number>(-1);
@@ -1785,6 +1804,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
       {/* Weapon Attacks */}
       <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} />
+
+      {/* Companions — a second creature, not a transformation. Renders nothing unless the
+          character can have one or already does. */}
+      <CompanionPanel character={character} onPopOut={openCompanionWindow} />
 
       {/* Alternate Forms (Wild Shape / Path of the Beast / Armorer) */}
       {hasAlternateForm && (

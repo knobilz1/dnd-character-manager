@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
 import { CreatorPage } from './pages/creator/CreatorPage';
 import { SheetPage } from './pages/sheet/SheetPage';
+import { CompanionView } from './pages/companion/CompanionView';
 import { GraveyardPage } from './pages/GraveyardPage';
 import { DMConsolePage } from './pages/dm/DMConsolePage';
 import { useAppUpdater } from './hooks/useAppUpdater';
@@ -53,6 +54,8 @@ export default function App() {
         <Route index element={<HomePage checkForUpdates={updater.checkForUpdates} checkStatus={updater.checkStatus} />} />
         <Route path="create" element={<CreatorPage />} />
         <Route path="character/:id" element={<SheetPage />} />
+        {/* A companion in its own window — opened from the sheet's Companions panel. */}
+        <Route path="companion/:charId/:companionId" element={<CompanionView />} />
         <Route path="graveyard" element={<GraveyardPage />} />
         <Route path="dm" element={<DMConsolePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
