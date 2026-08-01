@@ -552,6 +552,52 @@ export interface ActiveWildShape {
   isCustom?: boolean;
 }
 
+// ── Companions ───────────────────────────────────────────────────────────────
+
+/**
+ * A creature the character CONTROLS but is not — a Beast Master's beast, a Steel Defender, a
+ * drake, a familiar. Distinct from ActiveWildShape, which transforms the character rather than
+ * adding a second creature.
+ *
+ * `kind` is the load-bearing field. Beast Master grafts the RANGER's proficiency bonus onto an
+ * ordinary beast stat block and floors its HP at 4 x ranger level, while a Steel Defender and a
+ * drake have their own progressions. Storing only "which stat block" would be right for one
+ * subclass and silently wrong for the rest.
+ */
+export interface Companion {
+  id: string;
+  /** Which feature granted it — decides how the numbers scale. */
+  kind: 'beast-master' | 'steel-defender' | 'drakewarden' | 'familiar';
+  /** The class whose level drives the scaling (e.g. 'ranger' for a Beast Master beast). */
+  classId: string;
+  /** Stat block id from beastForms.ts. Used by `beast-master`; other kinds carry their own. */
+  beastId?: string;
+  /** Player-given name — the beast's species stays on the stat block. */
+  name: string;
+  currentHP: number;
+  tempHP?: number;
+  conditions?: Condition[];
+  /** Whether it is currently out. Only active companions are placed on maps and tracked in a
+   *  fight — the DM console reads this to know whether to give it a deployment cell. */
+  active: boolean;
+}
+
+/** A companion's live numbers with its owner's scaling already applied. */
+export interface CompanionDerived {
+  beastName: string;
+  size: 'Tiny' | 'Small' | 'Medium' | 'Large' | 'Huge';
+  cr: string;
+  maxHP: number;
+  ac: number;
+  speed: BeastFormSpeed;
+  /** The bonus folded into ac / toHit / damage above, so the UI can show its working. */
+  profBonusApplied: number;
+  /** 2 once Bestial Fury (11th) is online. */
+  attacksPerAction: number;
+  attacks: BeastFormAttack[];
+  specialAbilities: string[];
+}
+
 // ── Campaign Journal ─────────────────────────────────────────────────────────
 
 export interface JournalEntry {
@@ -653,6 +699,9 @@ export interface Character {
   journal?: JournalEntry[];
   // Alternate form state
   activeWildShape?: ActiveWildShape | null;
+  /** Creatures the character controls but is not (Beast Master beast, Steel Defender, familiar).
+   *  Separate from activeWildShape, which is a transformation of the character. */
+  companions?: Companion[];
   armorerMode?: 'guardian' | 'infiltrator';
   pathOfBeastForm?: 'bite' | 'claws' | 'tail' | null;
   // Expertise (doubled proficiency bonus): skill names where the character has expertise
