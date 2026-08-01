@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from io import BytesIO as io_bytes
 
 sys.path.insert(0, os.path.dirname(__file__))
 import r6verify as V  # noqa: E402
@@ -32,10 +33,35 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 FURNITURE = re.compile(r'^\s*(\d+/\d+/\d+,.*|https?://\S+.*|\d+/\d+)\s*$', re.M)
 
 
+def page_image(pg):
+    """The page's own scan, which is the LARGEST image on it.
+
+    Not `images[0]`: some books place a logo or a decorative rule first, and taking that yields a
+    few characters for a whole page. VGM looked like it simply would not OCR — 17 characters from
+    18 pages — until this was the difference.
+    """
+    best, size = None, 0
+    for im in pg.images:
+        try:
+            data = im.data
+        except Exception:                                    # noqa: BLE001
+            continue
+        if len(data) > size:
+            best, size = data, len(data)
+    return best
+
+
 def ocr_page(img_bytes, tmpdir, i):
+    # Decode through PIL rather than writing the raw bytes out with a .png name. Volo's pages are
+    # JPEG 2000 (Im0.jp2), and tesseract simply fails on a mis-named file — the book looked like it
+    # would not OCR at all, 17 characters from 18 pages, purely because of the extension.
     src = os.path.join(tmpdir, f'p{i}.png')
-    with open(src, 'wb') as f:
-        f.write(img_bytes)
+    try:
+        from PIL import Image
+        Image.open(io_bytes(img_bytes)).convert('RGB').save(src)
+    except Exception:                                        # noqa: BLE001
+        with open(src, 'wb') as f:
+            f.write(img_bytes)
     out = os.path.join(tmpdir, f'p{i}')
     r = subprocess.run(['tesseract', src, out, '--psm', '3'],
                        capture_output=True, text=True)
@@ -77,10 +103,10 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for i in pages:
             pg = r.pages[i]
-            imgs = list(pg.images)
             txt = ''
-            if imgs:
-                txt = ocr_page(imgs[0].data, tmp, i)
+            img = page_image(pg)
+            if img is not None:
+                txt = ocr_page(img, tmp, i)
             if not txt.strip():
                 txt = pg.extract_text() or ''
             out.append(FURNITURE.sub('', txt))

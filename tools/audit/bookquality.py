@@ -55,43 +55,48 @@ def profile(pdf):
     }
 
 
-rows = []
-for book, pdf in BOOK_PDF.items():
-    if not os.path.exists(os.path.join(V.REF, pdf)):
-        continue
-    try:
-        rows.append((book, profile(pdf)))
-    except Exception as e:                                        # noqa: BLE001
-        rows.append((book, {'error': str(e)[:60]}))
+def report():
+    rows = []
+    for book, pdf in BOOK_PDF.items():
+        if not os.path.exists(os.path.join(V.REF, pdf)):
+            continue
+        try:
+            rows.append((book, profile(pdf)))
+        except Exception as e:                                        # noqa: BLE001
+            rows.append((book, {'error': str(e)[:60]}))
 
-print('| book | chars | vocab missing | dice as "ld" | NUL | ligatures | fragments | verdict |')
-print('|---|---|---|---|---|---|---|---|')
-suspect = []
-for book, p in rows:
-    if 'error' in p:
-        print(f"| {book} | — | — | — | — | — | — | EXTRACT FAILED: {p['error']} |")
-        suspect.append(book)
-        continue
-    bad = []
-    if p['missing']:
-        bad.append('missing core vocabulary')
-    if p['ld'] > p['1d']:
-        bad.append('dice mis-read')
-    if p['nul']:
-        bad.append('NUL ligatures')
-    if p['lig']:
-        bad.append('unicode ligatures')
-    if p['chars'] < 200_000:
-        bad.append('almost no text')
-    verdict = 'OK' if not bad else '⚠ ' + ', '.join(bad)
-    if bad:
-        suspect.append(book)
-    print(f"| {book} | {p['chars']:,} | {','.join(p['missing']) or '—'} | {p['ld']} vs {p['1d']} | "
-          f"{p['nul']} | {p['lig']} | {p['frag']:.0f}% | {verdict} |")
+    print('| book | chars | vocab missing | dice as "ld" | NUL | ligatures | fragments | verdict |')
+    print('|---|---|---|---|---|---|---|---|')
+    suspect = []
+    for book, p in rows:
+        if 'error' in p:
+            print(f"| {book} | — | — | — | — | — | — | EXTRACT FAILED: {p['error']} |")
+            suspect.append(book)
+            continue
+        bad = []
+        if p['missing']:
+            bad.append('missing core vocabulary')
+        if p['ld'] > p['1d']:
+            bad.append('dice mis-read')
+        if p['nul']:
+            bad.append('NUL ligatures')
+        if p['lig']:
+            bad.append('unicode ligatures')
+        if p['chars'] < 200_000:
+            bad.append('almost no text')
+        verdict = 'OK' if not bad else '⚠ ' + ', '.join(bad)
+        if bad:
+            suspect.append(book)
+        print(f"| {book} | {p['chars']:,} | {','.join(p['missing']) or '—'} | {p['ld']} vs {p['1d']} | "
+              f"{p['nul']} | {p['lig']} | {p['frag']:.0f}% | {verdict} |")
 
-print(f'\n{len(rows) - len(suspect)} of {len(rows)} books extract cleanly.')
-if suspect:
-    print('Needs handling before any sweep against it is believable: ' + ', '.join(suspect))
-print('\nNote: `debook()` in racepdf.py already repairs the ligature and dice cases at COMPARISON\n'
-      'time, so a flagged book is not necessarily giving wrong answers today — it is a book whose\n'
-      'raw text a NEW sweep must not read naively.')
+    print(f'\n{len(rows) - len(suspect)} of {len(rows)} books extract cleanly.')
+    if suspect:
+        print('Needs handling before any sweep against it is believable: ' + ', '.join(suspect))
+    print('\nNote: `debook()` in racepdf.py already repairs the ligature and dice cases at COMPARISON\n'
+          'time, so a flagged book is not necessarily giving wrong answers today — it is a book whose\n'
+          'raw text a NEW sweep must not read naively.')
+
+
+if __name__ == '__main__':
+    report()
