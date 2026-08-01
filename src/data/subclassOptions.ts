@@ -182,6 +182,54 @@ export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
     ],
   }],
 
+  // PHB p.80. The monk knows Elemental Attunement for free and picks one other at 3rd, then one
+  // more at 6th, 11th and 17th — so the CHOSEN count is 1/2/3/4 and Elemental Attunement is not in
+  // the list. Without this the subclass is unplayable from the sheet: its entire content is which
+  // disciplines you took. Level requirements are carried in the choice NAME, which is the
+  // convention SubclassOptionsPicker already gates on (see Rune Knight).
+  'way-of-the-four-elements': [{
+    key: 'elementalDisciplines',
+    label: 'Elemental Disciplines (Elemental Attunement is known for free)',
+    picksByLevel: { 3: 1, 6: 2, 11: 3, 17: 4 },
+    choices: [
+      { id: 'fangs-of-the-fire-snake', name: 'Fangs of the Fire Snake', description: '1 ki — unarmed reach +10 ft, fire damage' },
+      { id: 'fist-of-four-thunders', name: 'Fist of Four Thunders', description: '2 ki — thunderwave' },
+      { id: 'fist-of-unbroken-air', name: 'Fist of Unbroken Air', description: '2 ki — 3d10 bludgeoning, push and prone' },
+      { id: 'rush-of-the-gale-spirits', name: 'Rush of the Gale Spirits', description: '2 ki — gust of wind' },
+      { id: 'shape-the-flowing-river', name: 'Shape the Flowing River', description: '1 ki — reshape ice and water' },
+      { id: 'sweeping-cinder-strike', name: 'Sweeping Cinder Strike', description: '2 ki — burning hands' },
+      { id: 'water-whip', name: 'Water Whip', description: '2 ki — 3d10 bludgeoning, prone or pull' },
+      { id: 'clench-of-the-north-wind', name: 'Clench of the North Wind (6th)', description: '3 ki — hold person' },
+      { id: 'gong-of-the-summit', name: 'Gong of the Summit (6th)', description: '3 ki — shatter' },
+      { id: 'eternal-mountain-defense', name: 'Eternal Mountain Defense (11th)', description: '5 ki — stoneskin (self)' },
+      { id: 'flames-of-the-phoenix', name: 'Flames of the Phoenix (11th)', description: '4 ki — fireball' },
+      { id: 'mist-stance', name: 'Mist Stance (11th)', description: '4 ki — gaseous form (self)' },
+      { id: 'ride-the-wind', name: 'Ride the Wind (11th)', description: '4 ki — fly (self)' },
+      { id: 'breath-of-winter', name: 'Breath of Winter (17th)', description: '6 ki — cone of cold' },
+      { id: 'river-of-hungry-flame', name: 'River of Hungry Flame (17th)', description: '5 ki — wall of fire' },
+      { id: 'wave-of-rolling-earth', name: 'Wave of Rolling Earth (17th)', description: '6 ki — wall of stone' },
+    ],
+  }],
+
+  // XGtE p.34: "any simple or martial weapon that lacks the heavy and special properties. The
+  // longbow is also a valid choice." Two at 3rd, then one more at 6th, 11th and 17th.
+  // Derived from items.ts rather than hand-typed: excluded the 8 heavy weapons and Net, then
+  // dropped Lance (its description spells out the special property without using the word) and
+  // added Longbow back per the explicit exception. Ids are WEAPON_TABLE names so the proficiency
+  // grant below can resolve them through lookupWeapon.
+  'way-of-the-kensei': [{
+    key: 'kenseiWeapons',
+    label: 'Kensei Weapons (at least one melee and one ranged)',
+    picksByLevel: { 3: 2, 6: 3, 11: 4, 17: 5 },
+    grants: 'weapon',
+    choices: [
+      'club', 'dagger', 'greatclub', 'handaxe', 'javelin', 'light hammer', 'mace', 'quarterstaff',
+      'sickle', 'spear', 'battleaxe', 'flail', 'longsword', 'morningstar', 'rapier', 'scimitar',
+      'shortsword', 'trident', 'war pick', 'warhammer', 'whip',
+      'light crossbow', 'dart', 'shortbow', 'sling', 'blowgun', 'hand crossbow', 'longbow',
+    ].map(w => ({ id: w, name: w.replace(/\b\w/g, c => c.toUpperCase()) })),
+  }],
+
   // ── Subclass SKILL grants ──────────────────────────────────────────────────────────────────
   // These carry `grants: 'skill'`, so useCharacterDerived merges the picks straight into the skill
   // proficiency set. Before this they were feature prose only: the creator caps skill picks at the

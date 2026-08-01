@@ -1,5 +1,6 @@
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
+import { getSubclassOptions } from '../data/subclassOptions';
 import { lookupWeapon } from '../data/weapons';
 import type { Character } from '../types';
 
@@ -27,6 +28,13 @@ export function isProficientWithWeapon(character: Character, weaponName: string)
   const grants: string[] = [];
   for (const cl of character.classes ?? []) {
     grants.push(...(getClass(cl.classId)?.weaponProficiencies ?? []));
+    // Subclass option groups that confer weapon proficiency — Way of the Kensei picks its kensei
+    // weapons and gains proficiency with them. Without this the choice would be recorded and then
+    // ignored, which is exactly how subclass SKILL grants were prose-only until they were wired.
+    for (const group of getSubclassOptions(cl.subclassId)) {
+      if (group.grants !== 'weapon') continue;
+      grants.push(...(character.subclassOptions?.[group.key] ?? []));
+    }
   }
   grants.push(...(getRace(character.raceId)?.proficiencies ?? []));
 

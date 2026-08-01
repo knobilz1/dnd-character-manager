@@ -3319,3 +3319,48 @@ spells with no save at all. It was matching *"advantage on Dex saves"*, which is
 **grants**, not a save it **forces**. Excluding `(dis)advantage on` / `succeeds on` / `immune to`
 dropped it to 17, of which 16 are simply spells with a real save whose optional `savingThrow` field
 is unset (a display nicety, not a mechanical error) and 1 was Earthquake above.
+
+---
+
+## D4 fix, part 2 — Four Elements disciplines and Kensei weapons
+
+Two PHB/XGtE monk subclasses whose entire content is a choice the sheet never asked for.
+
+### Way of the Four Elements (PHB p.80)
+Elemental Attunement is known for free and is deliberately **not** in the list; the chosen count is
+**1 / 2 / 3 / 4** at levels 3 / 6 / 11 / 17. All 16 pickable disciplines transcribed with their ki
+costs. Level requirements ride in the choice *name* — `Clench of the North Wind (6th)` — which is
+the convention `SubclassOptionsPicker` already gates on, added for Rune Knight.
+
+Verified on a level-3 monk: **"0 / 1 — choice required"**, the 7 ungated disciplines selectable and
+the 9 gated ones (6th / 11th / 17th) locked.
+
+### Way of the Kensei (XGtE p.34) — and the picks now confer proficiency
+*"any simple or martial weapon that lacks the heavy and special properties. The longbow is also a
+valid choice."* Two at 3rd, then one more at 6th, 11th, 17th → **2 / 3 / 4 / 5**.
+
+The 28-weapon list was **derived from `items.ts`, not hand-typed**: excluded the 8 heavy weapons and
+Net, then two corrections a generated list gets wrong — dropped **Lance** (its description spells the
+special property out without using the word "special") and added **Longbow** back per XGtE's explicit
+exception.
+
+`isProficientWithWeapon` now reads `grants: 'weapon'` option groups, so the choice does something
+instead of being recorded and ignored — the same failure that left subclass *skill* grants as prose.
+
+Verified on a level-3 Kensei holding a longsword (monks are not proficient with one):
+
+| | weapon row |
+|---|---|
+| before | `Longsword — **not proficient** — Attack +0` |
+| after picking it | `Longsword — Attack **+2**` |
+
+### Beast Master's companion — deliberately NOT built
+PHB p.93 says *"a beast that is no larger than Medium and that has a challenge rating of 1/4 or
+lower"* and gives **no list**. The option mechanism stores one id from a fixed set, so any list I
+supplied would silently forbid legal companions — the app's `beastForms.ts` holds only 12 qualifying
+beasts because it is the **druid Wild Shape** table, and it omits Boar, Giant Badger, Giant Weasel,
+Hawk, Owl, Deer and others that are all legal here.
+
+Modelling an open choice as a closed one is worse than leaving it: a picker that refuses a legal
+beast reads as a bug, whereas the feature text at least states the rule correctly. This needs a
+free-text field or a real beast index, and is filed rather than half-built.
