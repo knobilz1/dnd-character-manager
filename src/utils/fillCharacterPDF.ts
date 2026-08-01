@@ -240,14 +240,16 @@ export async function fillCharacterPDF(character: Character, templateBytes: Uint
   // ── Proficiencies & Languages ─────────────────────────────────────────────
 
   const proficiencies: string[] = [];
-  if (bg?.toolProficiencies?.length)  proficiencies.push(...bg.toolProficiencies);
+  // Resolved tools, not the raw grant strings — otherwise this printed
+  // "Three musical instruments of your choice" as though it were a proficiency.
+  if (d.toolProficiencies?.length) proficiencies.push(...d.toolProficiencies);
   // Every class, and its TOOLS as well as its weapons and armour. This read classes[0] only, and
   // omitted class tool proficiencies entirely — so a bard's three instruments and a druid's
   // herbalism kit never appeared on the exported sheet.
   for (const cl of character.classes) {
     const def = getClass(cl.classId);
     if (!def) continue;
-    proficiencies.push(...def.weaponProficiencies, ...def.armorProficiencies, ...def.toolProficiencies);
+    proficiencies.push(...def.weaponProficiencies, ...def.armorProficiencies);
     if (cl.subclassId) {
       proficiencies.push(...(ALL_SUBCLASSES.find(s => s.id === cl.subclassId)?.armorProficiencies ?? []));
     }

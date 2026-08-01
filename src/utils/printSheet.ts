@@ -1294,6 +1294,8 @@ function buildJournalPage(character: Character): string {
 export interface SheetDerivedData {
   /** Resolved language list — placeholders for unmade choices already stripped. */
   languages?: string[];
+  /** Resolved tool proficiencies — grant strings for unmade choices already stripped. */
+  toolProficiencies?: string[];
   finalScores: Record<string, number>;
   mods: Record<string, number>;
   profBonus: number;
@@ -1327,9 +1329,18 @@ function buildSheetPages(character: Character, d: SheetDerivedData, addBreakBefo
   const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   const proficiencies: string[] = [];
-  if (bg?.toolProficiencies?.length) proficiencies.push(...bg.toolProficiencies);
-  if (classDef?.weaponProficiencies) proficiencies.push(...classDef.weaponProficiencies);
-  if (classDef?.armorProficiencies)  proficiencies.push(...classDef.armorProficiencies);
+  // Resolved tools, not the raw grant strings — this used to print "Three musical instruments of
+  // your choice" as though it were a proficiency. Weapons and armour walk EVERY class, and pick up
+  // subclass armour grants, rather than reading classes[0].
+  if (d.toolProficiencies?.length) proficiencies.push(...d.toolProficiencies);
+  for (const cl of character.classes) {
+    const def = getClass(cl.classId);
+    if (!def) continue;
+    proficiencies.push(...def.weaponProficiencies, ...def.armorProficiencies);
+    if (cl.subclassId) {
+      proficiencies.push(...(ALL_SUBCLASSES.find(x => x.id === cl.subclassId)?.armorProficiencies ?? []));
+    }
+  }
   if (race?.proficiencies?.length)   proficiencies.push(...race.proficiencies);
   // Derived, not raw: race.languages carries placeholder strings for choices the player
   // hasn't made, and they were being printed as if they were languages.

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
 import { LanguagePicker } from '../../components/LanguagePicker';
+import { ToolPicker } from '../../components/ToolPicker';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import { getSubclassOptions } from '../../data/subclassOptions';
 import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
@@ -29,10 +30,12 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
 }) {
-  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages } = useCharacterStore();
+  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages, setSelectedToolProficiencies } = useCharacterStore();
   const derived = useCharacterDerived(character);
   const languages: string[] = derived?.languages ?? [];
   const languagesOwed: number = derived?.languagesOwed ?? 0;
+  const toolProficiencies: string[] = derived?.toolProficiencies ?? [];
+  const toolChoices: any[] = derived?.toolChoices ?? [];
   const bg = resolveBackground(character);
   const race = getRace(character.raceId);
   const bgAsiSource = getBackground(character.backgroundId);
@@ -201,6 +204,18 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
               owed={languagesOwed}
               selected={character.selectedLanguages ?? []}
               onChange={setSelectedLanguages}
+              compact
+            />
+            {toolProficiencies.length > 0 && (
+              <div className="bg-slate-900 rounded-lg p-3">
+                <p className="text-xs font-bold text-white mb-1">Tool Proficiencies</p>
+                <p className="text-xs text-slate-400">{toolProficiencies.join(', ')}</p>
+              </div>
+            )}
+            <ToolPicker
+              choices={toolChoices}
+              value={character.selectedToolProficiencies}
+              onChange={setSelectedToolProficiencies}
               compact
             />
             {(race.resistances?.length ?? 0) > 0 && (

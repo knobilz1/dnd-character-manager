@@ -7,6 +7,7 @@ import { getSubclassOptions, picksAllowed } from '../data/subclassOptions';
 import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
 import { fixedLanguages, racialLanguagePicks } from '../data/languages';
+import { fixedTools, parseToolGrant } from '../data/tools';
 import { ALL_FEATS } from '../data/feats';
 import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
@@ -403,6 +404,26 @@ export function computeCharacterDerived(character: Character) {
       }
     }
 
+    // ── Tool proficiencies ───────────────────────────────────────────────────
+    // Class and background grants only. `race.proficiencies` is a mixed bag — it holds skills and
+    // weapons too (Athletics, Longsword) — so pulling tools from it would list a battleaxe as a
+    // tool proficiency.
+    const toolSources = [
+      ...character.classes.flatMap(cl => getClass(cl.classId)?.toolProficiencies ?? []),
+      ...(bgDef?.toolProficiencies ?? []),
+    ];
+    const chosenTools = character.selectedToolProficiencies ?? {};
+    // One entry per grant, so each keeps its own allowed categories.
+    const toolChoices = [...new Set(toolSources)]
+      .map(text => ({ text, grant: parseToolGrant(text) }))
+      .filter((x): x is { text: string; grant: NonNullable<ReturnType<typeof parseToolGrant>> } => !!x.grant)
+      .map(x => ({ ...x, picked: chosenTools[x.text] ?? [] }));
+    const toolProficiencies = [...new Set([
+      ...fixedTools(toolSources),
+      ...toolChoices.flatMap(c => c.picked),
+    ])];
+    const toolsOwed = toolChoices.reduce((n, c) => n + Math.max(0, c.grant.count - c.picked.length), 0);
+
     // ── Languages ────────────────────────────────────────────────────────────
     // The race's languages array mixes real languages with placeholder strings for choices the
     // player hasn't made ("one extra language of your choice"). Those placeholders were being
@@ -643,6 +664,9 @@ export function computeCharacterDerived(character: Character) {
       totalLevel,
       languages,
       languagesOwed,
+      toolProficiencies,
+      toolChoices,
+      toolsOwed,
       // Exported so the sheet, sidebar and spell panel all ask the SAME question the derive asked.
       // Each used to recompute `classes[0]` for itself, which is how a fighter/wizard got rendered
       // as a known-caster: the fighter isn't in the prepared-caster list, and nothing else looked.

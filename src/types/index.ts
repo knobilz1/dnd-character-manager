@@ -681,6 +681,10 @@ export interface Character {
    *  choice"), which used to be printed on the sheet as though it were a language — see
    *  data/languages.ts. */
   selectedLanguages?: string[];
+  /** Tool proficiencies the player CHOSE, keyed by the grant string that offered them
+   *  ("Three musical instruments of your choice"). Keyed rather than flat so a bard's three
+   *  instrument picks cannot be spent on artisan's tools — see data/tools.ts. */
+  selectedToolProficiencies?: Record<string, string[]>;
   selectedSkillProficiencies: SkillName[];
   selectedFeats: string[];
   classOptions: ClassOptionsState;
