@@ -452,7 +452,6 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     description: 'Your innate magic flows from draconic blood.',
     features: [
       { name: 'Draconic Resilience', level: 3, description: 'HP max increases by +3 at level 3, then +1 per additional Sorcerer level. While not wearing armor: AC = 10 + Dex mod + Cha mod.' },
-      { name: 'Draconic Ancestor', level: 3, description: 'Choose a dragon type (Acid/Cold/Fire/Lightning/Poison). This determines your Elemental Affinity damage type.' },
       { name: 'Elemental Affinity', level: 6, description: 'Choose Acid, Cold, Fire, Lightning, or Poison → gain Resistance to that damage type. When casting a spell that deals that damage type: add Cha mod to one damage roll.' },
       { name: 'Dragon Wings', level: 14, description: 'Bonus Action: sprout spectral wings for 1 hour (or dismiss). Fly Speed 60 ft. Once per Long Rest; restore with 3 SP (no action).' },
       { name: 'Dragon Companion', level: 18, description: 'Always have Summon Dragon prepared; cast it without Material components. Cast once without a slot per Long Rest. When casting without Concentration: duration → 1 min.' },

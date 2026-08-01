@@ -481,8 +481,11 @@ export interface SubclassOptionGroup {
    * `'cantrip'` choices carry SPELL ids: they are merged into the always-prepared set so the
    * cantrip lands in the spellbook, and are therefore not counted against cantrips known —
    * a subclass cantrip is gained IN ADDITION to the class's own.
+   *
+   * `'resistance'` choices carry DamageType ids and are read by `resistancesOf`, so they halve
+   * damage exactly like a racial resistance.
    */
-  grants?: 'skill' | 'language' | 'tool' | 'weapon' | 'cantrip';
+  grants?: 'skill' | 'language' | 'tool' | 'weapon' | 'cantrip' | 'resistance';
 }
 
 export interface EquipmentOption {

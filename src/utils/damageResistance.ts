@@ -1,5 +1,6 @@
 import type { Character, DamageType } from '../types';
 import { getRace } from '../data/races';
+import { getSubclassOptions } from '../data/subclassOptions';
 
 /**
  * Resistance halving, for the one path that can apply it: damage that arrives WITH a type.
@@ -18,7 +19,19 @@ import { getRace } from '../data/races';
  * of those grows a real field, add it here — this is the single place that decides.
  */
 export function resistancesOf(character: Character): DamageType[] {
-  return getRace(character.raceId)?.resistances ?? [];
+  const out = new Set<DamageType>(getRace(character.raceId)?.resistances ?? []);
+  // Subclass choices that grant a resistance — currently the 2024 Draconic Sorcerer's Elemental
+  // Affinity, which picks one of five damage types at 6th level. Gated on the class's own level,
+  // so a 3rd-level sorcerer who picked early doesn't resist anything yet.
+  for (const cl of character.classes ?? []) {
+    if (!cl.subclassId) continue;
+    for (const group of getSubclassOptions(cl.subclassId)) {
+      if (group.grants !== 'resistance') continue;
+      if (cl.level < Math.min(...Object.keys(group.picksByLevel).map(Number))) continue;
+      for (const picked of character.subclassOptions?.[group.key] ?? []) out.add(picked as DamageType);
+    }
+  }
+  return [...out];
 }
 
 export function isResistantTo(character: Character, type: DamageType | undefined): boolean {

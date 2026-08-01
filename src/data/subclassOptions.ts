@@ -98,12 +98,15 @@ export const SUBCLASS_OPTIONS: Record<string, SubclassOptionGroup[]> = {
     ],
   }],
 
-  // PHB 2024 splits what 2014 did in one step: the ancestor is picked at 3, and Elemental Affinity
-  // at 6 names the damage type you resist. The 2024 list is by damage type, not by dragon colour.
+  // PHB 2024 p.146: the damage type is chosen at 6th level as part of Elemental Affinity, and
+  // grants Resistance to it. There is no level-3 "Draconic Ancestor" feature in 2024 — that was
+  // carried over from the 2014 subclass shape and has been removed. The storage key is unchanged
+  // so any character who already picked one keeps it.
   'draconic-bloodline-2024': [{
     key: 'draconicAncestor2024',
-    label: 'Draconic Ancestor',
-    picksByLevel: { 3: 1 },
+    label: 'Elemental Affinity — Damage Resistance',
+    picksByLevel: { 6: 1 },
+    grants: 'resistance',
     choices: [
       { id: 'acid', name: 'Acid' },
       { id: 'cold', name: 'Cold' },
