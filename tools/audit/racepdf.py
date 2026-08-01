@@ -1,32 +1,39 @@
 """Race trait text vs the source books, straight from the PDFs.
 
-⚠️ STATUS (2026-08-01): the LOCATOR works — 95 of 122 races pair, and the per-book table is
-honest. The COMPARISON layer is not yet trustworthy: it still reports things like "High Elf
-Darkvision — app states 60ft" when the PHB plainly says 60 feet. Do not action its findings
-without reading the trait in the book first. What is left is written up at the bottom.
+STATUS (2026-08-01): working. PHB — the control book — pairs 15/15 with 67/67 trait names
+located and ONE finding, which turned out to be the app being more current than the source (see
+"errata" below). Across all books: 99/122 races paired, 48 mechanics findings, down from 306 when
+the sweep was first stood up.
 
-Why this is harder than it looks, and worth recording:
+Why this is harder than it looks, all of it learned by getting it wrong first:
 
 1. The md extracts are SUMMARIES. A word-level diff against them is noise end to end, so anything
-   about WORDING has to come from the PDFs. (Cost a whole sweep to learn.)
+   about WORDING has to come from the PDFs.
 2. The app's race descriptions are deliberate PARAPHRASE, not quotation. Firbolg Magic says
    "Once per short or long rest each" where the book takes a sentence. So a verbatim diff is also
    noise — 261 findings, none real. What cannot differ without being wrong is the mechanical
    vocabulary: numbers, rest type, ability, damage type, action cost. That is what MECH matches.
-3. The OCR text layer must be searched FLAT (no spaces: "60feet") but compared RAW ("60 feet"),
-   because a regex needing word boundaries can never match the flattened form. Keep the
-   normalised→raw index map; `r6verify._flatten` already provides it.
+3. The OCR layer must be SEARCHED flat ("60feet") but COMPARED raw ("60 feet"), or a
+   word-boundary regex matches nothing. `r6verify._flatten` provides the index map.
+4. The BACK-OF-BOOK INDEX out-scores the real entry if you rank windows by "how many trait names
+   are nearby" — an index crams them into a few hundred characters. Discriminated by what FOLLOWS
+   the name: a page number means index, prose means entry. This alone took PHB from 17 findings
+   to 1.
+5. `parentRaceId` is DANGLING in this data. The app flattens the base races away — there is no
+   race with id 'elf', only 'elf-high' and friends carrying the merged trait list — so looking the
+   parent up returns None for all four PHB base races. The id string is used as a name instead.
+6. The PDFs are PRE-ERRATA printings. The one PHB finding is Tiefling Infernal Legacy: the book
+   says "once per day", the app says "regain when you finish a long rest", which is WotC's
+   corrected text. A finding here means the two differ, NOT that the app is wrong — read the trait
+   before changing anything.
 
 GATED ON PAIRING: the matched/total table prints before any finding, because "0 mismatches" over
 3% pairing is a failure this audit has already hit once.
 
-KNOWN REMAINING WORK:
-- A SUBRACE's window is anchored on the subrace heading, so traits printed once under the PARENT
-  (elf Darkvision, dwarf Resilience) fall outside it. Needs parent+subrace spans unioned, not the
-  best-scoring one of the two. This is the cause of most of the 65 mechanics findings.
-- 27 races do not locate: the 9 MMoM legacy tieflings and 4 SCAG tiefling variants are printed as
-  one entry with a table of options; the 6 SJA races come from an AnyFlip capture whose text does
-  not survive extraction at all (0 traits found — expected, and matches the spell sweep).
+STILL UNPAIRED (23): the 9 MMoM legacy tieflings and 4 SCAG tiefling variants are printed as one
+entry with a table of options rather than as separate entries; the 6 SJA races come from an
+AnyFlip capture whose text does not survive extraction at all (0 traits found — the same books
+that blocked the spell sweep).
 
 Usage: python tools/audit/racepdf.py [BookId] [--full]
 """
@@ -94,32 +101,34 @@ def mech_tokens(s):
     return out
 
 
-def race_region(book, r, by_id, span=9000):
-    """The slice of the book that is THIS race's entry.
+def _is_entry(raw, raw_idx, p, klen):
+    """Is the trait name at flat position `p` an ENTRY, or an index line?
 
-    Scored, not first-hit: every occurrence of the race's name gets a window, and the window
-    containing the most of that race's own trait names wins. A table of contents mention scores 0
-    and loses to the real entry; two similarly-named races (Tiefling / Tiefling (Zariel)) separate
-    because their trait sets differ.
-
-    A subrace also searches under its PARENT's name, since the books print "Elf" once and then the
-    subrace beneath it.
+    An index reads "Dwarven Resilience 20"; an entry reads "Dwarven Resilience. You have advantage
+    on saving throws against poison…". Without this the PHB's back-of-book index beat the real
+    dwarf entry outright — the index crams every trait name into a few hundred characters, so it
+    scored higher on "how many trait names are nearby" than the pages that actually define them.
     """
-    names = [flat(r['name'])]
-    # Drop a parenthetical — "Tiefling (Zariel)" is printed as "Zariel Tiefling" or just "Zariel".
-    bare = flat(re.sub(r'\(.*?\)', '', r['name']))
-    if bare and bare not in names:
-        names.append(bare)
-    inner = re.findall(r'\((.*?)\)', r['name'])
-    names += [flat(x) for x in inner if flat(x)]
-    parent = by_id.get(r['parent']) if r.get('parent') else None
-    if parent:
-        names.append(flat(parent['name']))
-    keys = [flat(t['name']) for t in r['traits'] if flat(t['name'])]
+    j = raw_idx[min(p + klen, len(raw_idx) - 1)]
+    tail = raw[j:j + 40]
+    return not re.match(r'^[\s.,·—-]*\d', tail)
 
+
+def _best_window(book, names, keys, span, raw=None, raw_idx=None):
+    """(lo, hi) of the best-scoring window for these names, scored by how many of `keys` it holds.
+
+    Scored, not first-hit: a contents-page mention scores 0 and loses to the real entry, and two
+    similarly-named races separate because their trait sets differ. Trait names that read as index
+    lines rather than definitions score nothing — see `_is_entry`.
+    """
     best, best_score = None, 0
     for nm in names:
-        if len(nm) < 4:
+        # 3, not 4: "Elf" is three characters, and the guard silently excluded it — so no elf
+        # subrace ever got its parent's span and every one was judged against whichever elf
+        # variant happened to fall inside its own window. Short names are safe here precisely
+        # because the windows are SCORED: a stray "elf" inside "himself" holds none of the race's
+        # traits, scores 0, and loses to the real entry.
+        if len(nm) < 3:
             continue
         start = 0
         while True:
@@ -127,17 +136,74 @@ def race_region(book, r, by_id, span=9000):
             if i < 0:
                 break
             start = i + 1
-            lo = max(0, i - 200)
-            win = book[lo: i + span]
-            score = sum(1 for k in keys if k in win)
+            lo, hi = max(0, i - 200), i + span
+            score = 0
+            for k in keys:
+                q = book.find(k, lo)
+                while 0 <= q < hi:
+                    if raw is None or _is_entry(raw, raw_idx, q, len(k)):
+                        score += 1
+                        break
+                    q = book.find(k, q + 1)
             if score > best_score:
-                best, best_score = (win, lo), score
-    # One trait in a 9k window is noise (an index line, a stray mention); two is an entry. But a
-    # race with only ONE trait in the app — PHB Human has exactly one, "Extra Language" — can never
-    # reach two, and a flat threshold silently dropped it as "not located". Require whichever is
-    # smaller, so a thin race is judged by what it actually has.
+                best, best_score = (lo, hi), score
+    return best
+
+
+def name_variants(name):
+    """"Tiefling (Zariel)" → tiefling(zariel), tiefling, zariel — the books print all three forms."""
+    out = [flat(name)]
+    bare = flat(re.sub(r'\(.*?\)', '', name))
+    if bare and bare not in out:
+        out.append(bare)
+    out += [flat(x) for x in re.findall(r'\((.*?)\)', name) if flat(x)]
+    return out
+
+
+def race_spans(book, r, by_id, span=9000, raw=None, raw_idx=None):
+    """Every slice of the book that holds part of this race's traits — a LIST, not one window.
+
+    A subrace's traits are printed in two places: the ones it inherits sit once under the parent
+    ("Elf. … Darkvision. … 60 feet"), and only its own sit under its heading. Taking whichever
+    single window scored higher meant the inherited half fell outside the region entirely, which is
+    why every elf and dwarf was reported as missing the 60 ft on its own Darkvision.
+
+    Returns both spans and searches them in turn, so a trait is found wherever the book prints it.
+    """
+    keys = [flat(t['name']) for t in r['traits'] if flat(t['name'])]
+    spans = []
+    own = _best_window(book, name_variants(r['name']), keys, span, raw, raw_idx)
+    if own:
+        spans.append(own)
+    # NOTE: `parentRaceId` is a DANGLING reference in this data — the app flattens the base races
+    # away, so there is no race with id 'elf', only 'elf-high' and friends, each carrying the
+    # merged trait list. Looking the parent up returns None for all four PHB base races, which is
+    # why an earlier version of this guard never fired. The id string itself ('elf', 'dwarf',
+    # 'gnome', 'halfling') is exactly the book's heading word, so it is used directly as a name.
+    parent = r.get('parent')
+    if parent and own:
+        # The parent's shared traits are printed IMMEDIATELY BEFORE the subrace heading — the PHB
+        # elf's Fey Ancestry and Trance sit at 60225, and High Elf's heading at 60952 — so the
+        # subrace's own forward window misses them by a few hundred characters.
+        #
+        # Extending backward rather than searching for the parent by name, because the name is
+        # unreliable in exactly this case: "elf" is a substring of "highelf", so a name search
+        # re-finds the subrace's own window and adds nothing. Position is the dependable signal,
+        # the layout is consistent across every book here, and a too-generous back-span costs only
+        # a wider search — the candidate resolution below still picks the occurrence that matches.
+        spans.insert(0, (max(0, own[0] - span), own[0] + 200))
+    if parent and not own:
+        p = _best_window(book, [flat(parent)], keys, span, raw, raw_idx)
+        if p:
+            spans.append(p)
+    if not spans:
+        return None
+    # Judge on what the spans cover TOGETHER. One trait in a 9k window is noise (an index line);
+    # two is an entry. But a race with only ONE trait — PHB Human has exactly one, "Extra
+    # Language" — can never reach two, so require whichever is smaller.
+    covered = sum(1 for k in set(keys) if any(k in book[lo:hi] for lo, hi in spans))
     need = min(2, len(keys)) or 1
-    return best if best_score >= need else None
+    return spans if covered >= need else None
 
 
 def races():
@@ -193,12 +259,11 @@ def main():
         # the app against a different species. That produced 261 bogus "diverges after 0 chars".
         # Every occurrence of the race name is scored by how many of ITS traits appear nearby, and
         # the best-scoring window is the entry.
-        located = race_region(book, r, by_id)
-        if located is None:
+        spans = race_spans(book, r, by_id, raw=raw_book, raw_idx=raw_idx)
+        if spans is None:
             unpaired += 1
             findings.append(('RACE NOT LOCATED', r['name'], r['book'], '', '', ''))
             continue
-        region, region_lo = located
 
         hits = 0
         for t in r['traits']:
@@ -206,8 +271,17 @@ def main():
             key = flat(t['name'])
             if not key:
                 continue
-            pos = region.find(key)
-            if pos < 0:
+            # Collect EVERY occurrence of the trait name across the spans, not the first.
+            # "Darkvision" appears under each elf subrace, so the first hit inside High Elf's
+            # window is the DROW's 120-foot version — and the app was then reported as wrong for
+            # saying 60 ft. Which occurrence is "this trait" is decided below, by the text.
+            cands = []
+            for lo, hi in spans:
+                p = book.find(key, lo)
+                while 0 <= p < hi:
+                    cands.append(p)
+                    p = book.find(key, p + 1)
+            if not cands:
                 findings.append(('TRAIT NAME NOT IN ENTRY', r['name'], r['book'], t['name'], '', ''))
                 continue
             hits += 1
@@ -224,10 +298,19 @@ def main():
             # a regex needing word boundaries ("60 feet") can never match "60feet" — the exact
             # trap the reference-books note records, and the reason an earlier run of this sweep
             # reported every Darkvision in the book as missing its own 60 ft.
-            fs = region_lo + pos
-            fe = min(len(raw_idx) - 1, fs + len(key) + max(len(app) * 3, 900))
-            src = raw_book[raw_idx[fs]: raw_idx[fe]]
-            missing = [tok for tok in mech_tokens(t['d']) if tok not in mech_tokens(src)]
+            # The occurrence that best matches IS this trait. Reporting the first one instead is
+            # how a race got blamed for its sibling's numbers; a finding only survives if NO
+            # occurrence of the name inside the race's entry states what the app states.
+            want = mech_tokens(t['d'])
+            missing = None
+            for pos in cands:
+                fe = min(len(raw_idx) - 1, pos + len(key) + max(len(app) * 3, 900))
+                src = raw_book[raw_idx[pos]: raw_idx[fe]]
+                gap = [tok for tok in want if tok not in mech_tokens(src)]
+                if missing is None or len(gap) < len(missing):
+                    missing = gap
+                if not missing:
+                    break
             if missing:
                 findings.append(('MECHANICS NOT IN SOURCE', r['name'], r['book'], t['name'],
                                  t['d'], 'app states ' + ', '.join(sorted(set(missing)))))
