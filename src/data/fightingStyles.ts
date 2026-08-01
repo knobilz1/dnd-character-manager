@@ -64,11 +64,19 @@ export function fightingStylesAllowed(
 export function activeFightingStyles(character: {
   classOptions?: { fightingStyles?: string[] };
   selectedFeats?: string[];
+  selectedFeatPicks?: Record<string, string[]>;
 }): string[] {
   const out = new Set(character.classOptions?.fightingStyles ?? []);
   for (const featId of character.selectedFeats ?? []) {
     const styleId = FEAT_TO_STYLE.get(featId);
     if (styleId) out.add(styleId);
+  }
+  // Fighting Initiate (TCE) grants a style the player CHOOSES, so it arrives as a pick rather
+  // than through the fixed map above. Filtered to real style ids: the same pick store also holds
+  // skill, tool and weapon choices from other feats.
+  const known = new Set(ALL_FIGHTING_STYLES.map(s => s.id));
+  for (const pick of Object.values(character.selectedFeatPicks ?? {}).flat()) {
+    if (known.has(pick)) out.add(pick);
   }
   return [...out];
 }

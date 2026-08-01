@@ -2467,8 +2467,14 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                   })()}
 
                   {/* ── Metamagic buttons (Sorcerer) ──────────────────── */}
-                  {r.key === 'sorcery_points' && (() => {
-                    const selectedIds: string[] = character.classOptions?.metamagic ?? [];
+                  {/* Also under Metamagic Adept's own pool: the feat grants 2 sorcery points and
+                      2 Metamagic options, and a non-sorcerer holding it has no `sorcery_points`
+                      resource at all — so keying only on that showed them nothing to spend it on. */}
+                  {(r.key === 'sorcery_points' || r.key === 'metamagic_adept_points') && (() => {
+                    const selectedIds: string[] = [
+                      ...(character.classOptions?.metamagic ?? []),
+                      ...Object.values(character.selectedFeatPicks ?? {}).flat(),
+                    ];
                     if (!selectedIds.length) return null;
                     const options = ALL_METAMAGIC.filter(m => selectedIds.includes(m.id));
                     if (!options.length) return null;

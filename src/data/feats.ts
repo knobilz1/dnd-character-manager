@@ -9,6 +9,10 @@ import { chosenAsi } from '../utils/racialAsi';
 import { SKILL_NAMES } from './mechanics';
 import { ARTISAN_TOOLS, MUSICAL_INSTRUMENTS, GAMING_SETS } from './tools';
 import { WEAPON_NAMES } from './weapons';
+import { ALL_FIGHTING_STYLES } from './fightingStyles';
+import { ALL_INVOCATIONS } from './invocations';
+import { ALL_METAMAGIC } from './metamagic';
+import { ALL_MANEUVERS } from './maneuvers';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -162,6 +166,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'PHB',
     description: 'You have martial training that allows you to perform special combat maneuvers. You gain the following benefits:\n• You learn two maneuvers of your choice from among those available to the Battle Master archetype in the fighter class. If a maneuver you use requires your target to make a saving throw to resist the maneuver\'s effects, the saving throw DC equals 8 + your proficiency bonus + your Strength or Dexterity modifier (your choice).\n• If you already have superiority dice, you gain one more; otherwise, you have one superiority die, which is a d6. This die is used to fuel your maneuvers. A superiority die is expended when you use it. You regain your expended superiority dice when you finish a short or long rest.',
     grantedResources: [{ key: 'martial_adept_dice', name: 'Superiority Die (Martial Adept)', max: 1, rechargeOn: 'short' }],
+    grantsPicks: { count: 2, label: 'Two Battle Master maneuvers', options: ALL_MANEUVERS.map(m => m.id) },
   },
   {
     id: 'moderately-armored',
@@ -332,6 +337,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     prerequisite: { proficiency: 'Martial Weapon' },
     description: 'Your martial training has helped you develop a particular style of fighting. As a result, you learn one Fighting Style option of your choice from the fighter class. If you already have a style, the one you choose must be different. Whenever you reach a level that grants the Ability Score Improvement feature, you can replace this feat\'s fighting style with another one from the fighter class that you don\'t have.',
+    grantsPicks: { count: 1, label: 'One Fighting Style from the fighter list', options: ALL_FIGHTING_STYLES.filter(s => s.classes.includes('fighter')).map(s => s.id) },
   },
   {
     id: 'fey-touched',
@@ -524,6 +530,11 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     prerequisite: { other: 'Spellcasting or Pact Magic feature' },
     description: 'Studying occult lore, you have unlocked eldritch power within yourself: you learn one Eldritch Invocation option of your choice from the warlock class. If the invocation has a prerequisite, you can choose that invocation only if you\'re a warlock who meets the prerequisite. Whenever you gain a level, you can replace the invocation with another from the warlock class.',
+    // TCE p.79: "If the invocation has a prerequisite, you can choose that invocation only if
+    // you're a warlock and only if you meet the prerequisite." Offering only the unconditional
+    // ones is the version that is right for every character; a warlock-aware picker would be a
+    // second rule to keep in sync for the smaller half of the cases.
+    grantsPicks: { count: 1, label: 'One Eldritch Invocation (no prerequisite)', options: ALL_INVOCATIONS.filter(i => i.minLevel <= 2 && !i.prerequisitePact && !i.prerequisiteSpell && !i.prerequisiteText).map(i => i.id) },
   },
   {
     id: 'gunner',
@@ -539,6 +550,7 @@ export const ALL_FEATS: Feat[] = [
     prerequisite: { other: 'Spellcasting or Pact Magic feature' },
     description: 'You\'ve learned how to exert your will on your spells:\n• You learn two Metamagic options of your choice from the sorcerer class. You can use only one Metamagic option on a spell when you cast it, unless the option says otherwise.\n• You gain 2 sorcery points to spend on Metamagic. You regain all spent sorcery points when you finish a long rest.',
     grantedResources: [{ key: 'metamagic_adept_points', name: 'Sorcery Points (Metamagic Adept)', max: 2, rechargeOn: 'long' }],
+    grantsPicks: { count: 2, label: 'Two Metamagic options', options: ALL_METAMAGIC.map(m => m.id) },
   },
   {
     id: 'piercer',

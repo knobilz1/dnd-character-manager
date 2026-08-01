@@ -11,6 +11,10 @@ export interface ProficiencyChoice {
   /** Offered but not selectable — already held some other way. Shown rather than hidden, because
    *  a missing option reads as a bug while a greyed one reads as an explanation. */
   disabled?: string[];
+  /** Display text for options whose stored value is an id — fighting styles, invocations,
+   *  metamagic and maneuvers are all stored by id and would otherwise read "two-weapon-fighting".
+   *  Skills, tools and weapons store their printed name and pass nothing. */
+  labels?: Record<string, string>;
 }
 
 /**
@@ -43,7 +47,7 @@ export function ProficiencyPicker({ title, choices, value, onChange, compact }: 
 
   return (
     <div className={cn('space-y-2', compact ? 'text-xs' : 'text-sm')}>
-      {choices.map(({ key, label, count, options, disabled }) => {
+      {choices.map(({ key, label, count, options, disabled, labels }) => {
         const picked = current[key] ?? [];
         const outstanding = picked.length < count;
         const blocked = new Set(disabled ?? []);
@@ -72,7 +76,7 @@ export function ProficiencyPicker({ title, choices, value, onChange, compact }: 
                       off && 'opacity-30 cursor-not-allowed',
                     )}
                   >
-                    {option}
+                    {labels?.[option] ?? option}
                   </button>
                 );
               })}

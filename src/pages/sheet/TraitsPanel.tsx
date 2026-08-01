@@ -13,7 +13,7 @@ import { FlexibleAsiPicker } from '../creator/steps/FlexibleAsiPicker';
 import { getClass } from '../../data/classes';
 import { ALL_SUBCLASSES } from '../../data/subclasses';
 import { ALL_FEATS } from '../../data/feats';
-import { ALL_FIGHTING_STYLES } from '../../data/fightingStyles';
+import { ALL_FIGHTING_STYLES, activeFightingStyles } from '../../data/fightingStyles';
 import { ALL_INVOCATIONS } from '../../data/invocations';
 import { ALL_PACT_BOONS } from '../../data/pactBoons';
 import { ALL_METAMAGIC } from '../../data/metamagic';
@@ -60,11 +60,16 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
   const totalLevel = totalCharacterLevel(character.classes);
 
   const co = character.classOptions ?? { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [] };
-  const fightingStyles = ALL_FIGHTING_STYLES.filter(x => co.fightingStyles?.includes(x.id));
-  const invocations = ALL_INVOCATIONS.filter(x => co.invocations?.includes(x.id));
+  // Feat picks live in their own store, so each of these lists has to consider both. Fighting
+  // Initiate, Eldritch Adept, Metamagic Adept and Martial Adept each grant one of these options
+  // and were rendering nowhere at all — the pick had no home and the list never looked for it.
+  const featPicked = new Set(Object.values(character.selectedFeatPicks ?? {}).flat());
+  const has = (ids: string[] | undefined, id: string) => !!ids?.includes(id) || featPicked.has(id);
+  const fightingStyles = ALL_FIGHTING_STYLES.filter(x => activeFightingStyles(character).includes(x.id));
+  const invocations = ALL_INVOCATIONS.filter(x => has(co.invocations, x.id));
   const pactBoon = co.pactBoon ? ALL_PACT_BOONS.find(p => p.id === co.pactBoon) : null;
-  const metamagic = ALL_METAMAGIC.filter(x => co.metamagic?.includes(x.id));
-  const maneuvers = ALL_MANEUVERS.filter(x => co.maneuvers?.includes(x.id));
+  const metamagic = ALL_METAMAGIC.filter(x => has(co.metamagic, x.id));
+  const maneuvers = ALL_MANEUVERS.filter(x => has(co.maneuvers, x.id));
   const infusions = ALL_INFUSIONS.filter(x => co.infusions?.includes(x.id));
 
   return (

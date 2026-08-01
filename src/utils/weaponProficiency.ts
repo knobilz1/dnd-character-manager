@@ -2,7 +2,7 @@ import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { getSubclassOptions } from '../data/subclassOptions';
 import { ALL_FEATS, resolvedFeatPicks } from '../data/feats';
-import { lookupWeapon } from '../data/weapons';
+import { lookupWeapon, WEAPON_NAMES } from '../data/weapons';
 import type { Character } from '../types';
 
 /**
@@ -45,9 +45,13 @@ export function isProficientWithWeapon(character: Character, weaponName: string)
   for (const featId of character.selectedFeats ?? []) {
     grants.push(...(ALL_FEATS.find(f => f.id === featId)?.grantsProficiency ?? []));
   }
-  // Weapon Master's four named picks. Picks that name a skill or tool simply never match a
-  // weapon below, so the three pools need no separating here.
-  grants.push(...resolvedFeatPicks(character));
+  // Weapon Master's four named picks, filtered to EXACT catalog names rather than passed through
+  // as free text. `lookupWeapon` matches by substring, so a raw pick would let option ids from
+  // other pools slip through: 'eldritch-spear' contains "spear", 'lance-of-lethargy' contains
+  // "lance", 'unarmed-fighting' contains "unarmed". A warlock taking Eldritch Spear would have
+  // gained spear proficiency, silently.
+  const byExactName = new Set(WEAPON_NAMES.map(w => w.toLowerCase()));
+  grants.push(...resolvedFeatPicks(character).filter(p => byExactName.has(p.toLowerCase())));
 
   for (const raw of grants) {
     const g = raw.trim().toLowerCase();
