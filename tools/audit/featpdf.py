@@ -21,7 +21,25 @@ STATE 2026-08-01 — TRUSTWORTHY, in the only sense that matters: it CANNOT sile
 
   coverage    155 of 155 feats located (from 122)
   findings    4 (from 60) — 2.6% of located, and ALL FOUR are explained: none is a data bug
-  control     43 of 43 corrupted feats detected, 0 missed
+  control     impossible 43/43 (100%) · plausible 37/42 (88%)
+
+TWO CONTROLS, because one is blind to what the comparison window costs. Impossible corruptions
+(930 ft, 92d6) prove the sweep can fail at all and read 100% at ANY width, since nothing satisfies
+930 ft. Plausible ones (30 ft -> 10 ft, d8 -> d10) can be satisfied by the feat next door, so they
+price the window. Run both from scratchpad/plausible.py; scratchpad/featwidth.py sweeps the knobs.
+
+    spots  width   findings  impossible  plausible
+      12    2200       4        100%        80%
+      12    1400       4        100%        88%   <- chosen: 8 points, free
+       3    1400       6        100%        88%
+       1    1400      10        100%        92%
+
+Narrowing to 1,400 changed no finding and recovered 8 points of detection, so the earlier 2,200 was
+pure loss. Below that, detection is bought with false positives and is no longer free.
+
+88% is the honest ceiling: 5 plausible corruptions go unreported (Mobile, Speedy, Telepathic,
+Unarmed Fighting, Boon of Dimensional Travel) because a neighbouring feat genuinely states the
+swapped value. Findings are trustworthy; the ABSENCE of a finding is weaker.
 
 The control is the claim. Every distance and die in every feat description is bumped (30 ft -> 930
 ft, 2d6 -> 92d6) and the sweep must report all of them; a sweep that has gone quiet by degrading is
@@ -344,7 +362,7 @@ def main():
         have = set()
         for s in spots[:12]:
             a = max(0, s - 700)
-            b = min(len(idx) - 1, s + max(len(flat(f['d'])) * 2, 2200))
+            b = min(len(idx) - 1, s + max(len(flat(f['d'])) * 2, 1400))
             have |= mech_tokens(raw[idx[a]: idx[b]], source=True)
         gap = sorted(t for t in want if t not in have)
         if gap:
