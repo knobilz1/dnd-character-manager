@@ -55,6 +55,30 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS'}
 
+# Comparison-window knobs, per kind, each priced by the plausible control rather than guessed.
+# Feats and backgrounds are printed as generously-spaced entries; magic items are short and packed
+# one after another, so a window sized for a feat reads three neighbouring items and accepts their
+# numbers as this item's.
+#     spots  back  width   findings  impossible  plausible
+#       12    700   1400       90       99%         64%
+#       12    300    700      115       99%         75%
+#        6    200    500      155       99%         81%   <- chosen
+#        3    150    400      224       99%         86%
+#        1    100    300      333       99%         92%
+#        1     60    200      339       99%         96%
+#
+# Unlike feats there is NO free setting here — every point of detection costs findings, because
+# items really are printed shoulder to shoulder. 92% means 333 findings over 784 items, a 42%
+# finding rate that nobody will read; 64% means a third of wrong values never surface. 81% at 155
+# is the balance, and the curve is printed above so the choice stays visible and revisable.
+#
+# The better fix is structural, not a knob: bound each item at the NEXT item's heading so the
+# window cannot reach a neighbour at all. Not built.
+KNOBS = {
+    'background': {'spots': 12, 'back': 700, 'width': 1400},
+    'item': {'spots': 6, 'back': 200, 'width': 500},
+}
+
 
 def entities(kind, bundle=None):
     """Name + book + the text that carries the mechanics.
@@ -136,10 +160,11 @@ def sweep(rows, only=None):
         # Conservative for the reason featpdf documents: a heading can sit columns away from the
         # text it names, and that cannot be scored away. Width 1,400 is what the plausible control
         # priced there — wider was 8 points worse for no change in findings.
+        kn = KNOBS['background'] if e.get('grants') else KNOBS['item']
         spans = []
-        for s in ([pos] + heading_positions(book, names))[:12]:
-            a = max(0, s - 700)
-            b = min(len(idx) - 1, s + max(len(flat(e['d'])) * 2, 1400))
+        for s in ([pos] + heading_positions(book, names))[:kn['spots']]:
+            a = max(0, s - kn['back'])
+            b = min(len(idx) - 1, s + max(len(flat(e['d'])) * 2, kn['width']))
             spans.append(raw[idx[a]: idx[b]])
 
         if e.get('grants'):
