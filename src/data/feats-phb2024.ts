@@ -51,6 +51,10 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Magic Initiate',
     sourceBook: 'PHB2024',
     description: 'Origin feat. Choose one spell list (Cleric, Druid, or Wizard — same list for all).\n• Learn 2 cantrips from that list.\n• Learn 1 level 1 spell from that list: it is always prepared; cast without a slot once per Long Rest (can also use spell slots).\n• Spellcasting ability: Intelligence, Wisdom, or Charisma (chosen at feat).\n• Repeatable: each time you take it, choose a different spell list.',
+    grantsSpellPicks: [
+      { key: 'cantrips', label: 'Two cantrips from one list', count: 2, level: 0, classIds: ['cleric', 'druid', 'wizard'], recharge: 'cantrip', ability: 'wis' },
+      { key: 'spell', label: 'One level 1 spell from that list', count: 1, level: 1, classIds: ['cleric', 'druid', 'wizard'], recharge: 'long', ability: 'wis' },
+    ],
   },
   {
     id: 'musician-2024',
@@ -341,6 +345,9 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { ability: { int: 13 }, minLevel: 4 },
     description: 'General feat (Int/Wis/Cha 13+, level 4+).\n• +1 Intelligence, Wisdom, or Charisma (max 20).\n• Ritual Spells: know Prof Bonus level 1 Ritual-tag spells (always prepared; can cast with slots). Spellcasting ability = feat ability.\n• On Prof Bonus increase: gain 1 more level 1 Ritual spell.\n• Quick Ritual: cast 1 prepared Ritual at normal casting time (no slot; no extended time). Once per Long Rest.',
     abilityScoreChoice: ['int', 'wis', 'cha'],
+    grantsSpellPicks: [
+      { key: 'rituals', label: 'Level 1 Ritual spells (proficiency bonus)', count: 2, countFromProfBonus: true, level: 1, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], ritualOnly: true, recharge: 'cantrip', ability: 'int' },
+    ],
   },
   {
     id: 'sentinel-2024',

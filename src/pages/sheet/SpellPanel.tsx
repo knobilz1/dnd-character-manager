@@ -1,7 +1,8 @@
 import React from 'react';
 import { Plus, Sparkles, X, Zap } from 'lucide-react';
 import { ALL_SPELLS, getSpell } from '../../data/spells';
-import { ALL_FEATS } from '../../data/feats';
+import { featGrantedSpells, featSpellChoices, spellPickOptions } from '../../data/feats';
+import { ProficiencyPicker } from '../../components/ProficiencyPicker';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import { SpellDetail } from '../creator/steps/StepSpells';
@@ -10,6 +11,7 @@ import { getClass } from '../../data/classes';
 import { getRace } from '../../data/races';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import { casterClassOf } from '../../hooks/useCharacterDerived';
+import { useCharacterStore } from '../../store/useCharacterStore';
 
 const SCHOOL_COLORS: Record<string, string> = {
   Abjuration: 'blue', Conjuration: 'purple', Divination: 'indigo',
@@ -50,6 +52,9 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
   const primaryClass = casterClassOf(character);
   const classDef = primaryClass ? getClass(primaryClass.classId) : null;
   const { maxPreparedSpells, slotTotals, cantripsKnown, maxSpellLevel, spellsKnown, spellbookLimit } = derived;
+  const setSelectedFeatSpells = useCharacterStore(st => st.setSelectedFeatSpells);
+  // Ritual Caster 2024's list grows with the proficiency bonus; every other grant has a fixed count.
+  const profBonus: number = derived?.profBonus ?? 2;
   const slotsUsed = character.spellSlotsUsed;
   const pactMagic = character.pactMagic;
 
@@ -355,16 +360,32 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
         );
       })()}
 
+      {/* Feat spell CHOICES. Magic Initiate, Ritual Caster, Spell Sniper, Artificer Initiate,
+          Aberrant Dragonmark and Strixhaven Initiate all say "you learn a spell of your choice"
+          and there was nowhere to record which — so the most-taken feat in the game granted
+          nothing. Rendered above the granted list, which is where the picks land once made. */}
+      <ProficiencyPicker
+        title="Feat spells"
+        choices={featSpellChoices(character, profBonus).map(c => {
+          const options = spellPickOptions(c.grant, character.enabledBooks ?? ['PHB']);
+          return {
+            key: c.key,
+            label: `${c.featName} — ${c.label}`,
+            count: c.count,
+            options: options.map(sp => sp.id),
+            labels: Object.fromEntries(options.map(sp => [sp.id, sp.name])),
+          };
+        })}
+        value={character.selectedFeatSpells}
+        onChange={setSelectedFeatSpells}
+        compact
+      />
+
       {/* Feat-Granted Spells */}
       {(() => {
-        const featSpells: Array<{ featId: string; featName: string; spellId: string; recharge: 'cantrip' | 'long' | 'short'; ability: string }> = [];
-        for (const featId of (character.selectedFeats ?? [])) {
-          const feat = ALL_FEATS.find(f => f.id === featId);
-          if (!feat?.grantedSpells?.length) continue;
-          for (const gs of feat.grantedSpells) {
-            featSpells.push({ featId, featName: feat.name, spellId: gs.spellId, recharge: gs.recharge, ability: gs.ability });
-          }
-        }
+        // Fixed grants AND the player's picks — one resolver, so a Magic Initiate cantrip lands
+        // here exactly as Fey Touched's Misty Step does.
+        const featSpells = featGrantedSpells(character);
         if (!featSpells.length) return null;
         return (
           <div className="bg-slate-800 border border-amber-700/40 rounded-xl overflow-hidden">

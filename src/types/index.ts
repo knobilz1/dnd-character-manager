@@ -344,6 +344,32 @@ export interface Feat {
   grantsPicks?: { count: number; label: string; options: string[] };
   /** Expertise slots (doubled proficiency) this feat grants, chosen from skills already held. */
   grantsExpertise?: number;
+  /**
+   * Spells the player CHOOSES. Once picked each one behaves exactly like a `grantedSpells` entry —
+   * same tracking key, same rest handling — so the only thing this adds is the choice.
+   *
+   * Magic Initiate and Strixhaven Initiate say the picks must come from ONE list (or one college).
+   * The pools here are the union instead, and the constraint is left to the player: enforcing it
+   * would mean a list-selector per feat, and the alternative on offer today is no spells at all.
+   */
+  grantsSpellPicks?: Array<{
+    /** Unique within the feat; storage keys on `${featId}:${key}`. */
+    key: string;
+    label: string;
+    count: number;
+    /** Count equals proficiency bonus instead, and grows with it (Ritual Caster 2024). */
+    countFromProfBonus?: boolean;
+    level: 0 | 1;
+    /** Spell lists to draw from. Ignored when `spellIds` names the pool outright. */
+    classIds?: string[];
+    /** An explicit pool, for grants that name their spells (Strixhaven's cantrip triples). */
+    spellIds?: string[];
+    ritualOnly?: boolean;
+    /** Spell Sniper: only cantrips that require an attack roll. */
+    requiresAttackRoll?: boolean;
+    recharge: 'cantrip' | 'long' | 'short';
+    ability: AbilityKey;
+  }>;
   /** Extra HP gained each time a level is gained while this feat is held. */
   hpBonusPerLevel?: number;
   /** One-time retroactive HP bonus per level already gained when this feat is first taken
@@ -717,6 +743,9 @@ export interface Character {
   /** Expertise chosen for feat-granted slots (Skill Expert, Prodigy, Boon of Skill). Separate
    *  from `expertiseSkills`, whose slots come from Rogue/Bard levels. */
   selectedFeatExpertise?: string[];
+  /** Spells chosen for feat grants, keyed `${featId}:${grantKey}` — Magic Initiate's two cantrips
+   *  and its 1st-level spell are separate grants with separate pools. */
+  selectedFeatSpells?: Record<string, string[]>;
   selectedSkillProficiencies: SkillName[];
   selectedFeats: string[];
   classOptions: ClassOptionsState;

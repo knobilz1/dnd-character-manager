@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Character, Condition, DamageType, ExhaustionLevel, InventoryItem, SlotLevel, ASIChoice, AbilityKey, ClassOptionsState, JournalEntry } from '../types';
 import { getRace } from '../data/races';
-import { ALL_FEATS } from '../data/feats';
+import { ALL_FEATS, featGrantedSpells } from '../data/feats';
 import { useLibraryStore } from './useLibraryStore';
 import { useBorrowedStore } from './useBorrowedStore';
 import { emptySlotState, PACT_MAGIC_TABLE, totalCharacterLevel } from '../data/mechanics';
@@ -82,6 +82,7 @@ interface CharacterState {
   setSelectedToolProficiencies: (v: Record<string, string[]>) => void;
   setSelectedFeatPicks: (v: Record<string, string[]>) => void;
   setSelectedFeatExpertise: (v: string[]) => void;
+  setSelectedFeatSpells: (v: Record<string, string[]>) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -330,13 +331,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
             }
           }
           // Feat-granted spells use prefixed keys: feat:FEATID:SPELLID
-          for (const featId of (c.selectedFeats ?? [])) {
-            const feat = ALL_FEATS.find(f => f.id === featId);
-            for (const gs of feat?.grantedSpells ?? []) {
-              if (gs.recharge === 'cantrip') continue;
-              const key = `feat:${featId}:${gs.spellId}`;
-              if (merged[key] == null) merged[key] = 1;
-            }
+          for (const gs of featGrantedSpells(c)) {
+            if (gs.recharge === 'cantrip') continue;
+            const key = `feat:${gs.featId}:${gs.spellId}`;
+            if (merged[key] == null) merged[key] = 1;
           }
           return merged;
         })(),
@@ -790,13 +788,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           }
         }
         // Initialize uses for any feat-granted spells (covers feat just taken this level-up).
-        for (const featId of selectedFeats) {
-          const feat = ALL_FEATS.find(f => f.id === featId);
-          for (const gs of feat?.grantedSpells ?? []) {
-            if (gs.recharge === 'cantrip') continue;
-            const key = `feat:${featId}:${gs.spellId}`;
-            if (merged[key] == null) merged[key] = 1;
-          }
+        for (const gs of featGrantedSpells({ ...s.character, selectedFeats })) {
+          if (gs.recharge === 'cantrip') continue;
+          const key = `feat:${gs.featId}:${gs.spellId}`;
+          if (merged[key] == null) merged[key] = 1;
         }
         return merged;
       })();
@@ -960,11 +955,8 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
             if (spell.recharge === 'short') merged[spell.spellId] = 1;
           }
         }
-        for (const featId of (s.character.selectedFeats ?? [])) {
-          const feat = ALL_FEATS.find(f => f.id === featId);
-          for (const gs of feat?.grantedSpells ?? []) {
-            if (gs.recharge === 'short') merged[`feat:${featId}:${gs.spellId}`] = 1;
-          }
+        for (const gs of featGrantedSpells(s.character)) {
+          if (gs.recharge === 'short') merged[`feat:${gs.featId}:${gs.spellId}`] = 1;
         }
         return merged;
       })();
@@ -1034,11 +1026,8 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
             merged[spell.spellId] = 1;
           }
         }
-        for (const featId of (s.character.selectedFeats ?? [])) {
-          const feat = ALL_FEATS.find(f => f.id === featId);
-          for (const gs of feat?.grantedSpells ?? []) {
-            if (gs.recharge !== 'cantrip') merged[`feat:${featId}:${gs.spellId}`] = 1;
-          }
+        for (const gs of featGrantedSpells(s.character)) {
+          if (gs.recharge !== 'cantrip') merged[`feat:${gs.featId}:${gs.spellId}`] = 1;
         }
         return merged;
       })();
@@ -1185,6 +1174,22 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setSelectedFeatExpertise: (v) =>
     set((s) => s.character ? { character: { ...s.character, selectedFeatExpertise: v } } : s),
+
+  setSelectedFeatSpells: (v) =>
+    set((s) => {
+      if (!s.character) return s;
+      const character = { ...s.character, selectedFeatSpells: v };
+      // A newly picked once-per-rest spell starts available. Without this its use counter is
+      // absent, and `?? 1` at the read site would make it look available while the rest handlers
+      // had no key to restore — the shape that let `recharge` sit inert for months.
+      const uses = { ...(character.innateSpellUses ?? {}) };
+      for (const gs of featGrantedSpells(character)) {
+        if (gs.recharge === 'cantrip') continue;
+        const key = `feat:${gs.featId}:${gs.spellId}`;
+        if (uses[key] == null) uses[key] = 1;
+      }
+      return { character: { ...character, innateSpellUses: uses } };
+    }),
 
   setSubclassOptions: (v) =>
     set((s) => {

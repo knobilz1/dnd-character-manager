@@ -1,4 +1,4 @@
-import type { Feat, Character, AbilityKey, BookId } from '../types';
+import type { Feat, Character, AbilityKey, BookId, Spell } from '../types';
 import { PHB2024_FEATS } from './feats-phb2024';
 import { getClass } from './classes';
 import { getSubclass } from './subclasses';
@@ -13,6 +13,7 @@ import { ALL_FIGHTING_STYLES } from './fightingStyles';
 import { ALL_INVOCATIONS } from './invocations';
 import { ALL_METAMAGIC } from './metamagic';
 import { ALL_MANEUVERS } from './maneuvers';
+import { ALL_SPELLS, getSpell } from './spells';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -159,6 +160,10 @@ export const ALL_FEATS: Feat[] = [
     name: 'Magic Initiate',
     sourceBook: 'PHB',
     description: 'Choose a class: bard, cleric, druid, sorcerer, warlock, or wizard. You learn two cantrips of your choice from that class\'s spell list. In addition, choose one 1st-level spell to learn from that same list. Using this feat, you can cast the spell once at its lowest level, and you must finish a long rest before you can cast it in this way again. Your spellcasting ability for these spells depends on the class you chose: Charisma for bard, sorcerer, or warlock; Wisdom for cleric or druid; or Intelligence for wizard.',
+    grantsSpellPicks: [
+      { key: 'cantrips', label: 'Two cantrips from one class list', count: 2, level: 0, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], recharge: 'cantrip', ability: 'cha' },
+      { key: 'spell', label: 'One 1st-level spell from that same list', count: 1, level: 1, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], recharge: 'long', ability: 'cha' },
+    ],
   },
   {
     id: 'martial-adept',
@@ -212,6 +217,9 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'PHB',
     prerequisite: { other: 'Intelligence or Wisdom 13 or higher' },
     description: 'You have learned a number of spells that you can cast as rituals. These spells are written in a ritual book, which you must have in hand while casting one of them. When you choose this feat, you acquire a ritual book holding two 1st-level spells of your choice. Choose one of the following classes: bard, cleric, druid, sorcerer, warlock, or wizard. You must choose your spells from that class\'s spell list, and the spells you choose must have the ritual tag.',
+    grantsSpellPicks: [
+      { key: 'rituals', label: 'Two 1st-level ritual spells from one class list', count: 2, level: 1, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], ritualOnly: true, recharge: 'cantrip', ability: 'int' },
+    ],
   },
   {
     id: 'savage-attacker',
@@ -258,6 +266,9 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'PHB',
     prerequisite: { spellcasting: true },
     description: 'You have learned techniques to enhance your attacks with certain kinds of spells, gaining the following benefits:\n• When you cast a spell that requires you to make an attack roll, the spell\'s range is doubled.\n• Your ranged spell attacks ignore half cover and three-quarters cover.\n• You learn one cantrip that requires an attack roll. Choose the cantrip from the bard, cleric, druid, sorcerer, warlock, or wizard spell list.',
+    grantsSpellPicks: [
+      { key: 'cantrip', label: 'One cantrip that requires an attack roll', count: 1, level: 0, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], requiresAttackRoll: true, recharge: 'cantrip', ability: 'cha' },
+    ],
   },
   {
     id: 'tavern-brawler',
@@ -330,6 +341,10 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'You\'ve learned some of an artificer\'s inventiveness:\n• You learn one cantrip of your choice from the artificer spell list, and you learn one 1st-level spell of your choice from that list. Intelligence is your spellcasting ability for these spells.\n• You can cast this feat\'s 1st-level spell without a spell slot, and you must finish a long rest before you can cast it in this way again. You can also cast the spell using any spell slots you have.\n• You gain proficiency with one type of artisan\'s tools of your choice, and you can use that type of tool as a spellcasting focus for any spell you cast that uses Intelligence as its spellcasting ability.',
     grantsTools: ["One type of artisan's tools of your choice"],
+    grantsSpellPicks: [
+      { key: 'cantrip', label: 'One artificer cantrip', count: 1, level: 0, classIds: ['artificer'], recharge: 'cantrip', ability: 'int' },
+      { key: 'spell', label: 'One 1st-level artificer spell', count: 1, level: 1, classIds: ['artificer'], recharge: 'long', ability: 'int' },
+    ],
   },
   {
     id: 'fighting-initiate',
@@ -619,6 +634,10 @@ export const ALL_FEATS: Feat[] = [
     prerequisite: { other: 'No other dragonmark' },
     description: 'You have a dragonmark that manifests unpredictably. You gain the following benefits:\n• Increase your Constitution score by 1, to a maximum of 20.\n• You learn one cantrip of your choice and one 1st-level spell of your choice from the sorcerer spell list. Constitution is your spellcasting ability for these spells.\n• You can cast the 1st-level spell without expending a spell slot. Once you do so, you can\'t cast it this way again until you finish a short or long rest. You can also cast it using spell slots you have.\n• When you cast the 1st-level spell using this feat, you must expend one of your Hit Dice and roll it. If the result is an odd number, one random creature within 30 feet of you (not you) takes force damage equal to the result; if there is no other creature in range, you take the damage instead. If the result is an even number, you gain temporary hit points equal to the result.',
     abilityScoreIncrease: { con: 1 },
+    grantsSpellPicks: [
+      { key: 'cantrip', label: 'One sorcerer cantrip', count: 1, level: 0, classIds: ['sorcerer'], recharge: 'cantrip', ability: 'con' },
+      { key: 'spell', label: 'One 1st-level sorcerer spell', count: 1, level: 1, classIds: ['sorcerer'], recharge: 'short', ability: 'con' },
+    ],
   },
   {
     id: 'greater-dragonmark',
@@ -635,6 +654,10 @@ export const ALL_FEATS: Feat[] = [
     name: 'Strixhaven Initiate',
     sourceBook: 'SCoC',
     description: 'You have studied some magical theory and have learned a few spells associated with Strixhaven University.\n\nChoose one of Strixhaven\'s colleges: Lorehold, Prismari, Quandrix, Silverquill, or Witherbloom. You learn two cantrips and one 1st-level spell based on the college you choose, as specified in the Strixhaven Spells table:\n• Lorehold: cantrips from light, sacred flame, and thaumaturgy; 1st-level cleric or wizard spell.\n• Prismari: cantrips from fire bolt, prestidigitation, and ray of frost; 1st-level bard or sorcerer spell.\n• Quandrix: cantrips from druidcraft, guidance, and mage hand; 1st-level druid or wizard spell.\n• Silverquill: cantrips from sacred flame, thaumaturgy, and vicious mockery; 1st-level bard or cleric spell.\n• Witherbloom: cantrips from chill touch, druidcraft, and spare the dying; 1st-level druid or wizard spell.\n\nYou can cast the chosen 1st-level spell without a spell slot, and you must finish a long rest before you can cast it in this way again. You can also cast the spell using any spell slots you have. Your spellcasting ability for this feat\'s spells is Intelligence, Wisdom, or Charisma (choose when you select this feat).',
+    grantsSpellPicks: [
+      { key: 'cantrips', label: 'Two cantrips from your Strixhaven college', count: 2, level: 0, spellIds: ['light', 'sacred-flame', 'thaumaturgy', 'fire-bolt', 'prestidigitation', 'ray-of-frost', 'druidcraft', 'guidance', 'mage-hand', 'vicious-mockery', 'chill-touch', 'spare-the-dying'], recharge: 'cantrip', ability: 'int' },
+      { key: 'spell', label: 'One 1st-level spell from your Strixhaven college lists', count: 1, level: 1, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'wizard'], recharge: 'long', ability: 'int' },
+    ],
   },
   {
     id: 'scoc-strixhaven-mascot',
@@ -769,4 +792,98 @@ export function featPickGroups(character: Character): FeatPickGroup[] {
 /** What those picks actually resolved to — auto grants in full, chosen picks otherwise. */
 export function resolvedFeatPicks(character: Character): string[] {
   return featPickGroups(character).flatMap(g => (g.auto ? g.options : g.picked));
+}
+
+/** A feat-granted spell, whether it was fixed in the data or chosen by the player. */
+export interface FeatSpell {
+  featId: string;
+  featName: string;
+  spellId: string;
+  recharge: 'cantrip' | 'long' | 'short';
+  ability: AbilityKey;
+}
+
+/**
+ * Every spell a character's feats grant — the fixed `grantedSpells` entries AND the picks.
+ *
+ * One function because there were four separate loops over `grantedSpells` (the spell panel, load,
+ * level-up, and each rest handler), and a fifth kind of feat spell would otherwise have had to be
+ * remembered in all four. That is the shape of defect this whole audit keeps finding.
+ */
+export function featGrantedSpells(character: Character): FeatSpell[] {
+  const out: FeatSpell[] = [];
+  for (const featId of character.selectedFeats ?? []) {
+    const feat = ALL_FEATS.find(f => f.id === featId);
+    if (!feat) continue;
+    for (const gs of feat.grantedSpells ?? []) {
+      out.push({ featId, featName: feat.name, ...gs });
+    }
+    for (const grant of feat.grantsSpellPicks ?? []) {
+      for (const spellId of character.selectedFeatSpells?.[`${featId}:${grant.key}`] ?? []) {
+        out.push({ featId, featName: feat.name, spellId, recharge: grant.recharge, ability: grant.ability });
+      }
+    }
+  }
+  return out;
+}
+
+export interface FeatSpellChoice {
+  /** Storage key, `${featId}:${grantKey}`. */
+  key: string;
+  featId: string;
+  featName: string;
+  label: string;
+  count: number;
+  level: 0 | 1;
+  picked: string[];
+  grant: NonNullable<Feat['grantsSpellPicks']>[number];
+}
+
+/**
+ * The spell choices a character's feats still offer.
+ *
+ * `profBonus` is passed in rather than derived here so this module stays free of the level tables;
+ * Ritual Caster 2024 is the only grant that needs it, and its list grows as the bonus does.
+ */
+export function featSpellChoices(character: Character, profBonus: number): FeatSpellChoice[] {
+  const out: FeatSpellChoice[] = [];
+  for (const featId of character.selectedFeats ?? []) {
+    const feat = ALL_FEATS.find(f => f.id === featId);
+    for (const grant of feat?.grantsSpellPicks ?? []) {
+      const key = `${featId}:${grant.key}`;
+      out.push({
+        key, featId, featName: feat!.name, label: grant.label, level: grant.level,
+        count: grant.countFromProfBonus ? profBonus : grant.count,
+        picked: character.selectedFeatSpells?.[key] ?? [],
+        grant,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Which spells a pick may be spent on.
+ *
+ * Computed on demand rather than baked into the feat entries: `ALL_FEATS` is a module-level const,
+ * and evaluating the spell catalog while it initialises would make the two modules' load order
+ * matter. Takes `enabledBooks` so a pool never offers a spell from a book the character is not
+ * using — the same filter the spell picker in the creator applies.
+ */
+export function spellPickOptions(
+  grant: NonNullable<Feat['grantsSpellPicks']>[number],
+  enabledBooks: BookId[],
+): Spell[] {
+  const pool = grant.spellIds
+    ? grant.spellIds.map(id => getSpell(id)).filter((s): s is Spell => !!s)
+    : ALL_SPELLS.filter(s => (grant.classIds ?? []).some(c => s.classes.includes(c)));
+  return pool
+    .filter(s => s.level === grant.level)
+    .filter(s => !grant.ritualOnly || s.ritual)
+    // No 'attack' tag exists in the spell data, so this reads the text. All 13 matches are real
+    // attack cantrips (fire bolt, eldritch blast, chill touch…); the probe asserts the count so a
+    // reworded description shows up as a change rather than a silently shorter list.
+    .filter(s => !grant.requiresAttackRoll || /spell attack/i.test(s.description))
+    .filter(s => bookEnabled(s, enabledBooks))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
