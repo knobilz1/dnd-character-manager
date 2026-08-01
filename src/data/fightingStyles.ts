@@ -29,3 +29,25 @@ export function getFightingStyle(id: string): FightingStyle | undefined {
 export function getFightingStylesForClass(classId: string): FightingStyle[] {
   return ALL_FIGHTING_STYLES.filter(fs => fs.classes.includes(classId));
 }
+
+/**
+ * How many Fighting Styles a class is entitled to at a given class level.
+ *
+ * Lives here rather than inline in the creator because the creator and the level-up dialog each
+ * need it, and the inline copy said `fighter && level >= 10 ? 2 : 1` — handing a second style to
+ * every fighter, when Additional Fighting Style belongs to the CHAMPION alone (2014 at 10th,
+ * 2024 at 7th). Paladin and ranger get theirs at 2nd, fighter at 1st.
+ */
+export function fightingStylesAllowed(
+  baseId: string,
+  subclassId: string | undefined,
+  level: number,
+): number {
+  if (baseId === 'fighter') {
+    const champion = (subclassId === 'champion' && level >= 10)
+      || (subclassId === 'champion-2024' && level >= 7);
+    return champion ? 2 : 1;
+  }
+  if ((baseId === 'paladin' || baseId === 'ranger') && level >= 2) return 1;
+  return 0;
+}

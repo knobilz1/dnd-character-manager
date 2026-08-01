@@ -3,7 +3,7 @@ import { SubclassOptionsPicker } from './SubclassOptionsPicker';
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
-import { ALL_FIGHTING_STYLES } from '../../../data/fightingStyles';
+import { ALL_FIGHTING_STYLES, fightingStylesAllowed } from '../../../data/fightingStyles';
 import { ALL_INVOCATIONS } from '../../../data/invocations';
 import { ALL_PACT_BOONS } from '../../../data/pactBoons';
 import { ALL_METAMAGIC } from '../../../data/metamagic';
@@ -157,10 +157,10 @@ export function StepClassOptions() {
 
   // ── Fighting Styles ──────────────────────────────────────────────────
   const hasFightingStyle = ['fighter', 'paladin', 'ranger'].includes(baseId);
-  let fightingStyleCount = 0;
-  if (baseId === 'fighter') fightingStyleCount = level >= 10 ? 2 : 1;
-  else if (baseId === 'paladin' && level >= 2) fightingStyleCount = 1;
-  else if (baseId === 'ranger' && level >= 2) fightingStyleCount = 1;
+  // Shared with the level-up dialog — see fightingStylesAllowed. The rule used to live here as
+  // `fighter && level >= 10 ? 2 : 1`, which handed a second style to every fighter rather than
+  // to the Champion alone.
+  const fightingStyleCount = fightingStylesAllowed(baseId, subclassId, level);
 
   const fightingStylesAvail = ALL_FIGHTING_STYLES
     .filter(fs => bookEnabled(fs, enabledBooks))

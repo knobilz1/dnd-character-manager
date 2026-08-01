@@ -10,6 +10,9 @@ import {
   FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
 } from '../../data/mechanics';
 import { ALL_FEATS, getEligibleFeats } from '../../data/feats';
+import { ALL_FIGHTING_STYLES, fightingStylesAllowed } from '../../data/fightingStyles';
+import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
+import { getSubclassOptions, picksAllowed } from '../../data/subclassOptions';
 import { ALL_SPELLS } from '../../data/spells';
 import { ALL_INVOCATIONS } from '../../data/invocations';
 import { ALL_PACT_BOONS } from '../../data/pactBoons';
@@ -160,7 +163,7 @@ function CompactOptionPicker({ items, selected, max, onToggle }: OptionPickerPro
 }
 
 export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDialogProps) {
-  const { addSpellToBook, updateClassOptions } = useCharacterStore();
+  const { addSpellToBook, updateClassOptions, setSubclassOptions } = useCharacterStore();
   const derived = useCharacterDerived(character);
   const [selectedClassIdx, setSelectedClassIdx] = React.useState(0);
   const [pendingSubclass, setPendingSubclass] = React.useState<string | undefined>(undefined);
@@ -233,6 +236,11 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const [pendingManeuvers, setPendingManeuvers] = React.useState<string[]>([]);
   const [pendingInfusions, setPendingInfusions] = React.useState<string[]>([]);
   const [pendingOptionalFeatures, setPendingOptionalFeatures] = React.useState<string[]>([]);
+  const [pendingFightingStyles, setPendingFightingStyles] = React.useState<string[]>([]);
+  // Subclass build choices (Four Elements disciplines, Kensei weapons, Runes, Arcane Shots).
+  // null = untouched this level-up; anything else replaces character.subclassOptions.
+  const [pendingSubclassOptions, setPendingSubclassOptions] =
+    React.useState<Record<string, string[]> | null>(null);
 
   // Reset all per-class choices when the selected class changes mid-dialog.
   React.useEffect(() => {
@@ -257,6 +265,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     setPendingInfusions([]);
     setPendingOptionalFeatures([]);
     setPendingExpertise([]);
+    setPendingFightingStyles([]);
+    setPendingSubclassOptions(null);
   }, [selectedClassIdx, newClassId]);
 
   React.useEffect(() => {
@@ -434,7 +444,8 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     if (pendingPactBoon || pendingTotemSpirit || pendingAspectTotem || pendingTotemicAttunement ||
         pendingLandType ||
         pendingInvocations.length || pendingMetamagic.length || pendingManeuvers.length ||
-        pendingInfusions.length || pendingOptionalFeatures.length) {
+        pendingInfusions.length || pendingOptionalFeatures.length ||
+        pendingFightingStyles.length) {
       updateClassOptions({
         ...(pendingPactBoon ? { pactBoon: pendingPactBoon } : {}),
         ...(pendingLandType ? { landType: pendingLandType } : {}),
@@ -446,8 +457,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
         maneuvers: [...new Set([...existing.maneuvers, ...pendingManeuvers])],
         infusions: [...new Set([...existing.infusions, ...pendingInfusions])],
         optionalFeatures: [...new Set([...(existing.optionalFeatures ?? []), ...pendingOptionalFeatures])],
+        fightingStyles: [...new Set([...(existing.fightingStyles ?? []), ...pendingFightingStyles])],
       });
     }
+
+    // Subclass choices write to their own field, not classOptions.
+    if (pendingSubclassOptions) setSubclassOptions(pendingSubclassOptions);
 
     // `classId` (= classDef.id), not `primary.classId`: on a multiclass dip there is no `primary`
     // yet, and the store keys off this to decide whether to bump a class or append a new one.
@@ -729,6 +744,29 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     .filter(f => bookEnabled(f, enabledBooks))
     .filter(f => f.classId === classId)
     .filter(f => f.minLevel === newLevel);
+
+  // ── Fighting Style / subclass choices owed AT THE NEW LEVEL ───────────────
+  // Both pickers already existed, in the creator only, so a character who LEVELLED into a choice
+  // was never asked for it: a Champion reaching 10 got no second style, a Four Elements monk
+  // reaching 6 got no second discipline. They stayed silently unspent.
+  const fightingStyleBase = baseClassId(classId);
+  const fightingStylesOwed = Math.max(
+    0,
+    fightingStylesAllowed(fightingStyleBase, primary?.subclassId ?? pendingSubclass, newLevel)
+      - (classOpts.fightingStyles ?? []).length,
+  );
+  const fightingStylesAvail = ALL_FIGHTING_STYLES
+    .filter(fs => bookEnabled(fs, character.enabledBooks))
+    .filter(fs => fs.classes.includes(fightingStyleBase))
+    .filter(fs => !(classOpts.fightingStyles ?? []).includes(fs.id));
+
+  const subclassForOptions = getSubclass(primary?.subclassId ?? pendingSubclass ?? '');
+  // Owed only when the allowance GREW at this level — otherwise every level-up would nag about a
+  // choice the player deliberately left open.
+  const subclassChoicesOwed = !!subclassForOptions && getSubclassOptions(subclassForOptions.id).some(g => {
+    const picked = (character.subclassOptions?.[g.key] ?? []).length;
+    return picksAllowed(g, newLevel) > picked && picksAllowed(g, newLevel) > picksAllowed(g, newLevel - 1);
+  });
 
   return (
     <Dialog open={open} onClose={onClose} title={currentLevel === 0 ? `New Class: ${classDef.name}` : `Level Up: ${classDef.name} ${currentLevel} → ${newLevel}`} wide>
@@ -1521,6 +1559,53 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
         )}
 
         {/* ─── Eldritch Invocations ─────────────────────────────────────────── */}
+        {/* ─── Fighting Style ──────────────────────────────────────────────── */}
+        {fightingStylesOwed > 0 && (
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+              Fighting Style{fightingStylesOwed > 1 ? 's' : ''} — choose {fightingStylesOwed}
+            </h3>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {fightingStylesAvail.map(fs => {
+                const on = pendingFightingStyles.includes(fs.id);
+                const full = !on && pendingFightingStyles.length >= fightingStylesOwed;
+                return (
+                  <button
+                    key={fs.id}
+                    disabled={full}
+                    onClick={() => setPendingFightingStyles(p =>
+                      p.includes(fs.id) ? p.filter(x => x !== fs.id) : [...p, fs.id])}
+                    className={cn(
+                      'p-3 rounded-lg border-2 text-left transition-all',
+                      on ? 'border-red-500 bg-red-950/30' : 'border-slate-700 bg-slate-800 hover:border-slate-500',
+                      full && 'opacity-40 cursor-not-allowed',
+                    )}
+                  >
+                    <p className="text-sm font-bold text-white">{fs.name}</p>
+                    <p className="text-xs text-slate-400 line-clamp-2">{fs.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ─── Subclass choices ────────────────────────────────────────────── */}
+        {subclassChoicesOwed && (
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+              {subclassForOptions?.name} — new choice available
+            </h3>
+            <SubclassOptionsPicker
+              subclassId={subclassForOptions?.id}
+              classLevel={newLevel}
+              value={pendingSubclassOptions ?? character.subclassOptions}
+              onChange={setPendingSubclassOptions}
+              compact
+            />
+          </section>
+        )}
+
         {isWarlock && totalNewInvocations > 0 && (
           <section>
             <div className="flex items-baseline justify-between mb-2">
