@@ -1,9 +1,8 @@
 """Race trait text vs the source books, straight from the PDFs.
 
-STATUS (2026-08-01): working. **116 of 122 races pair.** PHB is the control and is clean:
-15/15 races, 67/67 trait names located, one finding — and that one is the app being MORE current
-than the source (see errata below). 54 mechanics findings across all books, from 306 when the
-sweep was first stood up.
+STATUS (2026-08-01): working. **120 of 122 races pair.** PHB is the control and is clean:
+15/15 races, 67/67 trait names, one finding — and that one is the app being MORE current than the
+source (see errata below). From 306 findings when the sweep was first stood up.
 
 Why this is harder than it looks, all of it learned by getting it wrong first:
 
@@ -36,13 +35,16 @@ GATED ON PAIRING: the matched/total table prints before any finding, because "0 
    of which are printed in the PHB. A race its own book cannot account for is retried against the
    PHB, and the finding says which book verified it. This took MMoM 21→30 and SCAG 6→10.
 
-STILL UNPAIRED (6), both groups a source problem rather than a tool problem:
-- **5 SJA races** (Autognome, Giff, Hadozee, Plasmoid, Thri-kreen). The AnyFlip capture yields
-  25,514 characters for an entire book — there is no text layer to search. The same capture
-  blocked the spell sweep. Astral Elf pairs only because its elf traits match the PHB.
-- **Leonin (MMoM)**. Neither the MMoM PDF nor its markdown extract contains the word at all; the
-  book's text layer is patchy. Leonin originates in Mythic Odysseys of Theros, which is not on
-  disk. Nothing to compare against.
+STILL UNPAIRED (2), and BOTH are findings about the app's data rather than about this tool:
+- **Leonin (MMoM)**. It appears in no book on disk, including MMoM itself, whose other 30 races
+  all pair. Leonin is a Mythic Odysseys of Theros race and MMoM did not reprint it, so
+  `sourceBook: 'MMoM'` looks wrong — a player enabling MMoM is offered a race that book has never
+  contained. MOoT is not a BookId in the app at all.
+- **Giff (SJA)**. The published giff has Creature Type, Size, Astral Spark, Firearms Mastery and
+  Hippo Build. The app has Ability Score Increase, Damage Dealer, Firearms Expert, Hippogriff
+  Build, Percussive Repair and Swim Speed — not one mechanical trait name matches, and 2022 races
+  do not grant a fixed Ability Score Increase at all. This looks like a playtest or invented
+  version rather than the book's.
 
 Usage: python tools/audit/racepdf.py [BookId] [--full]
 """
