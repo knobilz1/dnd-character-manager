@@ -9,10 +9,30 @@ Reuses, deliberately, everything both earlier sweeps paid for: de-hyphenation, s
 split unit word, bare dice read source-side only, the index-vs-entry discriminator, dual
 extraction, and the coverage gate.
 
-THE CONTROL IS THE CLAIM, exactly as in featpdf. `--control` bumps every distance and die in every
-feature description and requires the sweep to report them all. A sweep that has gone quiet by
-degrading is otherwise indistinguishable from one that has gone quiet by getting correct. Re-run it
-after ANY scoring change.
+THE CONTROL IS THE CLAIM, exactly as in featpdf — but TWO controls, because one of them is blind
+to the thing most likely to go wrong.
+
+  --control              corrupt every distance, die and DC to an IMPOSSIBLE value (930 ft, 92d6).
+                         Answers "can the sweep still fail at all". 148/148.
+  --control --plausible  swap them for values the books DO contain (30 ft -> 10 ft, d8 -> d10).
+                         Answers "what is the comparison window costing". 139/148 = 93%.
+
+The second exists because findings fall as the window widens and that looks like progress. It is
+not. Measured:
+
+    window   findings   impossible   plausible
+      2400      49         100%         93%     <- chosen
+      4000      47         100%         87%
+      6000      44         100%         81%
+      9000      39         100%         77%
+
+Ten fewer findings costs sixteen points of real detection, and the impossible control reads 100%
+the whole way down. **A quieter report is not a better one — prove the difference before taking
+it.** 2,400 is the widest window that costs nothing measurable.
+
+93% is not 100%, and that is the honest ceiling here: 9 plausible corruptions go unreported
+(Circle of Spores, School of Abjuration, Sea Domain and 6 more) because a neighbouring feature
+genuinely states the swapped value. Findings are trustworthy; ABSENCE of a finding is weaker.
 
 Usage: SUBCLASS_BUNDLE=<bundled subclasses.mjs> python tools/audit/subclasspdf.py [book] [--full]
        ... --control      run the negative control instead and report the detection rate
@@ -166,21 +186,44 @@ def sweep(all_subs, only=None):
     return stats, findings, notes, paired, unpaired, nobook
 
 
-def control(all_subs):
+def _impossible(d):
+    """Values no rulebook contains, so nothing can accidentally satisfy them."""
+    d = re.sub(r'\b(\d+)(\s*(?:feet|foot|ft)\b)', lambda m: '9' + m.group(0), d)
+    d = re.sub(r'\b(\d+)d(\d+)\b', lambda m: '9' + m.group(0), d)
+    # DCs too, so the "save DC implies dc8" reading cannot quietly hide a wrong one.
+    return re.sub(r'\bDC (\d+)\b', lambda m: 'DC 9' + m.group(1), d)
+
+
+# Swaps to values the books DO contain. This is the control that constrains WINDOW WIDTH: an
+# impossible 930 ft can never be satisfied by a neighbour's text however wide the window grows, so
+# it cannot tell you what widening costs. A plausible 15 ft can, because the feature next door may
+# genuinely say 15 feet.
+PLAUSIBLE_FT = {'5': '15', '10': '30', '15': '5', '20': '10', '30': '10', '60': '30', '120': '60'}
+PLAUSIBLE_DIE = {'4': '6', '6': '8', '8': '10', '10': '12', '12': '6', '20': '12'}
+
+
+def _plausible(d):
+    d = re.sub(r'\b(\d+)(\s*(?:feet|foot|ft)\b)',
+               lambda m: PLAUSIBLE_FT.get(m.group(1), m.group(1)) + m.group(2), d)
+    return re.sub(r'\b(\d+)d(\d+)\b',
+                  lambda m: f'{m.group(1)}d{PLAUSIBLE_DIE.get(m.group(2), m.group(2))}', d)
+
+
+def control(all_subs, mode='impossible'):
     """Corrupt every distance and die, then require the sweep to report each one."""
+    mangle = _impossible if mode == 'impossible' else _plausible
     bad = json.loads(json.dumps(all_subs))
     changed = set()
     for s in bad:
         for f in s['features']:
-            d = re.sub(r'\b(\d+)(\s*(?:feet|foot|ft)\b)', lambda m: '9' + m.group(0), f['d'])
-            d = re.sub(r'\b(\d+)d(\d+)\b', lambda m: '9' + m.group(0), d)
+            d = mangle(f['d'])
             if d != f['d']:
                 changed.add(s['name'])
                 f['d'] = d
     _, findings, _, _, _, _ = sweep(bad)
     flagged = {r[1] for r in findings}
     missed = sorted(changed - flagged)
-    print(f'CONTROL: {len(changed)} subclasses corrupted, '
+    print(f'CONTROL[{mode}]: {len(changed)} subclasses corrupted, '
           f'{len(changed & flagged)} detected ({100 * len(changed & flagged) // max(1, len(changed))}%)')
     if missed:
         print(f'  MISSED ({len(missed)}): ' + ', '.join(missed[:20]))
@@ -193,7 +236,7 @@ def main():
     full = '--full' in sys.argv
     all_subs = subclasses()
     if '--control' in sys.argv:
-        control(all_subs)
+        control(all_subs, 'plausible' if '--plausible' in sys.argv else 'impossible')
         return
 
     stats, findings, notes, paired, unpaired, nobook = sweep(all_subs, args[0] if args else None)
