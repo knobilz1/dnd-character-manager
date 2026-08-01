@@ -214,6 +214,39 @@ def name_variants(name):
     return out
 
 
+_PHB_FLAT = []
+
+
+def phb_flat():
+    """The base book, flattened, loaded once — a subrace's inherited traits are printed here."""
+    if not _PHB_FLAT:
+        _PHB_FLAT.append(V._flatten(V.book_text(BOOK_PDF['PHB']))[0])
+    return _PHB_FLAT[0]
+
+
+def trait_variants(name):
+    """The app's trait NAME is its own label, exactly as its description is its own paraphrase.
+
+    The code already refuses to diff descriptions as prose for that reason; nothing was applying
+    the same caveat to names, so 21 traits the books print in full were reported missing. The app
+    adds a level suffix the book has no reason to print ("Celestial Revelation (Level 3)") and
+    prefixes a shared trait with the subrace to keep ids unique ("Beasthide Shifting Feature" for
+    what Eberron heads "Shifting Feature", once per shifter type).
+
+    Deliberately conservative: never falls back to a single generic word. A one-word variant makes
+    the search unfailable — "Flexible ASI (2024)" reduced to "ASI" matches the letters inside
+    "basic" and "quasi" 208 times, which would mark every one of these verified without reading a
+    thing. Two words minimum unless the app's own name is shorter.
+    """
+    out = [name]
+    bare = re.sub(r'\s*\([^)]*\)', '', name).strip()
+    out.append(bare)
+    parts = bare.split()
+    if len(parts) > 2:
+        out.append(' '.join(parts[1:]))
+    return list(dict.fromkeys(x for x in out if x))
+
+
 def race_spans(book, r, by_id, span=9000, raw=None, raw_idx=None):
     """Every slice of the book that holds part of this race's traits — a LIST, not one window.
 
@@ -267,7 +300,10 @@ def races():
         sys.exit('set RACE_BUNDLE to a bundled races.mjs path')
     out = subprocess.run(
         ['node', '-e',
-         'const m=await import(process.argv[1]);'
+         # An absolute Windows path is not a URL: import("C:/x.mjs") reads "c:" as the scheme and
+         # throws ERR_UNSUPPORTED_ESM_URL_SCHEME. pathToFileURL handles both absolute and relative.
+         'const {pathToFileURL}=await import("node:url");'
+         'const m=await import(pathToFileURL(process.argv[1]).href);'
          'const f=[];const w=r=>{f.push({id:r.id,name:r.name,book:r.sourceBook,'
          'parent:r.parentRaceId??null,hidden:!!r.hidden,'
          'traits:(r.traits??[]).map(t=>({name:t.name,d:t.description}))});'
@@ -286,7 +322,7 @@ def main():
 
     all_races = races()
     by_id = {r['id']: r for r in all_races}
-    stats, findings = {}, []
+    stats, findings, notes = {}, [], []
     paired = unpaired = nobook = hidden = 0
 
     for r in all_races:
@@ -341,22 +377,41 @@ def main():
         hits = 0
         for t in r['traits']:
             st['traits'] += 1
-            key = flat(t['name'])
-            if not key:
+            if not flat(t['name']):
                 continue
             # Collect EVERY occurrence of the trait name across the spans, not the first.
             # "Darkvision" appears under each elf subrace, so the first hit inside High Elf's
             # window is the DROW's 120-foot version — and the app was then reported as wrong for
             # saying 60 ft. Which occurrence is "this trait" is decided below, by the text.
-            cands = []
-            for lo, hi in spans:
-                p = book.find(key, lo)
-                while 0 <= p < hi:
-                    cands.append(p)
-                    p = book.find(key, p + 1)
+            key, cands = None, []
+            for variant in trait_variants(t['name']):
+                k = flat(variant)
+                if not k:
+                    continue
+                got = []
+                for lo, hi in spans:
+                    p = book.find(k, lo)
+                    while 0 <= p < hi:
+                        got.append(p)
+                        p = book.find(k, p + 1)
+                if got:
+                    key, cands = k, got
+                    break
             if not cands:
-                findings.append(('TRAIT NAME NOT IN ENTRY', r['name'], r['book'], t['name'], '',
-                                 f'checked against {via}' if via else ''))
+                # WHY it is not there decides whether anyone should act on it, and the three causes
+                # were previously reported as one. A subrace's book does not reprint the traits it
+                # INHERITS — Duergar's Dwarven Resilience is printed in the PHB under Dwarf, and
+                # Eberron never repeats it — so 12 of these were the audit asking the wrong book.
+                where = [flat(v) for v in trait_variants(t['name']) if flat(v)]
+                if any(book.count(k) for k in where):
+                    kind = 'NAME OUTSIDE ENTRY (locator, not data)'
+                elif any(phb_flat().count(k) for k in where):
+                    kind = 'INHERITED — printed in the base book'
+                else:
+                    kind = 'TRAIT NAME NOT IN SOURCE'
+                (findings if kind == 'TRAIT NAME NOT IN SOURCE' else notes).append(
+                    (kind, r['name'], r['book'], t['name'], '',
+                     f'checked against {via}' if via else ''))
                 continue
             hits += 1
             st['found'] += 1
@@ -407,16 +462,27 @@ def main():
     if paired == 0:
         sys.exit('\nNOTHING PAIRED — any findings below would be meaningless.')
 
-    kinds = {}
-    for f in findings:
-        kinds.setdefault(f[0], []).append(f)
-    for kind, lst in kinds.items():
-        print(f'\n## {kind} ({len(lst)})')
-        for k, name, book, trait, app, note in (lst if full else lst[:25]):
-            print(f'- **{name}** [{book}]' + (f' — {trait}' if trait else '') + (f'  ({note})' if note else ''))
-        if not full and len(lst) > 25:
-            print(f'  … {len(lst) - 25} more (pass --full)')
-    print(f'\n{len(findings)} findings over {paired} paired races')
+    def dump(rows):
+        kinds = {}
+        for f in rows:
+            kinds.setdefault(f[0], []).append(f)
+        for kind, lst in kinds.items():
+            print(f'\n## {kind} ({len(lst)})')
+            for k, name, book, trait, app, note in (lst if full else lst[:25]):
+                print(f'- **{name}** [{book}]' + (f' — {trait}' if trait else '')
+                      + (f'  ({note})' if note else ''))
+            if not full and len(lst) > 25:
+                print(f'  … {len(lst) - 25} more (pass --full)')
+
+    dump(findings)
+    # Printed, never hidden — but kept out of the headline count, because neither category is a
+    # question about the app's data. Silently dropping them would make the sweep look cleaner than
+    # it is; counting them as findings sent a reader to check 27 traits the books do print.
+    if notes:
+        print('\n---\n# Not findings — the audit asked the wrong book, or the wrong window')
+        dump(notes)
+    print(f'\n{len(findings)} findings over {paired} paired races'
+          + (f'  (+{len(notes)} explained above)' if notes else ''))
 
 
 if __name__ == '__main__':
