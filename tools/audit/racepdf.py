@@ -1,9 +1,9 @@
 """Race trait text vs the source books, straight from the PDFs.
 
-STATUS (2026-08-01): working. PHB — the control book — pairs 15/15 with 67/67 trait names
-located and ONE finding, which turned out to be the app being more current than the source (see
-"errata" below). Across all books: 99/122 races paired, 48 mechanics findings, down from 306 when
-the sweep was first stood up.
+STATUS (2026-08-01): working. **116 of 122 races pair.** PHB is the control and is clean:
+15/15 races, 67/67 trait names located, one finding — and that one is the app being MORE current
+than the source (see errata below). 54 mechanics findings across all books, from 306 when the
+sweep was first stood up.
 
 Why this is harder than it looks, all of it learned by getting it wrong first:
 
@@ -30,10 +30,19 @@ Why this is harder than it looks, all of it learned by getting it wrong first:
 GATED ON PAIRING: the matched/total table prints before any finding, because "0 mismatches" over
 3% pairing is a failure this audit has already hit once.
 
-STILL UNPAIRED (23): the 9 MMoM legacy tieflings and 4 SCAG tiefling variants are printed as one
-entry with a table of options rather than as separate entries; the 6 SJA races come from an
-AnyFlip capture whose text does not survive extraction at all (0 traits found — the same books
-that blocked the spell sweep).
+7. A 2014 VARIANT is printed as trait REPLACEMENTS, not as a race. SCAG's Feral tiefling is one
+   line — "This trait replaces the Ability Score Increase trait" — while the app models it as a
+   full race carrying the base tiefling's Darkvision, Hellish Resistance and Infernal Legacy, all
+   of which are printed in the PHB. A race its own book cannot account for is retried against the
+   PHB, and the finding says which book verified it. This took MMoM 21→30 and SCAG 6→10.
+
+STILL UNPAIRED (6), both groups a source problem rather than a tool problem:
+- **5 SJA races** (Autognome, Giff, Hadozee, Plasmoid, Thri-kreen). The AnyFlip capture yields
+  25,514 characters for an entire book — there is no text layer to search. The same capture
+  blocked the spell sweep. Astral Elf pairs only because its elf traits match the PHB.
+- **Leonin (MMoM)**. Neither the MMoM PDF nor its markdown extract contains the word at all; the
+  book's text layer is patchy. Leonin originates in Mythic Odysseys of Theros, which is not on
+  disk. Nothing to compare against.
 
 Usage: python tools/audit/racepdf.py [BookId] [--full]
 """
@@ -150,13 +159,30 @@ def _best_window(book, names, keys, span, raw=None, raw_idx=None):
     return best
 
 
+# Words that describe how the app FILES a race rather than what the book calls it. "Tiefling
+# (Feral Variant)" is headed simply "Feral" in SCAG.
+FILLER = {'variant', 'variants', 'heritage', 'subrace', 'of', 'the', 'a', 'an'}
+
+
 def name_variants(name):
-    """"Tiefling (Zariel)" → tiefling(zariel), tiefling, zariel — the books print all three forms."""
+    """Every form a book might head this race under, most specific first.
+
+    "Tiefling (Zariel)" → tiefling(zariel), tiefling, zariel. "Draconblood Dragonborn" →
+    draconblooddragonborn, draconblood, dragonborn — EGtW heads it "Draconblood" alone, so without
+    the individual words it never paired despite appearing 25 times.
+
+    Emitting extra candidates is safe because `_best_window` SCORES them: a form the book doesn't
+    use finds nothing, holds none of the race's traits, and loses to one that does.
+    """
     out = [flat(name)]
     bare = flat(re.sub(r'\(.*?\)', '', name))
     if bare and bare not in out:
         out.append(bare)
     out += [flat(x) for x in re.findall(r'\((.*?)\)', name) if flat(x)]
+    # Individual significant words, so a race the book heads by its distinctive half is reachable.
+    for w in re.split(r'[^A-Za-z]+', name):
+        if len(w) >= 3 and w.lower() not in FILLER and flat(w) not in out:
+            out.append(flat(w))
     return out
 
 
@@ -260,6 +286,19 @@ def main():
         # Every occurrence of the race name is scored by how many of ITS traits appear nearby, and
         # the best-scoring window is the entry.
         spans = race_spans(book, r, by_id, raw=raw_book, raw_idx=raw_idx)
+        via = None
+        if spans is None and r['book'] != 'PHB':
+            # A 2014 VARIANT is printed as a set of trait REPLACEMENTS, not as a whole race:
+            # SCAG's Feral tiefling is one line saying "This trait replaces the Ability Score
+            # Increase trait". The app models it as a full race carrying the base tiefling's
+            # Darkvision, Hellish Resistance and Infernal Legacy — all of which are printed in the
+            # PHB. So a race its own book cannot account for is retried against the base book, and
+            # the finding says which book actually verified it.
+            praw = V.book_text(BOOK_PDF['PHB'])
+            pbook, pidx = V._flatten(praw)
+            pspans = race_spans(pbook, r, by_id, raw=praw, raw_idx=pidx)
+            if pspans is not None:
+                spans, book, raw_book, raw_idx, via = pspans, pbook, praw, pidx, 'PHB'
         if spans is None:
             unpaired += 1
             findings.append(('RACE NOT LOCATED', r['name'], r['book'], '', '', ''))
@@ -282,7 +321,8 @@ def main():
                     cands.append(p)
                     p = book.find(key, p + 1)
             if not cands:
-                findings.append(('TRAIT NAME NOT IN ENTRY', r['name'], r['book'], t['name'], '', ''))
+                findings.append(('TRAIT NAME NOT IN ENTRY', r['name'], r['book'], t['name'], '',
+                                 f'checked against {via}' if via else ''))
                 continue
             hits += 1
             st['found'] += 1
@@ -313,7 +353,8 @@ def main():
                     break
             if missing:
                 findings.append(('MECHANICS NOT IN SOURCE', r['name'], r['book'], t['name'],
-                                 t['d'], 'app states ' + ', '.join(sorted(set(missing)))))
+                                 t['d'], 'app states ' + ', '.join(sorted(set(missing)))
+                                 + (f' [checked against {via}]' if via else '')))
         if hits:
             paired += 1
             st['paired'] += 1
