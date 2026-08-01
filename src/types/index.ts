@@ -204,6 +204,12 @@ export interface Subclass {
   hidden?: boolean;
   description: string;
   features: ClassFeature[];
+  /** Armour/shield categories this subclass grants ("Heavy armor", "Medium armor", "Shields") —
+   *  the wording matches `DClass.armorProficiencies` so `armorGrants` can union them directly.
+   *  No level key: you cannot hold a subclass before its own subclass level, and every one of
+   *  these grants lands exactly there. Weapon, tool and skill grants in the same feature are
+   *  deliberately NOT here; those are separate systems. */
+  armorProficiencies?: string[];
   alwaysPreparedSpells?: Record<number, string[]>;
   /** Always-prepared spells that depend on a build choice: Circle of the Land picks one of
    *  eight land types and gets that column only. Outer key is the chosen land, inner shape

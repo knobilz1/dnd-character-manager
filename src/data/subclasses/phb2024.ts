@@ -86,8 +86,7 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
       { name: 'Martial Training', level: 3, description: 'Proficiency with Martial weapons, Medium armor, and Shields. Can use a Simple or Martial weapon as your spellcasting focus.' },
       { name: 'Extra Attack', level: 6, description: 'Attack twice with the Attack action. Can replace one attack with a cantrip (action casting time).' },
       { name: 'Battle Magic', level: 14, description: 'After casting a spell that uses your action, make 1 weapon attack as a Bonus Action.' },
-    ],
-  },
+    ], armorProficiencies: ['Medium armor', 'Shields'] },
 
   // ═══════════════════════════ CLERIC ════════════════════════════════════════
 

@@ -1,4 +1,6 @@
 import { getClass } from '../data/classes';
+import { getSubclass } from '../data/subclasses';
+import { ALL_FEATS } from '../data/feats';
 import { ARMOR_STATS } from '../data/items';
 import type { Character } from '../types';
 
@@ -15,10 +17,20 @@ import type { Character } from '../types';
  */
 function armorGrants(character: Character): Set<string> {
   const out = new Set<string>();
+  const add = (g: string) => out.add(g.trim().toLowerCase());
   for (const cl of character.classes ?? []) {
-    for (const g of getClass(cl.classId)?.armorProficiencies ?? []) {
-      out.add(g.trim().toLowerCase());
-    }
+    for (const g of getClass(cl.classId)?.armorProficiencies ?? []) add(g);
+    // SUBCLASSES grant armour too, and reading only the base class meant a Life Domain cleric in
+    // plate was told they couldn't cast spells — identical to a wizard in plate. Fifteen subclasses
+    // are affected, most of them heavy-armour cleric domains, i.e. one of the most common builds
+    // in the game.
+    for (const g of (cl.subclassId ? getSubclass(cl.subclassId)?.armorProficiencies ?? [] : [])) add(g);
+  }
+  // Heavily/Lightly/Moderately Armored carry `grantsProficiency` and nothing had ever read it, so
+  // spending a whole feat on armour proficiency bought nothing. Entries that name skills or tools
+  // simply never match an armour category, so they need no filtering here.
+  for (const featId of character.selectedFeats ?? []) {
+    for (const g of ALL_FEATS.find(f => f.id === featId)?.grantsProficiency ?? []) add(g);
   }
   return out;
 }

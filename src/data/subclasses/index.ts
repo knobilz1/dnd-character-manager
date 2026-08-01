@@ -34,7 +34,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Combat Inspiration', level: 3, description: 'Also at 3rd level, you learn to inspire others in battle. A creature that has a Bardic Inspiration die from you can roll that die and add the number rolled to a weapon damage roll it just made. Alternatively, when an attack roll is made against the creature, it can use its reaction to roll the Bardic Inspiration die and add the number rolled to its AC against that attack, after seeing the roll but before knowing whether it hits or misses.' },
     { name: 'Extra Attack', level: 6, description: 'Starting at 6th level, you can attack twice, instead of once, whenever you take the Attack action on your turn.' },
     { name: 'Battle Magic', level: 14, description: 'At 14th level, you have mastered the art of weaving spellcasting and weapon use into a single harmonious act. When you use your action to cast a bard spell, you can make one weapon attack as a bonus action.' },
-  ]},
+  ], armorProficiencies: ['Medium armor', 'Shields'] },
   { id: 'college-of-glamour', name: 'College of Glamour', classId: 'bard', sourceBook: 'XGtE', description: 'The College of Glamour is the home of bards who mastered their craft in the vibrant realm of the Feywild or under the tutelage of someone who dwelled there.', features: [
     { name: 'Mantle of Inspiration', level: 3, description: 'When you join the College of Glamour at 3rd level, you gain the ability to weave a song of fey magic that imbues your allies with vigor and speed. As a bonus action, expend one use of Bardic Inspiration. Choose a number of creatures within 60 feet of you equal to your Charisma modifier (minimum one). Each creature gains temporary hit points (5 at bard levels 1–4, 8 at 5th–9th, 11 at 10th–14th, 14 at 15th+) and can use its reaction to move up to its speed without provoking opportunity attacks.' },
     { name: 'Enthralling Performance', level: 3, description: 'Starting at 3rd level, if you perform for at least 1 minute, at the end of the performance choose a number of humanoids within 60 feet equal to your Charisma modifier (minimum one). Each must make a Wisdom saving throw (DC 8 + your proficiency bonus + your Charisma modifier) or be charmed by you. While charmed, the creature idolizes you and speaks glowingly of you to anyone who talks to it. It can repeat the save every 24 hours or when it suffers harm. Once per short or long rest.' },
@@ -60,7 +60,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Blessed Healer', level: 6, description: 'Beginning at 6th level, the healing spells you cast on others heal you as well. When you cast a spell of 1st level or higher that restores hit points to a creature other than you, you regain hit points equal to 2 + the spell\'s level.' },
     { name: 'Divine Strike', level: 8, description: 'At 8th level, you gain the ability to infuse your weapon strikes with divine energy. Once on each of your turns when you hit a creature with a weapon attack, you can cause the attack to deal an extra 1d8 radiant damage to the target.' },
     { name: 'Supreme Healing', level: 17, description: 'Starting at 17th level, when you would normally roll one or more dice to restore hit points with a spell, you instead use the highest number possible for each die.' },
-  ], alwaysPreparedSpells: { 1: ['bless', 'cure-wounds'], 3: ['lesser-restoration', 'spiritual-weapon'], 5: ['beacon-of-hope', 'revivify'], 7: ['death-ward', 'guardian-of-faith'], 9: ['mass-cure-wounds', 'raise-dead'] }},
+  ], alwaysPreparedSpells: { 1: ['bless', 'cure-wounds'], 3: ['lesser-restoration', 'spiritual-weapon'], 5: ['beacon-of-hope', 'revivify'], 7: ['death-ward', 'guardian-of-faith'], 9: ['mass-cure-wounds', 'raise-dead'] }, armorProficiencies: ['Heavy armor'] },
   { id: 'knowledge-domain', name: 'Knowledge Domain', classId: 'cleric', sourceBook: 'PHB', description: 'The gods of knowledge—including Ioun, Oghma, Thoth, and others—value learning and understanding above all.', features: [
     { name: 'Blessings of Knowledge', level: 1, description: 'At 1st level, you learn two languages of your choice. You also become proficient in your choice of two of the following skills: Arcana, History, Nature, or Religion. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen skills.' },
     { name: 'Channel Divinity: Knowledge of the Ages', level: 2, description: 'Starting at 2nd level, you can use your Channel Divinity to tap into a divine well of knowledge. As an action, you choose one skill or tool. For 10 minutes, you have proficiency with the chosen skill or tool.' },
@@ -297,7 +297,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Dampen Elements', level: 6, description: 'When you or a creature within 30 feet takes acid, cold, fire, lightning, or thunder damage, you can use your reaction to grant resistance against that instance of damage.' },
     { name: 'Divine Strike', level: 8, description: 'Once on each of your turns when you hit a creature with a weapon attack, you can cause the attack to deal an extra 1d8 cold, fire, or lightning damage (2d8 at 14th level).' },
     { name: 'Master of Nature', level: 17, description: 'You gain the ability to command animals and plant creatures. While charmed by your Channel Divinity, you can use a bonus action to verbally command them.' },
-  ], alwaysPreparedSpells: { 1: ['animal-friendship', 'speak-with-animals'], 3: ['barkskin', 'spike-growth'], 5: ['plant-growth', 'wind-wall'], 7: ['dominate-beast', 'grasping-vine'], 9: ['insect-plague', 'tree-stride'] }},
+  ], alwaysPreparedSpells: { 1: ['animal-friendship', 'speak-with-animals'], 3: ['barkskin', 'spike-growth'], 5: ['plant-growth', 'wind-wall'], 7: ['dominate-beast', 'grasping-vine'], 9: ['insect-plague', 'tree-stride'] }, armorProficiencies: ['Heavy armor'] },
   { id: 'tempest-domain', name: 'Tempest Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods whose portfolios include the Tempest domain govern storms, sea, and sky. They include gods of lightning and thunder, of earthquakes, fire, and the fury of the elements.', features: [
     { name: 'Bonus Proficiencies', level: 1, description: 'You gain proficiency with martial weapons and heavy armor.' },
     { name: 'Wrath of the Storm', level: 1, description: 'When a creature within 5 feet hits you, you can use your reaction to cause it to make a Dexterity save, taking 2d8 lightning or thunder damage on a fail. Usable a number of times equal to your Wisdom modifier per long rest.' },
@@ -309,7 +309,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // PHB p.62: Wrath of the Storm — Wisdom modifier uses (min 1) per long rest.
     resources: [{ name: 'Wrath of the Storm', key: 'wrath_of_the_storm', rechargeOn: 'long',
       maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
-    alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }},
+    alwaysPreparedSpells: { 1: ['fog-cloud', 'thunderwave'], 3: ['gust-of-wind', 'shatter'], 5: ['call-lightning', 'sleet-storm'], 7: ['control-water', 'ice-storm'], 9: ['destructive-wave', 'insect-plague'] }, armorProficiencies: ['Heavy armor'] },
   { id: 'trickery-domain', name: 'Trickery Domain', classId: 'cleric', sourceBook: 'PHB', description: 'Gods of trickery are mischief-makers and instigators who stand as a constant challenge to the accepted order among both gods and mortals.', features: [
     { name: 'Blessing of the Trickster', level: 1, description: 'You can use your action to touch a willing creature other than yourself to give it advantage on Dex (Stealth) checks for 1 hour.' },
     { name: 'Channel Divinity: Invoke Duplicity', level: 2, description: 'You create a perfect illusion of yourself within 30 feet that lasts for 1 minute. As a bonus action, you can move it up to 30 feet. You can cast spells through it and gain advantage on attacks against creatures within 5 feet of both you and the illusion.' },
@@ -328,7 +328,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // PHB p.63: War Priest — Wisdom modifier uses (min 1) per long rest.
     resources: [{ name: 'War Priest', key: 'war_priest', rechargeOn: 'long',
       maxPerLevel: { 1:1,2:1,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
-    alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }},
+    alwaysPreparedSpells: { 1: ['divine-favor', 'shield-of-faith'], 3: ['magic-weapon', 'spiritual-weapon'], 5: ['crusaders-mantle', 'spirit-guardians'], 7: ['freedom-of-movement', 'stoneskin'], 9: ['flame-strike', 'hold-monster'] }, armorProficiencies: ['Heavy armor'] },
 
   // ── PHB: DRUID CIRCLES ────────────────────────────────────────────────
   { id: 'circle-of-the-land', name: 'Circle of the Land', classId: 'druid', sourceBook: 'PHB', description: 'The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites through a vast oral tradition.',
@@ -463,7 +463,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Blade Flourish', level: 3, description: 'When you take the Attack action, your walking speed increases by 10 feet. You can also spend one use of Bardic Inspiration to add a flourish: Defensive, Slashing, or Mobile.' },
     { name: 'Extra Attack', level: 6, description: 'You can attack twice when you take the Attack action.' },
     { name: 'Master\'s Flourish', level: 14, description: 'You can use a flourish without spending Bardic Inspiration, rolling a d6 in place of the inspiration die.' },
-  ]},
+  ], armorProficiencies: ['Medium armor'] },
   { id: 'college-of-whispers', name: 'College of Whispers', classId: 'bard', sourceBook: 'XGtE', description: 'Most folk are happy to welcome a bard into their midst. But some bards of the College of Whispers use their gifts to spread mistrust and ruin.', features: [
     { name: 'Psychic Blades', level: 3, description: 'When you hit a creature with a weapon attack, you can expend one use of Bardic Inspiration to deal an extra 2d6 psychic damage (scales with level).' },
     { name: 'Words of Terror', level: 3, description: 'If you speak with a humanoid alone for at least 1 minute, you can target them to make a Wisdom save or be frightened of you or another creature of your choice for 1 hour.' },
@@ -479,7 +479,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Soul of the Forge', level: 6, description: 'You gain resistance to fire damage and a +1 bonus to AC while wearing heavy armor.' },
     { name: 'Divine Strike', level: 8, description: 'Once per turn on hit with a weapon attack, deal extra 1d8 fire damage (2d8 at 14th).' },
     { name: 'Saint of Forge and Fire', level: 17, description: 'You have immunity to fire damage and resistance to nonmagical bludgeoning, piercing, and slashing damage while wearing heavy armor.' },
-  ], alwaysPreparedSpells: { 1: ['identify', 'searing-smite'], 3: ['heat-metal', 'magic-weapon'], 5: ['elemental-weapon', 'protection-from-energy'], 7: ['fabricate', 'wall-of-fire'], 9: ['animate-objects', 'creation'] }},
+  ], alwaysPreparedSpells: { 1: ['identify', 'searing-smite'], 3: ['heat-metal', 'magic-weapon'], 5: ['elemental-weapon', 'protection-from-energy'], 7: ['fabricate', 'wall-of-fire'], 9: ['animate-objects', 'creation'] }, armorProficiencies: ['Heavy armor'] },
   { id: 'grave-domain', name: 'Grave Domain', classId: 'cleric', sourceBook: 'XGtE', description: 'Gods of the grave watch over the line between life and death. To these deities, death and the afterlife are a foundational part of the multiverse.', features: [
     { name: 'Circle of Mortality', level: 1, description: 'You gain the Spare the Dying cantrip and can cast it as a bonus action at range 30 feet. Healing spells on creatures at 0 HP are maximized.' },
     { name: 'Eyes of the Grave', level: 1, description: 'As an action, detect any undead within 60 feet that aren\'t behind total cover or protected by divination magic — you sense their presence until end of your next turn but not their capabilities or identity. Wisdom modifier uses per long rest.' },
@@ -736,7 +736,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Accursed Specter', level: 6, description: 'When you slay a humanoid, you can cause its spirit to rise as a specter under your control for 1 hour. Once per long rest.' },
     { name: 'Armor of Hexes', level: 10, description: 'When your Hexblade\'s Cursed target hits you with an attack, roll a d6. On 4 or higher, the attack misses you.' },
     { name: 'Master of Hexes', level: 14, description: 'When the target of your Hexblade\'s Curse dies, you can apply the curse to a different creature within 30 feet.' },
-  ], expandedSpells: { 1: ['shield', 'wrathful-smite'], 3: ['blur', 'branding-smite'], 5: ['blink', 'elemental-weapon'], 7: ['phantasmal-killer', 'staggering-smite'], 9: ['banishing-smite', 'cone-of-cold'] }},
+  ], expandedSpells: { 1: ['shield', 'wrathful-smite'], 3: ['blur', 'branding-smite'], 5: ['blink', 'elemental-weapon'], 7: ['phantasmal-killer', 'staggering-smite'], 9: ['banishing-smite', 'cone-of-cold'] }, armorProficiencies: ['Medium armor', 'Shields'] },
   { id: 'the-celestial', name: 'The Celestial', classId: 'warlock', sourceBook: 'XGtE', description: 'Your patron is a powerful being of the Upper Planes. You have bound yourself to an ancient empyrean, solar, or other powerful entity of light.', features: [
     { name: 'Bonus Cantrips', level: 1, description: 'You learn the Light and Sacred Flame cantrips.' },
     { name: 'Healing Light', level: 1, description: 'You have a pool of d6s equal to 1 + warlock level. As a bonus action, choose a creature within 60 feet (including yourself) and spend dice to heal them.' },
@@ -831,7 +831,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // TCE p.32: Embodiment of the Law — Wisdom modifier uses (min 1) per long rest.
     resources: [{ name: 'Embodiment of the Law', key: 'embodiment_of_the_law', rechargeOn: 'long',
       maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 } }],
-    alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compulsion', 'locate-creature'], 9: ['commune', 'dominate-person'] }},
+    alwaysPreparedSpells: { 1: ['command', 'heroism'], 3: ['hold-person', 'zone-of-truth'], 5: ['mass-healing-word', 'slow'], 7: ['compulsion', 'locate-creature'], 9: ['commune', 'dominate-person'] }, armorProficiencies: ['Heavy armor'] },
   { id: 'peace-domain', name: 'Peace Domain', classId: 'cleric', sourceBook: 'TCE', description: 'The teachings of the gods of the Peace Domain unite people of all sorts to live with one another in tranquility.', features: [
     { name: 'Implement of Peace', level: 1, description: 'You gain proficiency in Insight, Performance, or Persuasion (your choice).' },
     { name: 'Emboldening Bond', level: 1, description: 'As an action, choose up to your proficiency bonus willing creatures within 30 feet of you (including yourself). A magical bond forms between them for 10 minutes or until you use this feature again. While a bonded creature is within 30 feet of another bonded creature, it can roll a d4 and add the number rolled to an attack roll, ability check, or saving throw (once per turn). You can use this feature a number of times equal to your proficiency bonus, and you regain all expended uses when you finish a long rest.' },
@@ -857,7 +857,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     // TCE p.33: Steps of Night — prof-bonus uses per long rest (override below).
     resources: [{ name: 'Steps of Night', key: 'steps_of_night', rechargeOn: 'long',
       maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:3,7:3,8:3,9:4,10:4,11:4,12:4,13:5,14:5,15:5,16:5,17:6,18:6,19:6,20:6 } }],
-    alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomund-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }},
+    alwaysPreparedSpells: { 1: ['faerie-fire', 'sleep'], 3: ['moonbeam', 'see-invisibility'], 5: ['aura-of-vitality', 'leomund-tiny-hut'], 7: ['aura-of-life', 'greater-invisibility'], 9: ['circle-of-power', 'mislead'] }, armorProficiencies: ['Heavy armor'] },
 
   // ── TCE: DRUID ───────────────────────────────────────────────────────
   { id: 'circle-of-spores', name: 'Circle of Spores', classId: 'druid', sourceBook: 'TCE', alsoIn: ['GGR'], description: 'Druids of the Circle of Spores find beauty in decay. They see the life-and-death cycle in fungi growing on rotting wood.', features: [
@@ -1159,7 +1159,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Extra Attack', level: 6, description: 'You can attack twice when you take the Attack action. You can also replace one of these attacks with a cantrip with a casting time of 1 action.' },
     { name: 'Song of Defense', level: 10, description: 'While Bladesong is active, you can use your reaction when you take damage to expend a spell slot and reduce the damage by five times the slot level.' },
     { name: 'Song of Victory', level: 14, description: 'While Bladesong is active, you add your Intelligence modifier to the damage of your melee weapon attacks.' },
-  ]},
+  ], armorProficiencies: ['Light armor'] },
   { id: 'order-of-scribes', name: 'Order of Scribes', classId: 'wizard', sourceBook: 'TCE', description: 'The Order of Scribes is a club of bookish mages who treat their spellbooks as extensions of their minds.', features: [
     { name: 'Wizardly Quill', level: 2, description: 'You magically create a special quill that requires no ink and makes copying spells faster and cheaper (gold cost halved). You can produce a new quill as an action.' },
     { name: 'Awakened Spellbook', level: 2, description: 'While holding your spellbook: use it as a spellcasting focus; when casting a wizard spell with a slot, you can temporarily replace its damage type with one from another spell in the book of the same level; when casting a wizard ritual, use the normal casting time instead of adding 10 minutes (once per long rest).' },
@@ -1256,8 +1256,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
   ],
     // Perfected Armor (15th): proficiency-bonus uses, all back on a long rest.
     resources: [{ name: 'Perfected Armor', key: 'perfected_armor', rechargeOn: 'long',
-      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }],
-  },
+      maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:5,16:5,17:6,18:6,19:6,20:6 } }], armorProficiencies: ['Heavy armor'] },
   { id: 'artillerist', name: 'Artillerist', classId: 'artificer', sourceBook: 'TCE', alsoIn: ['ERLW'], description: 'An Artillerist specializes in using magic to hurl energy, projectiles, and explosions on a battlefield.', features: [
     { name: 'Tool Proficiency', level: 3, description: 'You gain proficiency with woodcarver\'s tools. If you already have it, you gain proficiency with one other type of artisan\'s tools.' },
     { name: 'Artillerist Spells', level: 3, description: 'You always have certain spells prepared: Shield, Thunderwave (3rd), Scorching Ray, Shatter (5th), Fireball, Wind Wall (9th), Ice Storm, Wall of Fire (13th), Cone of Cold, Wall of Force (17th).' },
@@ -1408,7 +1407,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Channel Divinity: Swirling Tides', level: 2, description: 'Starting at 2nd level, you can unleash a torrent of surging water in a 30 foot radius; creatures you choose must make a Strength saving throw or be knocked prone. For 1 minute the water is difficult terrain unless you have a swim speed.' },
     { name: 'Potent Spellcasting', level: 8, description: 'Starting at 8th level you add your Wisdom modifier to the damage you deal with any cleric cantrip.' },
     { name: 'One with the Sea', level: 17, description: 'At 17th level you can shroud yourself in the essence of a sea creature for 1 minute. Choose Octopus (doubled spell range, one extra target per spell), Shark (half damage dealt repeats at end of target\'s next turn; ignore resistance/immunity), or Conch (+2 AC, advantage on saves vs spells, permanent Sanctuary effect).' },
-  ]},
+  ], armorProficiencies: ['Heavy armor'] },
 
   // Druid
   { id: 'tob-circle-of-the-shoal', name: 'Circle of the Shoal', classId: 'druid', sourceBook: 'ToB', description: 'Following the philosophy that strength lies in numbers, these druids assist and support allies, helping them manoeuvre around enemies — experts at oceanic and swarming transformations.', features: [
@@ -1724,7 +1723,7 @@ export const ALL_SUBCLASSES: Subclass[] = [
     { name: 'Extra Attack', level: 6, description: 'Starting at 6th level, you can attack twice, instead of once, whenever you take the Attack action on your turn.' },
     { name: 'Song of Defense', level: 10, description: 'Beginning at 10th level, you can direct your magic to absorb damage while your Bladesong is active. When you take damage, you can use your reaction to expend one spell slot and reduce that damage to you by an amount equal to five times the spell slot\'s level.' },
     { name: 'Song of Victory', level: 14, description: 'Starting at 14th level, you add your Intelligence modifier (minimum of +1) to the damage of your melee weapon attacks while your Bladesong is active.' },
-  ]},
+  ], armorProficiencies: ['Light armor'] },
   // PHB 2024 Subclasses
   ...PHB2024_SUBCLASSES,
 ];
