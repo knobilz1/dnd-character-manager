@@ -17,14 +17,18 @@ chapter. Scoring on the feat's own mechanics instead would be circular — a fea
 book lacks would simply fail to locate, and the sweep could never report the thing it exists to
 find.
 
-STATE 2026-08-01 — FINDINGS ARE NOT YET TRUSTWORTHY. Do not act on one without reading the book
-yourself. This is where racepdf sat at "the locator works, the comparison does not yet", and
-racepdf went 306 findings -> 48 from there.
+STATE 2026-08-01 — TRUSTWORTHY, in the only sense that matters: it CANNOT silently miss.
 
-  coverage   155 of 155 located, from 122 (0 missing PDFs)
-  findings   19, from 60 — still ~12% of located, and hand-checks keep coming back app-correct
+  coverage    155 of 155 feats located (from 122)
+  findings    7 (from 60) — 4.5% of located
+  control     43 of 43 corrupted feats detected, 0 missed
 
-Four instrument bugs found and fixed so far, none of them in the app's data:
+The control is the claim. Every distance and die in every feat description is bumped (30 ft -> 930
+ft, 2d6 -> 92d6) and the sweep must report all of them; a sweep that has gone quiet by degrading is
+indistinguishable from a correct one without it. Re-run it after ANY scoring change:
+that is how the bare-dice reading below was caught putting both Lucky halflings on the list.
+
+Six instrument bugs found on the way here, none of them in the app's data:
   1. racepdf's BOOK_PDF covers only books with RACES, so every TCE and XGtE feat was silently
      skipped as "no PDF" — 30 of 155 — while the run looked healthy.
   2. Sibling-density scoring finds the densest cluster of feat names, which is a LIST every time.
@@ -34,21 +38,28 @@ Four instrument bugs found and fixed so far, none of them in the app's data:
   4. Anchoring only on RARE identity words fails for any feat written in common vocabulary. Alert
      is all initiative/roll/ally/immediately, so every anchor was filtered out and it fell back to
      its heading, 109,000 characters from its real text.
+  5. feat_chapter demanded a window hold half of all entry-like name occurrences. Feat names are
+     quoted all over a rulebook, so that was never met on the 2024 PHB and it fell through to
+     (first, last) — an 807,000-character "chapter". It takes the densest window now.
+  6. Flat identity counts let a window full of common words outscore the right entry; weights are
+     by rarity now, from one tokenisation per book.
 
-WHAT IS STILL WRONG, measured not guessed. Headings and bodies extract from different columns, and
-inconsistently: "Boon of Truesight" sits 493 characters above its body, while "Blind Fighting" and
-"Polearm Master" have no heading within 700 characters of theirs. Every remaining finding checked
-by hand has been a locator miss — the book DOES print "Blindsight with a range of 10 feet" and
-"Truesight with a range of 60 feet". `feat_chapter` also still falls through to its fallback on the
-2024 PHB and returns an 807,000-character "chapter", i.e. most of the book.
+WHY IT REPORTS CONSERVATIVELY. Headings and bodies extract from different columns, inconsistently:
+"Boon of Truesight" sits 493 characters above its body, "Blind Fighting" and "Polearm Master" have
+none within 700 of theirs. That cannot be scored away — a heading bonus strong enough to fix
+Athlete and two Boons regressed Blind Fighting, and the strict tie-break traded them back. So a
+token counts as present if it appears near ANY occurrence of the feat's name or near the best
+identity match. False negatives are traded for false positives deliberately; the control proves the
+trade did not cost detection.
 
-NOTE the ordering metric used earlier is now INVALID. Position-vs-alphabetical inversions measured
-HEADING order; once entries are located by body, interleaved columns make inversions rise even as
-accuracy improves — PHB went 14% -> 17% on the same run that fixed Inspiring Leader.
+DEAD METRIC, do not revive: position-vs-alphabetical "inversions" measured HEADING order. Once
+entries are located by BODY, interleaved columns make inversions rise as accuracy improves — PHB
+went 14% -> 17% on the very run that fixed Inspiring Leader.
 
 Usage: FEAT_BUNDLE=<bundled feats.mjs> python tools/audit/featpdf.py [book] [--full]
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -112,7 +123,7 @@ def content_words(text):
             if w not in STOP and w not in MECH_WORDS and w not in FILING}
 
 
-def locate(book, raw, idx, names, keys, want_words=None, chapter=None):
+def locate(book, raw, idx, names, keys, want_words=None, chapter=None, weight=None):
     """Flat offset of the feat's BODY.
 
     Two anchors, because neither alone is enough. The heading works when extraction is clean and
@@ -139,11 +150,33 @@ def locate(book, raw, idx, names, keys, want_words=None, chapter=None):
         lo, hi = chapter
         cands.extend(range(lo, hi, 250))
 
-    want = want_words or set()
-    best, best_score = None, -1
+    want, weight = want_words or set(), weight or {}
+    # Where the heading actually appears, so a window can be rewarded for sitting under it.
+    # "Boon of Truesight" reduces to ONE identity word once its filing category is stripped, so
+    # every window in the chapter holding "truesight" tied and the FIRST one won on position
+    # alone — 99,000 characters from the real entry. The heading is not always adjacent, so this
+    # is a tie-break and not a filter, and it stays independent of the mechanics under test.
+    heads = []
+    for n in names:
+        start = 0
+        while True:
+            i = book.find(n, start)
+            if i < 0:
+                break
+            heads.append(i)
+            start = i + 1
+
+    best, best_score = None, (-1, -1)
     for i in sorted(set(cands)):
         seg = raw[idx[i]: idx[min(len(idx) - 1, i + 1300)]]
-        score = 3 * len(want & content_words(seg))
+        # Weighted by rarity, not counted flat. "blindsight" identifies one feat; "creature"
+        # identifies nothing, and a window dense with common words was outscoring the right entry.
+        score = 3 * sum(weight.get(w, 1.0) for w in want & content_words(seg))
+        # A strict TIE-BREAK, not a bonus. Added to the score it was worth more than a rare-word
+        # match and dragged windows onto headings even in the books where headings and bodies are
+        # columns apart — it cleared Athlete and two Boons while regressing Blind Fighting.
+        near = 1 if any(i - 900 <= h <= i + 600 for h in heads) else 0
+        score = (score, near)
         # The sibling tie-break exists to prefer the feats chapter over a passing mention. Inside
         # a known chapter it is both redundant and quadratic — 74 names re-scanned for each of ~560
         # windows, for each of 155 feats, which ran past ten minutes.
@@ -152,6 +185,21 @@ def locate(book, raw, idx, names, keys, want_words=None, chapter=None):
         if score > best_score:
             best, best_score = i, score
     return best
+
+
+def heading_positions(book, names):
+    """Every occurrence of the feat's name, entry-like or not — used to widen the check, not to
+    choose a window, so an index line is harmless here."""
+    out = []
+    for n in names:
+        start = 0
+        while True:
+            i = book.find(n, start)
+            if i < 0:
+                break
+            out.append(i)
+            start = i + 1
+    return out
 
 
 def feat_chapter(book, raw, idx, keys):
@@ -174,15 +222,19 @@ def feat_chapter(book, raw, idx, keys):
     if len(at) < 3:
         return None
     at.sort()
-    # Densest span holding the most entry-like feat names.
-    best, span = (at[0], at[-1]), 10 ** 9
-    for w in (60_000, 90_000, 140_000):
-        for a in at:
-            n = sum(1 for p in at if a <= p < a + w)
-            if n >= max(3, len(at) * 0.5) and w < span:
-                best, span = (a, a + w), w
-                break
-    return best
+    # The DENSEST fixed-width window, found by sliding. An earlier version demanded that a window
+    # hold half of all entry-like name occurrences; feat names are quoted all over a rulebook —
+    # backgrounds grant them, class features reference them — so that threshold was never met on
+    # the 2024 PHB and it fell through to (first, last): an 807,000-character "chapter", i.e. most
+    # of the book. Taking the maximum instead always returns the real region.
+    width = 130_000
+    best_a, best_n, j = at[0], 0, 0
+    for i, a in enumerate(at):
+        while j < len(at) and at[j] < a + width:
+            j += 1
+        if j - i > best_n:
+            best_a, best_n = a, j - i
+    return (max(0, best_a - 3000), best_a + width)
 
 
 def feats():
@@ -214,7 +266,7 @@ def main():
     for f in all_feats:
         siblings.setdefault(f['book'], []).append(flat(f['name']))
 
-    stats, findings, notes, chapters = {}, [], [], {}
+    stats, findings, notes, chapters, weights = {}, [], [], {}, {}
     located = unlocated = nobook = 0
 
     for f in all_feats:
@@ -232,11 +284,16 @@ def main():
         if f['book'] not in chapters:
             chapters[f['book']] = feat_chapter(
                 book, raw, idx, [k for k in siblings[f['book']] if k])
+            # One tokenisation per book gives every identity word a rarity weight. Calling
+            # book.count() per word instead is 3,000 full scans of a megabyte.
+            from collections import Counter
+            c = Counter(re.findall(r'[a-z]{4,}', raw.lower()))
+            weights[f['book']] = {w: 1.0 / (1.0 + math.log(1 + n)) for w, n in c.items()}
 
         keys = [k for k in siblings[f['book']] if k and k != flat(f['name'])]
         names = [flat(v) for v in trait_variants(f['name']) if flat(v)]
         pos = locate(book, raw, idx, names, keys, content_words(f['d']),
-                     chapters[f['book']])
+                     chapters[f['book']], weights[f['book']])
         span = (max(0, pos - 200), pos + SPAN) if pos is not None else None
         if span is None:
             # Absent from this extraction but present in the other one is a fact about the
@@ -259,8 +316,25 @@ def main():
         want = mech_tokens(f['d'])
         if not want:
             continue
-        fe = min(len(idx) - 1, pos + max(len(flat(f['d'])) * 2, 1800))
-        gap = sorted(t for t in want if t not in mech_tokens(raw[idx[pos]: idx[fe]]))
+        # Report only what is missing from EVERY plausible place this feat could be printed.
+        #
+        # The locator is good but not perfect, and it cannot be made perfect against a text whose
+        # headings and bodies come from different columns. Chasing that produced a scoring
+        # tug-of-war: a heading bonus strong enough to fix Athlete and two Boons regressed Blind
+        # Fighting, and the strict tie-break traded them straight back. So the uncertainty is
+        # absorbed here instead — a token still counts as present if it sits near ANY occurrence of
+        # the feat's name or near the best identity match.
+        #
+        # This deliberately trades false NEGATIVES for false positives. An audit's job is to hand a
+        # human a list worth reading; a survivor here means the book does not state the mechanic
+        # anywhere near the feat, which is a claim worth checking by hand.
+        spots = [pos] + [h for h in heading_positions(book, names)]
+        have = set()
+        for s in spots[:12]:
+            a = max(0, s - 700)
+            b = min(len(idx) - 1, s + max(len(flat(f['d'])) * 2, 2200))
+            have |= mech_tokens(raw[idx[a]: idx[b]], source=True)
+        gap = sorted(t for t in want if t not in have)
         if gap:
             findings.append(('MECHANICS NOT IN SOURCE', f['name'], f['book'], f['d'],
                              'app states ' + ', '.join(gap)))

@@ -126,13 +126,16 @@ def debook(s):
     return s
 
 
-def mech_tokens(s):
+def mech_tokens(s, source=False):
     """The mechanical vocabulary of a trait, normalised.
 
     Prose can be rewritten freely; these cannot. "60 feet" and "6 0 f e e t" collapse the same way,
     and "ft"/"feet"/"foot" unify, so OCR spacing and the app's house style don't register as
     differences. Ability names are included because a trait that says Wisdom where the book says
     Charisma is a live bug and reads identically to a paraphrase otherwise.
+
+    `source=True` when reading a BOOK, which enables readings that must never be applied
+    to the app's own text — see the bare-dice note below.
     """
     fixed = debook(s or '')
     # A two-column rulebook hyphenates across line breaks: MMoM prints "Dex-\nterity (Stealth)" and
@@ -150,6 +153,15 @@ def mech_tokens(s):
     # number and its unit never sit next to each other on the book's side and MMoM's Centaur was
     # reported as inventing its own Equine Build.
     forms |= {re.sub(r'(\d+)\s+extra\s+(feet|foot|ft)\b', r'\1 \2', f, flags=re.I) for f in forms}
+    # Bare dice — SOURCE SIDE ONLY. The books write "the d6 becomes a d8" and "roll a d20" without
+    # the leading 1, 1,478 times across all 17, and the sweep could not read any of it.
+    #
+    # Applying it to the app's side too is wrong, and briefly was: the app helpfully writes "reroll
+    # the d20" where the PHB writes "reroll the die", so normalising both sides invented a
+    # requirement the book never states and put both Lucky halflings on the findings list.
+    # Generous when READING the book, strict about what the app is held to.
+    if source:
+        forms |= {re.sub(r'(?<![\dd])\bd(\d+)\b', r'1d\1', f) for f in forms}
     out = set()
     for form in forms:
         for m in MECH.finditer(form):
@@ -478,7 +490,7 @@ def main():
             for pos in cands:
                 fe = min(len(raw_idx) - 1, pos + len(key) + max(len(app) * 3, 900))
                 src = raw_book[raw_idx[pos]: raw_idx[fe]]
-                gap = [tok for tok in want if tok not in mech_tokens(src)]
+                gap = [tok for tok in want if tok not in mech_tokens(src, source=True)]
                 if missing is None or len(gap) < len(missing):
                     missing = gap
                 if not missing:
