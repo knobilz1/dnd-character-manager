@@ -1,6 +1,6 @@
 import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
-import { SKILL_ABILITY, abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
+import { SKILL_ABILITY, SKILL_NAMES, abilityMod, PROFICIENCY_BONUS, totalCharacterLevel } from '../../../data/mechanics';
 import { getClass, baseClassId } from '../../../data/classes';
 import { getBackground } from '../../../data/backgrounds';
 import { cn } from '../../../utils/cn';
@@ -19,11 +19,9 @@ function expertiseSlotsForClass(rawClassId: string, classLevel: number): number 
   return 0;
 }
 
-const ALL_SKILLS: SkillName[] = [
-  'Acrobatics','Animal Handling','Arcana','Athletics','Deception','History',
-  'Insight','Intimidation','Investigation','Medicine','Nature','Perception',
-  'Performance','Persuasion','Religion','Sleight of Hand','Stealth','Survival',
-];
+// Canonical list lives in data/mechanics.ts, derived from SKILL_ABILITY. This file used to
+// keep its own hand-typed copy of the same eighteen.
+const ALL_SKILLS: SkillName[] = SKILL_NAMES;
 
 const KD_SKILLS = ['Arcana', 'History', 'Nature', 'Religion'] as const;
 

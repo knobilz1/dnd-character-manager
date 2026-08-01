@@ -6,6 +6,9 @@ import { getRace } from './races';
 import { getBackground } from './backgrounds';
 import { bookEnabled } from '../utils/bookEnabled';
 import { chosenAsi } from '../utils/racialAsi';
+import { SKILL_NAMES } from './mechanics';
+import { ARTISAN_TOOLS, MUSICAL_INSTRUMENTS, GAMING_SETS } from './tools';
+import { WEAPON_NAMES } from './weapons';
 
 export const ALL_FEATS: Feat[] = [
   // PHB Feats
@@ -235,6 +238,7 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'PHB',
     description: 'You gain proficiency in any combination of three skills or tools of your choice.',
     grantsProficiency: ['3 skills or tools of your choice'],
+    grantsPicks: { count: 3, label: 'Three skills or tools of your choice', options: [...SKILL_NAMES, ...ARTISAN_TOOLS, ...MUSICAL_INSTRUMENTS, ...GAMING_SETS] },
   },
   {
     id: 'skulker',
@@ -279,6 +283,7 @@ export const ALL_FEATS: Feat[] = [
     description: 'You have practiced extensively with a variety of weapons, gaining the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• You gain proficiency with four weapons of your choice. Each one must be a simple or a martial weapon.',
     abilityScoreChoice: ['str', 'dex'],
     grantsProficiency: ['4 weapons of your choice'],
+    grantsPicks: { count: 4, label: 'Four weapons of your choice', options: [...WEAPON_NAMES] },
   },
   // XGtE Feats
   {
@@ -350,6 +355,8 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'TCE',
     description: 'You have honed your proficiency with particular skills, granting you the following benefits:\n• Increase one ability score of your choice by 1, to a maximum of 20.\n• You gain proficiency in one skill of your choice.\n• Choose one skill in which you have proficiency. You gain expertise with that skill, which means your proficiency bonus is doubled for any ability check you make with it. The skill you choose must be one that isn\'t already benefiting from a feature, such as Expertise, that doubles your proficiency bonus.',
     abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+    grantsPicks: { count: 1, label: 'One skill of your choice', options: [...SKILL_NAMES] },
+    grantsExpertise: 1,
   },
   {
     id: 'telekinetic',
@@ -459,6 +466,10 @@ export const ALL_FEATS: Feat[] = [
     sourceBook: 'XGtE',
     prerequisite: { other: 'Half-elf, half-orc, or human' },
     description: 'You have a knack for learning new things. You gain the following benefits:\n• You gain one skill proficiency of your choice, one tool proficiency of your choice, and fluency in one language of your choice.\n• Choose one skill in which you have proficiency. You gain expertise with that skill, which means your proficiency bonus is doubled for any ability check you make with it.',
+    grantsPicks: { count: 1, label: 'One skill of your choice', options: [...SKILL_NAMES] },
+    grantsExpertise: 1,
+    grantsTools: ["One type of artisan's tools of your choice"],
+    grantsLanguages: 1,
   },
   {
     id: 'second-chance',
@@ -476,6 +487,7 @@ export const ALL_FEATS: Feat[] = [
     description: 'You are uncommonly nimble for your race. You gain the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• Your walking speed increases by 5 feet.\n• You gain proficiency in the Acrobatics or Athletics skill (your choice).\n• You have advantage on any Strength (Athletics) or Dexterity (Acrobatics) check you make to escape from being grappled.',
     abilityScoreChoice: ['str', 'dex'],
     speedBonus: 5,
+    grantsPicks: { count: 1, label: 'Acrobatics or Athletics', options: ['Acrobatics', 'Athletics'] },
   },
   {
     id: 'wood-elf-magic',
@@ -705,4 +717,44 @@ export function getEligibleFeats(character: Character, enabledBooks: BookId[]): 
     // prereq.other is free-text — can't enforce programmatically, show it but allow selection
     return true;
   });
+}
+
+export interface FeatPickGroup {
+  featId: string;
+  featName: string;
+  /** The grant's own wording — used as the picker label and as the storage key's twin. */
+  label: string;
+  count: number;
+  options: string[];
+  picked: string[];
+  /** True when the grant covers every option, so there is nothing to choose. Boon of Skill grants
+   *  all eighteen skills; a picker demanding eighteen clicks would be a formality, not a choice. */
+  auto: boolean;
+}
+
+/**
+ * Every proficiency pick the character's feats grant, one group per feat.
+ *
+ * One group per feat rather than a single pool, for the same reason tool grants are split: a
+ * Squat Nimbleness pick may only be Acrobatics or Athletics, and pooling it with Skilled's three
+ * would let it be spent on Stealth.
+ */
+export function featPickGroups(character: Character): FeatPickGroup[] {
+  const out: FeatPickGroup[] = [];
+  for (const featId of character.selectedFeats ?? []) {
+    const feat = ALL_FEATS.find(f => f.id === featId);
+    if (!feat?.grantsPicks) continue;
+    const { count, label, options } = feat.grantsPicks;
+    out.push({
+      featId, featName: feat.name, label, count, options,
+      picked: character.selectedFeatPicks?.[featId] ?? [],
+      auto: count >= options.length,
+    });
+  }
+  return out;
+}
+
+/** What those picks actually resolved to — auto grants in full, chosen picks otherwise. */
+export function resolvedFeatPicks(character: Character): string[] {
+  return featPickGroups(character).flatMap(g => (g.auto ? g.options : g.picked));
 }

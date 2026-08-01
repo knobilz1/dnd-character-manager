@@ -1,4 +1,4 @@
-import type { SlotLevel } from '../types';
+import type { SlotLevel, SkillName } from '../types';
 
 // Full caster spell slots (Wizard, Sorcerer, Bard, Cleric, Druid)
 export const FULL_CASTER_SLOTS: Record<number, number[]> = {
@@ -201,6 +201,11 @@ export const SKILL_ABILITY: Record<string, string> = {
   'Stealth': 'dex',
   'Survival': 'wis',
 };
+
+/** Every skill, derived from SKILL_ABILITY so the two cannot drift. The creator kept its own
+ *  hand-typed copy of this list; the two happened to agree, which is not a property anyone was
+ *  checking. */
+export const SKILL_NAMES = Object.keys(SKILL_ABILITY) as SkillName[];
 
 export function abilityMod(score: number): number {
   return Math.floor((score - 10) / 2);

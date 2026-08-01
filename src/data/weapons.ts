@@ -92,3 +92,10 @@ export function damageLine(dice: string, mod: number): string {
   if (mod === 0) return dice;
   return `${dice}${mod >= 0 ? '+' : ''}${mod}`;
 }
+
+/** Every weapon a player can be granted proficiency with by name, in Title Case for display.
+ *  WEAPON_TABLE keys are lowercase for substring matching; Weapon Master's picker needs the
+ *  printed form, and `isProficientWithWeapon` lowercases both sides before comparing. */
+export const WEAPON_NAMES: string[] = WEAPON_TABLE
+  .filter(w => w.category !== 'unarmed')
+  .map(w => w.name.replace(/\b[a-z]/g, c => c.toUpperCase()));

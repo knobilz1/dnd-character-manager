@@ -8,8 +8,10 @@ import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
 import { fixedLanguages, racialLanguagePicks } from '../data/languages';
 import { fixedTools, parseToolGrant } from '../data/tools';
-import { ALL_FEATS } from '../data/feats';
+import { ALL_FEATS, featPickGroups, resolvedFeatPicks } from '../data/feats';
 import { activeFightingStyles } from '../data/fightingStyles';
+import { SKILL_NAMES } from '../data/mechanics';
+import { ARTISAN_TOOLS, MUSICAL_INSTRUMENTS, GAMING_SETS } from '../data/tools';
 import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
 import { armorPenalty } from '../utils/armorProficiency';
@@ -227,9 +229,21 @@ export function computeCharacterDerived(character: Character) {
     // carry it as undefined, and spreading undefined throws. That was survivable while only the
     // display used this function, but the store now delegates its resource maxima here — so a
     // throw would take out load() itself and make the character unopenable.
+    // Feat proficiency picks are resolved once, here, and then routed by which catalog each pick
+    // belongs to: skills below, tools further down, weapons in isProficientWithWeapon. That split
+    // is what lets Skilled's "any combination of three skills or tools" be a single choice.
+    const featPicks = featPickGroups(character);
+    const featPicked = new Set(resolvedFeatPicks(character));
+    const featPicksOwed = featPicks.reduce(
+      (n, g) => n + (g.auto ? 0 : Math.max(0, g.count - g.picked.length)), 0);
+
     const skillProfs = new Set<string>([
       ...(character.selectedSkillProficiencies ?? []),
       ...(bg?.skillProficiencies ?? []),
+      // Skilled, Skill Expert, Prodigy, Squat Nimbleness, Keen Mind, Observant and Boon of Skill
+      // all named a skill in prose and granted none. Merged here, at the one place skills are
+      // composed, rather than special-cased per feat.
+      ...SKILL_NAMES.filter(s => featPicked.has(s)),
     ]);
 
     // Subclass-granted skill proficiencies. `selectedSkillProficiencies` is capped at the CLASS's
@@ -245,9 +259,15 @@ export function computeCharacterDerived(character: Character) {
       }
     }
     const expertiseSet = new Set<string>(character.expertiseSkills ?? []);
+    // Feat-granted expertise. Its own slots and its own storage, because `expertiseSkills` is
+    // sized by Rogue/Bard level in the creator — a feat's expertise put in there would either be
+    // truncated or silently inflate the class allowance.
+    const featExpertiseOwed = (character.selectedFeats ?? [])
+      .reduce((n, id) => n + (ALL_FEATS.find(f => f.id === id)?.grantsExpertise ?? 0), 0);
+    const featExpertise = (character.selectedFeatExpertise ?? []).slice(0, featExpertiseOwed);
 
     // Subclass auto-expertise (fixed skills, no player choice required)
-    const effectiveExpertiseSet = new Set<string>(expertiseSet);
+    const effectiveExpertiseSet = new Set<string>([...expertiseSet, ...featExpertise]);
     for (const cl of character.classes) {
       // Corsair (ToB) Ferocious Presence (lv.7): doubled proficiency in Intimidation
       if (cl.subclassId === 'tob-corsair' && cl.level >= 7) effectiveExpertiseSet.add('Intimidation');
@@ -433,9 +453,14 @@ export function computeCharacterDerived(character: Character) {
       .map(text => ({ text, grant: parseToolGrant(text) }))
       .filter((x): x is { text: string; grant: NonNullable<ReturnType<typeof parseToolGrant>> } => !!x.grant)
       .map(x => ({ ...x, picked: chosenTools[x.text] ?? [] }));
+    // The other half of the feat picks: anything picked that is a tool rather than a skill.
+    // Skilled offers both pools in one grant, so the split has to happen at resolution, not at
+    // the picker.
+    const ALL_TOOL_NAMES = [...ARTISAN_TOOLS, ...MUSICAL_INSTRUMENTS, ...GAMING_SETS];
     const toolProficiencies = [...new Set([
       ...fixedTools(toolSources),
       ...toolChoices.flatMap(c => c.picked),
+      ...ALL_TOOL_NAMES.filter(t => featPicked.has(t)),
     ])];
     const toolsOwed = toolChoices.reduce((n, c) => n + Math.max(0, c.grant.count - c.picked.length), 0);
 
@@ -700,6 +725,10 @@ export function computeCharacterDerived(character: Character) {
       toolProficiencies,
       toolChoices,
       toolsOwed,
+      featPicks,
+      featPicksOwed,
+      featExpertiseOwed,
+      featExpertise,
       // Exported so the sheet, sidebar and spell panel all ask the SAME question the derive asked.
       // Each used to recompute `classes[0]` for itself, which is how a fighter/wizard got rendered
       // as a known-caster: the fighter isn't in the prepared-caster list, and nothing else looked.

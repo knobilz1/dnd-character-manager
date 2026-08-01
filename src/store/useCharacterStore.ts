@@ -80,6 +80,8 @@ interface CharacterState {
   setSubclassOptions: (v: Record<string, string[]>) => void;
   setSelectedLanguages: (v: string[]) => void;
   setSelectedToolProficiencies: (v: Record<string, string[]>) => void;
+  setSelectedFeatPicks: (v: Record<string, string[]>) => void;
+  setSelectedFeatExpertise: (v: string[]) => void;
 
   // Resources
   setResource: (key: string, value: number) => void;
@@ -1177,6 +1179,12 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setSelectedLanguages: (v) =>
     set((s) => s.character ? { character: { ...s.character, selectedLanguages: v } } : s),
+
+  setSelectedFeatPicks: (v) =>
+    set((s) => s.character ? { character: { ...s.character, selectedFeatPicks: v } } : s),
+
+  setSelectedFeatExpertise: (v) =>
+    set((s) => s.character ? { character: { ...s.character, selectedFeatExpertise: v } } : s),
 
   setSubclassOptions: (v) =>
     set((s) => {

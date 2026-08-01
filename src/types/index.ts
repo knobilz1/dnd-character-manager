@@ -330,6 +330,20 @@ export interface Feat {
   grantsTools?: string[];
   /** How many languages of the player's choice this feat grants (Linguist: 3, Prodigy: 1). */
   grantsLanguages?: number;
+  /**
+   * Proficiency picks, where the player chooses from an explicit list.
+   *
+   * One shape covers all of them because each pick is resolved by WHICH CATALOG it appears in:
+   * a pick that is a skill name becomes a skill proficiency, one that is a tool becomes a tool
+   * proficiency, one that is a weapon becomes weapon proficiency. That is what lets Skilled's
+   * "any combination of three skills or tools" be a single picker rather than two coupled ones.
+   *
+   * When `count` covers the whole of `options` the picks are granted outright with no picker —
+   * Boon of Skill grants every skill, and making the player click all eighteen is not a choice.
+   */
+  grantsPicks?: { count: number; label: string; options: string[] };
+  /** Expertise slots (doubled proficiency) this feat grants, chosen from skills already held. */
+  grantsExpertise?: number;
   /** Extra HP gained each time a level is gained while this feat is held. */
   hpBonusPerLevel?: number;
   /** One-time retroactive HP bonus per level already gained when this feat is first taken
@@ -696,6 +710,13 @@ export interface Character {
    *  ("Three musical instruments of your choice"). Keyed rather than flat so a bard's three
    *  instrument picks cannot be spent on artisan's tools — see data/tools.ts. */
   selectedToolProficiencies?: Record<string, string[]>;
+  /** Proficiency picks made for feats, keyed by feat id. Separate from
+   *  `selectedSkillProficiencies` because that array is capped at the CLASS's own skill count —
+   *  putting a feat's skill in there would push a class pick out. */
+  selectedFeatPicks?: Record<string, string[]>;
+  /** Expertise chosen for feat-granted slots (Skill Expert, Prodigy, Boon of Skill). Separate
+   *  from `expertiseSkills`, whose slots come from Rogue/Bard levels. */
+  selectedFeatExpertise?: string[];
   selectedSkillProficiencies: SkillName[];
   selectedFeats: string[];
   classOptions: ClassOptionsState;

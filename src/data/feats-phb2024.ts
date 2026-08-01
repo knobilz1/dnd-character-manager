@@ -1,4 +1,6 @@
 import type { Feat } from '../types';
+import { SKILL_NAMES } from './mechanics';
+import { ARTISAN_TOOLS, MUSICAL_INSTRUMENTS, GAMING_SETS } from './tools';
 
 /**
  * PHB 2024 Feats — four categories:
@@ -68,6 +70,7 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Skilled',
     sourceBook: 'PHB2024',
     description: 'Origin feat.\n• Gain proficiency in any combination of 3 skills or tools of your choice.\n• Repeatable: you can take this feat more than once.',
+    grantsPicks: { count: 3, label: 'Any combination of 3 skills or tools', options: [...SKILL_NAMES, ...ARTISAN_TOOLS, ...MUSICAL_INSTRUMENTS, ...GAMING_SETS] },
   },
   {
     id: 'tavern-brawler-2024',
@@ -232,6 +235,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { ability: { int: 13 }, minLevel: 4 },
     description: 'General feat (Int 13+, level 4+).\n• +1 Intelligence (max 20).\n• Lore Knowledge: gain proficiency or Expertise in Arcana, History, Investigation, Nature, or Religion (choose 1).\n• Quick Study: take the Study action as a Bonus Action.',
     abilityScoreIncrease: { int: 1 },
+    grantsPicks: { count: 1, label: 'Lore Knowledge — one skill', options: ['Arcana', 'History', 'Investigation', 'Nature', 'Religion'] },
   },
   {
     id: 'lightly-armored-2024',
@@ -294,6 +298,7 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { ability: { int: 13 }, minLevel: 4 },
     description: 'General feat (Int or Wis 13+, level 4+).\n• +1 Intelligence or Wisdom (max 20).\n• Keen Observer: gain proficiency or Expertise in Insight, Investigation, or Perception (choose 1).\n• Quick Search: take the Search action as a Bonus Action.',
     abilityScoreChoice: ['int', 'wis'],
+    grantsPicks: { count: 1, label: 'Keen Observer — one skill', options: ['Insight', 'Investigation', 'Perception'] },
   },
   {
     id: 'piercer-2024',
@@ -377,6 +382,8 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 4 },
     description: 'General feat (level 4+).\n• +1 to any ability score (max 20).\n• Proficiency in 1 skill of your choice.\n• Expertise in 1 skill you\'re already proficient in.',
     abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+    grantsPicks: { count: 1, label: 'One skill of your choice', options: [...SKILL_NAMES] },
+    grantsExpertise: 1,
   },
   {
     id: 'skulker-2024',
@@ -589,6 +596,8 @@ export const PHB2024_FEATS: Feat[] = [
     prerequisite: { minLevel: 19 },
     description: 'Epic Boon feat (level 19+).\n• +1 to one ability score (max 30).\n• Proficiency in all skills.\n• Expertise in 1 skill in which you lack Expertise.',
     abilityScoreChoice: ['str', 'dex', 'con', 'int', 'wis', 'cha'],
+    grantsPicks: { count: SKILL_NAMES.length, label: 'Proficiency in all skills', options: [...SKILL_NAMES] },
+    grantsExpertise: 1,
   },
   {
     id: 'boon-of-speed',

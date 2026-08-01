@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
 import { LanguagePicker } from '../../components/LanguagePicker';
-import { ToolPicker } from '../../components/ToolPicker';
+import { ProficiencyPicker } from '../../components/ProficiencyPicker';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import { getSubclassOptions } from '../../data/subclassOptions';
 import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
@@ -20,6 +20,7 @@ import { ALL_METAMAGIC } from '../../data/metamagic';
 import { ALL_MANEUVERS } from '../../data/maneuvers';
 import { ALL_INFUSIONS } from '../../data/infusions';
 import { totalCharacterLevel } from '../../data/mechanics';
+import { toolOptions } from '../../data/tools';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import type { Background, BackgroundCustom, Character, JournalEntry, AbilityKey } from '../../types';
 
@@ -30,12 +31,16 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
 }) {
-  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages, setSelectedToolProficiencies } = useCharacterStore();
+  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages, setSelectedToolProficiencies, setSelectedFeatPicks, setSelectedFeatExpertise } = useCharacterStore();
   const derived = useCharacterDerived(character);
   const languages: string[] = derived?.languages ?? [];
   const languagesOwed: number = derived?.languagesOwed ?? 0;
   const toolProficiencies: string[] = derived?.toolProficiencies ?? [];
   const toolChoices: any[] = derived?.toolChoices ?? [];
+  const featPicks: any[] = derived?.featPicks ?? [];
+  const featExpertiseOwed: number = derived?.featExpertiseOwed ?? 0;
+  const featExpertise: string[] = derived?.featExpertise ?? [];
+  const skillProfs: Set<string> = derived?.allSkillProficiencies ?? new Set();
   const bg = resolveBackground(character);
   const race = getRace(character.raceId);
   const bgAsiSource = getBackground(character.backgroundId);
@@ -212,12 +217,40 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
                 <p className="text-xs text-slate-400">{toolProficiencies.join(', ')}</p>
               </div>
             )}
-            <ToolPicker
-              choices={toolChoices}
+            <ProficiencyPicker
+              choices={toolChoices.map(c => ({
+                key: c.text, label: c.text, count: c.grant.count, options: toolOptions(c.grant),
+              }))}
               value={character.selectedToolProficiencies}
               onChange={setSelectedToolProficiencies}
               compact
             />
+            {/* Feat-granted picks. Skilled, Skill Expert, Prodigy, Squat Nimbleness, Keen Mind,
+                Observant and Weapon Master all named a proficiency in their description and
+                granted none, because no field carried it and no picker offered it. */}
+            <ProficiencyPicker
+              choices={featPicks.filter(g => !g.auto).map(g => ({
+                key: g.featId, label: `${g.featName} — ${g.label}`, count: g.count, options: g.options,
+              }))}
+              value={character.selectedFeatPicks}
+              onChange={setSelectedFeatPicks}
+              compact
+            />
+            {featExpertiseOwed > 0 && (
+              <ProficiencyPicker
+                choices={[{
+                  key: 'feat-expertise',
+                  label: `Expertise — choose ${featExpertiseOwed}`,
+                  count: featExpertiseOwed,
+                  // Expertise doubles an existing proficiency, so the pool is what you are already
+                  // proficient in — offering all eighteen would invite an illegal pick.
+                  options: [...skillProfs].sort(),
+                }]}
+                value={{ 'feat-expertise': featExpertise }}
+                onChange={(next) => setSelectedFeatExpertise(next['feat-expertise'] ?? [])}
+                compact
+              />
+            )}
             {(race.resistances?.length ?? 0) > 0 && (
               <div className="bg-slate-900 rounded-lg p-3">
                 <p className="text-xs font-bold text-white mb-1">Damage Resistances</p>

@@ -1,7 +1,7 @@
 import { getClass } from '../data/classes';
 import { getRace } from '../data/races';
 import { getSubclassOptions } from '../data/subclassOptions';
-import { ALL_FEATS } from '../data/feats';
+import { ALL_FEATS, resolvedFeatPicks } from '../data/feats';
 import { lookupWeapon } from '../data/weapons';
 import type { Character } from '../types';
 
@@ -45,6 +45,9 @@ export function isProficientWithWeapon(character: Character, weaponName: string)
   for (const featId of character.selectedFeats ?? []) {
     grants.push(...(ALL_FEATS.find(f => f.id === featId)?.grantsProficiency ?? []));
   }
+  // Weapon Master's four named picks. Picks that name a skill or tool simply never match a
+  // weapon below, so the three pools need no separating here.
+  grants.push(...resolvedFeatPicks(character));
 
   for (const raw of grants) {
     const g = raw.trim().toLowerCase();
