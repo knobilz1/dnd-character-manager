@@ -118,6 +118,11 @@ def debook(s):
     # 'ld6' / 'l d6' / '1 d6' are all 1d6. Bounded to the dice shape, so an ordinary word with
     # l-before-d is untouched.
     s = re.sub(r'\b[l1I]\s*[dD]\s*(\d+)', r'1d\1', s)
+    # The mirror case, split on the OTHER side of the d: GGR prints Simic Hybrid's scaling as
+    # "17th level (4d 10)", so \d+d\d+ never matched and the app was reported as inventing 4d10.
+    # 17 occurrences across all books, every one unambiguously dice (2d 12, 1d 8, 10d 10) — the
+    # digits before the d must be contiguous with it, so "level 3 d 4" cannot be swept up.
+    s = re.sub(r'\b(\d+d)\s+(\d+)\b', r'\1\2', s)
     return s
 
 
