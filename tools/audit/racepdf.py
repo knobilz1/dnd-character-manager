@@ -129,12 +129,22 @@ def mech_tokens(s):
     differences. Ability names are included because a trait that says Wisdom where the book says
     Charisma is a live bug and reads identically to a paraphrase otherwise.
     """
+    fixed = debook(s or '')
+    # A two-column rulebook hyphenates across line breaks: MMoM prints "Dex-\nterity (Stealth)" and
+    # "resistance to psy-\nchic damage". The FLAT index rejoins those (it drops non-alphanumerics),
+    # which is why the trait NAME is still found — but this runs on RAW text so \bdexterity\b cannot
+    # match, and the app was reported as inventing the one mechanic that defines the trait. Nine
+    # findings across MMoM/VGM/GGR, each missing exactly one token sitting 33-77 chars away.
+    # Both forms are scanned and the tokens unioned, so de-hyphenating can never LOSE a match that
+    # the hyphenated form would have made (joining "half-\nelf" is harmless — no MECH token has a
+    # hyphen in it, but the union means we do not have to prove that).
+    forms = {re.sub(r'\s+', ' ', fixed)}
+    forms.add(re.sub(r'\s+', ' ', re.sub(r'[-‐­]\s*\n\s*', '', fixed)))
     out = set()
-    for m in MECH.finditer(re.sub(r'\s+', ' ', debook(s or ''))):
-        tok = m.group(0).lower()
-        tok = re.sub(r'\s+', '', tok)
-        tok = tok.replace('foot', 'ft').replace('feet', 'ft')
-        out.add(tok)
+    for form in forms:
+        for m in MECH.finditer(form):
+            tok = re.sub(r'\s+', '', m.group(0).lower())
+            out.add(tok.replace('foot', 'ft').replace('feet', 'ft'))
     return out
 
 
