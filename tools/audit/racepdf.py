@@ -95,6 +95,12 @@ MECH = re.compile(
     re.I)
 
 
+NUMBER_WORD = {'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
+               'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10}
+WORD_DICE = re.compile(r'\b(two|three|four|five|six|seven|eight|nine|ten)\s+d(4|6|8|10|12|20)s?\b',
+                       re.I)
+
+
 # Damage the OCR does to the SOURCE text, each pattern confirmed by counting before it was
 # handled — never guessed at from a failing case:
 #   ligature-as-NUL   FToD writes "pro<NUL>ciency bonus" 21 times; "proficiency" appears 0 times
@@ -177,6 +183,11 @@ def mech_tokens(s, source=False):
         # dc10 in the book and is still reported.
         if re.search(r'save\s+DC', ' '.join(forms), re.I):
             out.update({'dc8', 'proficiencybonus'})
+        # Dice counts spelled as words: the 2024 Diviner's Portent is "roll two d20s" and the
+        # string "2d20" appears NOWHERE in that book, so the app was reported as inventing both
+        # Portent and Greater Portent. 23 occurrences across the books.
+        forms |= {WORD_DICE.sub(lambda m: f'{NUMBER_WORD[m.group(1).lower()]}d{m.group(2)}', f)
+                  for f in forms}
     for form in forms:
         for m in MECH.finditer(form):
             tok = re.sub(r'\s+', '', m.group(0).lower())
