@@ -1652,10 +1652,16 @@ export const ALL_RACES: Race[] = [
   },
   {
     id: 'giff',
-    // SJA p.11: Percussive Repair — once per day, i.e. back on a long rest. (Firearms Expert
-    // recharges "when you reload", which is not a rest and not a daily budget, so it gets no counter.)
+    // Astral Spark: uses equal to proficiency bonus, all back on a long rest. The max is a
+    // placeholder seed here; resourceMaxOverrides['astral_spark'] carries the real value, the same
+    // way every other prof-bonus pool works.
+    //
+    // This entry used to hold the UNEARTHED ARCANA giff — Damage Dealer, Firearms Expert with a
+    // reroll-on-miss, Hippogriff Build, Percussive Repair, Swim Speed. Not one of those traits is
+    // in the published Spelljammer, which was only discoverable once the book's OCR existed:
+    // its PDF is page images, so the race read as unverifiable rather than wrong.
     resources: [
-      { name: 'Percussive Repair', key: 'percussive_repair', rechargeOn: 'long', maxPerLevel: atEveryLevel(1) },
+      { name: 'Astral Spark', key: 'astral_spark', rechargeOn: 'long', maxPerLevel: atEveryLevel(2) },
     ],
     name: 'Giff',
     sourceBook: 'SJA',
@@ -1665,12 +1671,13 @@ export const ALL_RACES: Race[] = [
     flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
       { name: 'Ability Score Increase', description: 'When determining your character\'s ability scores, increase one score by 2 and increase a different score by 1, or increase three different scores by 1.' },
-      { name: 'Damage Dealer', description: 'Once per turn when you score a hit with an attack roll using a weapon, you can roll the weapon\'s damage die one additional time and add it to the damage roll.' },
-      { name: 'Firearms Expert', description: 'You have proficiency with firearms (see the Dungeon Master\'s Guide). Whenever you make a ranged attack with a firearm and miss, you can reroll the attack roll against the same target. You can\'t use this trait again until you reload the firearm.' },
-      { name: 'Hippogriff Build', description: 'You count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.' },
-      { name: 'Percussive Repair', description: 'Once per day as a bonus action, you can strike a Construct or vehicle within 5 feet of you and restore 1d6 hit points to it.' },
-      { name: 'Swim Speed', description: 'You have a swimming speed of 30 feet.' },
+      { name: 'Creature Type', description: 'You are a Humanoid.' },
+      { name: 'Astral Spark', description: 'Your psychic connection to the Astral Plane enables you to mystically access a spark of divine power, which you can channel through your weapons. When you hit a target with a simple or martial weapon, you can cause the target to take extra force damage equal to your proficiency bonus. You can use this trait a number of times equal to your proficiency bonus, but you can use it no more than once per turn. You regain all expended uses when you finish a long rest.' },
+      { name: 'Firearms Mastery', description: 'You have a mystical connection to firearms that traces back to the gods of the giff, who delighted in such weapons. You have proficiency with all firearms and ignore the loading property of any firearm. In addition, attacking at long range with a firearm doesn\'t impose disadvantage on your attack roll.' },
+      { name: 'Hippo Build', description: 'You have advantage on Strength-based ability checks and Strength saving throws. In addition, you count as one size larger when determining your carrying capacity and the weight you can push, drag, or lift.' },
+      { name: 'Speed', description: 'Your walking speed is 30 feet, and you have a swimming speed equal to your walking speed.' },
     ],
+    swim: 30,
     languages: ['Common', 'one other language of your choice'],
     isSubrace: false,
   },

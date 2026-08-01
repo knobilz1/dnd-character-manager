@@ -528,6 +528,10 @@ export function computeCharacterDerived(character: Character) {
     // campaign — the same bug that kept every racial prof-bonus trait at its level-1 value.
     // (2014 Lucky is a flat 3 and needs no override; it uses a different key, so a character
     // cannot end up holding both pools.)
+    // Giff's Astral Spark: uses equal to proficiency bonus. Same shape as the feat pools below —
+    // the race entry's `max` is only a level-1 seed.
+    if (character.raceId === 'giff') resourceMaxOverrides['astral_spark'] = profBonus;
+
     const feats = new Set(character.selectedFeats ?? []);
     for (const [featId, key] of [
       ['lucky-2024',                   'luck_points'],
