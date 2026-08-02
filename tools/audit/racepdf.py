@@ -207,6 +207,17 @@ def mech_tokens(s, source=False):
         # dc10 in the book and is still reported.
         if re.search(r'save\s+DC', ' '.join(forms), re.I):
             out.update({'dc8', 'proficiencybonus'})
+        # The books grant these as ADJECTIVES — "you are immune to poison", "resistant to fire" —
+        # and MECH only matches the nouns the app uses. 310 "immune" and 18 "resistant" across the
+        # 16 books; GGR writes the adjective 20 times and the noun NEVER, so no GGR entry granting
+        # an immunity could ever be matched. Four spell findings were this one word form.
+        # Source side only, like the bare dice above: generous about how the book may phrase a
+        # claim, strict about what the app is held to.
+        joined = ' '.join(forms)
+        if re.search(r'\bimmune\b', joined, re.I):
+            out.add('immunity')
+        if re.search(r'\bresistant\b', joined, re.I):
+            out.add('resistance')
         # Dice counts spelled as words: the 2024 Diviner's Portent is "roll two d20s" and the
         # string "2d20" appears NOWHERE in that book, so the app was reported as inventing both
         # Portent and Greater Portent. 23 occurrences across the books.
