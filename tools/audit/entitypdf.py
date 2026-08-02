@@ -147,8 +147,13 @@ KNOBS = {
     # The missing precision check is the FINDING RATE on uncorrupted data. 3 of 23 is an instrument;
     # 18 of 23 is a broken one wearing a good score. Just as a quieter report is not a better one, a
     # noisier one is not either — and only the pair of numbers can tell them apart.
+    # Re-priced once the findings were triaged: Rally, Brace and Quick Toss all state their
+    # mechanics correctly and sit just outside a 400-wide window (they clear at 800-1500). Widening
+    # maneuvers to reach them costs 15 points — 76% -> 61% — so the false positives are cheaper than
+    # the misses and 400 stays. Invocations go the other way: one window at 800 reaches 100%
+    # detection for 7 findings in 54, a readable rate, where 400 was 90% for 1.
     'maneuver': {'spots': 2, 'back': 100, 'width': 400},
-    'invocation': {'spots': 2, 'back': 100, 'width': 400},
+    'invocation': {'spots': 1, 'back': 100, 'width': 800},
 }
 # Infusions, metamagic, fighting styles and pact boons ARE laid out like feats and priced fine at
 # this: 87%, 80%, 100%, 100% plausible respectively.
