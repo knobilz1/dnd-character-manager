@@ -47,7 +47,22 @@ faith"), so `want` was empty and nothing was ever compared, while the report sai
 finding". A background's checkable claims are its GRANTS, which the books state plainly as "Skill
 Proficiencies: Insight, Religion". 0% -> 93%.
 
-Usage: ENTITY_BUNDLE=<bundled .mjs> python tools/audit/entitypdf.py --kind=background|item
+KNOWN SOURCE DEFECTS — findings that are the PDF's fault, confirmed, so nobody re-investigates:
+
+  Pact of the Chain [PHB] "reaction". The rule is that the familiar attacks with its reaction and
+  the app states it correctly; this PDF's entry simply lacks the clause. Every signal inside the
+  tool said otherwise — the entry was provably the right one (it holds "attack action", "forgo"
+  and "quasit"), the sentence around the gap was intact, and the FLAT index, which strips spacing
+  so OCR word-splitting cannot hide a word, had no "reaction" either. A single extraction with no
+  second copy to check against can be wrong in a way no amount of care inside the tool detects.
+
+  Storm Sphere [XGtE] "lightning damage". The real entry does not pass the Casting Time test and
+  the occurrence that does holds no dice at all. See `spell_entry`.
+
+  Flame Tongue [DMG] "fire damage". A false entry mark cuts its window to 363 characters. Priced:
+  raising a minimum-gap floor to rescue it costs more detection than it saves.
+
+Usage: ENTITY_BUNDLE=<bundled .mjs> python tools/audit/entitypdf.py --kind=<kind>
                                                                    [book] [--full] [--control]
 """
 import bisect
