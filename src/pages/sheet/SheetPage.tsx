@@ -52,6 +52,8 @@ import { SidebarPanel } from './SidebarPanel';
 import { AlternateFormPanel } from '../../components/AlternateFormPanel';
 import { CompanionPanel } from '../../components/CompanionPanel';
 import { activeCompanions } from '../../utils/companion';
+import { summonSpecFor } from '../../data/summonOptions';
+import { SummonPicker } from '../../components/SummonPicker';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { WildShapeModal } from '../../components/WildShapeModal';
 
@@ -1091,6 +1093,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
   const [itemsOpen,      setItemsOpen]      = React.useState(true);
   const [expandedKey,    setExpandedKey]    = React.useState<string | null>(null);
   const [castSpell,      setCastSpell]      = React.useState<ReturnType<typeof getSpell> | null>(null);
+  const [summonSpell,    setSummonSpell]    = React.useState<ReturnType<typeof getSpell> | null>(null);
 
   function toggleExpand(key: string) {
     setExpandedKey(prev => prev === key ? null : key);
@@ -1214,6 +1217,23 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
                         <span className="text-slate-400">{spellLevelLabel(spell.level)} {spell.school}</span>
                         {spell.concentration && <span className="bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">Concentration</span>}
                         {spell.ritual && <span className="bg-teal-900/50 text-teal-300 px-1.5 py-0.5 rounded text-[10px]">Ritual</span>}
+                        {/* Same ritual cast as the Spells tab. This surface is a SECOND spell list
+                            with its own cast dialog, so a feature added to SpellPanel alone is only
+                            half present — which is exactly how this one was found. */}
+                        {spell.ritual && spell.level > 0 && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (spell.concentration && character.concentrationSpellId !== spell.id)
+                                startConcentration(spell.id);
+                              if (summonSpecFor(spell.id)) setSummonSpell(spell);
+                            }}
+                            className="ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-blue-700 bg-blue-900/30 text-blue-300 hover:bg-blue-800/50 transition-all"
+                            title="Cast as ritual — takes 10 minutes longer and expends no spell slot"
+                          >
+                            Ritual
+                          </button>
+                        )}
                         {canCast(spell, alwaysPrepared) && (
                           <button
                             onClick={e => {
@@ -1225,7 +1245,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
                               }
                               setCastSpell(spell);
                             }}
-                            className="ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-red-700 bg-red-900/30 text-red-300 hover:bg-red-800/50 transition-all"
+                            className={cn("flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-red-700 bg-red-900/30 text-red-300 hover:bg-red-800/50 transition-all", !spell.ritual && "ml-auto")}
                             title="Cast spell"
                           >
                             <Zap size={10} />
@@ -1273,6 +1293,12 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
       )}
 
       {/* ── Cast slot picker ── */}
+      <SummonPicker
+        spec={summonSpell ? summonSpecFor(summonSpell.id) : undefined}
+        character={character}
+        onClose={() => setSummonSpell(null)}
+      />
+
       <Dialog open={!!castSpell} onClose={() => setCastSpell(null)} title={castSpell ? `Cast ${castSpell.name}` : ''}>
         {castSpell && (
           <div className="space-y-3">
@@ -1291,7 +1317,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
             {pactMagic && pactMagic.slotLevel >= castSpell.level && pactMagic.slotsUsed < pactMagic.slotsTotal && (
               <button
                 className="w-full text-left p-3 rounded-lg border-2 border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 transition-all"
-                onClick={() => { usePactSlot(); if (castSpell.concentration) startConcentration(castSpell.id); setCastSpell(null); }}
+                onClick={() => { usePactSlot(); if (castSpell.concentration) startConcentration(castSpell.id); if (summonSpecFor(castSpell.id)) setSummonSpell(castSpell); setCastSpell(null); }}
               >
                 <p className="text-sm font-bold text-purple-300">Pact Magic Slot (L{pactMagic.slotLevel})</p>
                 <p className="text-xs text-slate-400">{pactMagic.slotsTotal - pactMagic.slotsUsed}/{pactMagic.slotsTotal} pact slots remaining</p>
@@ -1310,7 +1336,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
                     <button
                       key={lvl}
                       disabled={disabled}
-                      onClick={() => { useSpellSlot(lvl); if (castSpell.concentration) startConcentration(castSpell.id); setCastSpell(null); }}
+                      onClick={() => { useSpellSlot(lvl); if (castSpell.concentration) startConcentration(castSpell.id); if (summonSpecFor(castSpell.id)) setSummonSpell(castSpell); setCastSpell(null); }}
                       className={cn(
                         'w-full text-left p-3 rounded-lg border-2 transition-all',
                         disabled ? 'border-slate-700 bg-slate-900 opacity-50 cursor-not-allowed'

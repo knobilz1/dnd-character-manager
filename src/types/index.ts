@@ -652,7 +652,9 @@ export interface ActiveWildShape {
 export interface Companion {
   id: string;
   /** Which feature granted it — decides how the numbers scale. */
-  kind: 'beast-master' | 'steel-defender' | 'drakewarden' | 'familiar';
+  /** `summoned` is anything conjured by a spell or item that uses its stat block as printed —
+   *  a Find Steed mount, a figurine's creature, a commanded elemental. No owner scaling. */
+  kind: 'beast-master' | 'steel-defender' | 'drakewarden' | 'familiar' | 'summoned';
   /** The class whose level drives the scaling (e.g. 'ranger' for a Beast Master beast). */
   classId: string;
   /** Stat block id from beastForms.ts. Used by `beast-master`; other kinds carry their own. */

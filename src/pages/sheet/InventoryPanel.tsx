@@ -5,6 +5,8 @@ import { cn } from '../../utils/cn';
 import type { Character, InventoryItem, ItemCategory } from '../../types';
 import { searchItems, type ItemTemplate } from '../../data/items';
 import { TOWN_STORE } from '../../data/townStore';
+import { itemSummonSpecFor } from '../../data/summonOptions';
+import { SummonPicker } from '../../components/SummonPicker';
 
 const CATEGORY_BADGE: Record<ItemCategory, string> = {
   weapon: 'bg-red-900/30 text-red-300 border-red-700/40',
@@ -49,6 +51,7 @@ export function InventoryPanel({
   updateCurrency,
 }: InventoryPanelProps) {
   const [addOpen, setAddOpen] = React.useState(false);
+  const [summonItem, setSummonItem] = React.useState<string | null>(null);
   const [draftItem, setDraftItem] = React.useState<{
     name: string; quantity: number; category: ItemCategory; weight?: number; description?: string; maxCharges?: number; recharge?: 'dawn' | 'long' | 'short';
   }>({ name: '', quantity: 1, category: 'gear' });
@@ -183,6 +186,7 @@ export function InventoryPanel({
                       onRename={name => renameInventoryItem(item.id, name)}
                       onDescriptionChange={desc => setInventoryDescription(item.id, desc)}
                       onChargesChange={charges => setItemCharges(item.id, charges)}
+                      onSummon={() => setSummonItem(item.name)}
                     />
                   </HoverCard>
                 ))}
@@ -297,6 +301,12 @@ export function InventoryPanel({
           </div>
         </div>
       </Dialog>
+
+      <SummonPicker
+        spec={summonItem ? itemSummonSpecFor(summonItem) : undefined}
+        character={character}
+        onClose={() => setSummonItem(null)}
+      />
     </div>
   );
 }
@@ -401,9 +411,10 @@ interface InventoryRowProps {
   onRename: (n: string) => void;
   onDescriptionChange: (d: string | undefined) => void;
   onChargesChange: (c: number) => void;
+  onSummon?: () => void;
 }
 
-function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename, onDescriptionChange, onChargesChange }: InventoryRowProps) {
+function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename, onDescriptionChange, onChargesChange, onSummon }: InventoryRowProps) {
   const [editingName, setEditingName] = React.useState(false);
   const [nameDraft, setNameDraft] = React.useState(item.name);
   const [editingDesc, setEditingDesc] = React.useState(false);
@@ -466,6 +477,19 @@ function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename,
             />
           )}
         </div>
+
+        {/* Summon — only for the handful of items that produce a creature the player then has to
+            track. The choice becomes a Companion, exactly as casting Find Familiar does, so it
+            gets the same pop-out sheet and the same active-summon banner. */}
+        {onSummon && itemSummonSpecFor(item.name) && (
+          <button
+            onClick={onSummon}
+            className="shrink-0 text-xs px-2 py-1 rounded border border-indigo-700 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50 transition-all"
+            title={`Summon from ${item.name}`}
+          >
+            Summon
+          </button>
+        )}
 
         <div className="flex items-center gap-1 shrink-0">
           <button

@@ -1,5 +1,5 @@
 import type { Character, Companion, CompanionDerived } from '../types';
-import { ALL_BEAST_FORMS } from '../data/beastForms';
+import { resolveCreatureForm } from '../data/summonOptions';
 import { PROFICIENCY_BONUS, totalCharacterLevel } from '../data/mechanics';
 import { classLevel } from '../data/classes';
 import { STEEL_DEFENDER, DRAKE_COMPANION } from '../data/companionForms';
@@ -118,7 +118,9 @@ export function computeCompanionDerived(
     };
   }
 
-  const beast = ALL_BEAST_FORMS.find(b => b.id === companion.beastId);
+  // Both pools. Summoned creatures live in their own array so they never leak into Wild Shape,
+  // but a companion can point at either one.
+  const beast = resolveCreatureForm(companion.beastId ?? '');
   if (!beast) return null;
 
   if (companion.kind === 'beast-master') {
@@ -146,11 +148,11 @@ export function computeCompanionDerived(
     };
   }
 
-  if (companion.kind === 'familiar') {
-    // A familiar is the ONLY kind that takes no owner scaling. PHB p.240: it "uses the chosen
-    // form's statistics" — the summoner's proficiency bonus is not added and its hit points are
-    // not floored, which is exactly why an owl familiar dies to a stiff breeze. Returning the
-    // stat block unchanged is the rule, not a stub.
+  if (companion.kind === 'familiar' || companion.kind === 'summoned') {
+    // Neither kind takes owner scaling. PHB p.240 on a familiar: it "uses the chosen form's
+    // statistics" — the summoner's proficiency bonus is not added and its hit points are not
+    // floored, which is exactly why an owl familiar dies to a stiff breeze. A conjured steed,
+    // figurine creature or commanded elemental is the same: the stat block as printed.
     return {
       beastName: beast.name,
       size: beast.size,
