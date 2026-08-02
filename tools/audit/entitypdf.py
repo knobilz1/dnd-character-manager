@@ -61,7 +61,8 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(__file__))
 import r6verify as V  # noqa: E402
-from racepdf import alt_flat, alt_text, flat, mech_tokens, trait_variants  # noqa: E402
+from racepdf import (alt_flat, alt_text, debook, flat,  # noqa: E402
+                     mech_tokens, trait_variants)
 from bookquality import BOOK_PDF  # noqa: E402
 from featpdf import content_words, feat_chapter, heading_positions, locate  # noqa: E402
 from subclasspdf import _impossible, _plausible  # noqa: E402
@@ -197,6 +198,10 @@ def entities(kind, bundle=None):
     pick = {
         'background': ('({name:x.name,book:x.sourceBook,d:((x.feature&&x.feature.description)||""),'
                        'grants:[].concat(x.skillProficiencies||[],x.toolProficiencies||[])})'),
+        # weight is the one TABULAR claim mundane equipment makes, and the PHB prints it plainly
+        # in the equipment tables ("Club 1 sp 1d4 bludgeoning 2 lb. Light").
+        'item': ('({name:x.name,book:x.sourceBook,d:x.description??"",'
+                 'weight:x.weight??null,category:x.category??null})'),
         'spell': ('({name:x.name,book:x.sourceBook,'
                   'd:(x.description??"")+"\\n"+(x.atHigherLevels??""),'
                   'damageType:x.damageType??null,savingThrow:x.savingThrow??null,'
@@ -319,6 +324,50 @@ def spell_entry(book, raw, idx, names, marks, want, weight):
     # was tried and is inert here: that window does contain the word "sphere", so it scores above
     # zero. The fix is a more tolerant entry test, not a score threshold.
     return best
+
+
+# A row in a PHB equipment table: name, then the cost column, then the weight column, all within a
+# few characters. The cost column is what anchors the weight to THIS item's row — without it the
+# first "lb" after the name belongs to whichever row happens to be next, which read PHB scale mail
+# (45 lb, correct in the app) as 8 lb and Lock (1 lb, correct) as 5 lb.
+#
+# "1½ lb" matters: OCR renders the vulgar fraction as a bare "1/2", so Crossbow bolts (20) and
+# Sling bullets (20) — 1½ lb in the book and 1.5 in the app — read as half a pound and looked wrong.
+ROW = re.compile(r'^.{0,26}?(?:\d+(?:,\d+)?)\s*(?:cp|sp|ep|gp|pp)\b'
+                 r'.{0,14}?(\d+)?\s*(½|1/2|1/4|¼)?\s*(\d+)?\s*lb', re.I | re.S)
+
+
+def row_weight(book, raw, idx, names):
+    """The weight the book's equipment table gives this item, or None."""
+    for n in names:
+        start = 0
+        while True:
+            i = book.find(n, start)
+            if i < 0:
+                break
+            start = i + 1
+            j = min(len(idx) - 1, i + len(n))
+            m = ROW.match(debook(raw[idx[j]: idx[min(len(idx) - 1, i + len(n) + 70)]]))
+            if not m:
+                continue
+            whole, frac, trail = m.group(1), m.group(2), m.group(3)
+            val = float(whole or trail or 0)
+            if frac:
+                val += 0.25 if frac in ('1/4', '¼') else 0.5
+            return val
+    return None
+
+
+def weight_names(name):
+    """Row names to try. The app writes "Arcane focus (orb)"; the PHB prints a category heading and
+    then a row called simply "Orb", so the parenthetical is a row name in its own right and has to
+    be tried FIRST — matching the category instead lands on whichever row it heads (Crystal, 1 lb)."""
+    out = []
+    par = re.search(r'\(([^)]+)\)', name)
+    if par and not re.search(r'\d', par.group(1)):
+        out.append(flat(par.group(1)))
+    out += [flat(v) for v in trait_variants(name)]
+    return [n for n in out if len(n) >= 3]
 
 
 def item_entry(book, raw, idx, names, marks, want, weight):
