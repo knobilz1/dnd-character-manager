@@ -612,7 +612,7 @@ const MAGIC_ITEMS: ItemTemplate[] = [
   // Specific named weapons
   { name: 'Dagger of Venom', category: 'magic', weight: 1, description: '+1 dagger. Once per day: coat with poison (DC 15 Con or 2d10 poison and poisoned for 1 minute). Rare.', maxCharges: 1, recharge: 'dawn' },
   { name: 'Dragon Slayer (Longsword)', category: 'magic', weight: 3, description: '+1 longsword. Against dragons: +3d6 damage. Rare.' },
-  { name: 'Frost Brand', category: 'magic', weight: 3, description: '+1 longsword. 1d6 cold instead of +1 damage. Gives cold resistance. Sheds bright light when cold within 30 ft. Very rare. Requires attunement.' },
+  { name: 'Frost Brand', category: 'magic', weight: 3, description: 'Any sword. Extra 1d6 cold damage on a hit. Gives fire resistance. In freezing temperatures, sheds bright light in a 10-ft radius and dim light beyond it. When drawn, extinguishes nonmagical flames within 30 ft (once per hour). Very rare. Requires attunement.' },
   { name: 'Giant Slayer (Longsword)', category: 'magic', weight: 3, description: '+1 longsword. Against giants: +2d6 and DC 15 Str save or fall prone. Rare.' },
   { name: 'Javelin of Lightning', category: 'magic', weight: 2, description: 'Before throwing: lightning bolt (DC 13 Dex, 4d6). Then functions as a normal javelin (loses power). Uncommon.' },
   { name: 'Mace of Disruption', category: 'magic', weight: 4, description: 'Against fiends/undead: +2d6 radiant; if the target then has 25 HP or fewer, DC 15 Wis save or destroyed (frightened until end of your next turn on a success). Sheds bright light 20 ft. Rare. Requires attunement.' },
