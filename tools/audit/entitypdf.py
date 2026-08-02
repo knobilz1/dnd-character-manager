@@ -201,7 +201,7 @@ def entities(kind, bundle=None):
                   'd:(x.description??"")+"\\n"+(x.atHigherLevels??""),'
                   'damageType:x.damageType??null,savingThrow:x.savingThrow??null,'
                   'level:x.level})'),
-    }.get(kind, '({name:x.name,book:x.sourceBook,d:x.description??""})')
+    }.get(kind, '({name:x.name,book:x.sourceBook,d:x.description??"",hidden:x.hidden??false})')
     out = subprocess.run(
         ['node', '-e',
          'const {pathToFileURL}=await import("node:url");'
@@ -337,6 +337,11 @@ def sweep(rows, only=None):
 
     for e in rows:
         if only and e['book'] != only:
+            continue
+        # `hidden` means the app itself has withdrawn the entry because no book contains it — the
+        # three Unearthed Arcana fighting styles. Sweeping them would report a coverage gap that is
+        # the correct state of affairs, so they are excluded rather than counted as unlocated.
+        if e.get('hidden'):
             continue
         st = stats.setdefault(e['book'], {'found': 0, 'total': 0, 'nobook': 0})
         st['total'] += 1

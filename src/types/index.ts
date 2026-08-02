@@ -413,6 +413,8 @@ export interface FightingStyle {
   sourceBook: BookId;
   classes: string[];
   description: string;
+  /** Withheld from the pickers — the entry is not in any book this app can cite. */
+  hidden?: boolean;
 }
 
 export interface EldritchInvocation {

@@ -12,7 +12,7 @@ export const ALL_METAMAGIC: Metamagic[] = [
   { id: 'twinned-spell', name: 'Twinned Spell', sourceBook: 'PHB', cost: 'Spell level (1 minimum)', description: 'When you cast a spell that targets only one creature and doesn\'t have a range of self, you can spend a number of sorcery points equal to the spell\'s level to target a second creature in range with the same spell (1 sorcery point if the spell is a cantrip). To be eligible, a spell must be incapable of targeting more than one creature at the spell\'s current level.' },
 
   // XGtE
-  { id: 'seeking-spell', name: 'Seeking Spell', sourceBook: 'XGtE', cost: '2 sorcery points', description: 'If you make an attack roll for a spell and miss, you can spend 2 sorcery points to reroll the d20, and you must use the new roll.' },
+  { id: 'seeking-spell', name: 'Seeking Spell', sourceBook: 'TCE', cost: '2 sorcery points', description: 'If you make an attack roll for a spell and miss, you can spend 2 sorcery points to reroll the d20, and you must use the new roll.' },
 
   // TCE
   { id: 'transmuted-spell', name: 'Transmuted Spell', sourceBook: 'TCE', cost: '1 sorcery point', description: 'When you cast a spell that deals a type of damage from the following list, you can spend 1 sorcery point to change that damage type to one of the others: acid, cold, fire, lightning, poison, thunder.' },
