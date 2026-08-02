@@ -72,6 +72,7 @@ interface CharacterState {
   removeSpellFromBook: (spellId: string) => void;
   startConcentration: (spellId: string) => void;
   endConcentration: () => void;
+  setInitiativeRoll: (total: number | undefined) => void;
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
   setInnateSpellAbility: (ability: AbilityKey) => void;
@@ -548,6 +549,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   endConcentration: () =>
     set((s) => s.character ? { character: { ...s.character, concentrationSpellId: undefined } } : s),
+
+  setInitiativeRoll: (total) =>
+    set((s) => s.character ? { character: { ...s.character, initiativeRoll: total } } : s),
 
   setResource: (key, value) =>
     set((s) => {
@@ -1053,6 +1057,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           exhaustionLevel: newExhaustionLevel,
           spellSlotsUsed: emptySlotState(),
           concentrationSpellId: undefined,
+          // A rolled initiative belongs to ONE encounter. Nobody is still in the fight they rolled
+          // for by the time they finish a long rest, and a stale number would show as this fight's
+          // order next session. Re-rolling replaces it in the meantime.
+          initiativeRoll: undefined,
           resources,
           pactMagic,
           hitDiceUsed,

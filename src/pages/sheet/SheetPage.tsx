@@ -34,6 +34,8 @@ import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { useDmConnection } from '../../hooks/useDmConnection';
+import { sendTalkToDM } from '../../utils/dmConnect';
 import { getClass, baseClassId } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
@@ -542,7 +544,18 @@ export function SheetPage() {
                 title="Click to roll initiative"
               >
                 <p className="text-xs text-slate-400 group-hover:text-blue-400 transition-colors">Init <span className="text-[10px] opacity-60">🎲</span></p>
-                <p className="font-bold text-white">{initiative >= 0 ? `+${initiative}` : `${initiative}`}</p>
+                {/* Once rolled, THIS FIGHT's number is what matters — the bonus is only useful
+                    until you have rolled it. Shown large with the bonus demoted underneath. */}
+                {character.initiativeRoll != null ? (
+                  <>
+                    <p className="font-bold text-blue-300 leading-tight">{character.initiativeRoll}</p>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      rolled ({initiative >= 0 ? `+${initiative}` : initiative})
+                    </p>
+                  </>
+                ) : (
+                  <p className="font-bold text-white">{initiative >= 0 ? `+${initiative}` : `${initiative}`}</p>
+                )}
               </button>
               {/* Speed */}
               <div className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center', exhaustionLevel >= 2 ? 'border-orange-700/60' : 'border-slate-700')}
@@ -1759,6 +1772,34 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   // ── Death-save die ──────────────────────────────────────────────────────
   const { triggerRoll: dsTrigger, lastResult } = useDiceStore();
   const seenDeathNonce = React.useRef<number>(-1);
+
+  // ── Initiative ──────────────────────────────────────────────────────────
+  /** The sheet has always been able to ROLL initiative — the stat is clickable — but the result
+   *  vanished into the dice roller. A fight needs that number to persist: the player has to know
+   *  where they sit in the order, and when a DM bot is running the table it needs the number to
+   *  build the order at all.
+   *
+   *  Sent to the DM independently of the dice roller's auto-send toggle. That toggle is about
+   *  whether routine rolls become chatter; initiative is not chatter, it is the input the DM
+   *  cannot run the encounter without, and defaulting it off would leave the bot guessing. */
+  const setInitiativeRoll = useCharacterStore(st => st.setInitiativeRoll);
+  const dmIp = useSettingsStore((st) => st.dmIp);
+  const dmConnected = useDmConnection();
+  const seenInitNonce = React.useRef<number>(-1);
+
+  React.useEffect(() => {
+    if (!lastResult || lastResult.label !== 'Initiative') return;
+    if (lastResult.nonce === seenInitNonce.current) return;
+    seenInitNonce.current = lastResult.nonce;
+    const total = lastResult.value;
+    setInitiativeRoll(total);
+    if (dmConnected && character?.name?.trim()) {
+      // Fire-and-forget: a DM that has gone away must not block the roll from landing on the sheet.
+      sendTalkToDM(`${character.name} rolled ${total} for initiative.`, character.name, dmIp)
+        .catch((e) => console.warn('Initiative not delivered to the DM:', e));
+    }
+  }, [lastResult, dmConnected, dmIp, character?.name, setInitiativeRoll]);
+
 
   React.useEffect(() => {
     if (!lastResult) return;
