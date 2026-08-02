@@ -308,7 +308,15 @@ def sweep(rows, only=None):
             raw = V.book_text(pdf)
             books[e['book']] = (raw,) + V._flatten(raw)
             sib = [flat(x['name']) for x in rows if x['book'] == e['book'] and flat(x['name'])]
-            sibs[e['book']] = [n for n in sib if len(n) >= 4]
+            # VARIANTS, not just the app's literal names. 180 of 785 items carry a parenthetical
+            # the books never print — the app splits one DMG entry into Horn of Valhalla (Silver),
+            # (Brass), (Bronze), (Iron), and the same for Ioun Stone, Giant Slayer and Belt of
+            # Giant Strength. Building the entry marks from literal names alone means the real
+            # heading is never searched for, so 40 of the DMG's 49 such items had no anchor at all
+            # and silently fell back to `locate`. "Belt of Giant Strength" sits 19 characters from
+            # its rarity line — a textbook entry that nothing was looking for.
+            sibs[e['book']] = sorted({flat(v) for x in rows if x['book'] == e['book']
+                                      for v in trait_variants(x['name']) if len(flat(v)) >= 4})
             chapters[e['book']] = feat_chapter(books[e['book']][1], raw,
                                                books[e['book']][2], sib)
             c = Counter(re.findall(r'[a-z]{4,}', raw.lower()))
