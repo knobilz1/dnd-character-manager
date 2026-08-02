@@ -360,7 +360,13 @@ def sweep(rows, only=None):
             a = max(0, s - kn['back'])
             b = min(len(idx) - 1, s + max(len(flat(e['d'])) * 2, kn['width']))
             if bounds:
-                nxt = bisect.bisect_right(bounds, s)   # marks ARE entry starts; take the next one
+                # Marks ARE entry starts, so the next one ends this entry. No minimum-gap floor:
+                # requiring the bound to sit at least N characters out was measured and is a net
+                # loss — 300 traded 28 findings for 4 points of detection (DMG 93% -> 88%), 600 and
+                # 1000 worse still. The short windows it would have rescued are outnumbered by the
+                # neighbours it lets back in. Cost: Flame Tongue is read through 363 characters and
+                # reported for the fire damage it is named after. Known, and cheaper than the fix.
+                nxt = bisect.bisect_right(bounds, s)
                 if nxt < len(bounds):
                     b = min(b, bounds[nxt])
             spans.append(raw[idx[a]: idx[b]])
