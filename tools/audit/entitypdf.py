@@ -248,6 +248,12 @@ def spell_entry(book, raw, idx, names, marks, want, weight):
         score = sum(weight.get(w, 1.0) for w in want & content_words(seg))
         if score > best_score:
             best, best_score = i, score
+    # KNOWN MISS, left in rather than papered over: Storm Sphere [XGtE]. Its real entry does not
+    # pass the Casting Time test, and the one occurrence that does holds no dice and no "lightning"
+    # — so the sweep compares against a window that is not the spell and reports the app for
+    # inventing its own lightning damage. Rejecting candidates that share no identity vocabulary
+    # was tried and is inert here: that window does contain the word "sphere", so it scores above
+    # zero. The fix is a more tolerant entry test, not a score threshold.
     return best
 
 
