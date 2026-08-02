@@ -5,6 +5,7 @@ mod local_llm;
 mod maplog;
 mod oauth;
 mod pack_profile;
+mod srd_monsters;
 mod party_listener;
 mod terrain;
 mod tile_library;

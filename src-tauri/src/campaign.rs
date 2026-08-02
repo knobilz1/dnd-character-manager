@@ -425,6 +425,15 @@ This campaign may have printable battle maps prepared for its encounters — lis
 /// New campaigns get this line inside BASE_CLAUDE_MD's own import list.
 const DM_RULES_IMPORT_LINE: &str = "\n@memory/dm_rules.md\n";
 
+/// The SRD monster index rides the same route as the rules: written into the campaign's memory
+/// folder and imported by CLAUDE.md, so it lands in the CACHED standing block rather than being
+/// re-sent every turn. ~2,700 tokens for all 334 monsters grouped by challenge rating.
+///
+/// It exists because dm_combat_encounter_guidance.md measured the DM's weakness as CR-BUDGET
+/// discipline, not monster choice — it picks a creature that fits the scene and then misjudges how
+/// dangerous it is. Grouping by CR turns "a lone boss near CR L" from a guess into a lookup.
+const SRD_MONSTERS_IMPORT_LINE: &str = "\n@memory/srd_monsters.md\n";
+
 /// The rules ONE campaign actually gets, filtered from `DM_RULES` by its battle
 /// mode. `DM_RULES` documents all three modes plus the prepared-battle-map
 /// protocol, but a table only ever plays ONE mode — and CLAUDE.md and every
@@ -1610,11 +1619,17 @@ fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
         crate::maplog::log("PENDING MEMORY FLUSH FAILED ON LOAD", &e);
     }
     write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(&read_battle_mode_at(root, id)))?;
+    // Rewritten every load like the rules, so regenerating the index (new SRD data) reaches every
+    // existing campaign without a migration.
+    write_atomic(&dir.join("memory").join("srd_monsters.md"), crate::srd_monsters::SRD_MONSTER_INDEX)?;
     let claude_path = dir.join("CLAUDE.md");
     let original = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
     let mut claude_md = refresh_stale_contract_lines(&strip_superseded_positioning(&original));
     if !claude_md.contains("@memory/dm_rules.md") {
         claude_md.push_str(DM_RULES_IMPORT_LINE);
+    }
+    if !claude_md.contains("@memory/srd_monsters.md") {
+        claude_md.push_str(SRD_MONSTERS_IMPORT_LINE);
     }
     if claude_md != original {
         write_atomic(&claude_path, &claude_md)?;
@@ -15936,5 +15951,46 @@ Tactics:
         for (_, line) in rows {
             println!("{line}");
         }
+    }
+
+    /// The monster index must reach EXISTING campaigns, not just new ones, and it must keep the
+    /// "this is a subset" guardrail. Both halves have bitten this project before: a rules addition
+    /// that only landed in BASE_CLAUDE_MD would be dead for every campaign already on disk, and a
+    /// partial source presented as complete is the failure mode dm_srd_monsters_plan.md was written
+    /// to prevent — the model reads absence as non-existence and stops using half the bestiary.
+    #[test]
+    fn srd_monster_index_syncs_and_keeps_its_guardrail() {
+        let idx = crate::srd_monsters::SRD_MONSTER_INDEX;
+        assert!(idx.contains("SUBSET"), "the partial-source guardrail is missing");
+        assert!(idx.contains("still fair game"), "must say a missing monster is still usable");
+        // Named in DM_RULES's own encounter examples and genuinely absent from the SRD.
+        assert!(idx.contains("mind flayer") && idx.contains("bullywug"),
+                "the guardrail must name the recommended monsters it cannot cost out");
+        // Grouped by CR, because CR-budget discipline is the measured gap.
+        assert!(idx.contains("## CR 1/4") && idx.contains("## CR 1"), "{idx:.400}");
+        // Will-o'-wisp IS in the SRD (CR 2) despite the plan memory claiming otherwise, so it must
+        // appear as an entry and NOT in the excluded list.
+        assert!(idx.contains("Will-o'-Wisp"), "will-o'-wisp is present at CR 2 and must be listed");
+
+        let tmp = std::env::temp_dir().join(format!("srdmon-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let id = "camp";
+        fs::create_dir_all(tmp.join(id).join("memory")).unwrap();
+        // An OLD campaign: CLAUDE.md with no monster import at all.
+        fs::write(tmp.join(id).join("CLAUDE.md"), "# Campaign
+").unwrap();
+        fs::write(tmp.join(id).join("battle_mode.txt"), "theater").unwrap();
+        sync_dm_rules_at(&tmp, id).unwrap();
+
+        let written = fs::read_to_string(tmp.join(id).join("memory").join("srd_monsters.md")).unwrap();
+        assert_eq!(written, idx, "the campaign copy must be the generated index verbatim");
+        let claude = fs::read_to_string(tmp.join(id).join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("@memory/srd_monsters.md"), "existing campaign never got the import: {claude}");
+
+        // Idempotent: syncing again must not add the import twice.
+        sync_dm_rules_at(&tmp, id).unwrap();
+        let claude2 = fs::read_to_string(tmp.join(id).join("CLAUDE.md")).unwrap();
+        assert_eq!(claude2.matches("@memory/srd_monsters.md").count(), 1, "{claude2}");
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
