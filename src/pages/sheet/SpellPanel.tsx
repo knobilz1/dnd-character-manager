@@ -240,6 +240,25 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                       </button>
                     )}
 
+                    {/* Ritual cast — deliberately NOT behind canCast. A ritual expends no spell
+                        slot, so neither having slots nor having the spell prepared gates it; a
+                        wizard rituals straight out of the spellbook. Separate button rather than a
+                        mode on Cast, because the two consume different things. */}
+                    {spell.ritual && spell.level > 0 && (
+                      <button
+                        onClick={() => {
+                          if (spell.concentration && character.concentrationSpellId !== spell.id) {
+                            startConcentration(spell.id);
+                          }
+                        }}
+                        className="shrink-0 text-xs px-2 py-1 rounded border border-blue-700 bg-blue-900/30 text-blue-300 hover:bg-blue-800/50 transition-all flex items-center gap-1"
+                        title="Cast as ritual — takes 10 minutes longer and expends no spell slot"
+                      >
+                        <BookOpen size={12} />
+                        <span className="hidden sm:inline">Ritual</span>
+                      </button>
+                    )}
+
                     {/* Cast button */}
                     {canCast(spell, prepared, alwaysPrepared) && (
                       <button
