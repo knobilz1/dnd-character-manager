@@ -25,7 +25,9 @@ export function SummonPicker({ spec, character, title, onClose }: {
         <div>
           <p className="text-sm text-slate-400 mb-3">{spec.help}</p>
           <div className="grid gap-2 sm:grid-cols-2">
-            {spec.options.map(opt => {
+            {spec.options
+              .filter(opt => !opt.requiresPactBoon || character.classOptions?.pactBoon === opt.requiresPactBoon)
+              .map(opt => {
               const beast = resolveCreatureForm(opt.beastId);
               return (
                 <button

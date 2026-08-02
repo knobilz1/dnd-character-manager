@@ -36,6 +36,11 @@ WANTED = {
     'Ring of Djinni Summoning': ['Djinni'],
     'Horn of Valhalla':      ['Berserker'],
     'Pipes of the Sewers':   ['Swarm of Rats'],
+    # Pact of the Chain lets a warlock take one of these instead of an ordinary
+    # familiar form. None of the four is a beast, which is why they were left out of
+    # the first pass — offering them without a stat block would have produced a
+    # companion whose sheet renders nothing.
+    'Pact of the Chain':     ['Imp', 'Pseudodragon', 'Quasit', 'Sprite'],
 }
 
 CR_TEXT = {0.0: '0', 0.125: '1/8', 0.25: '1/4', 0.5: '1/2'}

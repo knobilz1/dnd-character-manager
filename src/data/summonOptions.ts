@@ -15,9 +15,12 @@ import { ALL_SUMMON_FORMS } from './summonForms';
  * spell is a new entry here plus its stat blocks, not new UI.
  */
 export interface SummonOption {
-  /** Stat block id in beastForms.ts — this is what the companion sheet reads. */
+  /** Stat block id in beastForms.ts or summonForms.ts — what the companion sheet reads. */
   beastId: string;
   label: string;
+  /** Offered only to a character with this pact boon. Pact of the Chain's four forms are not
+   *  available to an ordinary caster, so showing them to every wizard would be wrong. */
+  requiresPactBoon?: string;
 }
 
 export interface SummonSpec {
@@ -31,9 +34,8 @@ export interface SummonSpec {
 /**
  * PHB Find Familiar, all fifteen forms, every one of which already has a stat block.
  *
- * Pact of the Chain's imp / pseudodragon / quasit / sprite are deliberately NOT here: they are not
- * beasts and have no stat block in beastForms.ts, so offering them would produce a companion whose
- * sheet renders nothing. They need their stat blocks added first.
+ * Pact of the Chain's imp / pseudodragon / quasit / sprite are included and gated on the boon. None
+ * of the four is a beast, so their stat blocks live in summonForms.ts alongside the other summons.
  */
 export const SUMMON_SPECS: Record<string, SummonSpec> = {
   'find-familiar': {
@@ -56,6 +58,13 @@ export const SUMMON_SPECS: Record<string, SummonSpec> = {
       { beastId: 'sea-horse',       label: 'Sea horse' },
       { beastId: 'spider',          label: 'Spider' },
       { beastId: 'weasel',          label: 'Weasel' },
+      // Pact of the Chain: "you can choose one of the normal forms for your familiar or one of
+      // the following special forms". Gated, not hidden — a warlock who has the boon sees them
+      // alongside the ordinary fifteen.
+      { beastId: 'imp',          label: 'Imp',          requiresPactBoon: 'pact-of-the-chain' },
+      { beastId: 'pseudodragon', label: 'Pseudodragon', requiresPactBoon: 'pact-of-the-chain' },
+      { beastId: 'quasit',       label: 'Quasit',       requiresPactBoon: 'pact-of-the-chain' },
+      { beastId: 'sprite',       label: 'Sprite',       requiresPactBoon: 'pact-of-the-chain' },
     ],
   },
   'find-steed': {

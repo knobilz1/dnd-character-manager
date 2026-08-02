@@ -39,19 +39,26 @@ export function CompanionPanel({ character, onPopOut }: {
   // beast pool above — a Battle Smith gets one Steel Defender and a Drakewarden one drake.
   const bsClass = character.classes.find(c => c.subclassId === 'battle-smith');
   const dwClass = character.classes.find(c => c.subclassId === 'drakewarden');
+  // The homunculus comes from an INFUSION, not a subclass, so any artificer who has learned it
+  // qualifies — Battle Smith or otherwise.
+  const homClass = (character.classOptions?.infusions ?? []).includes('homunculus-servant')
+    ? character.classes.find(c => c.classId === 'artificer')
+    : undefined;
   const hasKind = (k: Companion['kind']) => companions.some(c => c.kind === k);
   // Nothing to show and nothing to offer — render nothing rather than an empty card.
-  if (!bmClass && !bsClass && !dwClass && companions.length === 0) return null;
+  if (!bmClass && !bsClass && !dwClass && !homClass && companions.length === 0) return null;
 
   /** Summon one of the fixed companions. Both are singular, so the button hides once it is out. */
-  function summonFixed(kind: 'steel-defender' | 'drakewarden') {
-    const cls = kind === 'steel-defender' ? bsClass : dwClass;
+  function summonFixed(kind: 'steel-defender' | 'drakewarden' | 'homunculus') {
+    const cls = kind === 'steel-defender' ? bsClass : kind === 'homunculus' ? homClass : dwClass;
     if (!cls) return;
     const draft: Companion = {
       id: crypto.randomUUID(),
       kind,
       classId: cls.classId,
-      name: kind === 'steel-defender' ? 'Steel Defender' : 'Drake Companion',
+      name: kind === 'steel-defender' ? 'Steel Defender'
+          : kind === 'homunculus' ? 'Homunculus Servant'
+          : 'Drake Companion',
       // Placeholder: computeCompanionDerived owns the real maximum, and the panel below reads it
       // from there. Seeding 1 rather than 0 keeps a fresh companion from rendering as dead.
       currentHP: 1,
@@ -88,6 +95,14 @@ export function CompanionPanel({ character, onPopOut }: {
             className="text-[11px] px-2 py-0.5 rounded border border-sky-700 bg-sky-900/30 text-sky-300 hover:bg-sky-800/50 transition-colors flex items-center gap-1"
           >
             <Plus size={11} /> Steel Defender
+          </button>
+        )}
+        {homClass && !hasKind('homunculus') && (
+          <button
+            onClick={() => summonFixed('homunculus')}
+            className="text-[11px] px-2 py-0.5 rounded border border-teal-700 bg-teal-900/30 text-teal-300 hover:bg-teal-800/50 transition-colors flex items-center gap-1"
+          >
+            <Plus size={11} /> Homunculus
           </button>
         )}
         {dwClass && !hasKind('drakewarden') && (

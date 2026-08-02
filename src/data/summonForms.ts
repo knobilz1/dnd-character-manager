@@ -124,6 +124,14 @@ export const ALL_SUMMON_FORMS: BeastForm[] = [
     attacks: [{ name: 'Beak', toHit: 6, damage: '1d8+4', damageType: 'piercing' }, { name: 'Claws', toHit: 6, damage: '2d6+4', damageType: 'slashing' }],
     specialAbilities: ['Keen Sight'],
   },
+  // Pact of the Chain
+  {
+    id: 'imp', name: 'Imp', cr: '1', size: 'Tiny', hp: 10, ac: 13,
+    str: 6, dex: 17, con: 13,
+    speed: { walk: 20, fly: 40 },
+    attacks: [{ name: 'Sting (Bite in Beast Form)', toHit: 5, damage: '1d4+3', damageType: 'piercing' }],
+    specialAbilities: ['Shapechanger', 'Devil\'s Sight', 'Magic Resistance'],
+  },
   // Figurine of Wondrous Power
   {
     id: 'lion', name: 'Lion', cr: '1', size: 'Large', hp: 26, ac: 12,
@@ -162,6 +170,22 @@ export const ALL_SUMMON_FORMS: BeastForm[] = [
     speed: { walk: 40 },
     attacks: [{ name: 'Hooves', toHit: 4, damage: '2d4+2', damageType: 'bludgeoning' }],
   },
+  // Pact of the Chain
+  {
+    id: 'pseudodragon', name: 'Pseudodragon', cr: '1/4', size: 'Tiny', hp: 7, ac: 13,
+    str: 6, dex: 15, con: 13,
+    speed: { walk: 15, fly: 60 },
+    attacks: [{ name: 'Bite', toHit: 4, damage: '1d4+2', damageType: 'piercing' }, { name: 'Sting', toHit: 4, damage: '1d4+2', damageType: 'piercing' }],
+    specialAbilities: ['Keen Senses', 'Magic Resistance', 'Limited Telepathy'],
+  },
+  // Pact of the Chain
+  {
+    id: 'quasit', name: 'Quasit', cr: '1', size: 'Tiny', hp: 7, ac: 13,
+    str: 5, dex: 17, con: 10,
+    speed: { walk: 40 },
+    attacks: [{ name: 'Claw (Bite in Beast Form)', toHit: 4, damage: '1d4+3', damageType: 'piercing' }],
+    specialAbilities: ['Shapechanger', 'Magic Resistance'],
+  },
   // Figurine of Wondrous Power
   {
     id: 'raven', name: 'Raven', cr: '0', size: 'Tiny', hp: 1, ac: 12,
@@ -185,6 +209,13 @@ export const ALL_SUMMON_FORMS: BeastForm[] = [
     speed: { walk: 40 },
     attacks: [{ name: 'Bite', toHit: 6, damage: '1d10+5', damageType: 'piercing' }, { name: 'Claw', toHit: 6, damage: '2d6+5', damageType: 'slashing' }],
     specialAbilities: ['Keen Smell', 'Pounce'],
+  },
+  // Pact of the Chain
+  {
+    id: 'sprite', name: 'Sprite', cr: '1/4', size: 'Tiny', hp: 2, ac: 15,
+    str: 3, dex: 18, con: 10,
+    speed: { walk: 10, fly: 40 },
+    attacks: [{ name: 'Longsword', toHit: 2, damage: '1', damageType: 'slashing' }, { name: 'Shortbow', toHit: 6, damage: '1', damageType: 'piercing' }],
   },
   // Pipes of the Sewers
   {

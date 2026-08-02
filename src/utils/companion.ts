@@ -2,7 +2,7 @@ import type { Character, Companion, CompanionDerived } from '../types';
 import { resolveCreatureForm } from '../data/summonOptions';
 import { PROFICIENCY_BONUS, totalCharacterLevel } from '../data/mechanics';
 import { classLevel } from '../data/classes';
-import { STEEL_DEFENDER, DRAKE_COMPANION } from '../data/companionForms';
+import { STEEL_DEFENDER, DRAKE_COMPANION, HOMUNCULUS_SERVANT } from '../data/companionForms';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 
 /**
@@ -88,6 +88,32 @@ export function computeCompanionDerived(
         damage: `1d8+${profBonus}`,
         damageType: 'force',
         reach: 5,
+      }],
+      specialAbilities: f.specialAbilities,
+    };
+  }
+
+  if (companion.kind === 'homunculus') {
+    const f = HOMUNCULUS_SERVANT;
+    // TCE: "Hit Points 1 + your Intelligence modifier + your artificer level" — note it is the
+    // artificer level ONCE, not five times it as the Steel Defender's is. Same shape, different
+    // multiplier, which is exactly the kind of thing a shared branch would have got wrong.
+    const intMod = ownerIntMod(character);
+    return {
+      beastName: f.name,
+      size: f.size,
+      cr: '—',
+      maxHP: Math.max(1, 1 + intMod + ownerLevel),
+      ac: f.baseAC,
+      speed: f.speed,
+      profBonusApplied: profBonus,
+      attacksPerAction: 1,
+      attacks: [{
+        name: 'Force Strike',
+        toHit: intMod + profBonus,
+        damage: `1d4+${profBonus}`,
+        damageType: 'force',
+        range: '30 ft',
       }],
       specialAbilities: f.specialAbilities,
     };
