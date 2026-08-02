@@ -339,6 +339,26 @@ def sweep(rows, only=None):
         for seg in spans:
             have |= mech_tokens(seg, source=True)
         gap = sorted(t for t in want if t not in have)
+        # Retry the gap in the OTHER extraction, inside that copy's own entry — not anywhere in the
+        # book. The PHB 2024's OCR drops text wholesale (it lost whole subclass feature headings,
+        # which is why the text layer was recovered at all), so a spell there can be reported for a
+        # die the second extraction states plainly.
+        #
+        # Measured, not assumed, because the same retry COST the background sweep 22 points: a
+        # background's grants are common words that hit anywhere in a second copy of the book. Dice
+        # and distances are specific, and confining the retry to the alt copy's own bounded entry
+        # keeps it from becoming a book-wide search. Controls after: 97% / 91%, both unmoved.
+        if gap and e['kind'] == 'spell':
+            alt = alt_text(e['book'])
+            if alt:
+                araw, abook, aidx = alt
+                apos = spell_entry(abook, araw, aidx, names,
+                                   _ct_marks(e['book'] + '#alt', abook),
+                                   content_words(e['d']), weights[e['book']])
+                if apos is not None:
+                    ab = min(len(aidx) - 1, apos + max(len(flat(e['d'])) * 2, kn['width']))
+                    ahave = mech_tokens(araw[aidx[apos]: aidx[ab]], source=True)
+                    gap = [t for t in gap if t not in ahave]
         if gap:
             findings.append(('MECHANICS NOT IN SOURCE', e['name'], e['book'], '',
                              'app states ' + ', '.join(gap)))
