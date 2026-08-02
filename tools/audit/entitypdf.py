@@ -19,8 +19,10 @@ as a flat 100%.
 
 STATE 2026-08-01
   backgrounds  72/73 located ·  19 findings · controls 93% impossible / 93% plausible
-  items       784/784 located · 155 findings · controls 99% impossible / 81% plausible
-  spells      534/543 located ·  40 findings · controls 97% impossible / 91% plausible
+  items       784/784 located · 258 findings · controls 99% impossible / 86% plausible
+                                              BUT SEE THE KNOBS NOTE — that 86% is the average of
+                                              94-100% on magic items and 53% on PHB equipment.
+  spells      530/543 located ·  34 findings · controls 97% impossible / 91% plausible
 
 AND A THIRD BLINDNESS THE TWO CONTROLS SHARE, found on spells. Both read 99%/90% while the sweep
 was comparing nearly half the PHB's spells against a window that did not contain them, because a
@@ -45,6 +47,7 @@ Proficiencies: Insight, Religion". 0% -> 93%.
 Usage: ENTITY_BUNDLE=<bundled .mjs> python tools/audit/entitypdf.py --kind=background|item
                                                                    [book] [--full] [--control]
 """
+import bisect
 import json
 import math
 import os
@@ -76,16 +79,29 @@ EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS', 'spell': 'ALL_S
 #        1    100    300      333       99%         92%
 #        1     60    200      339       99%         96%
 #
-# Unlike feats there is NO free setting here — every point of detection costs findings, because
-# items really are printed shoulder to shoulder. 92% means 333 findings over 784 items, a 42%
-# finding rate that nobody will read; 64% means a third of wrong values never surface. 81% at 155
-# is the balance, and the curve is printed above so the choice stays visible and revisable.
+# That table has been superseded. It read as "no free setting — every point of detection costs
+# findings", and the real reason was that a character width cannot separate entries printed
+# shoulder to shoulder. Bounding each window at the NEXT entry's heading removes the trade, and the
+# aggregate was ALSO hiding that this corpus is two populations with very different instruments:
 #
-# The better fix is structural, not a knob: bound each item at the NEXT item's heading so the
-# window cannot reach a neighbour at all. Not built.
+#   spots 1 / back 0 / width 1400, bounded      located  findings  plausible
+#     EGtW   magic items                            83        35      100%
+#     TCE    magic items                            83        26       96%
+#     DMG    magic items                           265       114       94%   (was 85%)
+#     PHB    mundane equipment                     252        30       53%   (was 57%)
+#
+# 81% aggregate was the average of a 94-100% instrument and a 53% one. Magic items — where the
+# mechanics actually live — are now on par with every other sweep.
+#
+# PHB's 253 entries are rope, torches and rations, printed in EQUIPMENT TABLES with no entry header
+# to bound against and often no prose at all. That is the same shape as the background sweep before
+# it was fixed: the claims are tabular (cost, weight, damage, properties) and comparing them as
+# prose windows checks almost nothing. The fix is to compare the table columns, not to tune a
+# window. NOT BUILT — and 53% is printed rather than averaged away so it cannot be mistaken for
+# coverage this sweep does not have.
 KNOBS = {
     'background': {'spots': 12, 'back': 700, 'width': 1400},
-    'item': {'spots': 6, 'back': 200, 'width': 500},
+    'item': {'spots': 1, 'back': 0, 'width': 1400},
     'spell': {'spots': 1, 'back': 200, 'width': 1500},
 }
 # Spells, same measurement (547 entries, 320 of them carrying a corruptible number — 58%, against
@@ -159,6 +175,42 @@ def entities(kind, bundle=None):
 
 
 _CT_MARKS = {}
+_ITEM_MARKS = {}
+
+# How far past an item's name its OWN type/rarity line can sit. Marks nearer than this belong to
+# the entry being read; the first one beyond it starts the next entry.
+OWN_HEADER = 120
+
+
+def _item_marks(bookid, raw, book, idx, siblings):
+    """Flat offsets of every item ENTRY heading in a book.
+
+    The item analogue of a spell's "Casting Time", and it has to be the same TWO-part test: an item
+    NAME followed closely by a type/rarity line. The rarity line alone is not an entry marker —
+    "rare", "common" and "requires attunement" all occur in ordinary body prose, which made the
+    marks 4x the item count in the DMG and 25x in XGtE and GGR, so the bound landed INSIDE entries
+    and cut them short. Findings went up while detection barely moved, which is the signature of a
+    boundary that is firing on the wrong thing rather than of a sweep that got stricter.
+
+    V.ENTRY_MARK is matched on RAW text so word boundaries still exist ('rare' inside 'rarely'
+    would match a flat search), then mapped into flat space.
+    """
+    if bookid not in _ITEM_MARKS:
+        rarity = sorted({bisect.bisect_left(idx, m.start())
+                         for m in V.ENTRY_MARK.finditer(raw)})
+        out = []
+        for n in siblings:
+            start = 0
+            while True:
+                i = book.find(n, start)
+                if i < 0:
+                    break
+                start = i + 1
+                j = bisect.bisect_left(rarity, i)
+                if j < len(rarity) and rarity[j] - i < OWN_HEADER:
+                    out.append(i)
+        _ITEM_MARKS[bookid] = sorted(set(out))
+    return _ITEM_MARKS[bookid]
 
 
 def _ct_marks(bookid, book):
@@ -202,7 +254,7 @@ def spell_entry(book, raw, idx, names, marks, want, weight):
 def sweep(rows, only=None):
     stats, findings, notes = {}, [], []
     located = unlocated = nobook = 0
-    chapters, weights, books = {}, {}, {}
+    chapters, weights, books, sibs = {}, {}, {}, {}
 
     for e in rows:
         if only and e['book'] != only:
@@ -218,6 +270,7 @@ def sweep(rows, only=None):
             raw = V.book_text(pdf)
             books[e['book']] = (raw,) + V._flatten(raw)
             sib = [flat(x['name']) for x in rows if x['book'] == e['book'] and flat(x['name'])]
+            sibs[e['book']] = [n for n in sib if len(n) >= 4]
             chapters[e['book']] = feat_chapter(books[e['book']][1], raw,
                                                books[e['book']][2], sib)
             c = Counter(re.findall(r'[a-z]{4,}', raw.lower()))
@@ -249,10 +302,20 @@ def sweep(rows, only=None):
         # text it names, and that cannot be scored away. Width 1,400 is what the plausible control
         # priced there — wider was 8 points worse for no change in findings.
         kn = KNOBS[e['kind']]
+        # Magic items are printed shoulder to shoulder, so no character width can separate an entry
+        # from its neighbour — every setting traded detection against findings and the sweep sat at
+        # 81%. Ending the window at the NEXT entry's own type/rarity line removes the trade: a
+        # neighbour cannot answer for this item however wide the window is. Same fix as spells.
+        bounds = (_item_marks(e['book'], raw, book, idx, sibs[e['book']])
+                  if e['kind'] == 'item' else None)
         spans = []
         for s in ([pos] + heading_positions(book, names))[:kn['spots']]:
             a = max(0, s - kn['back'])
             b = min(len(idx) - 1, s + max(len(flat(e['d'])) * 2, kn['width']))
+            if bounds:
+                nxt = bisect.bisect_right(bounds, s)   # marks ARE entry starts; take the next one
+                if nxt < len(bounds):
+                    b = min(b, bounds[nxt])
             spans.append(raw[idx[a]: idx[b]])
 
         if e['kind'] == 'background':
