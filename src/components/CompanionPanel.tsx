@@ -35,8 +35,30 @@ export function CompanionPanel({ character, onPopOut }: {
   const [picking, setPicking] = useState(false);
   const companions = character.companions ?? [];
   const bmClass = character.classes.find(c => c.subclassId === 'beast-master');
+  // The other two feature-granted companions. Neither is a beast, so neither goes through the
+  // beast pool above — a Battle Smith gets one Steel Defender and a Drakewarden one drake.
+  const bsClass = character.classes.find(c => c.subclassId === 'battle-smith');
+  const dwClass = character.classes.find(c => c.subclassId === 'drakewarden');
+  const hasKind = (k: Companion['kind']) => companions.some(c => c.kind === k);
   // Nothing to show and nothing to offer — render nothing rather than an empty card.
-  if (!bmClass && companions.length === 0) return null;
+  if (!bmClass && !bsClass && !dwClass && companions.length === 0) return null;
+
+  /** Summon one of the fixed companions. Both are singular, so the button hides once it is out. */
+  function summonFixed(kind: 'steel-defender' | 'drakewarden') {
+    const cls = kind === 'steel-defender' ? bsClass : dwClass;
+    if (!cls) return;
+    const draft: Companion = {
+      id: crypto.randomUUID(),
+      kind,
+      classId: cls.classId,
+      name: kind === 'steel-defender' ? 'Steel Defender' : 'Drake Companion',
+      // Placeholder: computeCompanionDerived owns the real maximum, and the panel below reads it
+      // from there. Seeding 1 rather than 0 keeps a fresh companion from rendering as dead.
+      currentHP: 1,
+      active: true,
+    };
+    onAdd(draft);
+  }
 
   function pick(beastId: string) {
     const beast = ALL_BEAST_FORMS.find(b => b.id === beastId);
@@ -56,10 +78,26 @@ export function CompanionPanel({ character, onPopOut }: {
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
         <span className="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
           <PawPrint size={14} /> Companions
         </span>
+        {bsClass && !hasKind('steel-defender') && (
+          <button
+            onClick={() => summonFixed('steel-defender')}
+            className="text-[11px] px-2 py-0.5 rounded border border-sky-700 bg-sky-900/30 text-sky-300 hover:bg-sky-800/50 transition-colors flex items-center gap-1"
+          >
+            <Plus size={11} /> Steel Defender
+          </button>
+        )}
+        {dwClass && !hasKind('drakewarden') && (
+          <button
+            onClick={() => summonFixed('drakewarden')}
+            className="text-[11px] px-2 py-0.5 rounded border border-violet-700 bg-violet-900/30 text-violet-300 hover:bg-violet-800/50 transition-colors flex items-center gap-1"
+          >
+            <Plus size={11} /> Summon drake
+          </button>
+        )}
         {bmClass && (
           <button
             onClick={() => setPicking(p => !p)}
