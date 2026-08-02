@@ -34,7 +34,7 @@ const WEAPONS: ItemTemplate[] = [
   { name: 'Greataxe', category: 'weapon', weight: 7, description: '1d12 slashing. Heavy, two-handed.' },
   { name: 'Greatsword', category: 'weapon', weight: 6, description: '2d6 slashing. Heavy, two-handed.' },
   { name: 'Halberd', category: 'weapon', weight: 6, description: '1d10 slashing. Heavy, reach, two-handed.' },
-  { name: 'Lance', category: 'weapon', weight: 6, description: '1d12 piercing. Reach. Disadvantage on attack rolls against adjacent targets.' },
+  { name: 'Lance', category: 'weapon', weight: 6, description: '1d12 piercing. Reach, special. Disadvantage on attack rolls against targets within 5 feet. Requires two hands to wield unless mounted.' },
   { name: 'Longsword', category: 'weapon', weight: 3, description: '1d8 slashing. Versatile (1d10).' },
   { name: 'Maul', category: 'weapon', weight: 10, description: '2d6 bludgeoning. Heavy, two-handed.' },
   { name: 'Morningstar', category: 'weapon', weight: 4, description: '1d8 piercing.' },
@@ -51,7 +51,7 @@ const WEAPONS: ItemTemplate[] = [
   { name: 'Crossbow, hand', category: 'weapon', weight: 3, description: '1d6 piercing. Ammunition (range 30/120), light, loading.' },
   { name: 'Crossbow, heavy', category: 'weapon', weight: 18, description: '1d10 piercing. Ammunition (range 100/400), heavy, loading, two-handed.' },
   { name: 'Longbow', category: 'weapon', weight: 2, description: '1d8 piercing. Ammunition (range 150/600), heavy, two-handed.' },
-  { name: 'Net', category: 'weapon', weight: 3, description: 'Thrown (range 5/15). A Large or smaller creature hit is restrained. DC 10 Strength check or cutting the net (AC 10, 5 HP) frees it.' },
+  { name: 'Net', category: 'weapon', weight: 3, description: 'Special, thrown (range 5/15). A Large or smaller creature hit is restrained. A DC 10 Strength check, or 5 slashing damage to the net (AC 10), frees it. Only one attack per action, regardless of Extra Attack.' },
 ];
 
 const ARMOR: ItemTemplate[] = [
