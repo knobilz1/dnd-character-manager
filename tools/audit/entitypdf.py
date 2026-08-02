@@ -19,9 +19,9 @@ as a flat 100%.
 
 STATE 2026-08-01
   backgrounds  72/73 located ·  19 findings · controls 93% impossible / 93% plausible
-  items       784/784 located · 258 findings · controls 99% impossible / 86% plausible
-                                              BUT SEE THE KNOBS NOTE — that 86% is the average of
-                                              94-100% on magic items and 53% on PHB equipment.
+  items       784/784 located · 178 findings · controls 99% impossible / 90% plausible
+                                              BUT SEE THE KNOBS NOTE — that 90% is the average of
+                                              93-100% on magic items and 69% on PHB equipment.
   spells      530/543 located ·  34 findings · controls 97% impossible / 91% plausible
 
 AND A THIRD BLINDNESS THE TWO CONTROLS SHARE, found on spells. Both read 99%/90% while the sweep
@@ -84,14 +84,17 @@ EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS', 'spell': 'ALL_S
 # shoulder to shoulder. Bounding each window at the NEXT entry's heading removes the trade, and the
 # aggregate was ALSO hiding that this corpus is two populations with very different instruments:
 #
-#   spots 1 / back 0 / width 1400, bounded      located  findings  plausible
-#     EGtW   magic items                            83        35      100%
-#     TCE    magic items                            83        26       96%
-#     DMG    magic items                           265       114       94%   (was 85%)
-#     PHB    mundane equipment                     252        30       53%   (was 57%)
+#   spots 1 / back 0 / width 1400, bounded, entry-anchored    located  findings  plausible
+#     EGtW   magic items                                          83        21      100%
+#     TCE    magic items                                          83        21       96%
+#     DMG    magic items                                         265        56       93%
+#     PHB    mundane equipment                                   252        56       69%
+#     all                                                        784       178       90%
 #
-# 81% aggregate was the average of a 94-100% instrument and a 53% one. Magic items — where the
-# mechanics actually live — are now on par with every other sweep.
+# 81% aggregate was the average of instruments that were nothing alike, and the split is kept
+# visible for that reason. Anchoring on the entry (see `item_entry`) then halved DMG's findings
+# while holding detection, and took PHB from 53% to 69% — better on both axes at once, which only
+# happens when the sweep was reading the wrong place rather than reading too much.
 #
 # PHB's 253 entries are rope, torches and rations, printed in EQUIPMENT TABLES with no entry header
 # to bound against and often no prose at all. That is the same shape as the background sweep before
@@ -257,6 +260,32 @@ def spell_entry(book, raw, idx, names, marks, want, weight):
     return best
 
 
+def item_entry(book, raw, idx, names, marks, want, weight):
+    """Flat offset of an item's ENTRY, anchored the same way spells are.
+
+    `_item_marks` already knows where every entry starts — a name followed within 120 characters by
+    a type/rarity line. Intersecting that with THIS item's name occurrences gives its own entry
+    directly, so the chapter heuristic never gets a vote.
+
+    It needed one: only 67 of the DMG's 265 items were landing on a detected entry heading, and
+    both controls read 99% and 94% straight through that, because a corrupted value is absent from
+    a wrong window as reliably as from a right one. What exposed it was Flame Tongue being reported
+    for "fire damage", Headband of Intellect for "Intelligence" and Belt of Giant Strength for
+    "Strength" — every one of them the mechanic the item is named after.
+    """
+    markset = set(marks)
+    cands = [i for i in heading_positions(book, names) if i in markset]
+    if not cands:
+        return None
+    best, best_score = None, -1.0
+    for i in sorted(set(cands)):
+        seg = raw[idx[i]: idx[min(len(idx) - 1, i + 900)]]
+        score = sum(weight.get(w, 1.0) for w in want & content_words(seg))
+        if score > best_score:
+            best, best_score = i, score
+    return best
+
+
 def sweep(rows, only=None):
     stats, findings, notes = {}, [], []
     located = unlocated = nobook = 0
@@ -291,6 +320,15 @@ def sweep(rows, only=None):
         if e['kind'] == 'spell':
             pos = spell_entry(book, raw, idx, names, _ct_marks(e['book'], book),
                               content_words(e['d']), weights[e['book']])
+        elif e['kind'] == 'item':
+            # Entry anchor first; `locate` only for entries the books print without a type/rarity
+            # line at all, which is the PHB's mundane equipment.
+            pos = item_entry(book, raw, idx, names,
+                             _item_marks(e['book'], raw, book, idx, sibs[e['book']]),
+                             content_words(e['d']), weights[e['book']])
+            if pos is None:
+                pos = locate(book, raw, idx, names, keys, content_words(e['d']),
+                             chapters[e['book']], weights[e['book']])
         else:
             pos = locate(book, raw, idx, names, keys, content_words(e['d']),
                          chapters[e['book']], weights[e['book']])
