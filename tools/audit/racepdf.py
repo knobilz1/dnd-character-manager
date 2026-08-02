@@ -117,6 +117,20 @@ LIGATURES = {
 }
 
 
+REAL_DICE = {'4', '6', '8', '10', '12', '20', '100'}
+_OCR_DIGIT = str.maketrans({'l': '1', 'I': '1', 'i': '1', 'O': '0', 'o': '0'})
+DICE_OCR = re.compile(r'(?<![A-Za-z0-9])([0-9lIiOo]{1,3})(\s?[dD]\s?)([0-9lIiOo]{1,3})'
+                      r'(?![A-Za-z0-9])')
+
+
+def _fix_die(m):
+    """Repair a dice token only when it resolves to a die a rulebook actually rolls."""
+    cnt, die = m.group(1).translate(_OCR_DIGIT), m.group(3).translate(_OCR_DIGIT)
+    if cnt.isdigit() and die in REAL_DICE:
+        return f'{cnt}d{die}'
+    return m.group(0)
+
+
 def debook(s):
     """Undo known OCR damage in PDF text. A no-op on the app's own text."""
     for bad, good in LIGATURES.items():
@@ -135,6 +149,16 @@ def debook(s):
     # their headings sitting 207 characters away the whole time. TCE is born-digital, so debook is
     # the only repair it can ever get. Anchored to a preceding digit so ordinary prose is untouched.
     s = re.sub(r'(?<=\d)(\s*)fe\s+et\b', r'\1feet', s)
+    # Letter/digit confusion INSIDE the die size, which the leading-l rule above cannot reach:
+    # the PHB prints Eldritch Blast's damage as "1dlO" (lowercase L, capital O), and d10/d12 are
+    # where this bites because they are the only two-character die sizes. 193 tokens across 9
+    # books survive every other repair — DMG 38, EGtW 58, ERLW 41, TCE 37 — and each one is a
+    # number the app is held to and the book is read as never stating.
+    #
+    # Gated on the RESULT being a die that exists. Without that gate "Id" in ordinary prose, or a
+    # d5/d7 that no rulebook rolls, would be manufactured into dice the book never printed — the
+    # repair would start inventing source rather than recovering it.
+    s = DICE_OCR.sub(_fix_die, s)
     return s
 
 

@@ -18,8 +18,17 @@ window traded 16 points of real detection for 10 fewer findings, which the impos
 as a flat 100%.
 
 STATE 2026-08-01
-  backgrounds  72/73 located · 19 findings · controls 93% impossible / 93% plausible
-  items       784/784 located · 90 findings · controls 99% impossible / 64% PLAUSIBLE
+  backgrounds  72/73 located ·  19 findings · controls 93% impossible / 93% plausible
+  items       784/784 located · 155 findings · controls 99% impossible / 81% plausible
+  spells      534/543 located ·  40 findings · controls 97% impossible / 91% plausible
+
+AND A THIRD BLINDNESS THE TWO CONTROLS SHARE, found on spells. Both read 99%/90% while the sweep
+was comparing nearly half the PHB's spells against a window that did not contain them, because a
+corrupted value is absent from a WRONG window exactly as reliably as from a right one. Neither
+control can see a locator that lands in the wrong place. What caught it was Fireball being reported
+for "1d6" and Magic Missile for "force damage" — claims the book obviously makes. The check that
+generalises: after any locator change, look at whether the most famous entries are being flagged
+for their most famous numbers. See `spell_entry`.
 
 TRUST BACKGROUNDS, DO NOT YET TRUST ITEMS. 64% means a third of plausible wrong values go
 unreported: magic-item entries are short and packed adjacently, so any window that reaches the
@@ -53,7 +62,7 @@ from subclasspdf import _impossible, _plausible  # noqa: E402
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS'}
+EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS', 'spell': 'ALL_SPELLS'}
 
 # Comparison-window knobs, per kind, each priced by the plausible control rather than guessed.
 # Feats and backgrounds are printed as generously-spaced entries; magic items are short and packed
@@ -77,7 +86,32 @@ EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS'}
 KNOBS = {
     'background': {'spots': 12, 'back': 700, 'width': 1400},
     'item': {'spots': 6, 'back': 200, 'width': 500},
+    'spell': {'spots': 1, 'back': 200, 'width': 1500},
 }
+# Spells, same measurement (547 entries, 320 of them carrying a corruptible number — 58%, against
+# 10% for class features, so this rate is measured over most of the data rather than a corner).
+#
+# The FIRST table here was priced against `locate`, and every number in it was meaningless:
+#     spots 6 / back 150 / width 600 -> 87 findings, 99% impossible, 90% plausible
+# Both controls passed while the sweep was reading a window that did not contain the spell (see
+# `spell_entry`). Re-priced against the entry anchor:
+#     spots  back  width   findings  impossible  plausible
+#        6    150    600       52       97%         90%    (the old setting, re-measured)
+#        1    150    600       54       97%         93%
+#        1    200   1500       40       97%         91%   <- chosen
+#        1    200   2500       36       97%         88%
+#        1    300   4000       33       97%         81%
+#
+# `spots: 1` — the entry alone, not every occurrence of the name — is better on BOTH axes than
+# spots 6, so the extra windows were never buying coverage, only hiding gaps. Width 1,500 then
+# reaches the At Higher Levels paragraph, which sits at the END of a spell entry and is where a
+# third of the app's dice live; 600 cut it off and reported the book as never stating an upcasting
+# line it prints for every spell. 40 findings at 91% beats the previous setting on both counts,
+# which is rare and is the only reason to take it — a quieter report is otherwise a worse one.
+#
+# THESE TABLES ARE ONLY MEANINGFUL BECAUSE OF THE id()-CACHE FIX in r6verify._flatten. Built before
+# it, width 550 read 256 findings between 500's 92 and 600's 87 — a table looping settings in one
+# process was reading windows computed against a different book's character index.
 
 
 def entities(kind, bundle=None):
@@ -94,9 +128,16 @@ def entities(kind, bundle=None):
     # share your faith" contains no die, distance or ability — so a mech_tokens comparison verifies
     # nothing while the report still says "72 located". The books state the grants plainly:
     # "Skill Proficiencies: Insight, Religion".
-    pick = ('({name:x.name,book:x.sourceBook,d:((x.feature&&x.feature.description)||""),'
-            'grants:[].concat(x.skillProficiencies||[],x.toolProficiencies||[])})'
-            if kind == 'background' else '({name:x.name,book:x.sourceBook,d:x.description??""})')
+    # A spell's upcasting line carries as many dice as its body ("2d6 for each slot level above
+    # 1st") and lives in a separate field, so it is appended rather than left unchecked.
+    pick = {
+        'background': ('({name:x.name,book:x.sourceBook,d:((x.feature&&x.feature.description)||""),'
+                       'grants:[].concat(x.skillProficiencies||[],x.toolProficiencies||[])})'),
+        'item': '({name:x.name,book:x.sourceBook,d:x.description??""})',
+        'spell': ('({name:x.name,book:x.sourceBook,'
+                  'd:(x.description??"")+"\\n"+(x.atHigherLevels??""),'
+                  'damageType:x.damageType??null,savingThrow:x.savingThrow??null})'),
+    }[kind]
     out = subprocess.run(
         ['node', '-e',
          'const {pathToFileURL}=await import("node:url");'
@@ -111,8 +152,50 @@ def entities(kind, bundle=None):
         key = (r['name'], r['book'])
         if key not in seen:                       # items.ts re-exports the same entry in groups
             seen.add(key)
+            r['kind'] = kind
             rows.append(r)
     return rows
+
+
+_CT_MARKS = {}
+
+
+def _ct_marks(bookid, book):
+    """Flat offsets of every "Casting Time" in a book — one per spell entry, near enough."""
+    if bookid not in _CT_MARKS:
+        _CT_MARKS[bookid] = [m.start() for m in re.finditer('castingtime', book)]
+    return _CT_MARKS[bookid]
+
+
+def spell_entry(book, raw, idx, names, marks, want, weight):
+    """Flat offset of a spell's ENTRY, anchored on the header every book prints above every spell.
+
+    Spells do not go through `locate`, and the reason is worth keeping. `feat_chapter` picks the
+    DENSEST fixed-width window of entry names, which for spells is the class spell LISTS — pages of
+    nothing but spell names and no mechanics at all — and its 133,000-char width is narrower than
+    the PHB's 80-page description section regardless. Measured: only 188 of the PHB's 357 real
+    spell entries fell inside the chapter it chose, so nearly half the book's spells were compared
+    against a window that never contained them.
+
+    That produced 87 findings which BOTH CONTROLS PASSED AT 99% AND 90%, because a corrupted value
+    is missing from a wrong window exactly as reliably as from a right one. Neither control can see
+    a locator that lands in the wrong place; what caught it was Fireball being reported for "1d6"
+    and Magic Missile for "force damage" — claims the PHB obviously does make.
+
+    "Casting Time" is the ideal anchor here precisely because it is disjoint from both the spell's
+    identity and its mechanics: it is not a word `content_words` ranks on and not a token
+    `mech_tokens` tests, so using it is neither circular nor a tie-break in disguise.
+    """
+    cands = [i for i in heading_positions(book, names) if any(0 < c - i < 140 for c in marks)]
+    if not cands:
+        return None
+    best, best_score = None, -1.0
+    for i in sorted(set(cands)):
+        seg = raw[idx[i]: idx[min(len(idx) - 1, i + 900)]]
+        score = sum(weight.get(w, 1.0) for w in want & content_words(seg))
+        if score > best_score:
+            best, best_score = i, score
+    return best
 
 
 def sweep(rows, only=None):
@@ -145,8 +228,12 @@ def sweep(rows, only=None):
         names = [flat(v) for v in trait_variants(e['name']) if len(flat(v)) >= 4]
         if not names:
             continue
-        pos = locate(book, raw, idx, names, keys, content_words(e['d']),
-                     chapters[e['book']], weights[e['book']])
+        if e['kind'] == 'spell':
+            pos = spell_entry(book, raw, idx, names, _ct_marks(e['book'], book),
+                              content_words(e['d']), weights[e['book']])
+        else:
+            pos = locate(book, raw, idx, names, keys, content_words(e['d']),
+                         chapters[e['book']], weights[e['book']])
         if pos is None:
             if any(alt_flat(e['book']).count(n) for n in names):
                 notes.append(('ONLY IN THE OTHER EXTRACTION', e['name'], e['book'], '', ''))
@@ -160,14 +247,14 @@ def sweep(rows, only=None):
         # Conservative for the reason featpdf documents: a heading can sit columns away from the
         # text it names, and that cannot be scored away. Width 1,400 is what the plausible control
         # priced there — wider was 8 points worse for no change in findings.
-        kn = KNOBS['background'] if e.get('grants') else KNOBS['item']
+        kn = KNOBS[e['kind']]
         spans = []
         for s in ([pos] + heading_positions(book, names))[:kn['spots']]:
             a = max(0, s - kn['back'])
             b = min(len(idx) - 1, s + max(len(flat(e['d'])) * 2, kn['width']))
             spans.append(raw[idx[a]: idx[b]])
 
-        if e.get('grants'):
+        if e['kind'] == 'background':
             # Flat containment, not MECH: a skill name is a proper noun, not mechanical vocabulary.
             flatspans = [flat(t) for t in spans]
             gap = sorted({g for g in e['grants']
@@ -214,7 +301,7 @@ def control(rows, mode='impossible'):
     for e in rows:
         d = mangle(e['d'])
         grants = e.get('grants')
-        if grants:
+        if e['kind'] == 'background':
             swapped = [SKILL_SWAP.get(g, g) for g in grants]
             if swapped != grants:
                 changed.add(e['name'])

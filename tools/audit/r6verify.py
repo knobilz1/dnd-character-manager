@@ -68,7 +68,19 @@ _INDEX_CACHE = {}
 
 
 def _flatten(text):
-    """(letters-only text, normalised->raw index map), cached per book."""
+    """(letters-only text, normalised->raw index map), cached per book.
+
+    The cache entry KEEPS A REFERENCE to `text`, and that is the whole point of storing it.
+    `id()` is a memory address: once a book's text is garbage-collected the next book allocated
+    can land on the same address and silently receive the previous book's character index, so
+    every window offset is computed against the wrong text. Holding the string alive makes the
+    address unique for the life of the process.
+
+    It presents as a sweep that is not deterministic ACROSS RUNS IN ONE PROCESS while being
+    perfectly deterministic in isolated ones — spell width 550 read 256 findings between runs of
+    500 and 600 that read 92 and 87. Every knob-pricing table built by looping settings in one
+    process is affected, which is how the item window was chosen.
+    """
     key = id(text)
     if key not in _INDEX_CACHE:
         raw_idx, buf = [], []
@@ -77,8 +89,8 @@ def _flatten(text):
             if c.isalnum():
                 buf.append(c)
                 raw_idx.append(i)
-        _INDEX_CACHE[key] = (''.join(buf), raw_idx)
-    return _INDEX_CACHE[key]
+        _INDEX_CACHE[key] = (text, ''.join(buf), raw_idx)
+    return _INDEX_CACHE[key][1:]
 
 
 def find_entry(text, name, span=1400):
