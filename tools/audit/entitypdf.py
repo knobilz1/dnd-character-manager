@@ -222,9 +222,14 @@ def entities(kind, bundle=None):
         # in the equipment tables ("Club 1 sp 1d4 bludgeoning 2 lb. Light").
         'item': ('({name:x.name,book:x.sourceBook,d:x.description??"",'
                  'weight:x.weight??null,category:x.category??null})'),
+        # range/duration/castingTime are things the app SAYS, they just live in their own fields
+        # rather than the prose. The forward sweep never needed them; completeness.py does — the
+        # book's entry header states the range, so judging the description alone reported 223 of
+        # 547 spells as omitting a distance they state perfectly well one field over.
         'spell': ('({name:x.name,book:x.sourceBook,'
                   'd:(x.description??"")+"\\n"+(x.atHigherLevels??""),'
                   'damageType:x.damageType??null,savingThrow:x.savingThrow??null,'
+                  'range:x.range??null,duration:x.duration??null,castingTime:x.castingTime??null,'
                   'level:x.level})'),
     }.get(kind, '({name:x.name,book:x.sourceBook,d:x.description??"",hidden:x.hidden??false})')
     out = subprocess.run(
@@ -416,7 +421,14 @@ def item_entry(book, raw, idx, names, marks, want, weight):
     return best
 
 
-def sweep(rows, only=None):
+def sweep(rows, only=None, judge=None):
+    """`judge(entry, spans) -> finding tuple or None` replaces the default comparison.
+
+    Every sweep here asks one direction — is what the app says supported by the book. Asking the
+    reverse (does the app say everything the book states) needs exactly the same entry anchoring
+    and none of the same comparison, so completeness.py passes its own judge rather than copying
+    eighty lines of locator that took two sessions to get right.
+    """
     stats, findings, notes = {}, [], []
     located = unlocated = nobook = 0
     chapters, weights, books, sibs = {}, {}, {}, {}
@@ -510,6 +522,17 @@ def sweep(rows, only=None):
                 if nxt < len(bounds):
                     b = min(b, bounds[nxt])
             spans.append(raw[idx[a]: idx[b]])
+
+        if judge is not None:
+            # The context matters as much as the spans. A judge asking the REVERSE question needs
+            # a tighter window than this one builds: contamination is harmless here (a neighbour's
+            # tokens only make the app's claim easier to find) and fatal there (every neighbour's
+            # token becomes "the app is silent on this"). Handing over the anchor lets it rebuild.
+            f = judge(e, spans, {'pos': pos, 'raw': raw, 'book': book, 'idx': idx,
+                                 'kn': kn, 'bounds': bounds, 'names': names})
+            if f:
+                findings.append(f)
+            continue
 
         if e['kind'] == 'background':
             # Flat containment, not MECH: a skill name is a proper noun, not mechanical vocabulary.
