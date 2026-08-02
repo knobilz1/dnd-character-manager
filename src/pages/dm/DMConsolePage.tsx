@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
+import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile, writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
@@ -709,6 +709,9 @@ export function DMConsolePage() {
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  /** Set when the user tried to close the window mid-sitting; see the close-guard effect. */
+  const [closeGuardOpen, setCloseGuardOpen] = React.useState(false);
+  const [closeGuardEnding, setCloseGuardEnding] = React.useState(false);
   const [turns, setTurns] = React.useState<Turn[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [warning, setWarning] = React.useState<string | null>(null);
@@ -1190,6 +1193,18 @@ export function DMConsolePage() {
   // close over a stale activeCampaignId — mirror it into a ref like partyRef.
   const campaignIdRef = React.useRef(activeCampaignId);
   campaignIdRef.current = activeCampaignId;
+  // Whether closing the window right now would LOSE something. Same condition
+  // wrapUpCurrentSession uses to decide there's anything to recap — a campaign
+  // is open and the table has actually said something. Mirrored into a ref
+  // because the close-requested listener is registered once at mount and would
+  // otherwise close over an empty `turns`.
+  const sittingIsLiveRef = React.useRef(false);
+  sittingIsLiveRef.current = !!activeCampaignId && turns.length > 0;
+  /** Set once the user has made their choice in the close guard, so the second close request goes
+   *  straight through. Using this rather than `destroy()` keeps the app to the permissions it
+   *  already has — `core:window:allow-close` is granted, `allow-destroy` is not, and capabilities
+   *  are not watched by `tauri dev`, so adding one is a silent no-op until a full restart. */
+  const closeGuardBypassRef = React.useRef(false);
   // Mirrors activeModuleId for the same reason campaignIdRef exists — runTurn
   // can fire from a listener registered once at mount (drainQueue) and would
   // otherwise close over a stale value. Also lets resolveChapterSection
@@ -2856,6 +2871,54 @@ export function DMConsolePage() {
   async function handleEndSession() {
     stopSpeakingAndClearQueue();
     await wrapUpCurrentSession();
+  }
+
+  /** Closing the window mid-sitting silently throws away the night.
+   *
+   *  End Session is what asks the engine for a recap, appends it to the campaign's MEMORY.md and
+   *  resets the --resume chain. Nothing else does: quitting just kills the process, and the turns
+   *  live only in React state until that recap runs. So a close request while a sitting is live is
+   *  intercepted and the choice handed back to the user.
+   *
+   *  Registered ONCE at mount and gated on a ref, deliberately. Re-registering per turn would churn
+   *  a native listener on every message, and gating inside the handler means an ordinary quit — no
+   *  campaign open, or nothing said yet — is never interrupted.
+   *
+   *  On the way out the guard sets a bypass ref before calling close() again, because close()
+   *  re-emits close-requested and would otherwise bounce straight back into this dialog. */
+  React.useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (closeGuardBypassRef.current) return; // already decided — this is the second request
+        if (!sittingIsLiveRef.current) return;   // nothing to lose — let it close
+        event.preventDefault();
+        setCloseGuardOpen(true);
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((e) => console.warn('Close guard not armed (session-loss warning disabled):', e));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  /** "End session" from the close guard: the SAME path as the toolbar button, then actually go. */
+  async function closeGuardEndSession() {
+    setCloseGuardEnding(true);
+    try {
+      await handleEndSession();
+    } catch (e) {
+      // A failed recap must not trap the user in a dialog they cannot leave. Surface it and still
+      // let them close — the alternative is an app that will not quit.
+      console.error('End Session failed while closing; closing anyway:', e);
+    }
+    closeGuardBypassRef.current = true;
+    await getCurrentWindow().close();
   }
 
   /** Switching campaigns via the picker below — closes out whatever was
@@ -6532,6 +6595,37 @@ export function DMConsolePage() {
           <Button variant="outline" onClick={() => setLoreOpen(false)}>Close</Button>
           <Button onClick={handleUpdateLore} disabled={!!moduleBusy || (!loreAddition.trim() && !pendingLoreUpdateFile)}>
             {moduleBusyLabel ?? 'Fold into campaign lore'}
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Close guard. No onClose: the whole point is that dismissing it by accident is the outcome
+          we are preventing, so the only ways out are the two explicit choices. */}
+      <Dialog open={closeGuardOpen} onClose={() => {}} title="End the session first?">
+        <p className="text-sm text-slate-300 mb-2">
+          A session is still running. If you close now, <strong className="text-amber-300">this
+          night&apos;s events are lost</strong> — the DM never gets to write its recap into the
+          campaign&apos;s memory, so nothing that happened tonight will be remembered next time.
+        </p>
+        <p className="text-xs text-slate-500 mb-4">
+          Ending the session asks the DM for a summary, saves it, and then closes.
+        </p>
+        <div className="flex justify-end gap-2 flex-wrap">
+          <Button variant="ghost" onClick={() => setCloseGuardOpen(false)} disabled={closeGuardEnding}>
+            Keep playing
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              closeGuardBypassRef.current = true;
+              void getCurrentWindow().close();
+            }}
+            disabled={closeGuardEnding}
+          >
+            Close anyway
+          </Button>
+          <Button onClick={() => { void closeGuardEndSession(); }} disabled={closeGuardEnding}>
+            {closeGuardEnding ? 'Ending session…' : 'End session & close'}
           </Button>
         </div>
       </Dialog>
