@@ -260,10 +260,27 @@ def _item_marks(bookid, raw, book, idx, siblings):
     return _ITEM_MARKS[bookid]
 
 
+SCHOOLS = ('abjuration', 'conjuration', 'divination', 'enchantment',
+           'evocation', 'illusion', 'necromancy', 'transmutation')
+_SCHOOL_RE = re.compile('|'.join(SCHOOLS))
+
+
 def _ct_marks(bookid, book):
-    """Flat offsets of every "Casting Time" in a book — one per spell entry, near enough."""
+    """Flat offsets of every spell-header marker in a book.
+
+    "Casting Time" alone left 9 spells unlocatable, and measuring the distance from each name to
+    the next one split them cleanly: Steel Wind Strike at 162, Ravenous Void 182 and Nathair's
+    Mischief 187 merely overshot the 140 threshold, while Chaos Bolt sat 4,084 away and Holy Weapon
+    4,630 — their books simply do not carry a readable "Casting Time" beside those entries.
+
+    So the school line is taken as a second marker. Every spell header states one ("2nd-level
+    conjuration", "evocation cantrip"), it is disjoint from both the spell's identity words and its
+    mechanical tokens, and being a second ALTERNATIVE rather than a requirement it can only add
+    candidates the first test missed.
+    """
     if bookid not in _CT_MARKS:
-        _CT_MARKS[bookid] = [m.start() for m in re.finditer('castingtime', book)]
+        _CT_MARKS[bookid] = sorted({m.start() for m in re.finditer('castingtime', book)}
+                                   | {m.start() for m in _SCHOOL_RE.finditer(book)})
     return _CT_MARKS[bookid]
 
 
