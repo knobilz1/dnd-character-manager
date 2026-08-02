@@ -5,7 +5,8 @@ import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
 import { FlexibleAsiPicker } from './FlexibleAsiPicker';
-import type { Race, CharacterGender } from '../../../types';
+import type { BookId, Race, CharacterGender } from '../../../types';
+import { BOOKS } from '../../../data/books';
 
 const CharacterViewport = React.lazy(() => import('../../sheet/CharacterViewport'));
 
@@ -41,19 +42,32 @@ export function StepRace() {
   }
   const racesWithoutSubs = availableRaces.filter(r => !subGroupIds.includes(r.id));
 
-  // One alphabetical list of PRIMARY races, not a "Races" pile and a "Subraces" pile. Those two
-  // headings described how the data is shaped, not how anyone looks for a race — nobody hunting a
-  // Rock Gnome thinks "that is a subrace". A primary race that has subraces becomes a labelled
-  // group holding them; the other 102 are just cards, because a heading over a single card
-  // repeating its own name is noise. Only elf, dwarf, halfling, gnome and Shifter have subraces.
-  const raceEntries: { key: string; name: string; group?: Race[]; race?: Race }[] = [
-    ...subGroupIds.map(parentId => ({
-      key: parentId,
-      name: groupLabel(parentId),
-      group: subraceRaces.filter(s => s.parentRaceId === parentId),
-    })),
-    ...racesWithoutSubs.map(r => ({ key: r.id, name: r.name, race: r })),
-  ].sort((a, b) => a.name.localeCompare(b.name));
+  // One list of PRIMARY races, not a "Races" pile and a "Subraces" pile. Those two headings
+  // described how the data is shaped, not how anyone looks for a race — nobody hunting a Rock
+  // Gnome thinks "that is a subrace". A primary race that has subraces becomes a labelled group
+  // holding them; the other 102 are just cards, because a heading over a single card repeating its
+  // own name is noise. Only elf, dwarf, halfling, gnome and Shifter have subraces.
+  // Sorted BY BOOK, then alphabetically inside it. With every sourcebook enabled this list runs to
+  // 122 races and a single A-Z run buries the PHB dozen among sixty dragonmarked and Eberron
+  // options; "which of MY books is this from" is the question a player actually asks first.
+  // BOOKS is in publication order, so PHB leads and third-party trails.
+  const bookOrder = new Map(BOOKS.map((b, i) => [b.id, i]));
+  const entryBook = (r: Race) => r.sourceBook;
+  const raceEntries: { key: string; name: string; book: BookId; group?: Race[]; race?: Race }[] = [
+    ...subGroupIds.map(parentId => {
+      const subs = subraceRaces.filter(s => s.parentRaceId === parentId);
+      return {
+        key: parentId,
+        name: groupLabel(parentId),
+        // elf/dwarf/halfling/gnome have no parent RACE in ALL_RACES (the ids are dangling), so the
+        // group takes its book from its own subraces rather than a parent that isn't there.
+        book: (ALL_RACES.find(r => r.id === parentId)?.sourceBook ?? subs[0]?.sourceBook ?? 'PHB') as BookId,
+        group: subs,
+      };
+    }),
+    ...racesWithoutSubs.map(r => ({ key: r.id, name: r.name, book: entryBook(r), race: r })),
+  ].sort((a, b) =>
+    (bookOrder.get(a.book) ?? 99) - (bookOrder.get(b.book) ?? 99) || a.name.localeCompare(b.name));
 
   function selectRace(race: Race) {
     setSelected(race);
@@ -101,10 +115,18 @@ export function StepRace() {
         <h2 className="text-2xl font-bold text-white mb-2">Choose Your Race</h2>
         <p className="text-slate-400 mb-4">Your race determines your ability score bonuses, speed, size, languages, and racial traits.</p>
 
-        {/* A group spans the full row so the alphabetical order still reads straight down the
-            grid — Dragonborn, Dwarf (group), Duergar — instead of groups being hoisted above. */}
+        {/* Both the book headings and the subrace groups span the full row, so the order reads
+            straight down the grid instead of being hoisted above it. */}
         <div className="grid gap-2 sm:grid-cols-2">
-          {raceEntries.map(entry => entry.race ? (
+          {raceEntries.map((entry, i) => (
+            <React.Fragment key={entry.key}>
+              {/* A heading whenever the book changes — a sort nobody can see is just a jumble. */}
+              {(i === 0 || raceEntries[i - 1].book !== entry.book) && (
+                <h3 className="sm:col-span-2 text-sm font-bold text-slate-300 uppercase tracking-wider mt-3 first:mt-0 pb-1 border-b border-slate-700/60">
+                  {BOOKS.find(b => b.id === entry.book)?.name ?? entry.book}
+                </h3>
+              )}
+              {entry.race ? (
             <RaceCard key={entry.key} race={entry.race} />
           ) : (
             <div
@@ -118,6 +140,8 @@ export function StepRace() {
                 {entry.group!.map(race => <RaceCard key={race.id} race={race} />)}
               </div>
             </div>
+          )}
+            </React.Fragment>
           ))}
         </div>
       </div>
