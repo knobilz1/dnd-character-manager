@@ -15,8 +15,8 @@ import { classLevel } from '../data/classes';
  * that granted it and the class that owns it, not just an id — otherwise it would be right for
  * one subclass and quietly wrong for the others.
  *
- * Only `beast-master` is implemented. The other kinds are named in the type so adding one is a
- * new branch here rather than a reshape of stored data.
+ * `beast-master` and `familiar` are implemented; `steel-defender` and `drakewarden` are named in
+ * the type so adding one is a new branch here rather than a reshape of stored data.
  */
 
 /** Add a flat bonus to a damage expression: "1d6+2" +2 -> "1d6+4", and "1" +2 -> "3". */
@@ -65,6 +65,25 @@ export function computeCompanionDerived(
         toHit: a.toHit + profBonus,
         damage: addDamageBonus(a.damage, profBonus),
       })),
+      specialAbilities: beast.specialAbilities ?? [],
+    };
+  }
+
+  if (companion.kind === 'familiar') {
+    // A familiar is the ONLY kind that takes no owner scaling. PHB p.240: it "uses the chosen
+    // form's statistics" — the summoner's proficiency bonus is not added and its hit points are
+    // not floored, which is exactly why an owl familiar dies to a stiff breeze. Returning the
+    // stat block unchanged is the rule, not a stub.
+    return {
+      beastName: beast.name,
+      size: beast.size,
+      cr: String(beast.cr),
+      maxHP: beast.hp,
+      ac: beast.ac,
+      speed: beast.speed,
+      profBonusApplied: 0,
+      attacksPerAction: 1,
+      attacks: beast.attacks,
       specialAbilities: beast.specialAbilities ?? [],
     };
   }

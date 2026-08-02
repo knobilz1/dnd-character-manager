@@ -1,6 +1,8 @@
 import React from 'react';
 import { Plus, Sparkles, X, Zap } from 'lucide-react';
 import { ALL_SPELLS, getSpell } from '../../data/spells';
+import { summonSpecFor } from '../../data/summonOptions';
+import { ALL_BEAST_FORMS } from '../../data/beastForms';
 import { featGrantedSpells, featSpellChoices, spellPickOptions } from '../../data/feats';
 import { ProficiencyPicker } from '../../components/ProficiencyPicker';
 import { Dialog, Badge, Button } from '../../components/ui';
@@ -45,6 +47,10 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
   const [filterLevel, setFilterLevel] = React.useState<number | 'all'>('all');
 
   const [castSpell, setCastSpell] = React.useState<Spell | null>(null);
+  const [summonSpell, setSummonSpell] = React.useState<Spell | null>(null);
+  // Pulled from the store rather than drilled through SheetPage — the same thing
+  // CompanionPanel and TraitsPanel do.
+  const addCompanion = useCharacterStore(st => st.addCompanion);
 
   // Everything below reads the CASTING class, not classes[0]. On a fighter/wizard the latter meant
   // the known-caster layout for a prepared caster, and the "Paladins gain spellcasting at level 2"
@@ -250,6 +256,9 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                           if (spell.concentration && character.concentrationSpellId !== spell.id) {
                             startConcentration(spell.id);
                           }
+                          // Find Familiar is a ritual far more often than it is slotted, so the
+                          // summon picker has to hang off this button too, not just Cast.
+                          if (summonSpecFor(spell.id)) setSummonSpell(spell);
                         }}
                         className="shrink-0 text-xs px-2 py-1 rounded border border-blue-700 bg-blue-900/30 text-blue-300 hover:bg-blue-800/50 transition-all flex items-center gap-1"
                         title="Cast as ritual — takes 10 minutes longer and expends no spell slot"
@@ -490,6 +499,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                 className="w-full text-left p-3 rounded-lg border-2 border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 transition-all"
                 onClick={() => {
                   usePactSlot();
+                  if (summonSpecFor(castSpell.id)) setSummonSpell(castSpell);
                   if (castSpell.concentration) startConcentration(castSpell.id);
                   setCastSpell(null);
                 }}
@@ -516,6 +526,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                       onClick={() => {
                         useSpellSlot(lvl);
                         if (castSpell.concentration) startConcentration(castSpell.id);
+                        if (summonSpecFor(castSpell.id)) setSummonSpell(castSpell);
                         setCastSpell(null);
                       }}
                       className={cn(
@@ -544,6 +555,63 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
               )}
           </div>
         )}
+      </Dialog>
+
+      {/* Summon picker — shown after casting a spell that lets you choose what appears. The
+          choice becomes a Companion, so it lands in the Companions panel with its own pop-out
+          sheet instead of leaving the player to add the owl by hand. */}
+      <Dialog
+        open={!!summonSpell}
+        onClose={() => setSummonSpell(null)}
+        title={summonSpell ? (summonSpecFor(summonSpell.id)?.title ?? summonSpell.name) : ''}
+        wide
+      >
+        {summonSpell && (() => {
+          const spec = summonSpecFor(summonSpell.id);
+          if (!spec) return null;
+          return (
+            <div>
+              <p className="text-sm text-slate-400 mb-3">{spec.help}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {spec.options.map(opt => {
+                  const beast = ALL_BEAST_FORMS.find(b => b.id === opt.beastId);
+                  return (
+                    <button
+                      key={opt.beastId}
+                      onClick={() => {
+                        if (!beast) return;
+                        addCompanion({
+                          id: crypto.randomUUID(),
+                          kind: spec.kind,
+                          // A familiar takes no owner scaling, so the class that summoned it does
+                          // not change its numbers — but the field is required and the first class
+                          // is the honest answer for whose spell it was.
+                          classId: character.classes[0]?.classId ?? '',
+                          beastId: opt.beastId,
+                          name: opt.label,
+                          currentHP: beast.hp,
+                          active: true,
+                        });
+                        setSummonSpell(null);
+                      }}
+                      className="text-left p-3 rounded-lg border-2 border-slate-600 bg-slate-800 hover:border-indigo-500 hover:bg-indigo-950/20 transition-all"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-white text-sm">{opt.label}</span>
+                        {beast && <Badge color="slate">{beast.size}</Badge>}
+                      </div>
+                      {beast && (
+                        <p className="text-xs text-slate-500">
+                          AC {beast.ac} · {beast.hp} HP · {Object.entries(beast.speed).map(([k, v]) => `${k} ${v}`).join(', ')}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </Dialog>
 
       {/* Spell detail dialog */}

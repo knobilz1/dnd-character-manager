@@ -51,6 +51,7 @@ import { useSidebarStore, type SidebarModuleId } from '../../store/useSidebarSto
 import { SidebarPanel } from './SidebarPanel';
 import { AlternateFormPanel } from '../../components/AlternateFormPanel';
 import { CompanionPanel } from '../../components/CompanionPanel';
+import { activeCompanions } from '../../utils/companion';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { WildShapeModal } from '../../components/WildShapeModal';
 
@@ -1850,6 +1851,29 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           <button onClick={endConcentration} className="text-xs text-amber-400 hover:text-amber-200 px-2 py-1 rounded border border-amber-700 hover:border-amber-500 transition-colors">
             End
           </button>
+        </div>
+      )}
+
+      {/* Active summons banner — sits beside the concentration banner because it is the same kind
+          of fact: something is live right now that the player has to remember. The pop-out window
+          is easy to close and easy to forget, so the sheet has to say so on its own, and each
+          chip reopens that companion's window. */}
+      {activeCompanions(character).length > 0 && (
+        <div className="bg-indigo-900/30 border border-indigo-600 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Eye size={16} className="text-indigo-400 shrink-0" />
+            <span className="text-indigo-300 font-medium text-sm">Summoned:</span>
+            {activeCompanions(character).map(c => (
+              <button
+                key={c.id}
+                onClick={() => openCompanionWindow(c)}
+                className="text-xs px-2 py-1 rounded border border-indigo-700 bg-indigo-950/40 text-indigo-200 hover:border-indigo-400 hover:bg-indigo-900/50 transition-colors"
+                title={`Open ${c.name}'s sheet`}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
