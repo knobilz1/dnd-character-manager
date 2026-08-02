@@ -66,6 +66,9 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 SPAN = 12000
 
+# Priced below — retry a missing VALUE in the second extraction, not just a missing NAME.
+ALT_RETRY = True
+
 
 def subclasses(bundle=None):
     """The app's real subclass data, through the bundler — parsing the TS is how five parser bugs
@@ -208,6 +211,26 @@ def sweep(all_subs, only=None):
                 b = min(len(idx) - 1, p + max(len(flat(f['d'])) * 2, 2400))
                 have |= mech_tokens(raw[idx[a]: idx[b]], source=True)
             gap = sorted(t for t in want if t not in have)
+            # Retry what is still missing in the OTHER extraction. The branch above already does
+            # this — but only when the feature NAME is absent from the primary, which is the rarer
+            # case. When the name is present and the VALUE is not, the second copy was never
+            # consulted, and the PHB 2024's OCR drops text wholesale: 9 of these 34 findings are
+            # from that one book, including Battle Master's superiority die progression.
+            # Bounded to the feature name's own occurrences, not searched book-wide, for the reason
+            # the background sweep's retry cost 22 points.
+            if gap and ALT_RETRY:
+                alt = alt_text(s['book'])
+                if alt:
+                    araw, abook, aidx = alt
+                    ahave = set()
+                    for kk in {flat(v) for v in trait_variants(f['name']) if len(flat(v)) >= 4}:
+                        q = abook.find(kk)
+                        while q >= 0 and len(ahave) < 400:
+                            a2 = max(0, q - 500)
+                            b2 = min(len(aidx) - 1, q + max(len(flat(f['d'])) * 2, 2400))
+                            ahave |= mech_tokens(araw[aidx[a2]: aidx[b2]], source=True)
+                            q = abook.find(kk, q + 1)
+                    gap = [t for t in gap if t not in ahave]
             if gap:
                 findings.append(('MECHANICS NOT IN SOURCE', s['name'], s['book'],
                                  f"{f['name']} (L{f['level']})",
