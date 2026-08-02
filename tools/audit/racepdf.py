@@ -131,6 +131,18 @@ def _fix_die(m):
     return m.group(0)
 
 
+_OCR_DIST = str.maketrans({'l': '1', 'I': '1', 'i': '1', 'O': '0', 'o': '0', 'S': '5'})
+DIST_OCR = re.compile(r'(?<![A-Za-z0-9])([0-9lIiOoS]{1,4})([-\s]+)(feet|foot|ft)\b', re.I)
+
+
+def _fix_dist(m):
+    """Repair a distance only when it resolves to a number a rulebook would print."""
+    n = m.group(1).translate(_OCR_DIST)
+    if n.isdigit() and n != '0' and int(n) <= 1000:
+        return f'{n}{m.group(2)}{m.group(3)}'
+    return m.group(0)
+
+
 def debook(s):
     """Undo known OCR damage in PDF text. A no-op on the app's own text."""
     for bad, good in LIGATURES.items():
@@ -159,6 +171,15 @@ def debook(s):
     # d5/d7 that no rulebook rolls, would be manufactured into dice the book never printed — the
     # repair would start inventing source rather than recovering it.
     s = DICE_OCR.sub(_fix_die, s)
+    # The same confusion in a DISTANCE: "S ft" for 5 ft, "SO-foot" for 50-foot, "I foot" for 1 foot.
+    # 51 across 10 books — small, and the count is only trustworthy because the first probe was
+    # wrong: written without requiring a separator it matched the ENGLISH WORDS "lift" and "soft"
+    # as li+ft and So+ft, and reported 155. A probe that cannot tell a distance from a common word
+    # inflates in exactly the direction that makes a fix look worthwhile.
+    #
+    # Gated on the result being a plausible distance, and a separator is REQUIRED for the same
+    # reason the count needed one.
+    s = DIST_OCR.sub(_fix_dist, s)
     return s
 
 
