@@ -1,13 +1,17 @@
-"""Backgrounds and magic items vs the PDFs — the last two unchecked categories.
+"""Backgrounds, magic items and spells vs the PDFs.
 
-73 backgrounds and 785 items, none of them ever compared against the BOOKS: both were read by hand
-or against the `md/` extracts, which are summaries.
+73 backgrounds, 785 items and 547 spells, none of them ever compared against the BOOKS: all three
+were read by hand or against the `md/` extracts, which are summaries.
 
-ONE tool for both, because both are the same shape — a named entity carrying a single description,
-which is a FEAT. So this reuses featpdf's locator (identity-word anchoring, the second-person
-entry test, the chapter sweep, rarity weighting) rather than becoming the fifth near-copy of the
-same code. Races/subclasses/classes are the other shape — entity with named sub-features — and
-live in racepdf/subclasspdf.
+ONE tool for all three, because all three are the same shape — a named entity carrying a single
+description, which is a FEAT. Races/subclasses/classes are the other shape (entity with named
+sub-features) and live in racepdf/subclasspdf.
+
+What differs per kind is only how an ENTRY is recognised, and that turned out to be the whole game.
+featpdf's chapter heuristic — take the densest window of entry names — is wrong for any corpus the
+books also print as a LIST, and both spells and items are such corpora. Each now anchors on the
+header its own book prints above every entry (`spell_entry`, `item_entry`); backgrounds still use
+featpdf's locator, which suits them.
 
 BOTH CONTROLS, as everywhere else:
   --control              impossible values (930 ft, 92d6). Can the sweep fail at all?
@@ -22,7 +26,7 @@ STATE 2026-08-01
   items       784/784 located · 178 findings · controls 99% impossible / 90% plausible
                                               BUT SEE THE KNOBS NOTE — that 90% is the average of
                                               93-100% on magic items and 69% on PHB equipment.
-  spells      530/543 located ·  34 findings · controls 97% impossible / 91% plausible
+  spells      530/543 located ·  29 findings · controls 97% impossible / 91% plausible
 
 AND A THIRD BLINDNESS THE TWO CONTROLS SHARE, found on spells. Both read 99%/90% while the sweep
 was comparing nearly half the PHB's spells against a window that did not contain them, because a
@@ -32,10 +36,9 @@ for "1d6" and Magic Missile for "force damage" — claims the book obviously mak
 generalises: after any locator change, look at whether the most famous entries are being flagged
 for their most famous numbers. See `spell_entry`.
 
-TRUST BACKGROUNDS, DO NOT YET TRUST ITEMS. 64% means a third of plausible wrong values go
-unreported: magic-item entries are short and packed adjacently, so any window that reaches the
-entry also reaches its neighbours, and a neighbour genuinely states the swapped value. Fix that
-before reading the 90 item findings as a work list.
+READ THE PER-BOOK SPLIT BEFORE TRUSTING AN ITEM RESULT. Magic items are at 93-100% and their
+findings are worth acting on; the PHB's mundane equipment is at 69% because it is printed as
+tables, not entries, and an absent finding there means much less.
 
 THE BACKGROUND SWEEP WAS BLIND AND THE CONTROL IS THE ONLY REASON ANYONE KNOWS. Comparing
 mech_tokens over a background's FEATURE prose detected 0 of 16 corruptions — 57 of 73 feature texts
@@ -100,7 +103,7 @@ EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS', 'spell': 'ALL_S
 # to bound against and often no prose at all. That is the same shape as the background sweep before
 # it was fixed: the claims are tabular (cost, weight, damage, properties) and comparing them as
 # prose windows checks almost nothing. The fix is to compare the table columns, not to tune a
-# window. NOT BUILT — and 53% is printed rather than averaged away so it cannot be mistaken for
+# window. NOT BUILT — and 69% is printed rather than averaged away so it cannot be mistaken for
 # coverage this sweep does not have.
 KNOBS = {
     'background': {'spots': 12, 'back': 700, 'width': 1400},
