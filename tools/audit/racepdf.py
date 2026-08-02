@@ -345,6 +345,45 @@ def phb_flat():
     return _PHB_FLAT[0]
 
 
+# The inherited-trait retry, OFF by default because it was priced and rejected.
+#
+# The app merges a parent race's traits into each subrace, so Half-Elf (Wood Elf Descent) carries
+# Darkvision while SCAG prints only what the variant changes and never restates the 60 feet. The
+# trait NAME is in SCAG, so the name-level PHB fallback never fires, and three separate Half-Elf
+# variants were reported for the most famous number in the race.
+#
+# Retrying the missing VALUE in the PHB fixes those, and costs more than it saves:
+#     off  96% impossible / 99% plausible / 47 findings
+#     on   96% impossible / 94% plausible / 37 findings
+# Ten fewer findings for five points of detection, where 99% is the best plausible figure of any
+# sweep in this audit. Same trade that was refused on maneuvers (15 points for 3 false positives),
+# refused the same way. The inherited-trait findings are a recognisable category — a subrace
+# flagged for a trait its own book does not restate — and reading past ten of them is cheaper than
+# missing six real corruptions.
+#
+# The tightening that would make it worth turning on: restrict the retry to occurrences inside the
+# PARENT RACE's section rather than every occurrence of the trait name in the PHB. Not built.
+INHERIT_RETRY = False
+
+_PHB_FULL = []
+
+
+def phb_full():
+    """The base book as (raw, flat, idx), so an INHERITED trait's numbers can be read there.
+
+    `phb_flat` only answers "does this name appear in the PHB", which classifies a missing trait
+    NAME. It cannot check a missing VALUE, and that is the commoner case: the app merges a parent
+    race's traits into each subrace, so Half-Elf (Wood Elf Descent) carries Darkvision — but SCAG
+    prints only what the variant changes and never restates the 60 feet, which is in the PHB under
+    Half-Elf. The trait name IS in SCAG, so the name-level fallback never fires and the sweep
+    reported three separate Half-Elf variants for the most famous number in the race.
+    """
+    if not _PHB_FULL:
+        raw = V.book_text(BOOK_PDF['PHB'])
+        _PHB_FULL.append((raw,) + V._flatten(raw))
+    return _PHB_FULL[0]
+
+
 def alt_text(book):
     """The other extraction as (raw, flat, idx), so a sweep can COMPARE there and not merely
     notice the name is present. Without this, a feature the primary extraction dropped is quietly
@@ -617,6 +656,22 @@ def main():
                     missing = gap
                 if not missing:
                     break
+            # Inherited traits: retry what is still missing in the BASE book, bounded to this
+            # trait's own occurrences there rather than searched book-wide. The same retry cost the
+            # background sweep 22 points when its grants — common words — were looked for anywhere
+            # in a second copy; a trait's numbers are specific and the window is the trait's own.
+            if missing and INHERIT_RETRY and r['book'] != 'PHB':
+                praw, pflat, pidx = phb_full()
+                start = 0
+                while missing:
+                    p = pflat.find(key, start)
+                    if p < 0:
+                        break
+                    start = p + 1
+                    pe = min(len(pidx) - 1, p + len(key) + max(len(app) * 3, 900))
+                    src = praw[pidx[p]: pidx[pe]]
+                    missing = [tok for tok in missing
+                               if tok not in mech_tokens(src, source=True)]
             if missing:
                 findings.append(('MECHANICS NOT IN SOURCE', r['name'], r['book'], t['name'],
                                  t['d'], 'app states ' + ', '.join(sorted(set(missing)))
