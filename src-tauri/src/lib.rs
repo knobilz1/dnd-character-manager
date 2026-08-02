@@ -63,6 +63,8 @@ pub fn run() {
       party_listener::push_narration,
       party_listener::set_broadcast_map,
       party_listener::clear_broadcast_map,
+      party_listener::set_broadcast_initiative,
+      party_listener::clear_broadcast_initiative,
       party_listener::present_players,
       party_listener::set_proxy_assignments,
       party_listener::set_shared_characters,

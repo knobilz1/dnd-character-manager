@@ -35,6 +35,7 @@ import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useDmConnection } from '../../hooks/useDmConnection';
+import { useDmInitiativeFeed } from '../../hooks/useDmInitiativeFeed';
 import { sendTalkToDM } from '../../utils/dmConnect';
 import { getClass, baseClassId } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
@@ -1785,6 +1786,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   const setInitiativeRoll = useCharacterStore(st => st.setInitiativeRoll);
   const dmIp = useSettingsStore((st) => st.dmIp);
   const dmConnected = useDmConnection();
+  const turnOrder = useDmInitiativeFeed();
   const seenInitNonce = React.useRef<number>(-1);
 
   React.useEffect(() => {
@@ -1918,6 +1920,41 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           <button onClick={endConcentration} className="text-xs text-amber-400 hover:text-amber-200 px-2 py-1 rounded border border-amber-700 hover:border-amber-500 transition-colors">
             End
           </button>
+        </div>
+      )}
+
+      {/* Turn order, when a DM bot is running the fight. Enemies are absent in round 1 by design —
+          the DM masks them before publishing (see maskInitiativeForPlayers), so this component
+          never holds the full order and cannot leak it. */}
+      {turnOrder && turnOrder.order.length > 0 && (
+        <div className="bg-sky-900/30 border border-sky-600 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sky-300 font-medium text-sm">
+              Turn order{turnOrder.round ? ` · round ${turnOrder.round}` : ''}:
+            </span>
+            {turnOrder.order.map((n) => (
+              <span
+                key={n}
+                className={cn(
+                  'text-xs px-2 py-1 rounded border',
+                  n === turnOrder.active
+                    ? 'border-sky-400 bg-sky-800/60 text-white font-bold'
+                    : 'border-sky-800 bg-sky-950/40 text-sky-200',
+                  n === character.name && 'ring-1 ring-amber-400/70',
+                )}
+              >
+                {n}
+              </span>
+            ))}
+            {turnOrder.hiddenCount > 0 && (
+              <span
+                className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-900/60 text-slate-500 italic"
+                title="You don't know when they act yet"
+              >
+                +{turnOrder.hiddenCount} unknown
+              </span>
+            )}
+          </div>
         </div>
       )}
 

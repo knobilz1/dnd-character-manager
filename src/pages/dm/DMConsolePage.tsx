@@ -17,7 +17,7 @@ import type { Absence, AbsenceMap, AbsenceMode } from '../../utils/dmPrompt';
 import { buildSheetDigest } from '../../utils/sheetDigest';
 import { cn } from '../../utils/cn';
 import { hasKnownHp } from '../../utils/partyHp';
-import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
+import { parseDmReply, applyDmActions, applyBattleLog, maskInitiativeForPlayers, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { disputedCells } from '../../utils/boardCrossCheck';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
@@ -2508,8 +2508,22 @@ export function DMConsolePage() {
             );
           }
           setBattleLog(null);
+          // Combat is over: every connected sheet clears the order AND the initiative it rolled
+          // for this fight. Fire-and-forget — a listener that isn't running must not stop the
+          // battle from ending on the DM's own screen.
+          invoke('clear_broadcast_initiative').catch((e) =>
+            console.warn('Failed to clear the players\' initiative:', e));
         } else if (actions.battleLog || actions.removeCombatant?.length) {
-          setBattleLog((prev) => applyBattleLog(prev, actions.battleLog, actions.removeCombatant));
+          setBattleLog((prev) => {
+            const next = applyBattleLog(prev, actions.battleLog, actions.removeCombatant);
+            // Publish the PLAYER-SAFE view of the order whenever the log moves. Masked here rather
+            // than anywhere downstream, so the broadcast slot only ever holds what players may see.
+            if (next?.initiative?.length) {
+              invoke('set_broadcast_initiative', { initiative: maskInitiativeForPlayers(next) })
+                .catch((e) => console.warn('Failed to publish the turn order:', e));
+            }
+            return next;
+          });
         }
       }
 

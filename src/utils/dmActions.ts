@@ -625,3 +625,45 @@ export function applyBattleLog(
 
   return next;
 }
+
+
+/** The turn order as PLAYERS may see it — the masked twin of `battleLog.initiative`.
+ *
+ *  Round 1 hides the enemy side entirely. Knowing exactly when the goblins act before they have
+ *  ever acted is information the table would not have at a real table: it turns "something is about
+ *  to come out of the dark" into a countdown. From round 2 the party has watched them go, so
+ *  withholding it stops being fog of war and starts being an annoyance.
+ *
+ *  Enemies are REMOVED rather than replaced with a placeholder. A row saying "??? acts here" still
+ *  leaks the count and the slot, which is most of what was worth hiding.
+ *
+ *  Masking happens here, on the DM's side, before anything is published — the broadcast slot only
+ *  ever holds the player-safe list, so a bug downstream cannot leak what was never put in. Same
+ *  principle as the shared map omitting deployment zones.
+ *
+ *  `ally` and `neutral` are shown: they are on the board in the fiction and usually the party's
+ *  own summons or NPCs, which the players already know about. Only `enemy` is hidden, and a
+ *  combatant with no `side` at all is treated as visible rather than guessed at — the DM sets
+ *  `side` for enemies precisely because it is the one that matters.
+ */
+export function maskInitiativeForPlayers(log: BattleLog): {
+  order: string[];
+  round?: number;
+  active?: string;
+  hiddenCount: number;
+} {
+  const order = log.initiative ?? [];
+  const enemyNames = new Set(
+    (log.combatants ?? []).filter(c => c.side === 'enemy').map(c => c.name),
+  );
+  const firstRound = (log.round ?? 1) <= 1;
+  const visible = firstRound ? order.filter(n => !enemyNames.has(n)) : order;
+  return {
+    order: visible,
+    round: log.round,
+    // Never point at a combatant the players cannot see — that would hand back the very fact the
+    // filter just removed ("it is someone's turn, and it is nobody on your list").
+    active: log.active && visible.includes(log.active) ? log.active : undefined,
+    hiddenCount: order.length - visible.length,
+  };
+}

@@ -161,6 +161,26 @@ export async function fetchBroadcastMap(since: number, ip: string): Promise<{ ve
   return (await res.json()) as { version: number; map?: BroadcastMap | null };
 }
 
+/** The live turn order as the DM has published it FOR PLAYERS — already masked, so the enemy side
+ *  is absent in round 1 (see dmActions.ts's maskInitiativeForPlayers). `initiative: null` on a new
+ *  version means combat ended: clear the order and the initiative rolled for it. */
+export interface BroadcastInitiative {
+  order: string[];
+  round?: number;
+  active?: string;
+  /** How many combatants were withheld — lets the UI say "+2 unknown" without naming them. */
+  hiddenCount: number;
+}
+
+export async function fetchBroadcastInitiative(
+  since: number,
+  ip: string,
+): Promise<{ version: number; initiative?: BroadcastInitiative | null }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/initiative?since=${since}`, { method: 'GET', connectTimeout: 5000 });
+  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  return (await res.json()) as { version: number; initiative?: BroadcastInitiative | null };
+}
+
 /** Who currently holds the "table camera" role (null if free), plus the DM's
  *  photo-request counter. Players PULL from the DM, so this counter is how a
  *  "the DM asked for a photo" request reaches the holder: when `requestSeq`
