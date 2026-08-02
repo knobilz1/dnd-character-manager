@@ -136,7 +136,8 @@ def entities(kind, bundle=None):
         'item': '({name:x.name,book:x.sourceBook,d:x.description??""})',
         'spell': ('({name:x.name,book:x.sourceBook,'
                   'd:(x.description??"")+"\\n"+(x.atHigherLevels??""),'
-                  'damageType:x.damageType??null,savingThrow:x.savingThrow??null})'),
+                  'damageType:x.damageType??null,savingThrow:x.savingThrow??null,'
+                  'level:x.level})'),
     }[kind]
     out = subprocess.run(
         ['node', '-e',
