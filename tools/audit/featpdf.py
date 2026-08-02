@@ -215,7 +215,12 @@ def locate(book, raw, idx, names, keys, want_words=None, chapter=None, weight=No
         # a known chapter it is both redundant and quadratic — 74 names re-scanned for each of ~560
         # windows, for each of 155 feats, which ran past ten minutes.
         if not chapter:
-            score += sum(1 for k in keys if 0 <= book.find(k, max(0, i - 200)) < i + SPAN)
+            # Into the FIRST element — `score` is already the (rarity, near-heading) pair by here,
+            # and adding an int to the tuple raised TypeError. Latent for as long as this locator
+            # only ever saw corpora big enough for feat_chapter to find a chapter; the first small
+            # one (10 metamagic options) crashed it.
+            score = (score[0] + sum(1 for k in keys
+                                    if 0 <= book.find(k, max(0, i - 200)) < i + SPAN), score[1])
         if score > best_score:
             best, best_score = i, score
     return best

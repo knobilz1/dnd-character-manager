@@ -68,7 +68,21 @@ from subclasspdf import _impossible, _plausible  # noqa: E402
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-EXPORTS = {'background': 'ALL_BACKGROUNDS', 'item': 'ALL_ITEMS', 'spell': 'ALL_SPELLS'}
+EXPORTS = {
+    'background': 'ALL_BACKGROUNDS',
+    'item': 'ALL_ITEMS',
+    'spell': 'ALL_SPELLS',
+    # The categories the first pass audited by hand and against the md/ extracts, and which this
+    # pass had never swept at all — so nothing here has ever faced a control. All are FEAT-shaped
+    # (one name, one description) and printed as ordinary entries inside a class chapter, so they
+    # take featpdf's locator and need no entry test of their own.
+    'invocation': 'ALL_INVOCATIONS',
+    'infusion': 'ALL_INFUSIONS',
+    'maneuver': 'ALL_MANEUVERS',
+    'metamagic': 'ALL_METAMAGIC',
+    'fightingstyle': 'ALL_FIGHTING_STYLES',
+    'pactboon': 'ALL_PACT_BOONS',
+}
 
 # Comparison-window knobs, per kind, each priced by the plausible control rather than guessed.
 # Feats and backgrounds are printed as generously-spaced entries; magic items are short and packed
@@ -109,7 +123,35 @@ KNOBS = {
     'background': {'spots': 12, 'back': 700, 'width': 1400},
     'item': {'spots': 1, 'back': 0, 'width': 1400},
     'spell': {'spots': 1, 'back': 200, 'width': 1500},
+    # Maneuvers and invocations are NOT laid out like feats. Both are printed as tight alphabetical
+    # runs inside one subclass or class entry, so a feat-sized window reads several neighbours and
+    # every neighbour's numbers count as this entry's. At the feat setting both reported ZERO
+    # findings — and the plausible control put maneuvers at 23% and invocations at 68%, which is
+    # what a clean report from a near-blind instrument looks like. Same lesson as backgrounds.
+    #
+    #   maneuvers                                invocations
+    #   spots back width  find  imp  plaus       spots back width  find  imp  plaus
+    #     12   700  1400     0  100%   23%         12   700  1400     0  100%   68%
+    #      4   200   700     1  100%   47%          4   200   700     1  100%   81%
+    #      2   100   400     3  100%   76%          2   100   400     1  100%   90%
+    #      1    50   250    17  100%   90%          1    50   250    30  100%  100%
+    #      1     0   150    18  100%   95%          1     0   150    31  100%  100%
+    #                 ^ 2/100/400 chosen for both
+    #
+    # AND HERE IS THE HOLE IN THE TWO CONTROLS: they measure RECALL ONLY. A window narrow enough to
+    # contain nothing detects every corruption — because it detects everything — and scores 95% and
+    # 100%. Maneuvers at width 150 read 95% while flagging 18 of 23, and the flags were Riposte for
+    # "reaction" and Trip Attack for "Strength", which are simply what those maneuvers do.
+    #
+    # The missing precision check is the FINDING RATE on uncorrupted data. 3 of 23 is an instrument;
+    # 18 of 23 is a broken one wearing a good score. Just as a quieter report is not a better one, a
+    # noisier one is not either — and only the pair of numbers can tell them apart.
+    'maneuver': {'spots': 2, 'back': 100, 'width': 400},
+    'invocation': {'spots': 2, 'back': 100, 'width': 400},
 }
+# Infusions, metamagic, fighting styles and pact boons ARE laid out like feats and priced fine at
+# this: 87%, 80%, 100%, 100% plausible respectively.
+DEFAULT_KNOB = {'spots': 12, 'back': 700, 'width': 1400}
 # Spells, same measurement (547 entries, 320 of them carrying a corruptible number — 58%, against
 # 10% for class features, so this rate is measured over most of the data rather than a corner).
 #
@@ -155,12 +197,11 @@ def entities(kind, bundle=None):
     pick = {
         'background': ('({name:x.name,book:x.sourceBook,d:((x.feature&&x.feature.description)||""),'
                        'grants:[].concat(x.skillProficiencies||[],x.toolProficiencies||[])})'),
-        'item': '({name:x.name,book:x.sourceBook,d:x.description??""})',
         'spell': ('({name:x.name,book:x.sourceBook,'
                   'd:(x.description??"")+"\\n"+(x.atHigherLevels??""),'
                   'damageType:x.damageType??null,savingThrow:x.savingThrow??null,'
                   'level:x.level})'),
-    }[kind]
+    }.get(kind, '({name:x.name,book:x.sourceBook,d:x.description??""})')
     out = subprocess.run(
         ['node', '-e',
          'const {pathToFileURL}=await import("node:url");'
@@ -356,7 +397,7 @@ def sweep(rows, only=None):
         # Conservative for the reason featpdf documents: a heading can sit columns away from the
         # text it names, and that cannot be scored away. Width 1,400 is what the plausible control
         # priced there — wider was 8 points worse for no change in findings.
-        kn = KNOBS[e['kind']]
+        kn = KNOBS.get(e['kind'], DEFAULT_KNOB)
         # Magic items are printed shoulder to shoulder, so no character width can separate an entry
         # from its neighbour — every setting traded detection against findings and the sweep sat at
         # 81%. Ending the window at the NEXT entry's own type/rarity line removes the trade: a
