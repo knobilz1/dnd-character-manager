@@ -41,6 +41,20 @@ export function StepRace() {
   }
   const racesWithoutSubs = availableRaces.filter(r => !subGroupIds.includes(r.id));
 
+  // One alphabetical list of PRIMARY races, not a "Races" pile and a "Subraces" pile. Those two
+  // headings described how the data is shaped, not how anyone looks for a race — nobody hunting a
+  // Rock Gnome thinks "that is a subrace". A primary race that has subraces becomes a labelled
+  // group holding them; the other 102 are just cards, because a heading over a single card
+  // repeating its own name is noise. Only elf, dwarf, halfling, gnome and Shifter have subraces.
+  const raceEntries: { key: string; name: string; group?: Race[]; race?: Race }[] = [
+    ...subGroupIds.map(parentId => ({
+      key: parentId,
+      name: groupLabel(parentId),
+      group: subraceRaces.filter(s => s.parentRaceId === parentId),
+    })),
+    ...racesWithoutSubs.map(r => ({ key: r.id, name: r.name, race: r })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+
   function selectRace(race: Race) {
     setSelected(race);
     // clear any increase chosen for the previous race — the shapes differ per race,
@@ -53,9 +67,12 @@ export function StepRace() {
   }
 
   function abilityStr(inc: Record<string, number>) {
+    // Only a 2024 species reaches the fallback: every flexible-ASI race takes the branch above,
+    // and the ten 2024 species are the only ones with no increase of their own. "Custom" was
+    // simply wrong for them — nothing is chosen here, the background grants it.
     return Object.entries(inc)
       .map(([k, v]) => `${k.toUpperCase()} +${v}`)
-      .join(', ') || 'Custom';
+      .join(', ') || 'Increase from background';
   }
 
   const RaceCard = ({ race }: { race: Race }) => (
@@ -84,32 +101,25 @@ export function StepRace() {
         <h2 className="text-2xl font-bold text-white mb-2">Choose Your Race</h2>
         <p className="text-slate-400 mb-4">Your race determines your ability score bonuses, speed, size, languages, and racial traits.</p>
 
-        {/* Subraces */}
-        {subGroupIds.length > 0 && (
-          <div className="mb-4">
-            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Subraces</h3>
-            {subGroupIds.map(parentId => (
-              <div key={parentId} className="mb-3">
-                <p className="text-xs text-slate-500 mb-1.5 pl-1">{groupLabel(parentId)}</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {subraceRaces.filter(s => s.parentRaceId === parentId).map(race => (
-                    <RaceCard key={race.id} race={race} />
-                  ))}
-                </div>
+        {/* A group spans the full row so the alphabetical order still reads straight down the
+            grid — Dragonborn, Dwarf (group), Duergar — instead of groups being hoisted above. */}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {raceEntries.map(entry => entry.race ? (
+            <RaceCard key={entry.key} race={entry.race} />
+          ) : (
+            <div
+              key={entry.key}
+              className="sm:col-span-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-2"
+            >
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 pl-1">
+                {entry.name}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {entry.group!.map(race => <RaceCard key={race.id} race={race} />)}
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* Non-subrace races */}
-        {racesWithoutSubs.length > 0 && (
-          <div>
-            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Races</h3>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {racesWithoutSubs.map(race => <RaceCard key={race.id} race={race} />)}
             </div>
-          </div>
-        )}
+          ))}
+        </div>
       </div>
 
       {/* Right: 3D viewport + race details */}
@@ -175,23 +185,28 @@ export function StepRace() {
               <Badge color="slate">{selected.sourceBook}</Badge>
             </div>
 
-            <div className="mb-4">
-              <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Ability Score Increases</h4>
-              <div className="flex flex-wrap gap-2">
-                {selected.flexibleAsi
-                  ? <FlexibleAsiPicker
-                      source={selected}
-                      value={draft.racialAbilityChoice}
-                      onChange={v => updateDraft({ racialAbilityChoice: v })}
-                    />
-                  : Object.entries(selected.abilityScoreIncreases).map(([k, v]) => (
-                    <span key={k} className="text-sm bg-slate-700 px-2 py-1 rounded text-white">
-                      {k.toUpperCase()} <span className="text-green-400">+{v}</span>
-                    </span>
-                  ))
-                }
+            {/* A 2024 species grants no ability increase at all — the background does — so its
+                `abilityScoreIncreases` is empty and it carries no `flexibleAsi`. Rendering the
+                heading unconditionally left all ten of them showing a title over nothing. */}
+            {(selected.flexibleAsi || Object.keys(selected.abilityScoreIncreases).length > 0) && (
+              <div className="mb-4">
+                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Ability Score Increases</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selected.flexibleAsi
+                    ? <FlexibleAsiPicker
+                        source={selected}
+                        value={draft.racialAbilityChoice}
+                        onChange={v => updateDraft({ racialAbilityChoice: v })}
+                      />
+                    : Object.entries(selected.abilityScoreIncreases).map(([k, v]) => (
+                      <span key={k} className="text-sm bg-slate-700 px-2 py-1 rounded text-white">
+                        {k.toUpperCase()} <span className="text-green-400">+{v}</span>
+                      </span>
+                    ))
+                  }
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="mb-4">
               <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Languages</h4>
