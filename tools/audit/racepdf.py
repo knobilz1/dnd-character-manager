@@ -85,7 +85,14 @@ def flat(s):
 
 MECH = re.compile(
     r'\b\d+d\d+\b'                                   # dice
-    r'|\b\d+\s*(?:feet|foot|ft)\b'                   # distances
+    # Distances. `[-\s]*`, not `\s*`: the books hyphenate an ATTRIBUTIVE distance and space a
+    # predicative one — "a 20-foot-radius sphere" but "within 20 feet" — and the hyphenated form is
+    # 15-22% of every book (163 in the PHB, 180 in PHB2024, 593 across six). `\s*` matched none of
+    # them, so on the SOURCE side those distances were invisible and the app's matching claim read
+    # as unsupported. Found via Elementalism, reported for the 5 ft it states and the 2024 PHB
+    # prints as "5-foot" 289 chars from its anchor. `debook`'s own DIST_OCR repair already accepted
+    # `[-\s]+`; only the token matcher disagreed.
+    r'|\b\d+[-\s]*(?:feet|foot|ft)\b'                # distances
     r'|\bdc\s*\d+\b'                                 # fixed DCs
     r'|\b(?:short|long)\s+rest\b'
     r'|\b(?:acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder)\s+damage\b'
@@ -118,8 +125,15 @@ LIGATURES = {
 
 
 REAL_DICE = {'4', '6', '8', '10', '12', '20', '100'}
-_OCR_DIGIT = str.maketrans({'l': '1', 'I': '1', 'i': '1', 'O': '0', 'o': '0'})
-DICE_OCR = re.compile(r'(?<![A-Za-z0-9])([0-9lIiOo]{1,3})(\s?[dD]\s?)([0-9lIiOo]{1,3})'
+# `S` for 5, same as _OCR_DIST below — the two repairs read the same damaged glyphs out of the same
+# extractions and had no business disagreeing about which ones. The distance side has always mapped
+# it; the dice side never did, so EGtW's Gravity Sinkhole printed `SdlO` and its 5d10 was invisible
+# while the neighbouring `ldlO` repaired fine. The app was reported for stating the die the book
+# states. 24 occurrences across 7 books. UPPERCASE only, again matching _OCR_DIST: lowercase `s`
+# appears in ordinary prose ("s d6") and buying two more repairs is not worth that risk. REAL_DICE
+# still gates the result, so a resolution no rulebook rolls is refused.
+_OCR_DIGIT = str.maketrans({'l': '1', 'I': '1', 'i': '1', 'O': '0', 'o': '0', 'S': '5'})
+DICE_OCR = re.compile(r'(?<![A-Za-z0-9])([0-9lIiOoS]{1,3})(\s?[dD]\s?)([0-9lIiOoS]{1,3})'
                       r'(?![A-Za-z0-9])')
 
 
@@ -246,7 +260,11 @@ def mech_tokens(s, source=False):
                   for f in forms}
     for form in forms:
         for m in MECH.finditer(form):
-            tok = re.sub(r'\s+', '', m.group(0).lower())
+            # Strip the separator, whatever it is. Spacing already collapsed here; the hyphen has
+            # to collapse the same way or "5-foot" and "5 feet" become two different tokens and the
+            # widened distance pattern above buys nothing. Only the distance branch can carry one —
+            # no other MECH alternative contains a hyphen.
+            tok = re.sub(r'[-\s]+', '', m.group(0).lower())
             out.add(tok.replace('foot', 'ft').replace('feet', 'ft'))
     return out
 
