@@ -1292,6 +1292,13 @@ export function DMConsolePage() {
   const [battleLog, setBattleLog] = React.useState<BattleLog | null>(null);
   const battleLogRef = React.useRef(battleLog);
   battleLogRef.current = battleLog;
+  // DEV-only escape hatch, same idea as useCreatorStore's `__creator`: the log is React state
+  // and never touches disk, so a headless harness has no other way to read what the DM actually
+  // recorded — and `environment` is exactly the field whose bugs are invisible from the prose.
+  // Tree-shaken out of production builds by the import.meta.env.DEV guard.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as Window & { __battleLog?: BattleLog | null }).__battleLog = battleLog;
+  }
   // The campaign's positioning style (theater / grid / hex), loaded per campaign
   // from the backend (read_battle_mode) and sent to the DM every turn. Ref so
   // runTurn/drainQueue (which close over refs, not state) read the live value.
