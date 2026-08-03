@@ -1,3 +1,4 @@
+mod background_gen;
 mod campaign;
 mod cli_provider;
 mod dm;
@@ -36,6 +37,7 @@ pub fn run() {
       oauth::start_oauth_server,
       oauth::get_fresh_access_token,
       oauth::clear_google_token,
+      background_gen::generate_character_background,
       dm::ask_dm,
       dm::ask_dm_engine,
       dm::warmup_dm_session,

@@ -1,8 +1,11 @@
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { ALL_BACKGROUNDS } from '../../../data/backgrounds';
+import { getRace } from '../../../data/races';
+import { getClass } from '../../../data/classes';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
 import { FlexibleAsiPicker } from './FlexibleAsiPicker';
+import { BackgroundGenerator } from './BackgroundGenerator';
 import type { BackgroundCustom } from '../../../types';
 
 export function StepBackground() {
@@ -96,9 +99,20 @@ export function StepBackground() {
               only suggestions: click one to drop it in, then edit it however you
               like. Blank means "use the book's default". */}
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-4">
-            <div>
-              <h3 className="text-lg font-bold text-white">Make It Yours</h3>
-              <p className="text-xs text-slate-400">Write your own, or click a suggestion to start from the book. Anything you leave blank uses {selected.name}'s default. Your proficiencies and feature don't change.</p>
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-white">Make It Yours</h3>
+                <p className="text-xs text-slate-400">Write your own, or click a suggestion to start from the book. Anything you leave blank uses {selected.name}'s default. Your proficiencies and feature don't change.</p>
+              </div>
+              {/* Sits HERE, next to the fields it fills, rather than up beside the background list:
+                  what it writes is the five boxes below, and a button that far from its effect
+                  reads like it picks a background for you. */}
+              <BackgroundGenerator
+                race={getRace(draft.raceId ?? '')?.name ?? ''}
+                characterClass={getClass(draft.classes?.[0]?.classId ?? '')?.name ?? ''}
+                background={custom.name?.trim() || selected.name}
+                onApply={setCustom}
+              />
             </div>
 
             <div>
