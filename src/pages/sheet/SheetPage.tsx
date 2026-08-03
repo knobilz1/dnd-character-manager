@@ -2739,7 +2739,16 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           {/* Pact magic */}
           {pactMagic && (
             <div className="mb-3">
-              <p className="text-xs text-slate-400 mb-1">Pact Magic (Level {pactMagic.slotLevel})</p>
+              {/* Say what the level MEANS. A warlock has no other slots — every one is their
+                  highest level and none can be spent lower — so a sheet listing only "Level 3"
+                  reads as though the 1st- and 2nd-level slots went missing. Asked in exactly
+                  those words by a player looking at their own level 5 Hexblade. */}
+              <p className="text-xs text-slate-400 mb-1">
+                Pact Magic (Level {pactMagic.slotLevel})
+                {pactMagic.slotLevel > 1 && (
+                  <span className="text-slate-500"> · all slots are level {pactMagic.slotLevel}; lower spells cast at {pactMagic.slotLevel}</span>
+                )}
+              </p>
               <div className="flex gap-2">
                 {Array.from({ length: pactMagic.slotsTotal }).map((_, i) => (
                   <button

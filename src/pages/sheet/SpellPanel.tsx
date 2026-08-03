@@ -521,6 +521,16 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                 }}
               >
                 <p className="text-sm font-bold text-purple-300">Pact Magic Slot (L{pactMagic.slotLevel})</p>
+                {/* Every pact slot is the warlock's highest level and there is no downcasting, so
+                    a 1st-level spell cast this way IS a 3rd-level casting — Hex runs 8 hours
+                    instead of 1, Armor of Agathys gives 15 temp HP instead of 5. The button named
+                    the slot's level but never said what that did to the spell, which is the half
+                    of Pact Magic people actually miss. */}
+                {pactMagic.slotLevel > castSpell.level && (
+                  <p className="text-xs text-purple-200/90">
+                    Casts at level {pactMagic.slotLevel} — pact slots are always your highest level and can&apos;t be spent lower.
+                  </p>
+                )}
                 <p className="text-xs text-slate-400">{pactMagic.slotsTotal - pactMagic.slotsUsed}/{pactMagic.slotsTotal} pact slots remaining</p>
               </button>
             )}
