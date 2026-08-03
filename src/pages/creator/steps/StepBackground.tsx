@@ -111,7 +111,17 @@ export function StepBackground() {
                 race={getRace(draft.raceId ?? '')?.name ?? ''}
                 characterClass={getClass(draft.classes?.[0]?.classId ?? '')?.name ?? ''}
                 background={custom.name?.trim() || selected.name}
-                onApply={setCustom}
+                onApply={({ name, alignment, ...traits }) => {
+                  // `name` here is the CHARACTER's, which lives on the draft — not
+                  // `backgroundCustom.name`, which renames the background itself. Spreading the
+                  // whole result into setCustom would have quietly retitled "Entertainer" to
+                  // whatever the character is called.
+                  setCustom(traits);
+                  updateDraft({
+                    ...(name.trim() ? { name: name.trim() } : {}),
+                    ...(alignment.trim() ? { alignment: alignment.trim() } : {}),
+                  });
+                }}
               />
             </div>
 

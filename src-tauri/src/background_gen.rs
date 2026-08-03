@@ -48,6 +48,13 @@ pub struct BackgroundBrief {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratedBackground {
+    /// The character's own name. The creator asks for this on its LAST page, by which point a
+    /// player who wanted the machine to do the work has already had it write their whole history
+    /// and is then asked to invent a name for the person in it.
+    pub name: String,
+    /// One of the nine, validated — see `ALIGNMENTS`. Anything else falls back to True Neutral
+    /// rather than reaching a Select that has no such option and silently showing the wrong one.
+    pub alignment: String,
     pub personality_traits: String,
     pub ideals: String,
     pub bonds: String,
@@ -55,11 +62,30 @@ pub struct GeneratedBackground {
     pub backstory: String,
 }
 
+/// Must match StepReview's own list exactly — this value goes straight into a `<Select>` built
+/// from it, and a near-miss ("Neutral" or "lawful good") renders as no selection at all.
+const ALIGNMENTS: [&str; 9] = [
+    "Lawful Good", "Neutral Good", "Chaotic Good",
+    "Lawful Neutral", "True Neutral", "Chaotic Neutral",
+    "Lawful Evil", "Neutral Evil", "Chaotic Evil",
+];
+
+/// Case-insensitive, because a model that returns "lawful good" got the answer right and only the
+/// capitalisation wrong, and dropping that to True Neutral would be throwing away a good answer.
+fn normalize_alignment(s: &str) -> String {
+    let t = s.trim();
+    ALIGNMENTS
+        .iter()
+        .find(|a| a.eq_ignore_ascii_case(t))
+        .map(|a| a.to_string())
+        .unwrap_or_else(|| "True Neutral".to_string())
+}
+
 /// The eight questions the model must answer for itself. Kept as one const so the prompt and any
 /// future critique pass cannot drift apart.
 const HIDDEN_QUESTIONS: &str = "\
 1. Who raised them, and what did those people teach them that they have since rejected? (Origin plus a built-in internal conflict.)
-2. What happened that made them leave — and why THEN, rather than a year earlier? The \"why now\" is what makes a character feel in motion.
+2. What happened that made them leave — and why at that exact moment, rather than a year earlier? The \"why now\" is what makes a character feel in motion. (Answer it in the prose without ever using the words \"why now\" or emphasising \"then\" — a model told to stress a word has a habit of stressing it back at the reader.)
 3. What did they do that they would never tell the party about? Every secret is a future scene.
 4. Someone wants them ruined. Give that person a NAME and a reason — a villain the DM can use, pre-loaded with stakes.
 5. What do they want badly enough to get someone killed over? Motivation with teeth, not \"seeks adventure\".
@@ -78,6 +104,15 @@ fn brief_line(label: &str, value: &str) -> String {
 
 /// Pure, so the prompt can be asserted in tests without running a model.
 pub fn build_prompt(brief: &BackgroundBrief, race: &str, class: &str, background: &str) -> String {
+    // "Surprise me" sends nothing at all. Six lines of "(not answered)" read as six failures and
+    // pull the model toward hedging; saying plainly that inventing it IS the job gets a character
+    // with opinions instead of one assembled from the safest option in each slot.
+    let nothing_answered = [
+        &brief.campaign, &brief.concept, &brief.playstyle, &brief.tone, &brief.wants, &brief.party,
+    ]
+    .iter()
+    .all(|s| s.trim().is_empty());
+
     let mut who = String::new();
     if !race.trim().is_empty() {
         who.push_str(&format!("- Race/species: {}\n", race.trim()));
@@ -95,7 +130,7 @@ play them. Write it to be USED at a table: a DM should be able to read it once a
 have three things to do with it.
 
 WHAT THE PLAYER TOLD YOU
-{brief}
+{brief}{freehand}
 WHO THEY ARE MECHANICALLY
 {who}
 ANSWER THESE EIGHT QUESTIONS YOURSELF, FROM WHAT THE PLAYER SAID. Do not ask the player any of \
@@ -116,9 +151,15 @@ question 7 must use that character by name.
 way the Player's Handbook writes them.
 - Do NOT annotate or label any field — no \"(Bittersweet)\", no \"(Ideal)\", no question numbers. \
 These go straight onto a character sheet and are read as the character's own words.
+- NAME them. A name that belongs to this species and this world, that a table can say out loud \
+every week, and that matches the person you just wrote. Use the same name the backstory uses.
+- Give them an ALIGNMENT, exactly one of: Lawful Good, Neutral Good, Chaotic Good, Lawful \
+Neutral, True Neutral, Chaotic Neutral, Lawful Evil, Neutral Evil, Chaotic Evil. Pick the one \
+their history actually argues for, not the safest one.
 
 Reply with ONLY a JSON object, no prose around it, no code fence:
-{{\"personalityTraits\": \"...\", \"ideals\": \"...\", \"bonds\": \"...\", \"flaws\": \"...\", \"backstory\": \"...\"}}",
+{{\"name\": \"...\", \"alignment\": \"...\", \"personalityTraits\": \"...\", \"ideals\": \"...\", \
+\"bonds\": \"...\", \"flaws\": \"...\", \"backstory\": \"...\"}}",
         brief = format!(
             "{}{}{}{}{}{}",
             brief_line("Campaign or setting", &brief.campaign),
@@ -128,6 +169,13 @@ Reply with ONLY a JSON object, no prose around it, no code fence:
             brief_line("Wants / does not want", &brief.wants),
             brief_line("Other party members they know", &brief.party),
         ),
+        freehand = if nothing_answered {
+            "\nThe player answered NOTHING — they asked you to surprise them. Inventing all of it \
+is the job, so commit: pick a specific setting, a specific person, a specific mess they are in, \
+and make every part of it point at the same character. A vague answer is the only wrong one here.\n"
+        } else {
+            ""
+        },
         who = if who.is_empty() { "- (not chosen yet)\n".to_string() } else { who },
         questions = HIDDEN_QUESTIONS,
     )
@@ -149,6 +197,8 @@ pub fn parse_reply(reply: &str) -> Result<GeneratedBackground, String> {
         .map_err(|e| format!("The model's reply wasn't valid JSON ({e}). Try Regenerate."))?;
     let get = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
     let out = GeneratedBackground {
+        name: get("name"),
+        alignment: normalize_alignment(&get("alignment")),
         personality_traits: get("personalityTraits"),
         ideals: get("ideals"),
         bonds: get("bonds"),
@@ -200,7 +250,7 @@ mod tests {
         let p = build_prompt(&brief(), "Human", "Bard", "Entertainer");
         for needle in [
             "Who raised them",
-            "why THEN",
+            "why at that exact moment",
             "never tell the party",
             "wants them ruined",
             "killed over",
@@ -229,11 +279,44 @@ mod tests {
         assert!(p.contains("- (not chosen yet)"));
     }
 
+    /// "Surprise me" sends an empty brief. Six "(not answered)" lines pull the model toward the
+    /// safest option in every slot, so the empty case has to say that inventing it IS the job.
+    #[test]
+    fn an_entirely_empty_brief_asks_the_model_to_commit() {
+        let p = build_prompt(&BackgroundBrief::default(), "Dwarf", "Cleric", "Acolyte");
+        assert!(p.contains("they asked you to surprise them"));
+        assert!(p.contains("A vague answer is the only wrong one here"));
+        // Still a real character, not a blank one: race/class/background and the eight questions
+        // all still reach the model.
+        assert!(p.contains("Dwarf") && p.contains("Cleric"));
+        assert!(p.contains("Who raised them"));
+    }
+
+    /// One answered field means the player is steering, so the surprise-me licence must NOT fire.
+    #[test]
+    fn one_answer_is_enough_to_turn_the_surprise_licence_off() {
+        let mut b = BackgroundBrief::default();
+        b.tone = "grim".into();
+        assert!(!build_prompt(&b, "", "", "").contains("surprise them"));
+    }
+
+    /// Alignment lands in a Select built from these exact nine strings — a near-miss renders as no
+    /// selection at all, which looks like the field silently failing.
+    #[test]
+    fn alignment_is_normalised_to_one_of_the_nine_or_falls_back() {
+        assert_eq!(normalize_alignment("chaotic good"), "Chaotic Good");
+        assert_eq!(normalize_alignment("  Lawful Evil  "), "Lawful Evil");
+        assert_eq!(normalize_alignment("Neutral"), "True Neutral");
+        assert_eq!(normalize_alignment(""), "True Neutral");
+        assert_eq!(normalize_alignment("Chaotic Stupid"), "True Neutral");
+    }
+
     #[test]
     fn parses_plain_and_fenced_json_and_tolerates_missing_trait_fields() {
-        let plain = r#"{"personalityTraits":"a","ideals":"b","bonds":"c","flaws":"d","backstory":"e"}"#;
+        let plain = r#"{"name":"Vess","alignment":"chaotic good","personalityTraits":"a","ideals":"b","bonds":"c","flaws":"d","backstory":"e"}"#;
         let g = parse_reply(plain).unwrap();
         assert_eq!((g.personality_traits.as_str(), g.backstory.as_str()), ("a", "e"));
+        assert_eq!((g.name.as_str(), g.alignment.as_str()), ("Vess", "Chaotic Good"));
 
         let fenced = "Here you go:\n```json\n{\"backstory\":\"only this\"}\n```\nHope that helps!";
         let g2 = parse_reply(fenced).unwrap();

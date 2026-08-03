@@ -44,8 +44,11 @@ const QUESTIONS: { key: keyof Brief; label: string; placeholder: string; rows?: 
     placeholder: 'Mira, the cleric — we grew up together' },
 ];
 
-/** The four one-liners plus the backstory, exactly as the creator stores them. */
-type Generated = Pick<BackgroundCustom, 'personalityTraits' | 'ideals' | 'bonds' | 'flaws' | 'backstory'>;
+/** The four one-liners and the backstory, plus the two things the creator's LAST page asks for.
+ *  Name and alignment come back here because a player who let the machine write their whole
+ *  history should not then be asked, three pages later, to invent a name for the person in it. */
+type Generated = Pick<BackgroundCustom, 'personalityTraits' | 'ideals' | 'bonds' | 'flaws' | 'backstory'>
+  & { name: string; alignment: string };
 
 export function BackgroundGenerator({
   race, characterClass, background, onApply,
@@ -61,13 +64,20 @@ export function BackgroundGenerator({
   const [result, setResult] = React.useState<Generated | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Which mode produced what's on screen, so Regenerate repeats THAT rather than quietly
+  // switching modes — pressing it after "Surprise me" should surprise you again, not start
+  // feeding it answers you never gave.
+  const [surprised, setSurprised] = React.useState(false);
 
-  async function generate() {
+  /** `override` is how "Surprise me" sends an empty brief WITHOUT clearing what the player may
+   *  have already typed — they can hit it, dislike the result, and press Edit answers to find
+   *  their own words still there. */
+  async function generate(override?: Brief) {
     setBusy(true);
     setError(null);
     try {
       const g = await invoke<Generated>('generate_character_background', {
-        brief, race, class: characterClass, background,
+        brief: override ?? brief, race, class: characterClass, background,
       });
       setResult(g);
     } catch (e) {
@@ -93,6 +103,13 @@ export function BackgroundGenerator({
         {result ? (
           <div className="space-y-4">
             <div className="space-y-3">
+              {/* Name and alignment lead, because they are the two the player has not seen the
+                  creator ask for yet and the two most likely to be worth a Regenerate on their
+                  own — a background you like under a name you don't is still a no. */}
+              <div className="flex items-baseline justify-between gap-3 flex-wrap pb-2 border-b border-slate-700/60">
+                <p className="text-lg font-bold text-white">{result.name || <span className="text-slate-500">(unnamed)</span>}</p>
+                <p className="text-xs uppercase tracking-widest text-slate-400">{result.alignment}</p>
+              </div>
               {([
                 ['Personality Traits', result.personalityTraits],
                 ['Ideal', result.ideals],
@@ -116,7 +133,7 @@ export function BackgroundGenerator({
               <Button variant="ghost" onClick={() => { setResult(null); setError(null); }} disabled={busy}>
                 Edit answers
               </Button>
-              <Button variant="outline" onClick={() => void generate()} disabled={busy}>
+              <Button variant="outline" onClick={() => void generate(surprised ? EMPTY : undefined)} disabled={busy}>
                 {busy ? 'Writing…' : 'Regenerate'}
               </Button>
               <Button
@@ -127,7 +144,8 @@ export function BackgroundGenerator({
               </Button>
             </div>
             <p className="text-[11px] text-slate-500">
-              Using it fills the five fields on this page — everything stays editable afterwards.
+              Using it fills the five fields on this page, plus the name and alignment the last page
+              asks for — everything stays editable afterwards.
             </p>
           </div>
         ) : (
@@ -153,15 +171,28 @@ export function BackgroundGenerator({
 
             {error && <p className="text-sm text-red-400">{error}</p>}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-700">
-              <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
-              <Button onClick={() => void generate()} disabled={busy || !answered}>
-                {busy ? 'Writing…' : 'Generate'}
+            <div className="flex justify-between gap-2 pt-2 border-t border-slate-700 flex-wrap">
+              {/* Deliberately never disabled — it is the answer to "I don't know, just make me
+                  someone", which is exactly the state an empty form means. */}
+              <Button
+                variant="ghost"
+                onClick={() => { setSurprised(true); void generate(EMPTY); }}
+                disabled={busy}
+              >
+                Surprise me
               </Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+                <Button onClick={() => { setSurprised(false); void generate(); }} disabled={busy || !answered}>
+                  {busy ? 'Writing…' : 'Generate'}
+                </Button>
+              </div>
             </div>
-            {!answered && (
-              <p className="text-[11px] text-slate-500">Answer at least one question to generate.</p>
-            )}
+            <p className="text-[11px] text-slate-500">
+              {answered
+                ? 'Generate uses your answers. Surprise me ignores them and invents the whole character.'
+                : 'Answer at least one question — or press Surprise me and let it invent everything.'}
+            </p>
           </div>
         )}
       </Dialog>
