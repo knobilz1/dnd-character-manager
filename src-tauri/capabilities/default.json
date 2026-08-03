@@ -33,6 +33,7 @@
     "core:window:allow-available-monitors",
     "core:window:allow-primary-monitor",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-set-focus"
   ]
 }

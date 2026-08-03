@@ -1200,11 +1200,6 @@ export function DMConsolePage() {
   // otherwise close over an empty `turns`.
   const sittingIsLiveRef = React.useRef(false);
   sittingIsLiveRef.current = !!activeCampaignId && turns.length > 0;
-  /** Set once the user has made their choice in the close guard, so the second close request goes
-   *  straight through. Using this rather than `destroy()` keeps the app to the permissions it
-   *  already has — `core:window:allow-close` is granted, `allow-destroy` is not, and capabilities
-   *  are not watched by `tauri dev`, so adding one is a silent no-op until a full restart. */
-  const closeGuardBypassRef = React.useRef(false);
   // Mirrors activeModuleId for the same reason campaignIdRef exists — runTurn
   // can fire from a listener registered once at mount (drainQueue) and would
   // otherwise close over a stale value. Also lets resolveChapterSection
@@ -1327,11 +1322,11 @@ export function DMConsolePage() {
   // row and nothing more: the DM is looking at actual humans, and someone
   // playing off a printed sheet is present while never appearing here.
   const [presentOnLan, setPresentOnLan] = React.useState<string[]>([]);
-  // Digests of the characters the DM itself is running, handed over ONCE on the
-  // first turn after roll call (see buildTurnPrompt's `absentSheets`). Not a
-  // per-turn cost: the numbers don't change and the resumed CLI transcript
-  // keeps them for the rest of the sitting.
-  const pendingAbsentSheetsRef = React.useRef<string | null>(null);
+  // Full digests of every sheet at the table, handed over ONCE on the first turn
+  // after roll call (see buildTurnPrompt's `partySheets`). Not a per-turn cost:
+  // these numbers don't change and the resumed CLI transcript keeps them for the
+  // rest of the sitting.
+  const pendingPartySheetsRef = React.useRef<string | null>(null);
 
   // Only polled while the roll-call dialog is actually open — presence is a
   // decoration on one dialog, not something the console needs to know
@@ -2228,10 +2223,10 @@ export function DMConsolePage() {
       // And for a recalled chapter — reference material the DM pulled up.
       const recalledChapter = pendingRecalledChapterRef.current ?? undefined;
       pendingRecalledChapterRef.current = null;
-      // Same one-shot consume for the absent characters' sheet digests, handed
-      // over on the first turn after roll call and never repeated.
-      const absentSheets = pendingAbsentSheetsRef.current ?? undefined;
-      pendingAbsentSheetsRef.current = null;
+      // Same one-shot consume for the party's sheet digests, handed over on the
+      // first turn after roll call and never repeated.
+      const partySheets = pendingPartySheetsRef.current ?? undefined;
+      pendingPartySheetsRef.current = null;
       const prompt = buildTurnPrompt({
         party: partyRef.current,
         spokenText,
@@ -2244,7 +2239,7 @@ export function DMConsolePage() {
         battleLog: battleLogRef.current,
         interruption,
         absent: absentRef.current,
-        absentSheets,
+        partySheets,
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
 
@@ -2857,7 +2852,7 @@ export function DMConsolePage() {
     // and the next sitting re-gates on its own roll call.
     setAbsent({});
     setRollCallTaken(false);
-    pendingAbsentSheetsRef.current = null;
+    pendingPartySheetsRef.current = null;
     // Every borrowed sheet goes back: clearing the assignments is what makes
     // the borrower's device drop the character from its own borrowed store on
     // its next poll.
@@ -2905,15 +2900,19 @@ export function DMConsolePage() {
    *  a native listener on every message, and gating inside the handler means an ordinary quit — no
    *  campaign open, or nothing said yet — is never interrupted.
    *
-   *  On the way out the guard sets a bypass ref before calling close() again, because close()
-   *  re-emits close-requested and would otherwise bounce straight back into this dialog. */
+   *  ⚠️ The way OUT is `destroy()`, and it needs `core:window:allow-destroy` in
+   *  capabilities/default.json. v0.25.5 shipped without it and the console could not be closed AT
+   *  ALL — not just mid-session. `onCloseRequested` is not a passive notification: its wrapper ends
+   *  with `if (!evt.isPreventDefault()) await this.destroy()`, so simply returning from the handler
+   *  routes an ordinary quit straight into a denied destroy, and nothing happens. `close()` is no
+   *  escape either — it re-emits close-requested, so a window with a listener can only ever be shut
+   *  by destroy(). Do not "simplify" this back to close(), and do not drop that permission. */
   React.useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     getCurrentWindow()
       .onCloseRequested((event) => {
-        if (closeGuardBypassRef.current) return; // already decided — this is the second request
-        if (!sittingIsLiveRef.current) return;   // nothing to lose — let it close
+        if (!sittingIsLiveRef.current) return; // nothing to lose — the wrapper destroys it
         event.preventDefault();
         setCloseGuardOpen(true);
       })
@@ -2938,8 +2937,7 @@ export function DMConsolePage() {
       // let them close — the alternative is an app that will not quit.
       console.error('End Session failed while closing; closing anyway:', e);
     }
-    closeGuardBypassRef.current = true;
-    await getCurrentWindow().close();
+    await getCurrentWindow().destroy();
   }
 
   /** Switching campaigns via the picker below — closes out whatever was
@@ -4555,15 +4553,21 @@ export function DMConsolePage() {
     });
   }
 
-  /** Close roll call and hand the DM the sheets it needs. Digests go only to
-   *  characters the DM itself is running: autopilot defends and follows, so it
-   *  makes no tactical choices and needs no spell list, and a proxied character
-   *  is being run by a person with the real sheet in front of them. */
+  /** Every sheet at the table, digested once for the DM.
+   *
+   *  This used to hand over only the characters the DM itself was running, on the theory that a
+   *  present player has their own sheet in front of them. That was the wrong line to draw. The DM
+   *  is the one resolving attacks AGAINST them and adjudicating their spells, and with nothing but
+   *  a name and an HP bar it cannot: watched it stop dead mid-fight and ask "Dagna — AC, what is
+   *  it?" three turns running. The secrecy that matters at this table runs the other way — players
+   *  don't see the DM's side — so the DM gets everything. */
+  function partySheetDigests(): string | null {
+    const digests = rollCallRows.filter((r) => r.sheet).map((r) => buildSheetDigest(r.sheet!));
+    return digests.length ? digests.join('\n\n') : null;
+  }
+
   function confirmRollCall() {
-    const digests = rollCallRows
-      .filter((r) => absent[r.key]?.mode === 'dm' && r.sheet)
-      .map((r) => buildSheetDigest(r.sheet!));
-    pendingAbsentSheetsRef.current = digests.length ? digests.join('\n\n') : null;
+    pendingPartySheetsRef.current = partySheetDigests();
     void publishProxyAssignments();
     setRollCallTaken(true);
     setRollCallOpen(false);
@@ -4574,7 +4578,7 @@ export function DMConsolePage() {
    *  solo testing to a single click. */
   function markEveryonePresent() {
     setAbsent({});
-    pendingAbsentSheetsRef.current = null;
+    pendingPartySheetsRef.current = partySheetDigests();
     void publishProxyAssignments({});
     setRollCallTaken(true);
     setRollCallOpen(false);
@@ -6637,10 +6641,7 @@ export function DMConsolePage() {
           </Button>
           <Button
             variant="outline"
-            onClick={() => {
-              closeGuardBypassRef.current = true;
-              void getCurrentWindow().close();
-            }}
+            onClick={() => { void getCurrentWindow().destroy(); }}
             disabled={closeGuardEnding}
           >
             Close anyway
