@@ -42,6 +42,8 @@ function usePull(character: Character) {
   const saveSnapshot = useSnapshotStore((s) => s.saveSnapshot);
   const [busy, setBusy] = React.useState(false);
   const [status, setStatus] = React.useState<string | null>(null);
+  // Stable so the toast's auto-dismiss timer isn't restarted by every re-render.
+  const clearStatus = React.useCallback(() => setStatus(null), []);
 
   async function pull(): Promise<boolean> {
     if (!dmIp.trim()) {
@@ -59,7 +61,9 @@ function usePull(character: Character) {
       // Back up what's on this device BEFORE anything is overwritten, and only
       // once the DM's copy is actually in hand — a snapshot taken for a pull
       // that then 404s or times out is just clutter in the History panel.
-      saveSnapshot(character, `Before DM sync — ${new Date().toISOString()}`);
+      // No timestamp in the label: the History panel already shows each snapshot's own
+      // time ("2m ago"), and an ISO string here only pushed the useful half off the row.
+      saveSnapshot(character, 'Before DM sync');
       // Keep OUR id. The DM keys characters by name and the copy that came back
       // may carry whatever id it had when it was lent out; writing that id into
       // the library would orphan this sheet's route and its snapshot history.
@@ -76,10 +80,19 @@ function usePull(character: Character) {
     }
   }
 
-  return { pull, busy, status, setStatus };
+  return { pull, busy, status, clearStatus };
 }
 
+/** The little box that appears bottom-right to report how the sync went. It used to sit
+ *  there until someone thought to click it — a result you've already read has no business
+ *  covering the sheet, so it now clears itself. Clicking still dismisses it early. */
 function StatusToast({ status, onDismiss }: { status: string | null; onDismiss: () => void }) {
+  React.useEffect(() => {
+    if (!status) return;
+    const t = setTimeout(onDismiss, 8000);
+    return () => clearTimeout(t);
+  }, [status, onDismiss]);
+
   if (!status) return null;
   return (
     <div
@@ -98,23 +111,40 @@ function StatusToast({ status, onDismiss }: { status: string | null; onDismiss: 
  *  Declining is remembered against that exact remote timestamp, so it stops
  *  asking until the DM's copy actually moves again. Dismissing the dialog any
  *  other way (backdrop, ✕) counts as declining for the same reason: a dialog
- *  that came back three seconds later would be unusable. */
+ *  that came back three seconds later would be unusable — and a quiet line
+ *  stays behind so changing your mind doesn't mean waiting for the DM to touch
+ *  the sheet again. */
 export function DmSyncOfferDialog({ character }: { character: Character }) {
   const remote = useDmSheetOfferStore((s) => s.remote);
   const declined = useDmSheetOfferStore((s) => s.declined);
   const decline = useDmSheetOfferStore((s) => s.decline);
-  const { pull, busy, status, setStatus } = usePull(character);
+  const reopen = useDmSheetOfferStore((s) => s.reopen);
+  const { pull, busy, status, clearStatus } = usePull(character);
 
-  const stale =
+  const newer =
     remote &&
     remote.name.trim().toLowerCase() === character.name.trim().toLowerCase() &&
-    remote.updatedAt > (character.updatedAt ?? 0) &&
-    remote.updatedAt !== declined;
+    remote.updatedAt > (character.updatedAt ?? 0);
 
   const when = remote ? new Date(remote.updatedAt).toLocaleString() : '';
   return (
     <>
-      <Dialog open={!!stale} onClose={decline} title="Newer version of this character on the DM">
+      {/* The way back after "Keep mine". Not a permanent control and not another icon in
+          the header row: it exists only while the DM still holds that newer copy, and
+          only because this player already said no to it once. */}
+      {newer && remote.updatedAt === declined && (
+        <button
+          onClick={reopen}
+          className="mb-3 text-xs text-sky-400/80 hover:text-sky-300 underline underline-offset-2"
+        >
+          The DM still has a newer copy of {character.name} — review the sync
+        </button>
+      )}
+      <Dialog
+        open={!!newer && remote.updatedAt !== declined}
+        onClose={decline}
+        title="Newer version of this character on the DM"
+      >
         <p className="text-sm text-slate-300">
           The DM's copy of <span className="font-bold text-white">{character.name}</span> was last
           changed <span className="font-bold text-white">{when}</span> — more recently than the one
@@ -132,7 +162,7 @@ export function DmSyncOfferDialog({ character }: { character: Character }) {
           </Button>
         </div>
       </Dialog>
-      <StatusToast status={status} onDismiss={() => setStatus(null)} />
+      <StatusToast status={status} onDismiss={clearStatus} />
     </>
   );
 }
