@@ -212,6 +212,22 @@ export function battleLogStatusText(log: BattleLog): string {
   parts.push(lines.join('\n'));
   if (log.environment) parts.push(`Environment: ${log.environment}`);
   if (log.notes) parts.push(`Notes: ${log.notes}`);
+  // Round 1 only, and only when there IS an enemy side to give away. A standing rule
+  // 100 lines up in the cached block loses to the turn's own momentum — this rides on
+  // the round number it constrains, so it is unmissable while it applies and gone the
+  // moment it doesn't. It exists because the DM was caught opening a fight with
+  // "Dagna, you're first — then the ghouls, Vess, and Rooth at the back", which is
+  // exactly what the players' own turn-order display is built to withhold in round 1
+  // (see maskInitiativeForPlayers). Both channels have to draw the same line or the
+  // masking is theatre.
+  if (log.round === 1 && log.combatants.some((c) => c.side === 'enemy')) {
+    parts.push(
+      'ROUND 1 — the party has not seen the enemy act yet. Do NOT say aloud where the enemies fall in the '
+      + 'turn order, how many of them there are in it, or their initiative values. Tell each player when '
+      + "they're up, and when an enemy's slot comes round just narrate it happening. The players' order "
+      + 'relative to each other is fine to state. From round 2 the whole order is fair game.'
+    );
+  }
   return parts.join('\n');
 }
 
