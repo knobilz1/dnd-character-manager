@@ -252,6 +252,32 @@ export function isPreparedCaster(classId: string): boolean {
   return maxPreparedSpellsFor(classId, 1, 0) !== null;
 }
 
+/** The highest spell level this caster can cast — derived from the slot table they actually use,
+ *  so it cannot drift from the slots themselves.
+ *
+ *  Lived inside StepSpells until the random-character roller needed it too; a util importing a
+ *  creator component to reach it would have been backwards, and a second copy is how the resource
+ *  overrides drifted. Its home is here, beside the tables it reads. */
+export function computeMaxSpellLevel(spellcastingType: string, classId: string, level: number): number {
+  let slots: number[];
+  if (spellcastingType === 'pact') {
+    return PACT_MAGIC_TABLE[Math.min(level, 20)]?.slotLevel ?? 1;
+  } else if (classId === 'artificer') {
+    slots = ARTIFICER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
+  } else if (spellcastingType === 'full') {
+    slots = FULL_CASTER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
+  } else if (spellcastingType === 'half') {
+    slots = HALF_CASTER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
+  } else if (spellcastingType === 'third') {
+    slots = THIRD_CASTER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
+  } else {
+    return 0;
+  }
+  // slots[0] = 1st-level slots, slots[8] = 9th-level slots
+  const highestIdx = slots.reduce((max, count, i) => (count > 0 ? i : max), -1);
+  return highestIdx + 1; // 0-based index → spell level number
+}
+
 export function spellsKnownFor(classId: string, level: number): number {
   const table = SPELLS_KNOWN[classId];
   if (!table) return 0;
