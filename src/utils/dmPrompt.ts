@@ -4,6 +4,8 @@ import { BATTLE_MODE_LABELS } from './dmActions';
 import { BOOKS } from '../data/books';
 import { hasKnownHp } from './partyHp';
 import { activeCompanions, computeCompanionDerived } from './companion';
+import { computeCharacterDerived } from '../hooks/useCharacterDerived';
+import type { AbilityKey } from '../types';
 
 /**
  * dmPrompt.ts — builds what gets sent to the Claude DM each turn.
@@ -68,6 +70,39 @@ function totalLevel(c: Character): number {
   return (c.classes || []).reduce((s, cl) => s + (cl.level || 0), 0);
 }
 
+const SAVE_ORDER: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+const sign = (n: number) => (n >= 0 ? `+${n}` : String(n));
+
+/** The numbers a DM needs to resolve something AGAINST this character without stopping to
+ *  ask: what an attack has to beat, what they roll on a save, what they notice without
+ *  looking, and the DC their own spells impose on everyone else. Skills, attacks and
+ *  prepared spells are deliberately NOT here — those are the player's own side of the
+ *  table, and they'd cost this line ten times the tokens.
+ *
+ *  The full sheet digest (buildSheetDigest, now sent for the whole party at roll call)
+ *  already carries these and much more. This repeats the four that decide EVERY roll,
+ *  every turn, for the same reason the battle log is re-sent every turn: the digest is a
+ *  one-shot and the model's context compacts. Losing an AC mid-fight is not theoretical
+ *  — it is what this line was added after watching: three turns in a row of "Dagna — AC,
+ *  what is it?" with the fight frozen. ~30 tokens per character to never repeat that.
+ *
+ *  Returns '' when the sheet won't compute: computeCharacterDerived assumes a COMPLETE
+ *  Character and throws on one that arrived over LAN half-populated (see sheetDigest.ts,
+ *  where the same throw once took down the whole roll call). Saying nothing is right —
+ *  the HP branch above already tells the DM that sheet is incomplete and not to guess. */
+function combatNumbers(c: Character): string {
+  let d: ReturnType<typeof computeCharacterDerived>;
+  try {
+    d = computeCharacterDerived(c);
+  } catch {
+    return '';
+  }
+  const saves = SAVE_ORDER.map((k) => `${k.toUpperCase()}${sign(d.savingThrows[k] ?? 0)}`).join(' ');
+  // A pure fighter has spellSaveDC 0 — that's "no spellcasting", not a DC of zero.
+  const dc = d.spellSaveDC ? ` | spell DC ${d.spellSaveDC}` : '';
+  return ` | AC ${d.ac} | saves ${saves} | passive Perception ${d.passivePerception}${dc}`;
+}
+
 function statusLine(c: Character, absent?: AbsenceMap): string {
   // A party member whose sheet arrived without HP (see partyHp.ts) would
   // otherwise be described to the DM, every single turn, as `HP NaN/undefined`.
@@ -84,7 +119,7 @@ function statusLine(c: Character, absent?: AbsenceMap): string {
     : '';
   const insp = c.inspiration ? ' ⭐' : '';
   const away = absenceSuffix(absent?.[partyKey(c.name)]);
-  return `${c.name} (${c.playerName || '?'}) — L${totalLevel(c)} ${classLine(c)} | HP ${hp} | ${cond}${exh}${insp}${ds}${away}`;
+  return `${c.name} (${c.playerName || '?'}) — L${totalLevel(c)} ${classLine(c)} | HP ${hp}${combatNumbers(c)} | ${cond}${exh}${insp}${ds}${away}`;
 }
 
 /** A companion that is OUT is a real creature standing on the battlefield, so the DM has to place
@@ -215,13 +250,18 @@ export function battleLogStatusText(log: BattleLog): string {
  *  is being covered. It rides as a suffix on each party status line rather
  *  than as its own section, so it costs ~10 tokens per absent character and
  *  nothing at all when everyone turned up.
- *  `absentSheets` is a ONE-SHOT, same as recalledSession/Map/Chapter above: the
- *  full digests of the characters the DM itself is running, sent on the first
- *  turn after roll call and then dropped. It stays available for the rest of
- *  the sitting because it's in the CLI's own resumed transcript — the same
- *  reason deferring memory writes was safe (see campaign.rs's pending queue).
- *  Sending it every turn instead would cost ~400 tokens × every turn to
- *  re-state numbers that never change. */
+ *  `partySheets` is a ONE-SHOT, same as recalledSession/Map/Chapter above: the
+ *  full digest of EVERY character at the table, sent on the first turn after
+ *  roll call and then dropped. It stays available for the rest of the sitting
+ *  because it's in the CLI's own resumed transcript — the same reason deferring
+ *  memory writes was safe (see campaign.rs's pending queue). Sending it every
+ *  turn instead would cost ~400 tokens × every turn to re-state numbers that
+ *  never change.
+ *
+ *  It used to cover only the characters the DM itself was running. That left the
+ *  DM resolving attacks against present players with no AC, no saves and no
+ *  spell DCs — so it stopped mid-fight to ask, or invented them. The table's
+ *  secrecy runs the other way: players don't see the DM's side. */
 export function buildTurnPrompt(opts: {
   party: Character[];
   spokenText: string;
@@ -234,9 +274,9 @@ export function buildTurnPrompt(opts: {
   battleLog?: BattleLog | null;
   interruption?: { heard: string };
   absent?: AbsenceMap;
-  absentSheets?: string;
+  partySheets?: string;
 }): string {
-  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, recalledChapter, battleLog, interruption, absent, absentSheets } = opts;
+  const { party, spokenText, battleMode, speaker, planCheckIn, recalledSession, recalledMap, recalledChapter, battleLog, interruption, absent, partySheets } = opts;
   const parts: string[] = [];
   if (interruption) {
     parts.push(interruption.heard
@@ -256,8 +296,8 @@ ${recalledChapter.text}`);
   if (recalledMap) {
     parts.push(`Recalled battle map "${recalledMap.slug}" (you asked to pull this up last turn — its full layout and tactics, for your reference; place enemies on these cells and describe positions by them, don't read the raw grid aloud):\n${recalledMap.spec}`);
   }
-  if (absentSheets) {
-    parts.push(`Character sheets for the absent players you're running tonight (reference material — sent once, at roll call, so keep it in mind for the rest of the session; play them from these numbers rather than inventing abilities):\n${absentSheets}`);
+  if (partySheets) {
+    parts.push(`Character sheets for the whole party (reference material — sent once, at roll call, so keep it in mind for the rest of the session). These are the real numbers: use them to resolve anything you adjudicate — what an attack has to beat, what a save comes to, what DC their spells impose — instead of asking a player for a number that is right here, and instead of inventing one. For any character you're running tonight yourself, play them from these numbers rather than inventing abilities:\n${partySheets}`);
   }
   parts.push(`Current party status:\n${partyStatusText(party, absent)}`);
   const tableBooks = tableBooksText(party);
