@@ -50,6 +50,12 @@ const browser = await chromium.launch({
 
 const page = await browser.newPage({ viewport: { width: 1200, height: 1000 } });
 page.on('pageerror', (e) => console.log('  [pageerror]', e.message.slice(0, 160)));
+// Console matters as much as pixels here: BoneAttachment warns `[attach] "<bone>"
+// bone not found` and renders nothing, which is indistinguishable from "the prop
+// is there but mis-fitted" in a screenshot. Surface warnings/errors explicitly.
+page.on('console', (m) => {
+  if (m.type() === 'warning' || m.type() === 'error') console.log(`  [${m.type()}]`, m.text().slice(0, 200));
+});
 
 // Seed the per-body fit override before any app code runs.
 if (fitOverride) {
@@ -76,6 +82,35 @@ await page.evaluate(({ raceId, gender, hairId, hairColor }) => {
 // Wait for the lazy CharacterViewport chunk + canvas, then for the GLBs to load.
 await page.waitForSelector('canvas', { timeout: 20000 });
 await page.waitForTimeout(7000);
+
+// ARMOR=1 flips the viewport's ⛑ dev toggle (showArmor), which is what gates every
+// armor BoneAttachment. Without it the armor props simply aren't mounted, so a shot
+// would show a bare body and prove nothing.
+if (process.env.ARMOR) {
+  const clicked = await page.evaluate(() => {
+    const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('⛑'));
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  console.log(clicked ? 'armor toggle: ON' : 'armor toggle: BUTTON NOT FOUND');
+  await page.waitForTimeout(5000); // armor GLB fetch + parse
+
+  // The ⛑ toggle also opens the slider FitPanel, which sits over the middle of the
+  // canvas. That both hides the body and swallows the orbit drag (OrbitControls
+  // never sees the mousedown), so every "rear" shot silently came back as the front
+  // view. Hide the panel before capturing.
+  const hidden = await page.evaluate(() => {
+    const panel = Array.from(document.querySelectorAll('div')).find(
+      (d) => /FIT\s*·/.test(d.textContent || '') && d.querySelector('input[type=range]'),
+    );
+    if (!panel) return false;
+    (panel.closest('div[style],div') || panel).style.display = 'none';
+    return true;
+  });
+  console.log(hidden ? 'fit panel: hidden for capture' : 'fit panel: not found (may not be open)');
+  await page.waitForTimeout(400);
+}
 
 const canvas = page.locator('canvas').first();
 const box = await canvas.boundingBox();

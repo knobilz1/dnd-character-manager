@@ -1,0 +1,143 @@
+{
+  "_readme": [
+    "Base avatars for races that currently render as a HUMAN body (modelRace() in src/data/hair.ts",
+    "falls through to 'human' for anything outside its 7 patterns - silently, with no warning).",
+    "",
+    "Generated BALD and in plain undergarments on purpose. The existing 7 races have clothing baked",
+    "into their single texture atlas, so any fitted garment sits on top of a painted-on tunic. New",
+    "races come out clean by construction, so the wardrobe works properly on them.",
+    "",
+    "TRIPO: same settings as armor (HD Model, 2K texture, 30000 polycount) PLUS the T-Pose toggle,",
+    "which replaces the long pose paragraph from the source species sheet and gives auto-rig a",
+    "cleaner canonical pose. 45 credits each.",
+    "",
+    "Only Tier A/B humanoid bipeds are listed. Tier C (wings, quadruped, four arms, ooze) will not",
+    "AccuRig cleanly and cannot borrow the shared biped animation clips - they need their own project.",
+    "",
+    "AFTER generation: AccuRig pass -> convert-idle-to-glb.cjs -> prune-static-channels.cjs, then wire",
+    "ModelRace + modelRace() in hair.ts AND the asset consts in CharacterViewport.tsx. Borrow the human",
+    "anims initially, exactly as Halfling/Tiefling/Gnome already do."
+  ],
+  "pieces": [
+    {
+      "id": "dragonborn_male",
+      "species": "Dragonborn",
+      "gender": "male",
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 980,
+      "prompt": "Single isolated full-body adult Dragonborn male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; tall wingless and tailless draconic humanoid with a dragonlike head, backward-sweeping horns, layered scales, strong humanoid limbs, plantigrade feet, and clear shoulder and hip joints. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "dragonborn_female",
+      "species": "Dragonborn",
+      "gender": "female",
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 979,
+      "prompt": "Single isolated full-body adult Dragonborn female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; tall wingless and tailless draconic humanoid with a dragonlike head, backward-sweeping horns, layered scales, strong humanoid limbs, plantigrade feet, and clear shoulder and hip joints. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "goliath_male",
+      "species": "Goliath",
+      "gender": "male",
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 961,
+      "prompt": "Single isolated full-body adult Goliath male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; very tall powerful giant-descended humanoid with broad shoulders, dense athletic musculature, stone-gray skin, subtle natural body markings, and clean humanlike anatomy. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "goliath_female",
+      "species": "Goliath",
+      "gender": "female",
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 960,
+      "prompt": "Single isolated full-body adult Goliath female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; very tall powerful giant-descended humanoid with broad shoulders, dense athletic musculature, stone-gray skin, subtle natural body markings, and clean humanlike anatomy. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "aasimar_male",
+      "species": "Aasimar",
+      "gender": "male",
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 934,
+      "prompt": "Single isolated full-body adult Aasimar male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; humanlike celestial humanoid with balanced heroic proportions, subtly luminous eyes, faint elegant celestial markings, and no permanent wings. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "aasimar_female",
+      "species": "Aasimar",
+      "gender": "female",
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 933,
+      "prompt": "Single isolated full-body adult Aasimar female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; humanlike celestial humanoid with balanced heroic proportions, subtly luminous eyes, faint elegant celestial markings, and no permanent wings. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "warforged_male",
+      "species": "Warforged",
+      "gender": "male",
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 992,
+      "prompt": "Single isolated full-body adult Warforged male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; medium living construct with an athletic humanoid frame made from wood, stone, and metal, protected articulated joints, expressive faceplate, layered body plating, and no attached armor or clothing. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "warforged_female",
+      "species": "Warforged",
+      "gender": "female",
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 991,
+      "prompt": "Single isolated full-body adult Warforged female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; medium living construct with an athletic humanoid frame made from wood, stone, and metal, protected articulated joints, expressive faceplate, layered body plating, and no attached armor or clothing. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "firbolg_male",
+      "species": "Firbolg",
+      "gender": "male",
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 963,
+      "prompt": "Single isolated full-body adult Firbolg male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; very tall broad forest giantkin humanoid with gentle heavy features, broad nose, large slightly pointed ears, powerful but calm proportions, and subtle natural skin tones. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "firbolg_female",
+      "species": "Firbolg",
+      "gender": "female",
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 962,
+      "prompt": "Single isolated full-body adult Firbolg female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; very tall broad forest giantkin humanoid with gentle heavy features, broad nose, large slightly pointed ears, powerful but calm proportions, and subtle natural skin tones. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "tabaxi_male",
+      "species": "Tabaxi",
+      "gender": "male",
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 978,
+      "prompt": "Single isolated full-body adult Tabaxi male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; cat-headed humanoid with short controlled feline fur, expressive feline face, long tail extending behind without touching the legs, clawed hands, digitigrade feet, and a lean agile build. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    },
+    {
+      "id": "tabaxi_female",
+      "species": "Tabaxi",
+      "gender": "female",
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "attempt": 0,
+      "chars": 977,
+      "prompt": "Single isolated full-body adult Tabaxi female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; cat-headed humanoid with short controlled feline fur, expressive feline face, long tail extending behind without touching the legs, clawed hands, digitigrade feet, and a lean agile build. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, hair, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages."
+    }
+  ]
+}

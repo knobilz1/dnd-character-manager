@@ -771,6 +771,10 @@ export interface Character {
   hitDiceUsed: Record<string, number>;
   spellbook: PreparedSpell[];
   concentrationSpellId?: string;
+  /** This encounter's rolled initiative total (d20 + the sheet's initiative bonus).
+   *  Cleared when the fight ends. Kept on the character rather than in component state so
+   *  it survives a tab switch mid-fight and so the DM push can read it from anywhere. */
+  initiativeRoll?: number;
   currentHP: number;
   tempHP: number;
   maxHP: number;

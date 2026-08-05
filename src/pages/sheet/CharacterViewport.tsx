@@ -122,6 +122,80 @@ const GNOME_FEMALE_ASSETS = {
   diffuse: 'Gnome_Female_Diffuse.png',
 };
 
+// Tripo bodies (2026-08): own idle GLB + diffuse, borrowed human anims —
+// same pattern as Halfling/Tiefling/Gnome above.
+//
+// Each was Tripo-generated, auto-rigged in AccuRig, exported with the UE5 target,
+// then had the `badass-idle-626441` clip transplanted in by matching bone NAMES.
+// Because every body carries the identical AccuRig UE5 skeleton, the merged human
+// anim sets drive them with no per-race animation files at all — a new race costs
+// only its idle GLB + diffuse (~3MB + ~1.5MB), nothing more.
+const FIRBOLG_MALE_ASSETS = {
+  idle:    'Firbolg_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Firbolg_Male_Diffuse.png',
+};
+const FIRBOLG_FEMALE_ASSETS = {
+  idle:    'Firbolg_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Firbolg_Female_Diffuse.png',
+};
+const GOBLIN_MALE_ASSETS = {
+  idle:    'Goblin_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Goblin_Male_Diffuse.png',
+};
+const GOBLIN_FEMALE_ASSETS = {
+  idle:    'Goblin_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Goblin_Female_Diffuse.png',
+};
+const GOLIATH_MALE_ASSETS = {
+  idle:    'Goliath_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Goliath_Male_Diffuse.png',
+};
+const HOBGOBLIN_MALE_ASSETS = {
+  idle:    'Hobgoblin_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Hobgoblin_Male_Diffuse.png',
+};
+const HOBGOBLIN_FEMALE_ASSETS = {
+  idle:    'Hobgoblin_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Hobgoblin_Female_Diffuse.png',
+};
+const KENKU_MALE_ASSETS = {
+  idle:    'Kenku_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Kenku_Male_Diffuse.png',
+};
+const MINOTAUR_MALE_ASSETS = {
+  idle:    'Minotaur_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Minotaur_Male_Diffuse.png',
+};
+const SATYR_MALE_ASSETS = {
+  idle:    'Satyr_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Satyr_Male_Diffuse.png',
+};
+const SHIFTER_MALE_ASSETS = {
+  idle:    'Shifter_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Shifter_Male_Diffuse.png',
+};
+const WARFORGED_MALE_ASSETS = {
+  idle:    'Warforged_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Warforged_Male_Diffuse.png',
+};
+const WARFORGED_FEMALE_ASSETS = {
+  idle:    'Warforged_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Warforged_Female_Diffuse.png',
+};
+
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
 /** All known asset sets — used for bulk preloading at app startup. */
@@ -133,6 +207,15 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   HALFLING_MALE_ASSETS, HALFLING_FEMALE_ASSETS,
   TIEFLING_MALE_ASSETS, TIEFLING_FEMALE_ASSETS,
   GNOME_MALE_ASSETS, GNOME_FEMALE_ASSETS,
+  FIRBOLG_MALE_ASSETS, FIRBOLG_FEMALE_ASSETS,
+  GOBLIN_MALE_ASSETS, GOBLIN_FEMALE_ASSETS,
+  GOLIATH_MALE_ASSETS,
+  HOBGOBLIN_MALE_ASSETS, HOBGOBLIN_FEMALE_ASSETS,
+  KENKU_MALE_ASSETS,
+  MINOTAUR_MALE_ASSETS,
+  SATYR_MALE_ASSETS,
+  SHIFTER_MALE_ASSETS,
+  WARFORGED_MALE_ASSETS, WARFORGED_FEMALE_ASSETS,
 ];
 
 // modelRace + ModelRace now live in src/data/hair.ts (a lightweight leaf module)
@@ -148,6 +231,27 @@ function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSe
   if (race === 'halfling') return gender === 'female' ? HALFLING_FEMALE_ASSETS  : HALFLING_MALE_ASSETS;
   if (race === 'tiefling') return gender === 'female' ? TIEFLING_FEMALE_ASSETS  : TIEFLING_MALE_ASSETS;
   if (race === 'gnome')    return gender === 'female' ? GNOME_FEMALE_ASSETS     : GNOME_MALE_ASSETS;
+  // Tripo bodies. Where only one gender is modelled, both route to it — same fallback style as
+  // the races above.
+  //
+  // ⚠️ WITHHELD: kenku, minotaur and satyr FEMALE bodies are generated topless and are not
+  // shipped. Their male body serves both genders until a clothed female is generated (the fix is
+  // a fresh Tripo run with "a plain close-fitting neutral tank top and short fitted shorts" —
+  // see scratch-armor/regen-prompts.json; a RETRY re-rolls the same prompt and reproduces the
+  // problem, which was measured, not assumed).
+  //
+  // dragonborn has no body at all: the female is withheld for the same reason, and the male was
+  // refused by AccuRig's auto-rig ("Error detected while auto rig"), so there is nothing to fall
+  // back to. It routes to human, exactly as it did before these bodies existed.
+  if (race === 'firbolg')   return gender === 'female' ? FIRBOLG_FEMALE_ASSETS   : FIRBOLG_MALE_ASSETS;
+  if (race === 'goblin')    return gender === 'female' ? GOBLIN_FEMALE_ASSETS    : GOBLIN_MALE_ASSETS;
+  if (race === 'goliath')   return GOLIATH_MALE_ASSETS;
+  if (race === 'hobgoblin') return gender === 'female' ? HOBGOBLIN_FEMALE_ASSETS : HOBGOBLIN_MALE_ASSETS;
+  if (race === 'kenku')     return KENKU_MALE_ASSETS;
+  if (race === 'minotaur')  return MINOTAUR_MALE_ASSETS;
+  if (race === 'satyr')     return SATYR_MALE_ASSETS;
+  if (race === 'shifter')   return SHIFTER_MALE_ASSETS;
+  if (race === 'warforged') return gender === 'female' ? WARFORGED_FEMALE_ASSETS : WARFORGED_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 

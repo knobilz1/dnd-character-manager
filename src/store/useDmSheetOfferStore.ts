@@ -27,6 +27,9 @@ interface DmSheetOfferState {
   declined: number;
   setRemote: (name: string, updatedAt: number | null) => void;
   decline: () => void;
+  /** Undo a decline — the player changed their mind. Without this "Keep mine" is a
+   *  one-way door: nothing asks again until the DM's copy happens to move. */
+  reopen: () => void;
 }
 
 export const useDmSheetOfferStore = create<DmSheetOfferState>()((set, get) => ({
@@ -45,4 +48,6 @@ export const useDmSheetOfferStore = create<DmSheetOfferState>()((set, get) => ({
   },
 
   decline: () => set((s) => ({ declined: s.remote?.updatedAt ?? s.declined })),
+
+  reopen: () => set({ declined: 0 }),
 }));

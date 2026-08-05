@@ -259,6 +259,37 @@ fn map_response(current: &BroadcastMap, since: u64) -> serde_json::Value {
     }
 }
 
+/// The live turn order, as the PLAYERS are allowed to see it.
+///
+/// Deliberately a different view from the DM's own `battleLog.initiative`, for the same reason the
+/// shared map omits deployment zones: the player copy is the one place that intentionally shows
+/// less. Knowing exactly when the goblins act before they have ever acted hands the table free
+/// information it would not have at a real table — so enemies are withheld for round 1 and appear
+/// from round 2, by which point the party has watched them go.
+///
+/// The masking happens on the DM side (see maskInitiativeForPlayers) so this slot only ever HOLDS
+/// the player-safe list; a bug here can leak nothing that was never put in.
+struct BroadcastInitiative {
+    version: u64,
+    payload: Option<serde_json::Value>,
+}
+
+fn broadcast_initiative() -> &'static Mutex<BroadcastInitiative> {
+    static INIT: OnceLock<Mutex<BroadcastInitiative>> = OnceLock::new();
+    INIT.get_or_init(|| Mutex::new(BroadcastInitiative { version: 0, payload: None }))
+}
+
+/// Pure: what `GET /initiative?since=<v>` returns. Same contract as `map_response` — a client on
+/// the current version gets only the version back, and a null payload on a NEW version means
+/// "combat is over, clear your order and your rolled number".
+fn initiative_response(current: &BroadcastInitiative, since: u64) -> serde_json::Value {
+    if since >= current.version {
+        serde_json::json!({ "version": current.version })
+    } else {
+        serde_json::json!({ "version": current.version, "initiative": current.payload })
+    }
+}
+
 // ── The table camera (#39) ───────────────────────────────────────────────────
 //
 // The DM bot often runs on a different machine from the table, with the players
@@ -471,6 +502,16 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let since = parse_since_param(&request_line);
         let current = broadcast_map().lock().unwrap();
         let body = map_response(&current, since).to_string();
+        drop(current);
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
+    if request_line.starts_with("GET /initiative") {
+        // Player devices poll this for the live turn order, already masked for
+        // them (round 1 hides the enemy side). A null payload on a new version
+        // means combat ended — clear the order and the local rolled number.
+        let since = parse_since_param(&request_line);
+        let current = broadcast_initiative().lock().unwrap();
+        let body = initiative_response(&current, since).to_string();
         drop(current);
         return write_response(&mut stream, 200, &body, "application/json");
     }
@@ -791,6 +832,26 @@ pub fn clear_broadcast_map() {
     }
 }
 
+/// Publishes the turn order to every connected player device. The DM Console passes an ALREADY
+/// MASKED list (see maskInitiativeForPlayers) plus the round and whose turn it is.
+#[tauri::command]
+pub fn set_broadcast_initiative(initiative: serde_json::Value) {
+    let mut current = broadcast_initiative().lock().unwrap();
+    current.version += 1;
+    current.payload = Some(initiative);
+}
+
+/// Combat is over: every connected player clears the order AND the initiative they rolled for it.
+/// A no-op when nothing is published, so ending a fight twice doesn't churn the version.
+#[tauri::command]
+pub fn clear_broadcast_initiative() {
+    let mut current = broadcast_initiative().lock().unwrap();
+    if current.payload.is_some() {
+        current.version += 1;
+        current.payload = None;
+    }
+}
+
 /// Character names whose devices have polled recently — the roll-call dialog's
 /// "their sheet is open on the network" dot. A hint beside the manual toggle,
 /// never a substitute for it (see the PRESENCE_TIMEOUT comment).
@@ -922,6 +983,28 @@ mod tests {
         assert_eq!(parse_since_param("GET /narration?since=nope HTTP/1.1"), 0, "unparseable value");
         assert_eq!(parse_since_param("GET / HTTP/1.1"), 0, "unrelated path with no query");
         assert_eq!(parse_since_param("GET /narration?foo=bar&since=7 HTTP/1.1"), 7, "since not the first param");
+    }
+
+    #[test]
+    /// Same contract as the map slot: a client on the current version gets no payload back, and a
+    /// NULL payload on a new version is the "combat is over, clear everything" signal — which is
+    /// the only way a player device learns to drop the initiative it rolled.
+    #[test]
+    fn initiative_response_follows_the_same_version_contract_as_maps() {
+        let published = BroadcastInitiative {
+            version: 4,
+            payload: Some(serde_json::json!({ "order": ["Mira"], "round": 1, "hiddenCount": 2 })),
+        };
+        let current = initiative_response(&published, 4);
+        assert!(current.get("initiative").is_none(), "already current: {current}");
+        let behind = initiative_response(&published, 2);
+        assert_eq!(behind["initiative"]["order"][0], "Mira", "{behind}");
+        assert_eq!(behind["initiative"]["hiddenCount"], 2, "{behind}");
+
+        // Combat ended: a new version whose payload is explicitly null.
+        let ended = BroadcastInitiative { version: 5, payload: None };
+        let r = initiative_response(&ended, 4);
+        assert!(r["initiative"].is_null(), "end of combat must send an explicit null: {r}");
     }
 
     #[test]

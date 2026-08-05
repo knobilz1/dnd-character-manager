@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { availableMonitors, primaryMonitor } from '@tauri-apps/api/window';
+import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile, writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
@@ -17,7 +17,7 @@ import type { Absence, AbsenceMap, AbsenceMode } from '../../utils/dmPrompt';
 import { buildSheetDigest } from '../../utils/sheetDigest';
 import { cn } from '../../utils/cn';
 import { hasKnownHp } from '../../utils/partyHp';
-import { parseDmReply, applyDmActions, applyBattleLog, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
+import { parseDmReply, applyDmActions, applyBattleLog, maskInitiativeForPlayers, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
 import type { BattleLog, BattleMode } from '../../utils/dmActions';
 import { disputedCells } from '../../utils/boardCrossCheck';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
@@ -709,6 +709,9 @@ export function DMConsolePage() {
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  /** Set when the user tried to close the window mid-sitting; see the close-guard effect. */
+  const [closeGuardOpen, setCloseGuardOpen] = React.useState(false);
+  const [closeGuardEnding, setCloseGuardEnding] = React.useState(false);
   const [turns, setTurns] = React.useState<Turn[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [warning, setWarning] = React.useState<string | null>(null);
@@ -1190,6 +1193,13 @@ export function DMConsolePage() {
   // close over a stale activeCampaignId — mirror it into a ref like partyRef.
   const campaignIdRef = React.useRef(activeCampaignId);
   campaignIdRef.current = activeCampaignId;
+  // Whether closing the window right now would LOSE something. Same condition
+  // wrapUpCurrentSession uses to decide there's anything to recap — a campaign
+  // is open and the table has actually said something. Mirrored into a ref
+  // because the close-requested listener is registered once at mount and would
+  // otherwise close over an empty `turns`.
+  const sittingIsLiveRef = React.useRef(false);
+  sittingIsLiveRef.current = !!activeCampaignId && turns.length > 0;
   // Mirrors activeModuleId for the same reason campaignIdRef exists — runTurn
   // can fire from a listener registered once at mount (drainQueue) and would
   // otherwise close over a stale value. Also lets resolveChapterSection
@@ -1277,6 +1287,13 @@ export function DMConsolePage() {
   const [battleLog, setBattleLog] = React.useState<BattleLog | null>(null);
   const battleLogRef = React.useRef(battleLog);
   battleLogRef.current = battleLog;
+  // DEV-only escape hatch, same idea as useCreatorStore's `__creator`: the log is React state
+  // and never touches disk, so a headless harness has no other way to read what the DM actually
+  // recorded — and `environment` is exactly the field whose bugs are invisible from the prose.
+  // Tree-shaken out of production builds by the import.meta.env.DEV guard.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as Window & { __battleLog?: BattleLog | null }).__battleLog = battleLog;
+  }
   // The campaign's positioning style (theater / grid / hex), loaded per campaign
   // from the backend (read_battle_mode) and sent to the DM every turn. Ref so
   // runTurn/drainQueue (which close over refs, not state) read the live value.
@@ -1305,11 +1322,11 @@ export function DMConsolePage() {
   // row and nothing more: the DM is looking at actual humans, and someone
   // playing off a printed sheet is present while never appearing here.
   const [presentOnLan, setPresentOnLan] = React.useState<string[]>([]);
-  // Digests of the characters the DM itself is running, handed over ONCE on the
-  // first turn after roll call (see buildTurnPrompt's `absentSheets`). Not a
-  // per-turn cost: the numbers don't change and the resumed CLI transcript
-  // keeps them for the rest of the sitting.
-  const pendingAbsentSheetsRef = React.useRef<string | null>(null);
+  // Full digests of every sheet at the table, handed over ONCE on the first turn
+  // after roll call (see buildTurnPrompt's `partySheets`). Not a per-turn cost:
+  // these numbers don't change and the resumed CLI transcript keeps them for the
+  // rest of the sitting.
+  const pendingPartySheetsRef = React.useRef<string | null>(null);
 
   // Only polled while the roll-call dialog is actually open — presence is a
   // decoration on one dialog, not something the console needs to know
@@ -2206,10 +2223,10 @@ export function DMConsolePage() {
       // And for a recalled chapter — reference material the DM pulled up.
       const recalledChapter = pendingRecalledChapterRef.current ?? undefined;
       pendingRecalledChapterRef.current = null;
-      // Same one-shot consume for the absent characters' sheet digests, handed
-      // over on the first turn after roll call and never repeated.
-      const absentSheets = pendingAbsentSheetsRef.current ?? undefined;
-      pendingAbsentSheetsRef.current = null;
+      // Same one-shot consume for the party's sheet digests, handed over on the
+      // first turn after roll call and never repeated.
+      const partySheets = pendingPartySheetsRef.current ?? undefined;
+      pendingPartySheetsRef.current = null;
       const prompt = buildTurnPrompt({
         party: partyRef.current,
         spokenText,
@@ -2222,7 +2239,7 @@ export function DMConsolePage() {
         battleLog: battleLogRef.current,
         interruption,
         absent: absentRef.current,
-        absentSheets,
+        partySheets,
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
 
@@ -2493,8 +2510,22 @@ export function DMConsolePage() {
             );
           }
           setBattleLog(null);
+          // Combat is over: every connected sheet clears the order AND the initiative it rolled
+          // for this fight. Fire-and-forget — a listener that isn't running must not stop the
+          // battle from ending on the DM's own screen.
+          invoke('clear_broadcast_initiative').catch((e) =>
+            console.warn('Failed to clear the players\' initiative:', e));
         } else if (actions.battleLog || actions.removeCombatant?.length) {
-          setBattleLog((prev) => applyBattleLog(prev, actions.battleLog, actions.removeCombatant));
+          setBattleLog((prev) => {
+            const next = applyBattleLog(prev, actions.battleLog, actions.removeCombatant);
+            // Publish the PLAYER-SAFE view of the order whenever the log moves. Masked here rather
+            // than anywhere downstream, so the broadcast slot only ever holds what players may see.
+            if (next?.initiative?.length) {
+              invoke('set_broadcast_initiative', { initiative: maskInitiativeForPlayers(next) })
+                .catch((e) => console.warn('Failed to publish the turn order:', e));
+            }
+            return next;
+          });
         }
       }
 
@@ -2821,7 +2852,7 @@ export function DMConsolePage() {
     // and the next sitting re-gates on its own roll call.
     setAbsent({});
     setRollCallTaken(false);
-    pendingAbsentSheetsRef.current = null;
+    pendingPartySheetsRef.current = null;
     // Every borrowed sheet goes back: clearing the assignments is what makes
     // the borrower's device drop the character from its own borrowed store on
     // its next poll.
@@ -2856,6 +2887,57 @@ export function DMConsolePage() {
   async function handleEndSession() {
     stopSpeakingAndClearQueue();
     await wrapUpCurrentSession();
+  }
+
+  /** Closing the window mid-sitting silently throws away the night.
+   *
+   *  End Session is what asks the engine for a recap, appends it to the campaign's MEMORY.md and
+   *  resets the --resume chain. Nothing else does: quitting just kills the process, and the turns
+   *  live only in React state until that recap runs. So a close request while a sitting is live is
+   *  intercepted and the choice handed back to the user.
+   *
+   *  Registered ONCE at mount and gated on a ref, deliberately. Re-registering per turn would churn
+   *  a native listener on every message, and gating inside the handler means an ordinary quit — no
+   *  campaign open, or nothing said yet — is never interrupted.
+   *
+   *  ⚠️ The way OUT is `destroy()`, and it needs `core:window:allow-destroy` in
+   *  capabilities/default.json. v0.25.5 shipped without it and the console could not be closed AT
+   *  ALL — not just mid-session. `onCloseRequested` is not a passive notification: its wrapper ends
+   *  with `if (!evt.isPreventDefault()) await this.destroy()`, so simply returning from the handler
+   *  routes an ordinary quit straight into a denied destroy, and nothing happens. `close()` is no
+   *  escape either — it re-emits close-requested, so a window with a listener can only ever be shut
+   *  by destroy(). Do not "simplify" this back to close(), and do not drop that permission. */
+  React.useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (!sittingIsLiveRef.current) return; // nothing to lose — the wrapper destroys it
+        event.preventDefault();
+        setCloseGuardOpen(true);
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((e) => console.warn('Close guard not armed (session-loss warning disabled):', e));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  /** "End session" from the close guard: the SAME path as the toolbar button, then actually go. */
+  async function closeGuardEndSession() {
+    setCloseGuardEnding(true);
+    try {
+      await handleEndSession();
+    } catch (e) {
+      // A failed recap must not trap the user in a dialog they cannot leave. Surface it and still
+      // let them close — the alternative is an app that will not quit.
+      console.error('End Session failed while closing; closing anyway:', e);
+    }
+    await getCurrentWindow().destroy();
   }
 
   /** Switching campaigns via the picker below — closes out whatever was
@@ -4471,15 +4553,21 @@ export function DMConsolePage() {
     });
   }
 
-  /** Close roll call and hand the DM the sheets it needs. Digests go only to
-   *  characters the DM itself is running: autopilot defends and follows, so it
-   *  makes no tactical choices and needs no spell list, and a proxied character
-   *  is being run by a person with the real sheet in front of them. */
+  /** Every sheet at the table, digested once for the DM.
+   *
+   *  This used to hand over only the characters the DM itself was running, on the theory that a
+   *  present player has their own sheet in front of them. That was the wrong line to draw. The DM
+   *  is the one resolving attacks AGAINST them and adjudicating their spells, and with nothing but
+   *  a name and an HP bar it cannot: watched it stop dead mid-fight and ask "Dagna — AC, what is
+   *  it?" three turns running. The secrecy that matters at this table runs the other way — players
+   *  don't see the DM's side — so the DM gets everything. */
+  function partySheetDigests(): string | null {
+    const digests = rollCallRows.filter((r) => r.sheet).map((r) => buildSheetDigest(r.sheet!));
+    return digests.length ? digests.join('\n\n') : null;
+  }
+
   function confirmRollCall() {
-    const digests = rollCallRows
-      .filter((r) => absent[r.key]?.mode === 'dm' && r.sheet)
-      .map((r) => buildSheetDigest(r.sheet!));
-    pendingAbsentSheetsRef.current = digests.length ? digests.join('\n\n') : null;
+    pendingPartySheetsRef.current = partySheetDigests();
     void publishProxyAssignments();
     setRollCallTaken(true);
     setRollCallOpen(false);
@@ -4490,7 +4578,7 @@ export function DMConsolePage() {
    *  solo testing to a single click. */
   function markEveryonePresent() {
     setAbsent({});
-    pendingAbsentSheetsRef.current = null;
+    pendingPartySheetsRef.current = partySheetDigests();
     void publishProxyAssignments({});
     setRollCallTaken(true);
     setRollCallOpen(false);
@@ -6532,6 +6620,34 @@ export function DMConsolePage() {
           <Button variant="outline" onClick={() => setLoreOpen(false)}>Close</Button>
           <Button onClick={handleUpdateLore} disabled={!!moduleBusy || (!loreAddition.trim() && !pendingLoreUpdateFile)}>
             {moduleBusyLabel ?? 'Fold into campaign lore'}
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Close guard. No onClose: the whole point is that dismissing it by accident is the outcome
+          we are preventing, so the only ways out are the two explicit choices. */}
+      <Dialog open={closeGuardOpen} onClose={() => {}} title="End the session first?">
+        <p className="text-sm text-slate-300 mb-2">
+          A session is still running. If you close now, <strong className="text-amber-300">this
+          night&apos;s events are lost</strong> — the DM never gets to write its recap into the
+          campaign&apos;s memory, so nothing that happened tonight will be remembered next time.
+        </p>
+        <p className="text-xs text-slate-500 mb-4">
+          Ending the session asks the DM for a summary, saves it, and then closes.
+        </p>
+        <div className="flex justify-end gap-2 flex-wrap">
+          <Button variant="ghost" onClick={() => setCloseGuardOpen(false)} disabled={closeGuardEnding}>
+            Keep playing
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => { void getCurrentWindow().destroy(); }}
+            disabled={closeGuardEnding}
+          >
+            Close anyway
+          </Button>
+          <Button onClick={() => { void closeGuardEndSession(); }} disabled={closeGuardEnding}>
+            {closeGuardEnding ? 'Ending session…' : 'End session & close'}
           </Button>
         </div>
       </Dialog>

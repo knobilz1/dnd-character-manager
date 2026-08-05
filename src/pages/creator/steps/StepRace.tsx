@@ -5,7 +5,8 @@ import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
 import { bookEnabled } from '../../../utils/bookEnabled';
 import { FlexibleAsiPicker } from './FlexibleAsiPicker';
-import type { Race, CharacterGender } from '../../../types';
+import type { BookId, Race, CharacterGender } from '../../../types';
+import { BOOKS } from '../../../data/books';
 
 const CharacterViewport = React.lazy(() => import('../../sheet/CharacterViewport'));
 
@@ -32,28 +33,42 @@ export function StepRace() {
     bookEnabled(r, draft.enabledBooks) && r.isSubrace && !r.hidden
   );
 
+  // A parent whose only purpose is to hold subraces is not itself selectable — you play a Hill
+  // Dwarf, never a generic "Dwarf" — so those ids are dropped from the flat list below. (In this
+  // data elf/dwarf/halfling/gnome have no parent entry at all; the ids are dangling. Shifter does.)
   const subGroupIds = [...new Set(
     subraceRaces.map(r => r.parentRaceId).filter((id): id is string => !!id)
   )];
-  function groupLabel(parentId: string): string {
-    const parent = ALL_RACES.find(r => r.id === parentId);
-    return parent ? parent.name : parentId.charAt(0).toUpperCase() + parentId.slice(1);
-  }
   const racesWithoutSubs = availableRaces.filter(r => !subGroupIds.includes(r.id));
 
-  // One alphabetical list of PRIMARY races, not a "Races" pile and a "Subraces" pile. Those two
-  // headings described how the data is shaped, not how anyone looks for a race — nobody hunting a
-  // Rock Gnome thinks "that is a subrace". A primary race that has subraces becomes a labelled
-  // group holding them; the other 102 are just cards, because a heading over a single card
-  // repeating its own name is noise. Only elf, dwarf, halfling, gnome and Shifter have subraces.
-  const raceEntries: { key: string; name: string; group?: Race[]; race?: Race }[] = [
-    ...subGroupIds.map(parentId => ({
-      key: parentId,
-      name: groupLabel(parentId),
-      group: subraceRaces.filter(s => s.parentRaceId === parentId),
-    })),
-    ...racesWithoutSubs.map(r => ({ key: r.id, name: r.name, race: r })),
-  ].sort((a, b) => a.name.localeCompare(b.name));
+  /** What a card is called once it stands on its own.
+   *
+   *  Most subrace names already carry their family — "Rock Gnome", "High Elf", "Drow (Dark Elf)" —
+   *  and reading "Rock Gnome Gnome" would be worse than the problem. The Shifters are the
+   *  exception: ERLW names them Beasthide / Longtooth / Swiftstride / Wildhunt, which say nothing
+   *  about being Shifters at all, so out of a group box they become four cards nobody can find. */
+  function cardName(r: Race): string {
+    if (!r.isSubrace || !r.parentRaceId) return r.name;
+    const parent = ALL_RACES.find(x => x.id === r.parentRaceId);
+    const label = parent?.name ?? r.parentRaceId.split('-').pop()!;
+    const word = label.replace(/s$/i, '');
+    return r.name.toLowerCase().includes(word.toLowerCase())
+      ? r.name
+      : `${r.name} ${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+  }
+
+  // ONE flat list, ordered by BOOK and nothing else — no subrace group boxes, no parent headings.
+  // The groups were an extra axis to read past: a player scanning for a race knows which books are
+  // on their table and knows the name they want, and "is this a subrace" is a fact about how the
+  // data is shaped rather than how anyone searches. Sorted by BOOKS (publication order, so PHB
+  // leads and third-party trails), then alphabetically inside each book — with every sourcebook
+  // enabled this runs to 121 races and a single A-Z run buries the PHB dozen among sixty
+  // dragonmarked and Eberron options.
+  const bookOrder = new Map(BOOKS.map((b, i) => [b.id, i]));
+  const raceEntries = [...racesWithoutSubs, ...subraceRaces]
+    .map(r => ({ key: r.id, name: cardName(r), book: r.sourceBook as BookId, race: r }))
+    .sort((a, b) =>
+      (bookOrder.get(a.book) ?? 99) - (bookOrder.get(b.book) ?? 99) || a.name.localeCompare(b.name));
 
   function selectRace(race: Race) {
     setSelected(race);
@@ -75,7 +90,7 @@ export function StepRace() {
       .join(', ') || 'Increase from background';
   }
 
-  const RaceCard = ({ race }: { race: Race }) => (
+  const RaceCard = ({ race, label }: { race: Race; label: string }) => (
     <div
       onClick={() => selectRace(race)}
       className={cn(
@@ -86,7 +101,7 @@ export function StepRace() {
       )}
     >
       <div className="flex items-center justify-between mb-1">
-        <h4 className="font-bold text-white text-sm">{race.name}</h4>
+        <h4 className="font-bold text-white text-sm">{label}</h4>
         <Badge color="slate">{race.size}</Badge>
       </div>
       <p className="text-xs text-slate-400 mb-1.5">{race.flexibleAsi ? 'Flexible ability increase' : abilityStr(race.abilityScoreIncreases)}</p>
@@ -101,23 +116,19 @@ export function StepRace() {
         <h2 className="text-2xl font-bold text-white mb-2">Choose Your Race</h2>
         <p className="text-slate-400 mb-4">Your race determines your ability score bonuses, speed, size, languages, and racial traits.</p>
 
-        {/* A group spans the full row so the alphabetical order still reads straight down the
-            grid — Dragonborn, Dwarf (group), Duergar — instead of groups being hoisted above. */}
+        {/* The book heading spans the full row, so the order reads straight down the grid instead
+            of being hoisted above it. */}
         <div className="grid gap-2 sm:grid-cols-2">
-          {raceEntries.map(entry => entry.race ? (
-            <RaceCard key={entry.key} race={entry.race} />
-          ) : (
-            <div
-              key={entry.key}
-              className="sm:col-span-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-2"
-            >
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 pl-1">
-                {entry.name}
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {entry.group!.map(race => <RaceCard key={race.id} race={race} />)}
-              </div>
-            </div>
+          {raceEntries.map((entry, i) => (
+            <React.Fragment key={entry.key}>
+              {/* A heading whenever the book changes — a sort nobody can see is just a jumble. */}
+              {(i === 0 || raceEntries[i - 1].book !== entry.book) && (
+                <h3 className="sm:col-span-2 text-sm font-bold text-slate-300 uppercase tracking-wider mt-3 first:mt-0 pb-1 border-b border-slate-700/60">
+                  {BOOKS.find(b => b.id === entry.book)?.name ?? entry.book}
+                </h3>
+              )}
+              <RaceCard race={entry.race} label={entry.name} />
+            </React.Fragment>
           ))}
         </div>
       </div>
@@ -139,7 +150,7 @@ export function StepRace() {
             {/* Race label overlay */}
             {selected && (
               <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1">
-                <span className="text-white text-xs font-bold">{selected.name}</span>
+                <span className="text-white text-xs font-bold">{cardName(selected)}</span>
               </div>
             )}
 
@@ -177,7 +188,7 @@ export function StepRace() {
         {/* Race details */}
         {selected ? (
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-            <h3 className="text-xl font-bold text-white mb-1">{selected.name}</h3>
+            <h3 className="text-xl font-bold text-white mb-1">{cardName(selected)}</h3>
             <div className="flex flex-wrap gap-2 mb-4">
               <Badge>{selected.size}</Badge>
               <Badge>Speed {selected.speed}ft</Badge>

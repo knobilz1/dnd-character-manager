@@ -1,3 +1,4 @@
+mod background_gen;
 mod campaign;
 mod cli_provider;
 mod dm;
@@ -5,6 +6,7 @@ mod local_llm;
 mod maplog;
 mod oauth;
 mod pack_profile;
+mod srd_monsters;
 mod party_listener;
 mod terrain;
 mod tile_library;
@@ -35,6 +37,7 @@ pub fn run() {
       oauth::start_oauth_server,
       oauth::get_fresh_access_token,
       oauth::clear_google_token,
+      background_gen::generate_character_background,
       dm::ask_dm,
       dm::ask_dm_engine,
       dm::warmup_dm_session,
@@ -62,6 +65,8 @@ pub fn run() {
       party_listener::push_narration,
       party_listener::set_broadcast_map,
       party_listener::clear_broadcast_map,
+      party_listener::set_broadcast_initiative,
+      party_listener::clear_broadcast_initiative,
       party_listener::present_players,
       party_listener::set_proxy_assignments,
       party_listener::set_shared_characters,

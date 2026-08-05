@@ -28,12 +28,15 @@ import { DmNarrationLog } from '../../components/DmNarrationLog';
 import { DmMapView } from '../../components/DmMapView';
 import { TableCameraButton } from '../../components/TableCameraButton';
 import { SendToDmButton } from '../../components/SendToDmButton';
-import { PullFromDmButton, DmHasNewerSheetBanner } from '../../components/PullFromDmButton';
+import { DmSyncOfferDialog } from '../../components/DmSyncOffer';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
 import { YouAreDeadOverlay } from '../../components/YouAreDeadOverlay';
 import { useSnapshotStore } from '../../store/useSnapshotStore';
 import { useThemeStore } from '../../store/useThemeStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { useDmConnection } from '../../hooks/useDmConnection';
+import { useDmInitiativeFeed } from '../../hooks/useDmInitiativeFeed';
+import { sendTalkToDM } from '../../utils/dmConnect';
 import { getClass, baseClassId } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
@@ -427,7 +430,6 @@ export function SheetPage() {
           </button>
           <DiceRoller exhaustionLevel={exhaustionLevel} characterName={character.name} />
           <SendToDmButton character={character} />
-          {!isBorrowed && <PullFromDmButton character={character} />}
           <TalkToDMButton characterName={character.name} />
           <DmNarrationLog characterName={character.name} />
           <DmMapView />
@@ -542,7 +544,18 @@ export function SheetPage() {
                 title="Click to roll initiative"
               >
                 <p className="text-xs text-slate-400 group-hover:text-blue-400 transition-colors">Init <span className="text-[10px] opacity-60">🎲</span></p>
-                <p className="font-bold text-white">{initiative >= 0 ? `+${initiative}` : `${initiative}`}</p>
+                {/* Once rolled, THIS FIGHT's number is what matters — the bonus is only useful
+                    until you have rolled it. Shown large with the bonus demoted underneath. */}
+                {character.initiativeRoll != null ? (
+                  <>
+                    <p className="font-bold text-blue-300 leading-tight">{character.initiativeRoll}</p>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      rolled ({initiative >= 0 ? `+${initiative}` : initiative})
+                    </p>
+                  </>
+                ) : (
+                  <p className="font-bold text-white">{initiative >= 0 ? `+${initiative}` : `${initiative}`}</p>
+                )}
               </button>
               {/* Speed */}
               <div className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center', exhaustionLevel >= 2 ? 'border-orange-700/60' : 'border-slate-700')}
@@ -668,9 +681,11 @@ export function SheetPage() {
         <div className="flex-1 overflow-y-auto scrollbar-thin p-4 min-w-0">
           {/* "The DM has a newer copy of you" — the week after a missed
               session, where someone else's device holds everything that
-              happened to this character. Never shown on a borrowed sheet:
-              that IS the DM's copy. */}
-          {!isBorrowed && <DmHasNewerSheetBanner character={character} />}
+              happened to this character. Raises itself as soon as this device
+              connects to a DM holding a newer copy; there is no button to go
+              looking for, because a returning player doesn't know to look.
+              Never shown on a borrowed sheet: that IS the DM's copy. */}
+          {!isBorrowed && <DmSyncOfferDialog character={character} />}
           <Tabs
             tabs={[
               { id: 'combat', label: 'Combat' },
@@ -1760,6 +1775,35 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   const { triggerRoll: dsTrigger, lastResult } = useDiceStore();
   const seenDeathNonce = React.useRef<number>(-1);
 
+  // ── Initiative ──────────────────────────────────────────────────────────
+  /** The sheet has always been able to ROLL initiative — the stat is clickable — but the result
+   *  vanished into the dice roller. A fight needs that number to persist: the player has to know
+   *  where they sit in the order, and when a DM bot is running the table it needs the number to
+   *  build the order at all.
+   *
+   *  Sent to the DM independently of the dice roller's auto-send toggle. That toggle is about
+   *  whether routine rolls become chatter; initiative is not chatter, it is the input the DM
+   *  cannot run the encounter without, and defaulting it off would leave the bot guessing. */
+  const setInitiativeRoll = useCharacterStore(st => st.setInitiativeRoll);
+  const dmIp = useSettingsStore((st) => st.dmIp);
+  const dmConnected = useDmConnection();
+  const turnOrder = useDmInitiativeFeed();
+  const seenInitNonce = React.useRef<number>(-1);
+
+  React.useEffect(() => {
+    if (!lastResult || lastResult.label !== 'Initiative') return;
+    if (lastResult.nonce === seenInitNonce.current) return;
+    seenInitNonce.current = lastResult.nonce;
+    const total = lastResult.value;
+    setInitiativeRoll(total);
+    if (dmConnected && character?.name?.trim()) {
+      // Fire-and-forget: a DM that has gone away must not block the roll from landing on the sheet.
+      sendTalkToDM(`${character.name} rolled ${total} for initiative.`, character.name, dmIp)
+        .catch((e) => console.warn('Initiative not delivered to the DM:', e));
+    }
+  }, [lastResult, dmConnected, dmIp, character?.name, setInitiativeRoll]);
+
+
   React.useEffect(() => {
     if (!lastResult) return;
     if (lastResult.label !== 'Death Save') return;
@@ -1877,6 +1921,41 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           <button onClick={endConcentration} className="text-xs text-amber-400 hover:text-amber-200 px-2 py-1 rounded border border-amber-700 hover:border-amber-500 transition-colors">
             End
           </button>
+        </div>
+      )}
+
+      {/* Turn order, when a DM bot is running the fight. Enemies are absent in round 1 by design —
+          the DM masks them before publishing (see maskInitiativeForPlayers), so this component
+          never holds the full order and cannot leak it. */}
+      {turnOrder && turnOrder.order.length > 0 && (
+        <div className="bg-sky-900/30 border border-sky-600 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sky-300 font-medium text-sm">
+              Turn order{turnOrder.round ? ` · round ${turnOrder.round}` : ''}:
+            </span>
+            {turnOrder.order.map((n) => (
+              <span
+                key={n}
+                className={cn(
+                  'text-xs px-2 py-1 rounded border',
+                  n === turnOrder.active
+                    ? 'border-sky-400 bg-sky-800/60 text-white font-bold'
+                    : 'border-sky-800 bg-sky-950/40 text-sky-200',
+                  n === character.name && 'ring-1 ring-amber-400/70',
+                )}
+              >
+                {n}
+              </span>
+            ))}
+            {turnOrder.hiddenCount > 0 && (
+              <span
+                className="text-xs px-2 py-1 rounded border border-slate-700 bg-slate-900/60 text-slate-500 italic"
+                title="You don't know when they act yet"
+              >
+                +{turnOrder.hiddenCount} unknown
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -2660,7 +2739,16 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           {/* Pact magic */}
           {pactMagic && (
             <div className="mb-3">
-              <p className="text-xs text-slate-400 mb-1">Pact Magic (Level {pactMagic.slotLevel})</p>
+              {/* Say what the level MEANS. A warlock has no other slots — every one is their
+                  highest level and none can be spent lower — so a sheet listing only "Level 3"
+                  reads as though the 1st- and 2nd-level slots went missing. Asked in exactly
+                  those words by a player looking at their own level 5 Hexblade. */}
+              <p className="text-xs text-slate-400 mb-1">
+                Pact Magic (Level {pactMagic.slotLevel})
+                {pactMagic.slotLevel > 1 && (
+                  <span className="text-slate-500"> · all slots are level {pactMagic.slotLevel}; lower spells cast at {pactMagic.slotLevel}</span>
+                )}
+              </p>
               <div className="flex gap-2">
                 {Array.from({ length: pactMagic.slotsTotal }).map((_, i) => (
                   <button

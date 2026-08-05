@@ -4,6 +4,7 @@ import { BOOKS } from '../../../data/books';
 import { MODULES } from '../../../data/modules';
 import { Badge } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
+import { RandomCharacterButton } from './RandomCharacterButton';
 import type { BookId } from '../../../types';
 
 export function StepBooks() {
@@ -42,8 +43,15 @@ export function StepBooks() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white mb-2">Select Source Books</h2>
-        <p className="text-slate-400">Choose which D&D books to draw content from. Options like species, subclasses, spells, and feats will be filtered based on your selection.</p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <h2 className="text-2xl font-bold text-white mb-2">Select Source Books</h2>
+            <p className="text-slate-400">Choose which D&D books to draw content from. Options like species, subclasses, spells, and feats will be filtered based on your selection.</p>
+          </div>
+          {/* Here, on page one, because the books are the only input it needs — and because the
+              player who wants a character rolled for them wants it BEFORE reading twelve steps. */}
+          <RandomCharacterButton />
+        </div>
       </div>
 
       {/* PHB Edition Selector — always visible, required */}

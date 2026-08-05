@@ -112,6 +112,15 @@ Most turns you'll just see the active module's current chapter text (if any) and
 
 ## How to DM
 - Track initiative yourself. Each round: narrate enemies, resolve actions, prompt the next player by name.
+
+### Starting a fight — initiative
+When a fight actually starts, build the order before you narrate the first round:
+- **Players send you their own numbers.** A connected sheet reports them as "<Name> rolled 17 for initiative." — that total already includes their Dexterity and any bonuses, so take it as given and never re-roll or adjust it. If someone hasn't sent one, ask that player for their initiative by name rather than inventing it. A player at the table with no sheet connected just tells you out loud; treat that the same way.
+- **Roll for your own side.** Every enemy or NPC in the fight needs a number from you — one roll per distinct group is fine (all four goblins can share a number), a solo boss rolls its own. Use the creature's Dexterity where you know it.
+- **Publish the merged order** in the same turn, highest first, via `battleLog.initiative` as the list of names, and set `active` to whoever is first and `round` to 1. Combatants that share a number can go in any order you like — just be consistent afterwards.
+- **Keep it current.** Anyone who joins mid-fight gets a number and goes into `initiative` in the right place; anyone who drops comes out via `removeCombatant`. If a player re-sends a different number (a re-roll, a mistake corrected), replace theirs and re-publish the order.
+- **In round 1, never say where the enemies fall in the order.** Not their numbers, not their slots, not how many slots. "Dagna, you're first — then the ghouls, Vess, and Rooth" hands the table a countdown of exactly when they're about to be hit, which nobody at a real table has before the enemy has ever moved. Round 1 you address the players only: tell whoever is up that they're up ("Dagna, you're first — what do you do?"), and when an enemy's slot arrives, just narrate it happening. The players' own numbers and their order relative to EACH OTHER are theirs and may be said freely. From round 2 the party has watched the enemies act, so the full order is fair game and you can state it plainly. This is the same line the players' own sheets draw — their turn-order display hides the enemy side in round 1 and shows it from round 2 — so saying it aloud in round 1 leaks precisely what the app is withholding.
+- Never the enemies' rolled initiative VALUES, in any round.
 - Balance the spotlight across a session — check in with quieter players by name rather than only following whoever spoke most recently or is loudest.
 - Prefer open prompts ("what do you do?") over leading yes/no ones ("do you want to attack?") — let players drive the scene instead of picking from an implied menu.
 - Roll monster attacks, saves, and damage yourself and state the result; let players roll their own d20s unless asked to roll for them, in which case just state a result plausible for the situation. Never speak the raw number or mechanic behind ANY roll you make on the DM's side of the screen (enemy/NPC attack rolls, saves, checks, initiative, damage dice, DCs) — the players only get the in-fiction outcome ("the guard's blade skims past your shoulder", "the two watchmen shove in first", never "he rolled a 14" or "the watchmen rolled a 9 for initiative"). A player's OWN rolls are theirs to report and discuss freely — this rule is only about what happens behind the screen.
@@ -395,6 +404,22 @@ When YOU decide what the party runs into (an ambush, a wandering threat, a guard
 - **Scale it to THIS party, not to the drama.** Match the fight to the party's level and headcount — a real threat they can still beat, not a curbstomp in either direction. Rough anchors for a party around level L: a lone "boss" creature should sit near CR L and never dramatically above it (for a 5th-level party a CR 5–6 solo is already a hard fight; a CR 12 is a bloodbath and a CR 20 is an instant TPK — never do that). A pack of weaker creatures works well when each is roughly CR L/4 or less, a handful of them at a time. Prefer a MIX — one tougher threat plus a few minions plays better than a single glass giant or a swarm of identical mooks. When in doubt, aim a little easy: a close, winnable fight beats an accidental party wipe from a random encounter.
 - **Place them so their tactics read.** Enemies that fight at RANGE — archers, crossbowmen, casters, artillery — start BACK: at distance, on high ground, behind cover, where they can open fire without being reached on turn one. MELEE brutes start closer, or where they can close fast — flanking out of the reeds/trees, holding a chokepoint, charging the front line. Ambushers stay hidden until they strike. Don't line the whole enemy side up on one rank at one range — stagger them by role so the party has to choose which threat to answer first. If a prepared battle map is loaded for this fight, place enemies on its real cells and honor its `Deployment:` section.
 
+### Turn order — never read it aloud
+Supersedes any older line telling you to announce the order in fiction ("the goblins move first, then Mira, then Thorin"). Don't do that, in any round.
+
+- **Never recite the turn order.** Not at the top of a round, not when someone asks how it's going, not ever. Not the enemies' slots, not how many of them there are in it, not the initiative values, and not a full read-back of the party's own order either.
+- **Just say whose turn it is, when it is.** "Dagna, you're up — what do you do?" When an enemy's slot comes round, narrate it happening; don't announce it first. The player who is up is the only person who needs to hear anything about order.
+- **The table already has it.** Every player's own device shows the live turn order, published from the battle log — that display is where the order lives, not your narration. Reading it out is at best redundant and at worst hands them a countdown of exactly when they're about to be hit.
+- You still TRACK the whole order in `battleLog.initiative`, exactly as before, and keep `active` current. This rule is only about what you say out loud.
+
+### Rolling — yours stay behind the screen
+You have every player character's real sheet: AC, saving throws, passive Perception, spell save DC. It's in the party status line every turn and in the sheet digests handed to you at roll call.
+
+- **Never ask a player for a number you already have.** "What's your AC?" mid-swing stops the fight dead over something written down in front of you. AC, saves, passive Perception and their spell save DCs are yours to read, not to ask for. Ask a player only for things that are genuinely theirs to decide or roll: their attack rolls, their damage, their saves, their skill checks, what they do.
+- **Roll the monsters' dice yourself and keep the numbers.** Say what HAPPENS — "the ghoul's claws rake across your shield and score your arm" or "it swipes wide and hits nothing but water" — never "that's a 16 to hit". Compare it to their AC silently and narrate the result. A raw to-hit number tells the table exactly what the monster's bonus is, turns every attack into arithmetic they have to do for you, and reads like a spreadsheet instead of a fight.
+- **A player's own roll gets an outcome back, not arithmetic.** When someone reports "16 to hit", the answer is what happens — "it punches through and the thing reels" or "the blade skids off its ribs" — never "16 clears AC 12". Confirming their number against the enemy's AC out loud hands the table that AC for the rest of the fight, and does it while sounding like you're just being helpful.
+- Same for every other number on your side: enemy AC, HP, saves, DCs, resistances. Describe them ("it's bleeding badly and slowing down", "your blade barely bites — something under that hide turns steel") and let the table work the rest out by playing. The one exception is a number the rules put in the players' hands: the DC of a save THEY have to roll, which you must state so they know what to beat.
+
 ### Battle mode
 Each turn your prompt states one line, `Battle mode: <name>.`. This table's mode and exactly how it changes the way you narrate placement:
 - **Theater of the Mind** — there is NO battle map, NO grid, and NO miniatures on the table. Never tell a player to move a mini, never reference a square/hex, a coordinate, or an exact map. Positioning lives entirely in the fiction: describe range in rough terms a listener can picture and act on ("about 30 feet, across the chasm", "right beside you", "the archers are up on the ledge, out of easy reach"), and adjudicate reach/cover/line-of-sight by what makes sense in the scene, not by counting cells. When you note a combatant's position in the battle log, use the `position` field as a short plain-English phrase ("flanking Thorin in the doorway", "prone behind the altar").
@@ -424,6 +449,15 @@ This campaign may have printable battle maps prepared for its encounters — lis
 /// Appended to a pre-existing CLAUDE.md that predates the dm_rules import.
 /// New campaigns get this line inside BASE_CLAUDE_MD's own import list.
 const DM_RULES_IMPORT_LINE: &str = "\n@memory/dm_rules.md\n";
+
+/// The SRD monster index rides the same route as the rules: written into the campaign's memory
+/// folder and imported by CLAUDE.md, so it lands in the CACHED standing block rather than being
+/// re-sent every turn. ~2,700 tokens for all 334 monsters grouped by challenge rating.
+///
+/// It exists because dm_combat_encounter_guidance.md measured the DM's weakness as CR-BUDGET
+/// discipline, not monster choice — it picks a creature that fits the scene and then misjudges how
+/// dangerous it is. Grouping by CR turns "a lone boss near CR L" from a guess into a lookup.
+const SRD_MONSTERS_IMPORT_LINE: &str = "\n@memory/srd_monsters.md\n";
 
 /// The rules ONE campaign actually gets, filtered from `DM_RULES` by its battle
 /// mode. `DM_RULES` documents all three modes plus the prepared-battle-map
@@ -1610,11 +1644,17 @@ fn sync_dm_rules_at(root: &Path, id: &str) -> Result<(), String> {
         crate::maplog::log("PENDING MEMORY FLUSH FAILED ON LOAD", &e);
     }
     write_atomic(&dir.join("memory").join("dm_rules.md"), &dm_rules_for_mode(&read_battle_mode_at(root, id)))?;
+    // Rewritten every load like the rules, so regenerating the index (new SRD data) reaches every
+    // existing campaign without a migration.
+    write_atomic(&dir.join("memory").join("srd_monsters.md"), crate::srd_monsters::SRD_MONSTER_INDEX)?;
     let claude_path = dir.join("CLAUDE.md");
     let original = fs::read_to_string(&claude_path).map_err(|e| e.to_string())?;
     let mut claude_md = refresh_stale_contract_lines(&strip_superseded_positioning(&original));
     if !claude_md.contains("@memory/dm_rules.md") {
         claude_md.push_str(DM_RULES_IMPORT_LINE);
+    }
+    if !claude_md.contains("@memory/srd_monsters.md") {
+        claude_md.push_str(SRD_MONSTERS_IMPORT_LINE);
     }
     if claude_md != original {
         write_atomic(&claude_path, &claude_md)?;
@@ -15936,5 +15976,46 @@ Tactics:
         for (_, line) in rows {
             println!("{line}");
         }
+    }
+
+    /// The monster index must reach EXISTING campaigns, not just new ones, and it must keep the
+    /// "this is a subset" guardrail. Both halves have bitten this project before: a rules addition
+    /// that only landed in BASE_CLAUDE_MD would be dead for every campaign already on disk, and a
+    /// partial source presented as complete is the failure mode dm_srd_monsters_plan.md was written
+    /// to prevent — the model reads absence as non-existence and stops using half the bestiary.
+    #[test]
+    fn srd_monster_index_syncs_and_keeps_its_guardrail() {
+        let idx = crate::srd_monsters::SRD_MONSTER_INDEX;
+        assert!(idx.contains("SUBSET"), "the partial-source guardrail is missing");
+        assert!(idx.contains("still fair game"), "must say a missing monster is still usable");
+        // Named in DM_RULES's own encounter examples and genuinely absent from the SRD.
+        assert!(idx.contains("mind flayer") && idx.contains("bullywug"),
+                "the guardrail must name the recommended monsters it cannot cost out");
+        // Grouped by CR, because CR-budget discipline is the measured gap.
+        assert!(idx.contains("## CR 1/4") && idx.contains("## CR 1"), "{idx:.400}");
+        // Will-o'-wisp IS in the SRD (CR 2) despite the plan memory claiming otherwise, so it must
+        // appear as an entry and NOT in the excluded list.
+        assert!(idx.contains("Will-o'-Wisp"), "will-o'-wisp is present at CR 2 and must be listed");
+
+        let tmp = std::env::temp_dir().join(format!("srdmon-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let id = "camp";
+        fs::create_dir_all(tmp.join(id).join("memory")).unwrap();
+        // An OLD campaign: CLAUDE.md with no monster import at all.
+        fs::write(tmp.join(id).join("CLAUDE.md"), "# Campaign
+").unwrap();
+        fs::write(tmp.join(id).join("battle_mode.txt"), "theater").unwrap();
+        sync_dm_rules_at(&tmp, id).unwrap();
+
+        let written = fs::read_to_string(tmp.join(id).join("memory").join("srd_monsters.md")).unwrap();
+        assert_eq!(written, idx, "the campaign copy must be the generated index verbatim");
+        let claude = fs::read_to_string(tmp.join(id).join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("@memory/srd_monsters.md"), "existing campaign never got the import: {claude}");
+
+        // Idempotent: syncing again must not add the import twice.
+        sync_dm_rules_at(&tmp, id).unwrap();
+        let claude2 = fs::read_to_string(tmp.join(id).join("CLAUDE.md")).unwrap();
+        assert_eq!(claude2.matches("@memory/srd_monsters.md").count(), 1, "{claude2}");
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

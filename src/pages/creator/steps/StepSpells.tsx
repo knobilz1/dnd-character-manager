@@ -10,11 +10,7 @@ import {
   cantripsKnownFor,
   spellsKnownFor,
   maxPreparedSpellsFor,
-  FULL_CASTER_SLOTS,
-  HALF_CASTER_SLOTS,
-  ARTIFICER_SLOTS,
-  THIRD_CASTER_SLOTS,
-  PACT_MAGIC_TABLE,
+  computeMaxSpellLevel,
 } from '../../../data/mechanics';
 import type { Spell, SpellLevel } from '../../../types';
 
@@ -25,29 +21,6 @@ const SCHOOL_COLORS: Record<string, string> = {
 };
 
 /** Returns the highest spell level the character can cast based on their slot table. */
-function computeMaxSpellLevel(
-  spellcastingType: string,
-  classId: string,
-  level: number,
-): number {
-  let slots: number[];
-  if (spellcastingType === 'pact') {
-    return PACT_MAGIC_TABLE[Math.min(level, 20)]?.slotLevel ?? 1;
-  } else if (classId === 'artificer') {
-    slots = ARTIFICER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
-  } else if (spellcastingType === 'full') {
-    slots = FULL_CASTER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
-  } else if (spellcastingType === 'half') {
-    slots = HALF_CASTER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
-  } else if (spellcastingType === 'third') {
-    slots = THIRD_CASTER_SLOTS[Math.min(level, 20)] ?? Array(9).fill(0);
-  } else {
-    return 0;
-  }
-  // slots[0] = 1st-level slots, slots[8] = 9th-level slots
-  const highestIdx = slots.reduce((max, count, i) => (count > 0 ? i : max), -1);
-  return highestIdx + 1; // convert 0-based index → spell level number
-}
 
 /** Per-spell-level CUMULATIVE caps for a wizard's spellbook. A wizard may only add
  *  a spell "of a level for which you have spell slots" (PHB p.114), so the number

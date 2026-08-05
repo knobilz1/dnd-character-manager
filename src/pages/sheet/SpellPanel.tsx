@@ -7,9 +7,11 @@ import { featGrantedSpells, featSpellChoices, spellPickOptions } from '../../dat
 import { ProficiencyPicker } from '../../components/ProficiencyPicker';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
+import { bookEnabled } from '../../utils/bookEnabled';
 import { SpellDetail } from '../creator/steps/StepSpells';
 import type { AbilityKey, Character, Spell, SpellLevel, SlotLevel } from '../../types';
 import { getClass } from '../../data/classes';
+import { getSubclass } from '../../data/subclasses';
 import { getRace } from '../../data/races';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import { casterClassOf } from '../../hooks/useCharacterDerived';
@@ -80,9 +82,26 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
   // Spells for add browser — include spells for ALL character classes so
   // multiclass casters (e.g. Fighter/Wizard, Paladin/Sorcerer) can add
   // spells from their secondary casting class.
-  const allClassIds = character.classes.map((cl: any) => cl.classId);
+  // Resolve each class to the id spell ENTRIES actually use, not the id the class carries.
+  //
+  // A 2024 druid's classId is 'druid-2024' while every druid spell lists 'druid', so matching on
+  // the raw id found nothing and the Add Spell dialog came up EMPTY for every 2024 caster. The
+  // creator has always resolved this through spellListClassId; the sheet never did.
+  //
+  // Eldritch Knight and Arcane Trickster are the same shape from the other direction: the SUBCLASS
+  // carries the list (both point at 'wizard'), so a fighter's own id would offer nothing at all.
+  const allClassIds = character.classes.map((cl) => {
+    const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+    if (sub?.spellListClassId) return sub.spellListClassId;
+    return getClass(cl.classId)?.spellListClassId ?? cl.classId;
+  });
   const availableToAdd = ALL_SPELLS.filter(s =>
-    character.enabledBooks.includes(s.sourceBook) &&
+    // bookEnabled, NOT a raw includes. The raw check was wrong in three ways at once: it ignored
+    // `alsoIn` (a spell reprinted into an enabled book stayed hidden), it ignored `hidden`, and —
+    // the one that actually bit — it missed the 2024 widening, so a PHB2024 character was offered
+    // 107 spells instead of 468. All 361 PHB spells simply vanished from Add Spell for them,
+    // because selecting the 2024 edition REPLACES 'PHB' in enabledBooks.
+    bookEnabled(s, character.enabledBooks) &&
     (classDef ? allClassIds.some(id => s.classes.includes(id)) : true) &&
     !spellbookMap.has(s.id) &&
     (filterLevel === 'all' || s.level === filterLevel) &&
@@ -502,6 +521,16 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                 }}
               >
                 <p className="text-sm font-bold text-purple-300">Pact Magic Slot (L{pactMagic.slotLevel})</p>
+                {/* Every pact slot is the warlock's highest level and there is no downcasting, so
+                    a 1st-level spell cast this way IS a 3rd-level casting — Hex runs 8 hours
+                    instead of 1, Armor of Agathys gives 15 temp HP instead of 5. The button named
+                    the slot's level but never said what that did to the spell, which is the half
+                    of Pact Magic people actually miss. */}
+                {pactMagic.slotLevel > castSpell.level && (
+                  <p className="text-xs text-purple-200/90">
+                    Casts at level {pactMagic.slotLevel} — pact slots are always your highest level and can&apos;t be spent lower.
+                  </p>
+                )}
                 <p className="text-xs text-slate-400">{pactMagic.slotsTotal - pactMagic.slotsUsed}/{pactMagic.slotsTotal} pact slots remaining</p>
               </button>
             )}

@@ -1,0 +1,252 @@
+{
+  "_readme": [
+    "Production manifest for the modular wardrobe. One mesh per (wardrobe, slot) serves ALL races:",
+    "every body shares one AccuRig UE5 skeleton, so a garment fitted once in MetaTailor applies broadly.",
+    "",
+    "PIPELINE: Tripo Studio (generate) -> download GLB -> scripts/optimize-prop-glb.cjs -> MetaTailor",
+    "(auto-fit + auto-skin-weight against an imported AccuRig avatar) -> FBX -> GLB -> app.",
+    "",
+    "EVERY garment except a helmet needs real skin weights. A rigid bone-parented prop is only correct",
+    "when it covers ONE rigid bone (a skull). Gloves span 15+ finger bones, pauldrons span clavicle to",
+    "upperarm, boots flex at the ball. So MetaTailor is on the path for all of these.",
+    "",
+    "TRIPO SETTINGS (set once, saved between runs): HD Model, v3.1 Best Quality, Ultra Mesh Quality ON,",
+    "Texture Quality 2K, PBR ON, Topology Triangle, Polycount 30000. That is 45 credits/model; the",
+    "defaults (4K / 2,000,000 polycount) cost 55 and produce ~6MB files. Export as GLB at 1k texture.",
+    "",
+    "status: NOT_STARTED | GENERATING | REJECTED | TRIPO_ACCEPTED | FITTING | FIT_PASSED | BLOCKED"
+  ],
+  "settings": {
+    "model": "HD Model / v3.1 Best Quality",
+    "textureQuality": "2K",
+    "polycount": 30000,
+    "topology": "Triangle",
+    "pbr": true,
+    "creditsPerModel": 45,
+    "exportFormat": "GLB",
+    "exportTextureResolution": "1k"
+  },
+  "styleSuffix": "Semi-realistic grounded fantasy-RPG style, moderate animation-friendly detail, clean readable shapes, believable thickness, hollow inside, joints unobstructed, suitable for automatic fitting and skin weighting. It floats alone in empty space with nothing underneath or supporting it.",
+  "negativeSuffix": "No body, mannequin, skin, head, face, hair, weapon, shield, stand, floor, background, or text.",
+  "wardrobes": {
+    "heavy": "Fortress knight plate. Blackened steel with brass rivets, worn leather straps, layered overlapping lames, raised outer ridges.",
+    "medium": "Warden brigandine. Riveted steel plates over oxblood leather, canvas backing, buckled straps, functional and worn.",
+    "light": "Scout leathers. Supple dark brown hide, minimal stitched panels, cloth wrap accents, no metal plating.",
+    "sorcerer": "Arcane vestments. Deep indigo and slate wool, silver embroidered geometric trim, layered cloth, no armor plating.",
+    "cultural": "Ceremonial regalia. Bone-white lacquered scale, verdigris bronze fittings, woven sash detailing, tribal geometric motifs."
+  },
+  "pieces": [
+    {
+      "id": "heavy_torso",
+      "wardrobe": "heavy",
+      "slot": "TORSO",
+      "status": "TRIPO_ACCEPTED",
+      "attempt": 1,
+      "file": "heavy_torso.glb",
+      "note": "Generated 2026-08-03. Shoulders FUSED to the chest plate - violates the never-fuse-slots rule, so it is not a clean TORSO. Art quality approved by Nabil. Re-generate torso-only, or keep as a combined chest+shoulder unit and skip heavy_shoulders."
+    },
+    {
+      "id": "heavy_legs",
+      "wardrobe": "heavy",
+      "slot": "LEGS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "heavy_hands",
+      "wardrobe": "heavy",
+      "slot": "HANDS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "heavy_shoulders",
+      "wardrobe": "heavy",
+      "slot": "SHOULDERS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "heavy_feet",
+      "wardrobe": "heavy",
+      "slot": "FEET",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "heavy_head",
+      "wardrobe": "heavy",
+      "slot": "HEAD",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "medium_torso",
+      "wardrobe": "medium",
+      "slot": "TORSO",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "medium_legs",
+      "wardrobe": "medium",
+      "slot": "LEGS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "medium_hands",
+      "wardrobe": "medium",
+      "slot": "HANDS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "medium_shoulders",
+      "wardrobe": "medium",
+      "slot": "SHOULDERS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "medium_feet",
+      "wardrobe": "medium",
+      "slot": "FEET",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "medium_head",
+      "wardrobe": "medium",
+      "slot": "HEAD",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "light_torso",
+      "wardrobe": "light",
+      "slot": "TORSO",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "light_legs",
+      "wardrobe": "light",
+      "slot": "LEGS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "light_hands",
+      "wardrobe": "light",
+      "slot": "HANDS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "light_shoulders",
+      "wardrobe": "light",
+      "slot": "SHOULDERS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "light_feet",
+      "wardrobe": "light",
+      "slot": "FEET",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "light_head",
+      "wardrobe": "light",
+      "slot": "HEAD",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "sorcerer_torso",
+      "wardrobe": "sorcerer",
+      "slot": "TORSO",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "sorcerer_legs",
+      "wardrobe": "sorcerer",
+      "slot": "LEGS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "sorcerer_hands",
+      "wardrobe": "sorcerer",
+      "slot": "HANDS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "sorcerer_shoulders",
+      "wardrobe": "sorcerer",
+      "slot": "SHOULDERS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "sorcerer_feet",
+      "wardrobe": "sorcerer",
+      "slot": "FEET",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "sorcerer_head",
+      "wardrobe": "sorcerer",
+      "slot": "HEAD",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "cultural_torso",
+      "wardrobe": "cultural",
+      "slot": "TORSO",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "cultural_legs",
+      "wardrobe": "cultural",
+      "slot": "LEGS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "cultural_hands",
+      "wardrobe": "cultural",
+      "slot": "HANDS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "cultural_shoulders",
+      "wardrobe": "cultural",
+      "slot": "SHOULDERS",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "cultural_feet",
+      "wardrobe": "cultural",
+      "slot": "FEET",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    },
+    {
+      "id": "cultural_head",
+      "wardrobe": "cultural",
+      "slot": "HEAD",
+      "status": "NOT_STARTED",
+      "attempt": 0
+    }
+  ]
+}
