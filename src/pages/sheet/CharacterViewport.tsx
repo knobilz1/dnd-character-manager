@@ -195,6 +195,38 @@ const WARFORGED_FEMALE_ASSETS = {
   anims:   'Human_Female_Anims.glb',
   diffuse: 'Warforged_Female_Diffuse.png',
 };
+// Rigged 2026-08-05 from Tripo art that had been downloaded months earlier and never processed.
+// No new credits were spent; the audit that found them lives in scratch-armor/tripo-audit.ts.
+const CHANGELING_MALE_ASSETS = {
+  idle:    'Changeling_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Changeling_Male_Diffuse.png',
+};
+const YUANTI_MALE_ASSETS = {
+  idle:    'Yuanti_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Yuanti_Male_Diffuse.png',
+};
+const TABAXI_MALE_ASSETS = {
+  idle:    'Tabaxi_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Tabaxi_Male_Diffuse.png',
+};
+const TABAXI_FEMALE_ASSETS = {
+  idle:    'Tabaxi_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Tabaxi_Female_Diffuse.png',
+};
+const LIZARDFOLK_MALE_ASSETS = {
+  idle:    'Lizardfolk_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Lizardfolk_Male_Diffuse.png',
+};
+const BUGBEAR_MALE_ASSETS = {
+  idle:    'Bugbear_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Bugbear_Male_Diffuse.png',
+};
 
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
@@ -216,6 +248,11 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   SATYR_MALE_ASSETS,
   SHIFTER_MALE_ASSETS,
   WARFORGED_MALE_ASSETS, WARFORGED_FEMALE_ASSETS,
+  CHANGELING_MALE_ASSETS,
+  YUANTI_MALE_ASSETS,
+  TABAXI_MALE_ASSETS, TABAXI_FEMALE_ASSETS,
+  LIZARDFOLK_MALE_ASSETS,
+  BUGBEAR_MALE_ASSETS,
 ];
 
 // modelRace + ModelRace now live in src/data/hair.ts (a lightweight leaf module)
@@ -252,6 +289,11 @@ function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSe
   if (race === 'satyr')     return SATYR_MALE_ASSETS;
   if (race === 'shifter')   return SHIFTER_MALE_ASSETS;
   if (race === 'warforged') return gender === 'female' ? WARFORGED_FEMALE_ASSETS : WARFORGED_MALE_ASSETS;
+  if (race === 'changeling') return CHANGELING_MALE_ASSETS;
+  if (race === 'yuanti')     return YUANTI_MALE_ASSETS;
+  if (race === 'tabaxi')     return gender === 'female' ? TABAXI_FEMALE_ASSETS : TABAXI_MALE_ASSETS;
+  if (race === 'lizardfolk') return LIZARDFOLK_MALE_ASSETS;
+  if (race === 'bugbear')    return BUGBEAR_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 
