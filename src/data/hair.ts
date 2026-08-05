@@ -24,23 +24,52 @@ export type ModelRace =
   | 'kenku' | 'firbolg' | 'goblin' | 'hobgoblin' | 'bugbear' | 'changeling'
   | 'lizardfolk' | 'satyr' | 'shifter' | 'yuanti' | 'dragonborn' | 'aasimar';
 
+/** Eberron dragonmarks are the one family whose ids carry NO hint of the underlying species —
+ *  `erlw-mark-of-warding` is a Dwarf, `erlw-mark-of-shadow` an Elf. No substring rule can reach
+ *  them, so they need an explicit table; without it all twelve rendered as humans. The species
+ *  is the one named in the race's display name (ERLW ties each mark to a fixed race). */
+const DRAGONMARK_BODY: Record<string, ModelRace> = {
+  'erlw-mark-of-detection': 'elf',        // Half-Elf
+  'erlw-mark-of-finding': 'halforc',      // Half-Orc / Human
+  'erlw-mark-of-handling': 'human',
+  'erlw-mark-of-healing': 'halfling',
+  'erlw-mark-of-hospitality': 'halfling',
+  'erlw-mark-of-making': 'human',
+  'erlw-mark-of-passage': 'human',
+  'erlw-mark-of-scribing': 'gnome',
+  'erlw-mark-of-sentinel': 'human',
+  'erlw-mark-of-shadow': 'elf',
+  'erlw-mark-of-storm': 'elf',            // Half-Elf
+  'erlw-mark-of-warding': 'dwarf',
+};
+
 /** Map a raceId string to a canonical model-race key. Unmapped → 'human'.
  *  Lives here (a lightweight leaf module) so UI like the creator can map races
  *  without importing the heavy three.js viewport. */
 export function modelRace(raceId?: string): ModelRace {
   if (!raceId) return 'human';
   const id = raceId.toLowerCase();
+  // Checked first: these ids match none of the substring rules below, and putting the table
+  // ahead of them keeps it immune to any future rule that might accidentally catch a mark id.
+  const mark = DRAGONMARK_BODY[id];
+  if (mark) return mark;
   // No dedicated half-elf model — 'half-elf' doesn't match the `startsWith('elf')`
   // check below (it starts with 'half'), so without this it silently fell through
   // to the generic 'human' default. Elf is the closer visual fit.
   if (id.includes('half-elf')) return 'elf';
-  if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
-  if (id.startsWith('dwarf') || id.includes('duergar')) return 'dwarf';
+  // These use `includes`, not `startsWith`: book- and variant-prefixed ids are the norm here
+  // ('sea-elf', 'astral-elf', 'deep-gnome', 'autognome', 'scag-tiefling-feral'), and every one
+  // of them fell through to 'human' while a perfectly good body sat on disk. Same compound-id
+  // trap that hid 'half-elf' for months — prefer `includes` unless a substring would collide.
+  // Shadar-kai carry no 'elf' in their id but their own Creature Type trait reads
+  // "You are a Humanoid (elf)" — the app's data says elf, so use the elf body.
+  if (id.includes('elf') || id.includes('drow') || id.includes('eladrin') || id.includes('shadar-kai')) return 'elf';
+  if (id.includes('dwarf') || id.includes('duergar')) return 'dwarf';
   // 'orc-vgm' and 'erlw-orc' render the half-orc body on purpose.
   if (id.includes('orc')) return 'halforc';
-  if (id.startsWith('halfling')) return 'halfling';
-  if (id.startsWith('tiefling')) return 'tiefling';
-  if (id.startsWith('gnome') || id.includes('svirfneblin')) return 'gnome';
+  if (id.includes('halfling')) return 'halfling';
+  if (id.includes('tiefling')) return 'tiefling';
+  if (id.includes('gnome') || id.includes('svirfneblin')) return 'gnome';
   // Tripo body families (2026-08). Compound-id trap: 'hobgoblin' contains
   // 'goblin' so it must match first; 'erlw-changeling' / 'erlw-warforged' /
   // 'erlw-shifter-*' match via includes().
@@ -48,7 +77,7 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('tabaxi')) return 'tabaxi';
   if (id.includes('leonin')) return 'leonin';
   if (id.includes('minotaur')) return 'minotaur';
-  if (id.startsWith('goliath')) return 'goliath';
+  if (id.includes('goliath')) return 'goliath';
   if (id.includes('triton')) return 'triton';
   if (id.includes('kenku')) return 'kenku';
   if (id.includes('firbolg')) return 'firbolg';
@@ -60,8 +89,8 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('satyr')) return 'satyr';
   if (id.includes('shifter')) return 'shifter';
   if (id.includes('yuan-ti')) return 'yuanti';
-  if (id.startsWith('dragonborn')) return 'dragonborn';
-  if (id.startsWith('aasimar')) return 'aasimar';
+  if (id.includes('dragonborn')) return 'dragonborn';
+  if (id.includes('aasimar')) return 'aasimar';
   return 'human';
 }
 
