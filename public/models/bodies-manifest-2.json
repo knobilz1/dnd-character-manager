@@ -1,0 +1,220 @@
+{
+  "pieces": [
+    {
+      "id": "bugbear_male",
+      "species": "Bugbear",
+      "gender": "male",
+      "tier": "A",
+      "chars": 955,
+      "prompt": "Single isolated full-body adult Bugbear male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; large hairy goblinoid with long powerful arms, broad shoulders, compact torso, pointed ears, heavy brow, and controlled fur coverage that does not obscure the joints. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "bugbear_female",
+      "species": "Bugbear",
+      "gender": "female",
+      "tier": "A",
+      "chars": 954,
+      "prompt": "Single isolated full-body adult Bugbear female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; large hairy goblinoid with long powerful arms, broad shoulders, compact torso, pointed ears, heavy brow, and controlled fur coverage that does not obscure the joints. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "changeling_male",
+      "species": "Changeling",
+      "gender": "male",
+      "tier": "A",
+      "chars": 952,
+      "prompt": "Single isolated full-body adult Changeling male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; androgynous pale shapeshifting humanoid presented in one stable default form, smooth facial features, light gray skin, colorless eyes, and subtle uncanny symmetry. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "changeling_female",
+      "species": "Changeling",
+      "gender": "female",
+      "tier": "A",
+      "chars": 951,
+      "prompt": "Single isolated full-body adult Changeling female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; androgynous pale shapeshifting humanoid presented in one stable default form, smooth facial features, light gray skin, colorless eyes, and subtle uncanny symmetry. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "goblin_male",
+      "species": "Goblin",
+      "gender": "male",
+      "tier": "A",
+      "chars": 921,
+      "prompt": "Single isolated full-body adult Goblin male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; small adult goblinoid with lean agile proportions, long pointed ears, broad expressive face, green-toned skin, and no childlike styling. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "goblin_female",
+      "species": "Goblin",
+      "gender": "female",
+      "tier": "A",
+      "chars": 920,
+      "prompt": "Single isolated full-body adult Goblin female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; small adult goblinoid with lean agile proportions, long pointed ears, broad expressive face, green-toned skin, and no childlike styling. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "hobgoblin_male",
+      "species": "Hobgoblin",
+      "gender": "male",
+      "tier": "A",
+      "chars": 920,
+      "prompt": "Single isolated full-body adult Hobgoblin male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; tall disciplined goblinoid with red-orange skin, pointed ears, strong athletic build, angular face, and clean humanlike proportions. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "hobgoblin_female",
+      "species": "Hobgoblin",
+      "gender": "female",
+      "tier": "A",
+      "chars": 919,
+      "prompt": "Single isolated full-body adult Hobgoblin female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; tall disciplined goblinoid with red-orange skin, pointed ears, strong athletic build, angular face, and clean humanlike proportions. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "kenku_male",
+      "species": "Kenku",
+      "gender": "male",
+      "tier": "B",
+      "chars": 951,
+      "prompt": "Single isolated full-body adult Kenku male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; raven-headed humanoid with a feathered head and forearms, beak, clawed hands and feet, no wings, compact agile proportions, and feathers kept clear of major joints. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "kenku_female",
+      "species": "Kenku",
+      "gender": "female",
+      "tier": "B",
+      "chars": 950,
+      "prompt": "Single isolated full-body adult Kenku female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; raven-headed humanoid with a feathered head and forearms, beak, clawed hands and feet, no wings, compact agile proportions, and feathers kept clear of major joints. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "leonin_male",
+      "species": "Leonin",
+      "gender": "male",
+      "tier": "A",
+      "chars": 973,
+      "prompt": "Single isolated full-body adult Leonin male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; large lion-headed humanoid with a powerful athletic build, feline muzzle, rounded ears, controlled short fur, a modest neck mane kept clear of shoulders, and humanlike plantigrade legs. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "leonin_female",
+      "species": "Leonin",
+      "gender": "female",
+      "tier": "A",
+      "chars": 972,
+      "prompt": "Single isolated full-body adult Leonin female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; large lion-headed humanoid with a powerful athletic build, feline muzzle, rounded ears, controlled short fur, a modest neck mane kept clear of shoulders, and humanlike plantigrade legs. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "lizardfolk_male",
+      "species": "Lizardfolk",
+      "gender": "male",
+      "tier": "B",
+      "chars": 959,
+      "prompt": "Single isolated full-body adult Lizardfolk male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; tall reptilian humanoid with a lizardlike head, scales, clawed hands and feet, strong plantigrade legs, and a muscular tail extending behind without touching the legs. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "lizardfolk_female",
+      "species": "Lizardfolk",
+      "gender": "female",
+      "tier": "B",
+      "chars": 958,
+      "prompt": "Single isolated full-body adult Lizardfolk female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; tall reptilian humanoid with a lizardlike head, scales, clawed hands and feet, strong plantigrade legs, and a muscular tail extending behind without touching the legs. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "minotaur_male",
+      "species": "Minotaur",
+      "gender": "male",
+      "tier": "B",
+      "chars": 964,
+      "prompt": "Single isolated full-body adult Minotaur male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; large bull-headed humanoid with symmetrical horns sweeping outward and upward, broad powerful torso, short controlled fur, humanlike arms, and sturdy hoofed digitigrade legs. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "minotaur_female",
+      "species": "Minotaur",
+      "gender": "female",
+      "tier": "B",
+      "chars": 963,
+      "prompt": "Single isolated full-body adult Minotaur female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; large bull-headed humanoid with symmetrical horns sweeping outward and upward, broad powerful torso, short controlled fur, humanlike arms, and sturdy hoofed digitigrade legs. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "satyr_male",
+      "species": "Satyr",
+      "gender": "male",
+      "tier": "B",
+      "chars": 957,
+      "prompt": "Single isolated full-body adult Satyr male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; fey humanoid with a humanlike upper body, small backward-curving horns, pointed ears, goat legs with cloven hooves, short tail, and clean readable hip and knee articulation. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "satyr_female",
+      "species": "Satyr",
+      "gender": "female",
+      "tier": "B",
+      "chars": 956,
+      "prompt": "Single isolated full-body adult Satyr female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; fey humanoid with a humanlike upper body, small backward-curving horns, pointed ears, goat legs with cloven hooves, short tail, and clean readable hip and knee articulation. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "shifter_male",
+      "species": "Shifter",
+      "gender": "male",
+      "tier": "A",
+      "chars": 969,
+      "prompt": "Single isolated full-body adult Shifter male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; humanlike weretouched humanoid in an unshifted default form, subtle bestial eyes, slightly pronounced canine teeth, restrained sideburn-like fur, and otherwise clean human anatomy. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "shifter_female",
+      "species": "Shifter",
+      "gender": "female",
+      "tier": "A",
+      "chars": 968,
+      "prompt": "Single isolated full-body adult Shifter female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; humanlike weretouched humanoid in an unshifted default form, subtle bestial eyes, slightly pronounced canine teeth, restrained sideburn-like fur, and otherwise clean human anatomy. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "triton_male",
+      "species": "Triton",
+      "gender": "male",
+      "tier": "A",
+      "chars": 953,
+      "prompt": "Single isolated full-body adult Triton male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; humanlike aquatic humanoid with blue-green skin, subtle webbed fingers and toes, restrained fin details at forearms and calves, slightly pointed ears, and no fish tail. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "triton_female",
+      "species": "Triton",
+      "gender": "female",
+      "tier": "A",
+      "chars": 952,
+      "prompt": "Single isolated full-body adult Triton female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; humanlike aquatic humanoid with blue-green skin, subtle webbed fingers and toes, restrained fin details at forearms and calves, slightly pointed ears, and no fish tail. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. Bald and hairless, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": false
+    },
+    {
+      "id": "yuanti_male",
+      "species": "Yuan-ti",
+      "gender": "male",
+      "tier": "B",
+      "chars": 963,
+      "prompt": "Single isolated full-body adult Yuan-ti male fantasy RPG base character, male adult proportions, natural athletic build without exaggerated musculature; mostly humanoid serpent-descended character with subtle scales, slit-pupil eyes, small fangs, restrained serpentine facial structure, humanlike legs, and no snake lower body. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    },
+    {
+      "id": "yuanti_female",
+      "species": "Yuan-ti",
+      "gender": "female",
+      "tier": "B",
+      "chars": 962,
+      "prompt": "Single isolated full-body adult Yuan-ti female fantasy RPG base character, female adult proportions, natural athletic build without exaggerated curves; mostly humanoid serpent-descended character with subtle scales, slit-pupil eyes, small fangs, restrained serpentine facial structure, humanlike legs, and no snake lower body. Semi-realistic stylized fantasy realism, believable anatomy, not cartoonish, not photorealistic. Symmetrical, arms away from the torso, hands open with fingers clearly separated, feet apart, head level, neutral expression. No head hair or mane, barefoot, wearing only plain close-fitting neutral undergarments. Clean silhouette, joints unobstructed, appendages separated from the body, suitable for humanoid auto-rigging and modular clothing fitting. No outfit, armor, shoes, jewelry, weapons, props, bags, cape, beard, dynamic pose, environment, platform, base, text, extra character, fused limbs, hidden hands, or crossed appendages.",
+      "furry": true
+    }
+  ]
+}

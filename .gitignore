@@ -53,3 +53,6 @@ public/models/Dwarf_Female_Anims.glb
 
 # Diagnostic output from scripts/freeze-capture.mjs
 scripts/freeze-capture.log
+
+# Tripo raw downloads — staging only, keepers get optimized into public/models/
+scratch-armor/

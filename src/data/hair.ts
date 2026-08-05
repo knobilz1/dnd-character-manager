@@ -18,7 +18,11 @@ import type { CharacterGender } from '../types';
 import type { AttachmentFit } from '../pages/sheet/CharacterViewport';
 
 /** Canonical model-race keys (one 3D body family each). */
-export type ModelRace = 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' | 'gnome';
+export type ModelRace =
+  | 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' | 'gnome'
+  | 'warforged' | 'tabaxi' | 'leonin' | 'minotaur' | 'goliath' | 'triton'
+  | 'kenku' | 'firbolg' | 'goblin' | 'hobgoblin' | 'bugbear' | 'changeling'
+  | 'lizardfolk' | 'satyr' | 'shifter' | 'yuanti' | 'dragonborn' | 'aasimar';
 
 /** Map a raceId string to a canonical model-race key. Unmapped → 'human'.
  *  Lives here (a lightweight leaf module) so UI like the creator can map races
@@ -32,10 +36,32 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('half-elf')) return 'elf';
   if (id.startsWith('elf') || id.includes('drow') || id.includes('eladrin')) return 'elf';
   if (id.startsWith('dwarf') || id.includes('duergar')) return 'dwarf';
-  if (id.includes('orc')) return 'halforc';           // half-orc, orc-2024
+  // 'orc-vgm' and 'erlw-orc' render the half-orc body on purpose.
+  if (id.includes('orc')) return 'halforc';
   if (id.startsWith('halfling')) return 'halfling';
   if (id.startsWith('tiefling')) return 'tiefling';
   if (id.startsWith('gnome') || id.includes('svirfneblin')) return 'gnome';
+  // Tripo body families (2026-08). Compound-id trap: 'hobgoblin' contains
+  // 'goblin' so it must match first; 'erlw-changeling' / 'erlw-warforged' /
+  // 'erlw-shifter-*' match via includes().
+  if (id.includes('warforged')) return 'warforged';
+  if (id.includes('tabaxi')) return 'tabaxi';
+  if (id.includes('leonin')) return 'leonin';
+  if (id.includes('minotaur')) return 'minotaur';
+  if (id.startsWith('goliath')) return 'goliath';
+  if (id.includes('triton')) return 'triton';
+  if (id.includes('kenku')) return 'kenku';
+  if (id.includes('firbolg')) return 'firbolg';
+  if (id.includes('hobgoblin')) return 'hobgoblin';
+  if (id.includes('goblin')) return 'goblin';
+  if (id.includes('bugbear')) return 'bugbear';
+  if (id.includes('changeling')) return 'changeling';
+  if (id.includes('lizardfolk')) return 'lizardfolk';
+  if (id.includes('satyr')) return 'satyr';
+  if (id.includes('shifter')) return 'shifter';
+  if (id.includes('yuan-ti')) return 'yuanti';
+  if (id.startsWith('dragonborn')) return 'dragonborn';
+  if (id.startsWith('aasimar')) return 'aasimar';
   return 'human';
 }
 
