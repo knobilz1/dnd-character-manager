@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest something Tavern Sheet should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation at the table, not just the feature. It usually suggests a better solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Source book (if this is content)
+      description: For a book, subclass, spell or item that isn't supported yet — which one?
+      placeholder: "Bigby Presents: Glory of the Giants"
