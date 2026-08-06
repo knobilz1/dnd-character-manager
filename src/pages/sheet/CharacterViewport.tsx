@@ -473,7 +473,10 @@ export const ALL_ASSET_SETS: AssetSet[] = [
 
 /** Pick the best available asset set for a given race + gender combo.
  *  Falls back gracefully when a gender-specific model doesn't exist yet. */
-function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
+// Exported for the dev model-review page, which shows the resolved filename so a reviewer can see
+// when a body is a FALLBACK (e.g. a female harengon rendering the male body) instead of silently
+// reviewing the wrong thing and passing it.
+export function getAssets(raceId: string | undefined, gender: CharacterGender): AssetSet {
   const race = modelRace(raceId);
   if (race === 'elf')      return gender === 'female' ? ELF_FEMALE_ASSETS      : ELF_MALE_ASSETS;
   if (race === 'dwarf')    return gender === 'female' ? DWARF_FEMALE_ASSETS    : DWARF_MALE_ASSETS;

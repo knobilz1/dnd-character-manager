@@ -6,6 +6,9 @@ import { SheetPage } from './pages/sheet/SheetPage';
 import { CompanionView } from './pages/companion/CompanionView';
 import { GraveyardPage } from './pages/GraveyardPage';
 import { DMConsolePage } from './pages/dm/DMConsolePage';
+// Lazy so the dev-only review page (and the three.js viewport it pulls in) never lands in the
+// main bundle; the route is dev-gated below anyway.
+const ModelReviewPage = React.lazy(() => import('./pages/dev/ModelReviewPage'));
 import { useAppUpdater } from './hooks/useAppUpdater';
 import { useThemeStore } from './store/useThemeStore';
 import { useDriveSync } from './hooks/useDriveSync';
@@ -58,6 +61,20 @@ export default function App() {
         <Route path="companion/:charId/:companionId" element={<CompanionView />} />
         <Route path="graveyard" element={<GraveyardPage />} />
         <Route path="dm" element={<DMConsolePage />} />
+        {/* Dev-only: review every rigged body against every animation state. Not registered in a
+            production build, so it cannot be reached from a shipped app. */}
+        {import.meta.env.DEV && (
+          <Route
+            path="model-review"
+            element={
+              // App.tsx has no Suspense boundary of its own, and a lazy element without one throws
+              // on navigation, so this route carries its own.
+              <React.Suspense fallback={<div className="p-6 text-sm text-neutral-400">Loading model review…</div>}>
+                <ModelReviewPage />
+              </React.Suspense>
+            }
+          />
+        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
