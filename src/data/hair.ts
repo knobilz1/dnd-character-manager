@@ -22,7 +22,9 @@ export type ModelRace =
   | 'human' | 'elf' | 'dwarf' | 'halforc' | 'halfling' | 'tiefling' | 'gnome'
   | 'warforged' | 'tabaxi' | 'leonin' | 'minotaur' | 'goliath' | 'triton'
   | 'kenku' | 'firbolg' | 'goblin' | 'hobgoblin' | 'bugbear' | 'changeling'
-  | 'lizardfolk' | 'satyr' | 'shifter' | 'yuanti' | 'dragonborn' | 'aasimar';
+  | 'lizardfolk' | 'satyr' | 'shifter' | 'yuanti' | 'dragonborn' | 'aasimar'
+  | 'kobold' | 'harengon' | 'tortle' | 'loxodon' | 'giff'
+  | 'verdan' | 'aarakocra' | 'owlin' | 'hadozee' | 'fairy' | 'plasmoid';
 
 /** Eberron dragonmarks are the one family whose ids carry NO hint of the underlying species —
  *  `erlw-mark-of-warding` is a Dwarf, `erlw-mark-of-shadow` an Elf. No substring rule can reach
@@ -91,6 +93,18 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('yuan-ti')) return 'yuanti';
   if (id.includes('dragonborn')) return 'dragonborn';
   if (id.includes('aasimar')) return 'aasimar';
+  // Bodies generated 2026-08-05. None of these collide with an earlier substring rule.
+  if (id.includes('kobold')) return 'kobold';
+  if (id.includes('harengon')) return 'harengon';
+  if (id.includes('tortle')) return 'tortle';
+  if (id.includes('loxodon')) return 'loxodon';
+  if (id.includes('giff')) return 'giff';
+  if (id.includes('verdan')) return 'verdan';
+  if (id.includes('aarakocra')) return 'aarakocra';
+  if (id.includes('owlin')) return 'owlin';
+  if (id.includes('hadozee')) return 'hadozee';
+  if (id.includes('fairy')) return 'fairy';
+  if (id.includes('plasmoid')) return 'plasmoid';
   return 'human';
 }
 
