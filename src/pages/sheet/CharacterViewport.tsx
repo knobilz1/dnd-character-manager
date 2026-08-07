@@ -351,11 +351,21 @@ const AARAKOCRA_FEMALE_ASSETS = {
   anims:   'Human_Female_Anims.glb',
   diffuse: 'Aarakocra_Female_Diffuse.png',
 };
-// Owlin female failed AccuRig characterize; the male body serves both, as goliath/kenku already do.
 const OWLIN_MALE_ASSETS = {
   idle:    'Owlin_Male_Idle.glb',
   anims:   'Human_Male_Anims.glb',
   diffuse: 'Owlin_Male_Diffuse.png',
+};
+// The male has folded wings and this female does not — a deliberate, eyes-open mismatch.
+// Three generations went into it: the one female body that DID grow wings fails AccuRig
+// characterize every time (three attempts, including after the knee gate and arm spread
+// landed), and the two that rig came out wingless however the prompt asked for them. A
+// wingless female body still beats the alternative it replaced, which was drawing the MALE
+// body for every female owlin. Worth another roll whenever there are spare credits.
+const OWLIN_FEMALE_ASSETS = {
+  idle:    'Owlin_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Owlin_Female_Diffuse.png',
 };
 const HADOZEE_MALE_ASSETS = {
   idle:    'Hadozee_Male_Idle.glb',
@@ -556,6 +566,7 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   VERDAN_MALE_ASSETS, VERDAN_FEMALE_ASSETS,
   AARAKOCRA_MALE_ASSETS, AARAKOCRA_FEMALE_ASSETS,
   OWLIN_MALE_ASSETS,
+  OWLIN_FEMALE_ASSETS,
   HADOZEE_MALE_ASSETS, HADOZEE_FEMALE_ASSETS,
   FAIRY_MALE_ASSETS, FAIRY_FEMALE_ASSETS,
   PLASMOID_MALE_ASSETS, PLASMOID_FEMALE_ASSETS,
@@ -639,9 +650,7 @@ export function getAssets(raceId: string | undefined, gender: CharacterGender): 
   if (race === 'kalashtar')  return gender === 'female' ? KALASHTAR_FEMALE_ASSETS : KALASHTAR_MALE_ASSETS;
   if (race === 'harengon')   return gender === 'female' ? HARENGON_FEMALE_ASSETS : HARENGON_MALE_ASSETS;
   if (race === 'simic-hybrid') return gender === 'female' ? SIMIC_HYBRID_FEMALE_ASSETS : SIMIC_HYBRID_MALE_ASSETS;
-  // Male body for both genders: the owlin female art failed AccuRig twice (v3 pending on
-  // Tripo); the same-species male reads far closer than a human.
-  if (race === 'owlin')      return OWLIN_MALE_ASSETS;
+  if (race === 'owlin')      return gender === 'female' ? OWLIN_FEMALE_ASSETS : OWLIN_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
 
