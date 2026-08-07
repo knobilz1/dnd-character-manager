@@ -296,6 +296,25 @@ export interface DmActionSet {
 }
 
 const ACTIONS_BLOCK = /```dm-actions\s*([\s\S]*?)```/i;
+/** Fallback for a turn whose actions are in a fence the primary regex doesn't recognise.
+ *  Measured live across 75 turns, the model varies the ENVELOPE while getting the content
+ *  right: ```json, a bare ```, ```json dm-actions, and sometimes an extra {"dm-actions": …}
+ *  wrapper. Any of them dropped a WHOLE turn — damage, the battle log, everything — with no
+ *  visible sign. So the label is ignored entirely and the decision is made on the CONTENT:
+ *  only an object that actually carries action keys is accepted (looksLikeActionSet), which
+ *  is what keeps an unrelated JSON snippet in the narration from being mistaken for one. */
+const ACTIONS_JSON_FALLBACK = /```[^\n]*\n\s*(\{[\s\S]*?\})\s*```/g;
+
+/** Every top-level key the action set defines. Used only to recognise a mis-fenced block. */
+const ACTION_KEYS = new Set([
+  'damage', 'heal', 'tempHp', 'addCondition', 'removeCondition', 'exhaustion', 'inspiration',
+  'remember', 'resolveFact', 'rememberEntity', 'rememberLocation', 'advanceToChapter',
+  'resolveChapterSection', 'switchActiveModule', 'recallSession', 'recallMap', 'recallChapter',
+  'makeMap', 'battleLog', 'removeCombatant', 'endBattle', 'battleResult',
+  'placeEffect', 'moveEffect', 'removeEffect',
+]);
+const looksLikeActionSet = (o: unknown): o is PlainObject =>
+  isPlainObject(o) && Object.keys(o).some((k) => ACTION_KEYS.has(k));
 
 // ── Field-level validation ──────────────────────────────────────────────────
 // JSON.parse only guarantees *some* value came out the other side — a weaker
@@ -389,6 +408,12 @@ function cleanCombatant(c: BattleCombatant, warnings: string[]): BattleCombatant
  *  if wrong-typed; combatants are filtered per-entry (a malformed one is
  *  dropped, not the whole update). Returns undefined only when the value isn't
  *  an object at all. */
+/** Action keys the model sometimes tucks INSIDE `battleLog` because the surrounding rules
+ *  talk about the log — measured live: a turn placed `placeEffect` in there and the whole
+ *  effect vanished, since unknown keys inside the log are dropped. They're hoisted back out
+ *  in sanitizeDmActionSet rather than lost. */
+const HOISTED_FROM_BATTLE_LOG = ['placeEffect', 'moveEffect', 'removeEffect', 'removeCombatant', 'endBattle', 'battleResult'] as const;
+
 function sanitizeBattleLogUpdate(raw: unknown, warnings: string[]): BattleLogUpdate | undefined {
   if (!isPlainObject(raw)) {
     warnings.push('Ignored dm-actions "battleLog": expected an object.');
@@ -431,6 +456,19 @@ function sanitizeScalar<T>(raw: unknown, fieldName: string, isValid: (x: unknown
 function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings: string[] } {
   const warnings: string[] = [];
   const actions: DmActionSet = {};
+
+  // Hoist misplaced top-level keys out of `battleLog` before anything reads them. Only when
+  // the top level doesn't already have its own value for that key, so a correctly-placed
+  // action always wins over a nested duplicate.
+  if (isPlainObject(raw.battleLog)) {
+    const nested = raw.battleLog;
+    for (const key of HOISTED_FROM_BATTLE_LOG) {
+      if (nested[key] !== undefined && raw[key] === undefined) {
+        raw = { ...raw, [key]: nested[key] };
+        warnings.push(`Moved dm-actions "${key}" out of "battleLog" — it belongs at the top level.`);
+      }
+    }
+  }
 
   const damage = sanitizeArray(raw.damage, 'damage', isNameAmount, warnings);
   if (damage.length) actions.damage = damage;
@@ -506,12 +544,29 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
 /** Splits a DM reply into spoken narration + parsed actions (if any), plus
  *  any warnings from dropped/malformed fields. */
 export function parseDmReply(reply: string): { narration: string; actions: DmActionSet | null; warnings: string[] } {
-  const match = reply.match(ACTIONS_BLOCK);
-  if (!match) return { narration: reply.trim(), actions: null, warnings: [] };
+  let match: RegExpMatchArray | null = reply.match(ACTIONS_BLOCK);
+  let fellBack = false;
+  if (!match) {
+    // Scan every ```json / ``` fence and take the first that actually parses AND carries at
+    // least one real action key — the model may also print unrelated JSON in its narration.
+    ACTIONS_JSON_FALLBACK.lastIndex = 0;
+    for (const m of reply.matchAll(ACTIONS_JSON_FALLBACK)) {
+      try {
+        const o = JSON.parse(m[1].trim());
+        const candidate = isPlainObject(o) && isPlainObject(o['dm-actions']) ? o['dm-actions'] : o;
+        if (looksLikeActionSet(candidate)) { match = m as RegExpMatchArray; fellBack = true; break; }
+      } catch { /* not this fence */ }
+    }
+    if (!match) return { narration: reply.trim(), actions: null, warnings: [] };
+  }
 
-  const narration = reply.replace(ACTIONS_BLOCK, '').trim();
+  const narration = reply.replace(match[0], '').trim();
   try {
-    const parsed: unknown = JSON.parse(match[1].trim());
+    let parsed: unknown = JSON.parse(match[1].trim());
+    // ```json { "dm-actions": {...} } — unwrap to the action set itself.
+    if (fellBack && isPlainObject(parsed) && isPlainObject(parsed['dm-actions'])) {
+      parsed = parsed['dm-actions'];
+    }
     // Valid JSON isn't necessarily the right *shape* — live-tested against a
     // local model (llama3 via Ollama) that sometimes emits a syntactically
     // valid but wrongly-shaped block (e.g. ["damage",[...]] instead of
