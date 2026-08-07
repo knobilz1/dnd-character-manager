@@ -281,12 +281,25 @@ const KOBOLD_FEMALE_ASSETS = {
   anims:   'Human_Female_Anims.glb',
   diffuse: 'Kobold_Female_Diffuse.png',
 };
-// Harengon female failed AccuRig characterize; males and females both use the male body until
-// it is re-rigged, which is wrong for female characters but better than requesting a missing file.
 const HARENGON_MALE_ASSETS = {
   idle:    'Harengon_Male_Idle.glb',
   anims:   'Human_Male_Anims.glb',
   diffuse: 'Harengon_Male_Diffuse.png',
+};
+const HARENGON_FEMALE_ASSETS = {
+  idle:    'Harengon_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Harengon_Female_Diffuse.png',
+};
+const SIMIC_HYBRID_MALE_ASSETS = {
+  idle:    'Simichybrid_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Simichybrid_Male_Diffuse.png',
+};
+const SIMIC_HYBRID_FEMALE_ASSETS = {
+  idle:    'Simichybrid_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Simichybrid_Female_Diffuse.png',
 };
 const TORTLE_MALE_ASSETS = {
   idle:    'Tortle_Male_Idle.glb',
@@ -535,7 +548,8 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   AASIMAR_MALE_ASSETS, AASIMAR_FEMALE_ASSETS,
   TRITON_MALE_ASSETS, TRITON_FEMALE_ASSETS,
   KOBOLD_MALE_ASSETS, KOBOLD_FEMALE_ASSETS,
-  HARENGON_MALE_ASSETS,
+  HARENGON_MALE_ASSETS, HARENGON_FEMALE_ASSETS,
+  SIMIC_HYBRID_MALE_ASSETS, SIMIC_HYBRID_FEMALE_ASSETS,
   TORTLE_MALE_ASSETS, TORTLE_FEMALE_ASSETS,
   LOXODON_MALE_ASSETS, LOXODON_FEMALE_ASSETS,
   GIFF_MALE_ASSETS, GIFF_FEMALE_ASSETS,
@@ -623,9 +637,10 @@ export function getAssets(raceId: string | undefined, gender: CharacterGender): 
   if (race === 'githzerai')  return gender === 'female' ? GITHZERAI_FEMALE_ASSETS : GITHZERAI_MALE_ASSETS;
   if (race === 'vedalken')   return gender === 'female' ? VEDALKEN_FEMALE_ASSETS  : VEDALKEN_MALE_ASSETS;
   if (race === 'kalashtar')  return gender === 'female' ? KALASHTAR_FEMALE_ASSETS : KALASHTAR_MALE_ASSETS;
-  // Male body for both genders, as goliath/shifter already do: the female body failed to rig, and
-  // the same-species male reads far closer than a human.
-  if (race === 'harengon')   return HARENGON_MALE_ASSETS;
+  if (race === 'harengon')   return gender === 'female' ? HARENGON_FEMALE_ASSETS : HARENGON_MALE_ASSETS;
+  if (race === 'simic-hybrid') return gender === 'female' ? SIMIC_HYBRID_FEMALE_ASSETS : SIMIC_HYBRID_MALE_ASSETS;
+  // Male body for both genders: the owlin female art failed AccuRig twice (v3 pending on
+  // Tripo); the same-species male reads far closer than a human.
   if (race === 'owlin')      return OWLIN_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }

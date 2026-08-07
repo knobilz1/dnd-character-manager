@@ -26,7 +26,7 @@ export type ModelRace =
   | 'kobold' | 'harengon' | 'tortle' | 'loxodon' | 'giff'
   | 'verdan' | 'aarakocra' | 'owlin' | 'hadozee' | 'fairy' | 'plasmoid'
   | 'genasi-air' | 'genasi-earth' | 'genasi-fire' | 'genasi-water'
-  | 'githyanki' | 'githzerai' | 'vedalken' | 'kalashtar';
+  | 'githyanki' | 'githzerai' | 'vedalken' | 'kalashtar' | 'simic-hybrid';
 
 /** Eberron dragonmarks are the one family whose ids carry NO hint of the underlying species —
  *  `erlw-mark-of-warding` is a Dwarf, `erlw-mark-of-shadow` an Elf. No substring rule can reach
@@ -119,6 +119,7 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('githzerai')) return 'githzerai';
   if (id.includes('vedalken')) return 'vedalken';
   if (id.includes('kalashtar')) return 'kalashtar';
+  if (id.includes('simic')) return 'simic-hybrid';
   return 'human';
 }
 
