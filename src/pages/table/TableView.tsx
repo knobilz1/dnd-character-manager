@@ -1,4 +1,6 @@
 import React from 'react';
+import { EffectsLayer, type EffectGrid } from './EffectsLayer';
+import type { PlacedEffect } from '../../utils/dmActions';
 
 /**
  * TableView — the chrome-less battle-map surface shown on a TV / second display
@@ -24,7 +26,15 @@ const TABLE_MAP_KEY = 'tavern-sheet-table-map';
 const POLL_MS = 500;
 
 interface TableFloor { name: string; png: string; }
-interface TableMap { name: string; floors: TableFloor[]; activeFloor: number; }
+interface TableMap {
+  name: string;
+  floors: TableFloor[];
+  activeFloor: number;
+  /** Persistent spell areas, written only during a GRID-mode fight. Absent on every
+   *  other payload, so an older/off-grid map simply draws no overlay. */
+  effects?: PlacedEffect[];
+  grid?: EffectGrid;
+}
 
 function readTableMap(): TableMap | null {
   try {
@@ -39,6 +49,7 @@ function readTableMap(): TableMap | null {
 
 export function TableView() {
   const [map, setMap] = React.useState<TableMap | null>(() => readTableMap());
+  const [img, setImg] = React.useState<HTMLImageElement | null>(null);
   const lastRaw = React.useRef<string | null>(null);
 
   // Poll the shared slot. Skip the parse + re-render when the raw string is
@@ -80,11 +91,15 @@ export function TableView() {
       ) : (
         <>
           <img
+            ref={setImg}
             src={active.png}
             alt={`${map.name} — ${active.name}`}
             className="w-full h-full object-contain"
             draggable={false}
           />
+          {map.grid && !!map.effects?.length && (
+            <EffectsLayer effects={map.effects} grid={map.grid} img={img} />
+          )}
           {floors.length > 1 && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-black/60 text-slate-300 text-lg tracking-wide">
               {active.name}

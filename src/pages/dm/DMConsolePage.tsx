@@ -18,7 +18,8 @@ import { buildSheetDigest } from '../../utils/sheetDigest';
 import { cn } from '../../utils/cn';
 import { hasKnownHp } from '../../utils/partyHp';
 import { parseDmReply, applyDmActions, applyBattleLog, maskInitiativeForPlayers, VOICE_CATALOG_IDS, PITCH_TAG_IDS, BATTLE_MODE_LABELS, BATTLE_MODES, isBattleMode } from '../../utils/dmActions';
-import type { BattleLog, BattleMode } from '../../utils/dmActions';
+import type { BattleLog, BattleMode, PlacedEffect } from '../../utils/dmActions';
+import { resolvePlacedEffect, isExpired } from '../../utils/effectStyle';
 import { disputedCells } from '../../utils/boardCrossCheck';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
 import { listTableCameras, captureTableFrame, coarsePhotoWarning, type TableCamera } from '../../utils/tableCamera';
@@ -1294,6 +1295,12 @@ export function DMConsolePage() {
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     (window as Window & { __battleLog?: BattleLog | null }).__battleLog = battleLog;
   }
+  // Persistent spell areas standing on the map (Web, Darkness, Flaming Sphere…).
+  // Same lifetime as battleLog — ephemeral, cleared on endBattle — and shown ONLY on
+  // the popped-out TV window, in grid mode only. Never broadcast to player devices.
+  const [placedEffects, setPlacedEffects] = React.useState<PlacedEffect[]>([]);
+  const placedEffectsRef = React.useRef(placedEffects);
+  placedEffectsRef.current = placedEffects;
   // The campaign's positioning style (theater / grid / hex), loaded per campaign
   // from the backend (read_battle_mode) and sent to the DM every turn. Ref so
   // runTurn/drainQueue (which close over refs, not state) read the live value.
@@ -2510,6 +2517,9 @@ export function DMConsolePage() {
             );
           }
           setBattleLog(null);
+          // Spell areas die with the fight — stale ones must not bleed onto the next map.
+          setPlacedEffects([]);
+          refreshTableEffects([]);
           // Combat is over: every connected sheet clears the order AND the initiative it rolled
           // for this fight. Fire-and-forget — a listener that isn't running must not stop the
           // battle from ending on the DM's own screen.
@@ -2526,6 +2536,37 @@ export function DMConsolePage() {
             }
             return next;
           });
+        }
+
+        // Spell areas. Placement resolves the spell's real geometry and duration here (see
+        // effectStyle.resolvePlacedEffect) rather than trusting the model for numbers — the
+        // radius-vs-diameter maths is exactly what an LLM gets wrong. Applied after the battle
+        // log above so a newly-placed effect stamps the round this turn actually advanced to.
+        if (actions.placeEffect?.length || actions.moveEffect?.length || actions.removeEffect?.length || actions.battleLog?.round !== undefined) {
+          const round = actions.battleLog?.round ?? battleLogRef.current?.round ?? 1;
+          let next = placedEffectsRef.current;
+
+          for (const req of actions.placeEffect ?? []) {
+            const result = resolvePlacedEffect(req, round, next.map((e) => e.id));
+            if ('failure' in result) {
+              console.warn(`Ignored placeEffect "${result.failure.query}": ${result.failure.reason}`);
+              continue;
+            }
+            next = [...next, result.effect];
+          }
+          for (const mv of actions.moveEffect ?? []) {
+            next = next.map((e) => (e.id === mv.id ? { ...e, at: { q: mv.to.q, r: mv.to.r } } : e));
+          }
+          if (actions.removeEffect?.length) {
+            const gone = new Set(actions.removeEffect);
+            next = next.filter((e) => !gone.has(e.id));
+          }
+          next = next.filter((e) => !isExpired(e, round));
+
+          if (next !== placedEffectsRef.current) {
+            setPlacedEffects(next);
+            refreshTableEffects(next);
+          }
         }
       }
 
@@ -3876,13 +3917,33 @@ export function DMConsolePage() {
    *  slot TableView polls. Same revealed, zone-free floors as the LAN broadcast
    *  (revealedPayload) — the TV is a player-facing surface, so it must never
    *  show an unrevealed floor or the enemy/party start-zones. */
-  function writeTableMap(card: MapCard, activeFloor = 0) {
-    const payload = { ...revealedPayload(card), activeFloor };
+  function writeTableMap(card: MapCard, activeFloor = 0, effects = placedEffectsRef.current) {
+    const payload: Record<string, unknown> = { ...revealedPayload(card), activeFloor };
+    // Spell areas ride along ONLY here, and only in grid mode: this is the TV's private
+    // channel. revealedPayload/broadcastMapCard feed players' own devices over :7777 and
+    // deliberately stay untouched. Grid geometry travels with them because the table
+    // window has no store, no Tauri access and no spell data of its own.
+    if (battleModeRef.current === 'grid' && effects.length) {
+      const floor = parseBattleMapFloors(card.spec)[0];
+      if (floor) {
+        payload.effects = effects;
+        payload.grid = { cols: floor.cols, rows: floor.rows, cellPx: 64, ruler: 32, cellFeet: floor.cellFeet };
+      }
+    }
     try {
       localStorage.setItem('tavern-sheet-table-map', JSON.stringify(payload));
     } catch {
       /* localStorage quota — the map is large; nothing we can do but skip. */
     }
+  }
+
+  /** Re-push the presented map when the effect list or the round changes. Cheap enough
+   *  to do unconditionally: writeTableMap no-ops when nothing is on the TV. */
+  function refreshTableEffects(effects: PlacedEffect[]) {
+    const slug = presentingSlugRef.current;
+    if (!slug) return;
+    const card = [...planMapCardsRef.current, ...adHocMapCardsRef.current].find((c) => c.slug === slug);
+    if (card) writeTableMap(card, 0, effects);
   }
 
   /** Open (or just focus) the chrome-less table window. Places it full-screen on
@@ -4925,6 +4986,33 @@ export function DMConsolePage() {
                     );
                   })}
                 </div>
+                {placedEffects.length > 0 && (
+                  // The human correction path: the model places these, and when it puts one in
+                  // the wrong square there has to be a way to take it off the TV without arguing
+                  // with the DM about it.
+                  <div className="mt-2 pt-2 border-t border-slate-800 space-y-1">
+                    <p className="text-[11px] text-slate-500">On the table map</p>
+                    {placedEffects.map((e) => (
+                      <div key={e.id} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-amber-300">
+                          {e.name}
+                          <span className="text-slate-500"> ({e.at.q},{e.at.r})</span>
+                        </span>
+                        <button
+                          onClick={() => {
+                            const next = placedEffects.filter((x) => x.id !== e.id);
+                            setPlacedEffects(next);
+                            refreshTableEffects(next);
+                          }}
+                          title="Remove from the table map"
+                          className="text-slate-500 hover:text-red-400 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {battleLog.environment && (
                   <p className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-800">{battleLog.environment}</p>
                 )}

@@ -81,6 +81,50 @@ export interface BattleLog {
  *  or `environment`. */
 export type BattleLogUpdate = Partial<Omit<BattleLog, 'combatants'>> & { combatants?: BattleCombatant[] };
 
+/** Visual family for a placed spell area — picks the palette and animation in
+ *  the TV overlay (see effectStyle.ts). Deliberately coarse: the look only has
+ *  to read across a room, not identify the spell. */
+export type EffectFamily = 'fire' | 'cold' | 'poison' | 'web' | 'radiant' | 'necrotic' | 'force' | 'fog' | 'nature' | 'lightning';
+
+/** A persistent spell area standing on the battle map, resolved to concrete
+ *  geometry at placement time so the TV window needs no spell data of its own.
+ *
+ *  `ft` is the RADIUS for sphere/cylinder and the SIDE/LENGTH for cube/line/
+ *  cone — a radius spans 2*ft/cellFeet cells across (10-ft radius = 4 squares).
+ *  Grid battle only, and only ever sent to the popped-out /table window. */
+export interface PlacedEffect {
+  id: string;
+  /** Display label, e.g. "Web". */
+  name: string;
+  shape: 'sphere' | 'cylinder' | 'cube' | 'cone' | 'line';
+  ft: number;
+  /** Lines only. */
+  widthFt?: number;
+  /** Cell, same 0-indexed space as BattleCombatant.coord. */
+  at: HexPosition;
+  /** Cones/lines: 0 = pointing right (+q), clockwise. */
+  angleDeg?: number;
+  castRound: number;
+  /** null = no automatic expiry; the DM removes it. */
+  durationRounds: number | null;
+  family: EffectFamily;
+}
+
+/** The `placeEffect` dm-action. The console resolves `spell` against the spell
+ *  data (see spellArea.ts) — the model sends a spell id or name and a cell, not
+ *  geometry, so it can't get the radius-vs-diameter maths wrong. */
+export interface PlaceEffectRequest {
+  spell: string;
+  at: HexPosition;
+  angle?: number;
+}
+
+/** The `moveEffect` dm-action — Flaming Sphere's bonus-action move and friends. */
+export interface MoveEffectRequest {
+  id: string;
+  to: HexPosition;
+}
+
 /** Every valid `voiceId` for `rememberEntity` (see tts.rs's VOICE_CATALOG,
  *  which is the source of truth this must stay in sync with) plus
  *  BASE_CLAUDE_MD's matching catalog list. An id outside this set is dropped
@@ -240,6 +284,15 @@ export interface DmActionSet {
    *  fires (see DMConsolePage's runTurn → append_memory_note) — the ONLY part
    *  of a fight that's persisted; the blow-by-blow log is discarded. */
   battleResult?: string;
+  /** Persistent spell areas created this turn (Web, Darkness, Flaming Sphere…).
+   *  The console resolves each spell's real shape/size/duration and shows it on
+   *  the popped-out TV map only, in grid mode only. Instantaneous spells
+   *  (Fireball) must never be sent — nothing persists to draw. */
+  placeEffect?: PlaceEffectRequest[];
+  /** Existing effects that moved this turn, by the id the console assigned. */
+  moveEffect?: MoveEffectRequest[];
+  /** Effect ids whose spell ended early (concentration dropped, dispelled). */
+  removeEffect?: string[];
 }
 
 const ACTIONS_BLOCK = /```dm-actions\s*([\s\S]*?)```/i;
@@ -296,6 +349,11 @@ const isNamedEntityFact = (x: unknown): x is NamedEntityFact =>
 const isStrArray = (x: unknown): x is string[] => Array.isArray(x) && x.every(isStr);
 const isHexPosition = (x: unknown): x is HexPosition =>
   isPlainObject(x) && isFiniteNum(x.q) && isFiniteNum(x.r);
+const isPlaceEffect = (x: unknown): x is PlaceEffectRequest =>
+  isPlainObject(x) && isStr(x.spell) && isHexPosition(x.at) &&
+  (x.angle === undefined || isFiniteNum(x.angle));
+const isMoveEffect = (x: unknown): x is MoveEffectRequest =>
+  isPlainObject(x) && isStr(x.id) && isHexPosition(x.to);
 const BATTLE_SIDES = new Set(['party', 'enemy', 'ally', 'neutral']);
 /** Requires a name; any present optional must be the correct type, else the
  *  whole combatant is dropped (with a warning) — same per-entry tolerance as
@@ -410,6 +468,13 @@ function sanitizeDmActionSet(raw: PlainObject): { actions: DmActionSet; warnings
   }
   const removeCombatant = sanitizeArray(raw.removeCombatant, 'removeCombatant', isStr, warnings);
   if (removeCombatant.length) actions.removeCombatant = removeCombatant;
+
+  const placeEffect = sanitizeArray(raw.placeEffect, 'placeEffect', isPlaceEffect, warnings);
+  if (placeEffect.length) actions.placeEffect = placeEffect;
+  const moveEffect = sanitizeArray(raw.moveEffect, 'moveEffect', isMoveEffect, warnings);
+  if (moveEffect.length) actions.moveEffect = moveEffect;
+  const removeEffect = sanitizeArray(raw.removeEffect, 'removeEffect', isStr, warnings);
+  if (removeEffect.length) actions.removeEffect = removeEffect;
 
   const remember = sanitizeArray(raw.remember, 'remember', isStr, warnings);
   if (remember.length) actions.remember = remember;
