@@ -24,7 +24,9 @@ export type ModelRace =
   | 'kenku' | 'firbolg' | 'goblin' | 'hobgoblin' | 'bugbear' | 'changeling'
   | 'lizardfolk' | 'satyr' | 'shifter' | 'yuanti' | 'dragonborn' | 'aasimar'
   | 'kobold' | 'harengon' | 'tortle' | 'loxodon' | 'giff'
-  | 'verdan' | 'aarakocra' | 'owlin' | 'hadozee' | 'fairy' | 'plasmoid';
+  | 'verdan' | 'aarakocra' | 'owlin' | 'hadozee' | 'fairy' | 'plasmoid'
+  | 'genasi-air' | 'genasi-earth' | 'genasi-fire' | 'genasi-water'
+  | 'githyanki' | 'githzerai' | 'vedalken' | 'kalashtar';
 
 /** Eberron dragonmarks are the one family whose ids carry NO hint of the underlying species —
  *  `erlw-mark-of-warding` is a Dwarf, `erlw-mark-of-shadow` an Elf. No substring rule can reach
@@ -105,6 +107,18 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('hadozee')) return 'hadozee';
   if (id.includes('fairy')) return 'fairy';
   if (id.includes('plasmoid')) return 'plasmoid';
+  // The four Genasi get four bodies, not one shared 'genasi': a fire genasi and an earth genasi
+  // have nothing visually in common, so a pooled body would read worse than the human fallback.
+  if (id.includes('genasi-air')) return 'genasi-air';
+  if (id.includes('genasi-earth')) return 'genasi-earth';
+  if (id.includes('genasi-fire')) return 'genasi-fire';
+  if (id.includes('genasi-water')) return 'genasi-water';
+  // 'githyanki' must precede 'githzerai'? No — they share only the 'gith' stem, and neither is a
+  // substring of the other, so order is irrelevant here. Kept adjacent for readability.
+  if (id.includes('githyanki')) return 'githyanki';
+  if (id.includes('githzerai')) return 'githzerai';
+  if (id.includes('vedalken')) return 'vedalken';
+  if (id.includes('kalashtar')) return 'kalashtar';
   return 'human';
 }
 

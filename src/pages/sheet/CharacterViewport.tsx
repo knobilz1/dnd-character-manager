@@ -422,6 +422,89 @@ const GOLIATH_FEMALE_ASSETS = {
   anims:   'Human_Female_Anims.glb',
   diffuse: 'Goliath_Female_Diffuse.png',
 };
+// The last species that had no body of their own. Filenames carry the hyphen from the model-race
+// key (Genasi-air_...), which the tauri bundle globs handle but a [A-Za-z_] filename regex does not
+// — see the note in scratch-armor/coverage.ts.
+const GENASI_AIR_MALE_ASSETS = {
+  idle:    'Genasi-air_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Genasi-air_Male_Diffuse.png',
+};
+const GENASI_AIR_FEMALE_ASSETS = {
+  idle:    'Genasi-air_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Genasi-air_Female_Diffuse.png',
+};
+const GENASI_EARTH_MALE_ASSETS = {
+  idle:    'Genasi-earth_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Genasi-earth_Male_Diffuse.png',
+};
+const GENASI_EARTH_FEMALE_ASSETS = {
+  idle:    'Genasi-earth_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Genasi-earth_Female_Diffuse.png',
+};
+const GENASI_FIRE_MALE_ASSETS = {
+  idle:    'Genasi-fire_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Genasi-fire_Male_Diffuse.png',
+};
+const GENASI_FIRE_FEMALE_ASSETS = {
+  idle:    'Genasi-fire_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Genasi-fire_Female_Diffuse.png',
+};
+const GENASI_WATER_MALE_ASSETS = {
+  idle:    'Genasi-water_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Genasi-water_Male_Diffuse.png',
+};
+const GENASI_WATER_FEMALE_ASSETS = {
+  idle:    'Genasi-water_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Genasi-water_Female_Diffuse.png',
+};
+const GITHYANKI_MALE_ASSETS = {
+  idle:    'Githyanki_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Githyanki_Male_Diffuse.png',
+};
+const GITHYANKI_FEMALE_ASSETS = {
+  idle:    'Githyanki_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Githyanki_Female_Diffuse.png',
+};
+const GITHZERAI_MALE_ASSETS = {
+  idle:    'Githzerai_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Githzerai_Male_Diffuse.png',
+};
+const GITHZERAI_FEMALE_ASSETS = {
+  idle:    'Githzerai_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Githzerai_Female_Diffuse.png',
+};
+const VEDALKEN_MALE_ASSETS = {
+  idle:    'Vedalken_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Vedalken_Male_Diffuse.png',
+};
+const VEDALKEN_FEMALE_ASSETS = {
+  idle:    'Vedalken_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Vedalken_Female_Diffuse.png',
+};
+const KALASHTAR_MALE_ASSETS = {
+  idle:    'Kalashtar_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Kalashtar_Male_Diffuse.png',
+};
+const KALASHTAR_FEMALE_ASSETS = {
+  idle:    'Kalashtar_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Kalashtar_Female_Diffuse.png',
+};
 
 export type AssetSet = typeof HUMAN_MALE_ASSETS;
 
@@ -466,6 +549,14 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   DRAGONBORN_MALE_ASSETS, DRAGONBORN_FEMALE_ASSETS,
   SHIFTER_FEMALE_ASSETS, CHANGELING_FEMALE_ASSETS, YUANTI_FEMALE_ASSETS,
   LIZARDFOLK_FEMALE_ASSETS, BUGBEAR_FEMALE_ASSETS, GOLIATH_FEMALE_ASSETS,
+  GENASI_AIR_MALE_ASSETS, GENASI_AIR_FEMALE_ASSETS,
+  GENASI_EARTH_MALE_ASSETS, GENASI_EARTH_FEMALE_ASSETS,
+  GENASI_FIRE_MALE_ASSETS, GENASI_FIRE_FEMALE_ASSETS,
+  GENASI_WATER_MALE_ASSETS, GENASI_WATER_FEMALE_ASSETS,
+  GITHYANKI_MALE_ASSETS, GITHYANKI_FEMALE_ASSETS,
+  GITHZERAI_MALE_ASSETS, GITHZERAI_FEMALE_ASSETS,
+  VEDALKEN_MALE_ASSETS, VEDALKEN_FEMALE_ASSETS,
+  KALASHTAR_MALE_ASSETS, KALASHTAR_FEMALE_ASSETS,
 ];
 
 // modelRace + ModelRace now live in src/data/hair.ts (a lightweight leaf module)
@@ -524,6 +615,14 @@ export function getAssets(raceId: string | undefined, gender: CharacterGender): 
   if (race === 'hadozee')    return gender === 'female' ? HADOZEE_FEMALE_ASSETS   : HADOZEE_MALE_ASSETS;
   if (race === 'fairy')      return gender === 'female' ? FAIRY_FEMALE_ASSETS     : FAIRY_MALE_ASSETS;
   if (race === 'plasmoid')   return gender === 'female' ? PLASMOID_FEMALE_ASSETS  : PLASMOID_MALE_ASSETS;
+  if (race === 'genasi-air')   return gender === 'female' ? GENASI_AIR_FEMALE_ASSETS   : GENASI_AIR_MALE_ASSETS;
+  if (race === 'genasi-earth') return gender === 'female' ? GENASI_EARTH_FEMALE_ASSETS : GENASI_EARTH_MALE_ASSETS;
+  if (race === 'genasi-fire')  return gender === 'female' ? GENASI_FIRE_FEMALE_ASSETS  : GENASI_FIRE_MALE_ASSETS;
+  if (race === 'genasi-water') return gender === 'female' ? GENASI_WATER_FEMALE_ASSETS : GENASI_WATER_MALE_ASSETS;
+  if (race === 'githyanki')  return gender === 'female' ? GITHYANKI_FEMALE_ASSETS : GITHYANKI_MALE_ASSETS;
+  if (race === 'githzerai')  return gender === 'female' ? GITHZERAI_FEMALE_ASSETS : GITHZERAI_MALE_ASSETS;
+  if (race === 'vedalken')   return gender === 'female' ? VEDALKEN_FEMALE_ASSETS  : VEDALKEN_MALE_ASSETS;
+  if (race === 'kalashtar')  return gender === 'female' ? KALASHTAR_FEMALE_ASSETS : KALASHTAR_MALE_ASSETS;
   // Male body for both genders, as goliath/shifter already do: the female body failed to rig, and
   // the same-species male reads far closer than a human.
   if (race === 'harengon')   return HARENGON_MALE_ASSETS;
