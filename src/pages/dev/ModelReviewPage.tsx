@@ -45,9 +45,18 @@ function buildEntries(): Entry[] {
 
 export default function ModelReviewPage() {
   const entries = React.useMemo(buildEntries, []);
-  const [idx, setIdx] = React.useState(0);
-  const [gender, setGender] = React.useState<CharacterGender>('male');
-  const [state, setState] = React.useState<AnimationState>('idle');
+  // ?family=loxodon&gender=female&state=limp-lv3 — lets the headless survey script
+  // (scratch-armor/tools/anim-survey.mjs) capture any body/state without keyboard driving.
+  const qs = React.useMemo(() => new URLSearchParams(window.location.search), []);
+  const [idx, setIdx] = React.useState(() => {
+    const i = entries.findIndex((e) => e.family === qs.get('family'));
+    return i >= 0 ? i : 0;
+  });
+  const [gender, setGender] = React.useState<CharacterGender>(qs.get('gender') === 'female' ? 'female' : 'male');
+  const [state, setState] = React.useState<AnimationState>(() => {
+    const s = qs.get('state');
+    return STATES.some((x) => x.id === s) ? (s as AnimationState) : 'idle';
+  });
 
   const entry = entries[idx];
 

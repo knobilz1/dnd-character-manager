@@ -1,5 +1,5 @@
 ﻿import * as React from 'react';
-import { Canvas, useLoader, useFrame } from '@react-three/fiber';
+import { Canvas, useLoader, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
@@ -647,6 +647,122 @@ const CLIP_TO_KEY: Record<string, string> = {
 const realClip = (clips: THREE.AnimationClip[]) =>
   clips.find((a) => !/open a|_ue5/i.test(a.name)) ?? clips[clips.length - 1] ?? clips[0];
 
+/**
+ * Retarget a shared Human_*_Anims clip onto this body's own proportions.
+ *
+ * The limp/fall/lie/hit clips are fully baked from the HUMAN skeleton: translation AND
+ * scale tracks on every one of ~119 bones, not just root motion. Played verbatim on a
+ * different body, those translation tracks overwrite each bone's local position with the
+ * human's bone lengths every frame — forcibly reshaping a divergent skeleton (giff,
+ * loxodon, kobold…) into human proportions. That is what tangled limp-lv3/down into a
+ * face-plant on wide bodies while the same clip looked correct on the human.
+ *
+ * Rotation is the pose; proportions must stay native. So: keep quaternion tracks, drop
+ * scale tracks, drop bone translations except the pelvis — pelvis translation is real
+ * root motion (a fall must still reach the ground) and is rescaled by the ratio of the
+ * two skeletons' pelvis rest offsets so the drop height matches this body's legs, not a
+ * human's. Tracks for nodes the body doesn't have (the anims file's own mesh node) are
+ * dropped too, which also silences the PropertyBinding "no target node" warnings.
+ */
+/**
+ * Rest LOCAL rotation per bone, recovered from the skeleton's inverse bind matrices.
+ * NOT read from live bone transforms: useLoader caches the GLTF scene by URL and a
+ * previous mount's mixer leaves the cached bones mid-pose, so bone.quaternion at
+ * mount time is whatever pose the last unmount happened to freeze. boneInverses come
+ * straight from the GLB accessor and never change.
+ */
+function restLocalQuats(scene: THREE.Object3D): Map<string, THREE.Quaternion> {
+  const map = new Map<string, THREE.Quaternion>();
+  scene.traverse((o) => {
+    const sm = o as THREE.SkinnedMesh;
+    if (!sm.isSkinnedMesh || map.size) return;
+    const { bones, boneInverses } = sm.skeleton;
+    const world = boneInverses.map((inv) => new THREE.Matrix4().copy(inv).invert());
+    const idx = new Map<THREE.Object3D, number>(bones.map((b, i) => [b as THREE.Object3D, i]));
+    bones.forEach((b, i) => {
+      const pi = b.parent ? idx.get(b.parent) : undefined;
+      const local = pi === undefined
+        ? world[i]
+        : new THREE.Matrix4().copy(world[pi]).invert().multiply(world[i]);
+      const q = new THREE.Quaternion();
+      local.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+      map.set(b.name, q);
+    });
+  });
+  return map;
+}
+
+function adaptSharedClip(
+  clip: THREE.AnimationClip,
+  bodyScene: THREE.Object3D,
+  animsScene: THREE.Object3D | null | undefined,
+): THREE.AnimationClip {
+  const bodyNodes = new Set<string>();
+  let dstPelvis: THREE.Object3D | null = null;
+  bodyScene.traverse((o) => {
+    if (!o.name) return;
+    bodyNodes.add(o.name);
+    if (o.name === 'pelvis') dstPelvis = o;
+  });
+  const srcPelvis = animsScene?.getObjectByName('pelvis');
+  const srcLen = srcPelvis?.position.length() ?? 0;
+  const ratio = srcLen > 1e-6 && dstPelvis ? (dstPelvis as THREE.Object3D).position.length() / srcLen : 1;
+
+  // Bind-frame delta correction. The clips store ABSOLUTE local rotations baked on the
+  // human rig, but AccuRig fits each body's bind frames to its mesh — measured 5-24° per
+  // bone against the human (giff), compounding to ~60° down the spine chain, which is
+  // how "lying on your back" became "folded face-down under yourself". Re-express every
+  // key as the human's deviation-from-rest applied to THIS body's rest:
+  //   q' = qRestDst · qRestSrc⁻¹ · q
+  // (three's own makeClipAdditive uses the same rest∘delta convention). For a body whose
+  // bind matches the human's, the correction is identity.
+  const dstRest = restLocalQuats(bodyScene);
+  // The anims scene is never animated (the mixer binds these tracks to the BODY scene),
+  // so its node transforms are pristine rest values; it is also mesh-free, so bind
+  // matrices don't exist there and node rotations are the only rest source.
+  const srcRest = new Map<string, THREE.Quaternion>();
+  animsScene?.traverse((o) => { if (o.name && !srcRest.has(o.name)) srcRest.set(o.name, o.quaternion); });
+
+  const tracks: THREE.KeyframeTrack[] = [];
+  const corr = new THREE.Quaternion();
+  const key = new THREE.Quaternion();
+  for (const t of clip.tracks) {
+    const dot = t.name.lastIndexOf('.');
+    const node = t.name.slice(0, dot);
+    const prop = t.name.slice(dot + 1);
+    if (!bodyNodes.has(node)) continue;
+    if (prop === 'scale') continue;
+    if (prop === 'position') {
+      if (node !== 'pelvis') continue;
+      const scaled = t.clone();
+      for (let i = 0; i < scaled.values.length; i++) scaled.values[i] *= ratio;
+      tracks.push(scaled);
+      continue;
+    }
+    if (prop === 'quaternion') {
+      const qs = srcRest.get(node);
+      const qd = dstRest.get(node);
+      if (qs && qd) {
+        corr.copy(qd).multiply(key.copy(qs).invert());
+        if (Math.abs(corr.w) < 0.99999) {
+          const fixed = t.clone();
+          const v = fixed.values;
+          for (let i = 0; i + 3 < v.length; i += 4) {
+            key.set(v[i], v[i + 1], v[i + 2], v[i + 3]).premultiply(corr).normalize();
+            v[i] = key.x; v[i + 1] = key.y; v[i + 2] = key.z; v[i + 3] = key.w;
+          }
+          tracks.push(fixed);
+          continue;
+        }
+      }
+      tracks.push(t);
+      continue;
+    }
+    tracks.push(t);
+  }
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks, clip.blendMode);
+}
+
 function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
   tex.colorSpace = THREE.SRGBColorSpace;
   // The mesh comes from a GLB (assimp export) whose UVs use the glTF convention
@@ -693,6 +809,18 @@ function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
  * the root transform makes the measurement depend only on the rig's bind pose, so
  * the returned scale is identical on every mount regardless of leftover state.
  */
+// DEV-only: exposes the live camera + controls on window so headless capture scripts
+// (scratch-armor/tools/anim-survey.mjs) can frame ground-level animation states
+// deterministically — Playwright wheel/drag orbiting proved unreliable under SwiftShader.
+function DevCameraHook() {
+  const { camera, controls, scene } = useThree();
+  React.useEffect(() => {
+    (window as unknown as Record<string, unknown>).__viewport = { camera, controls, scene };
+    return () => { delete (window as unknown as Record<string, unknown>).__viewport; };
+  }, [camera, controls, scene]);
+  return null;
+}
+
 function fitToViewport(scene: THREE.Object3D, targetHeight = 1.8): { scale: number; yOffset: number } {
   scene.updateMatrixWorld(true);
   const invRoot = new THREE.Matrix4().copy(scene.matrixWorld).invert();
@@ -1078,17 +1206,42 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetMan
     const idleClip = realClip(idleGltf.animations);
     if (idleClip) add(idleClip, 'idle');
 
-    // All other animations from the merged anims GLB
+    // All other animations from the merged anims GLB, retargeted to this body's proportions
     for (const clip of (animsGltf.animations ?? [])) {
       const key = CLIP_TO_KEY[clip.name];
-      if (key) add(clip, key);
+      if (key) add(adaptSharedClip(clip, scene, animsGltf.scene), key);
     }
 
     const idleKeys = ['idle', 'idle2'].filter(k => actions[k]);
     return { mixer, actions, idleKeys };
   }, [scene, idleGltf.animations, animsGltf]);
 
-  useFrame((_, delta) => mixer.update(delta));
+  // Ground clamp for the on-the-floor states. The shared clips are retargeted by
+  // rotation only (adaptSharedClip), so a body whose bone offsets point differently
+  // from the human's — giff's forward-hung head, loxodon's trunk — can end a lie-down
+  // with part of its skeleton below y=0 (measured: giff head at −0.26 world). Rather
+  // than solving true pose retargeting, lift the whole body so its lowest bone rests
+  // at ground level. minY is measured with the current lift applied (matrixWorld is
+  // one frame stale), so the correction is expressed relative to lift.current and the
+  // lerp converges instead of oscillating.
+  const GROUND_STATES = React.useRef(new Set(['down', 'limp-lv3'])).current;
+  const lift = React.useRef(0);
+  useFrame((_, delta) => {
+    mixer.update(delta);
+    let target = 0;
+    if (GROUND_STATES.has(animationState)) {
+      let minY = Infinity;
+      scene.traverse((o) => {
+        if ((o as THREE.Bone).isBone) {
+          const y = o.matrixWorld.elements[13];
+          if (y < minY) minY = y;
+        }
+      });
+      if (minY !== Infinity) target = Math.max(0, lift.current + (0.02 - minY));
+    }
+    lift.current += (target - lift.current) * Math.min(1, delta * 8);
+    scene.position.y = yOffset + lift.current;
+  });
 
   const prev    = React.useRef('');
   const curIdle = React.useRef(0);
@@ -1518,6 +1671,7 @@ export default function CharacterViewport({
                   onHelmetEffective={setHelmetEffective} onHairEffective={setHairEffective} />}
           </React.Suspense>
           <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
+          {import.meta.env.DEV && <DevCameraHook />}
           <OrbitControls
             ref={controlsRef}
             makeDefault
