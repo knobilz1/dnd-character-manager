@@ -19,8 +19,12 @@ export function LanguagePicker({ known, owed, selected, onChange, compact }: {
   onChange: (next: string[]) => void;
   compact?: boolean;
 }) {
-  if (owed === 0) return null;
   const picked = selected ?? [];
+  // Languages lock once chosen. The creator never asks for them, so the choice is finished
+  // here on the sheet — but finished means finished: once every owed pick is made the picker
+  // disappears (the Languages tile above lists the result) instead of offering a free respec
+  // forever. Picks can still be rearranged while at least one is outstanding.
+  if (owed === 0 || picked.length >= owed) return null;
   const outstanding = picked.length < owed;
   // `known` already contains the picks, so the "do you have it another way" test has to exclude
   // them or every chosen language would immediately grey itself out.
