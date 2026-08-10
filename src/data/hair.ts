@@ -26,7 +26,12 @@ export type ModelRace =
   | 'kobold' | 'harengon' | 'tortle' | 'loxodon' | 'giff'
   | 'verdan' | 'aarakocra' | 'owlin' | 'hadozee' | 'fairy' | 'plasmoid'
   | 'genasi-air' | 'genasi-earth' | 'genasi-fire' | 'genasi-water'
-  | 'githyanki' | 'githzerai' | 'vedalken' | 'kalashtar' | 'simic-hybrid';
+  | 'githyanki' | 'githzerai' | 'vedalken' | 'kalashtar' | 'simic-hybrid'
+  // Thri-kreen have FOUR arms and the AccuRig skeleton has two, so only the primary pair is
+  // rigged — the secondary pair rides along as static geometry bound to the chest. Kept out of
+  // the library until 2026-08-09 for exactly that reason; the alternative was the plain human
+  // fallback, which reads worse than a mantis with still arms.
+  | 'thrikreen';
 
 /** Eberron dragonmarks are the one family whose ids carry NO hint of the underlying species —
  *  `erlw-mark-of-warding` is a Dwarf, `erlw-mark-of-shadow` an Elf. No substring rule can reach
@@ -120,6 +125,8 @@ export function modelRace(raceId?: string): ModelRace {
   if (id.includes('vedalken')) return 'vedalken';
   if (id.includes('kalashtar')) return 'kalashtar';
   if (id.includes('simic')) return 'simic-hybrid';
+  // Race id is 'thri-kreen'; the body key drops the hyphen to match the asset filenames.
+  if (id.includes('thri')) return 'thrikreen';
   return 'human';
 }
 

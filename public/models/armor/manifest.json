@@ -39,11 +39,11 @@
     {
       "id": "heavy_torso",
       "wardrobe": "heavy",
-      "slot": "TORSO",
-      "status": "TRIPO_ACCEPTED",
+      "slot": "SHOULDERS",
+      "status": "FIT_PASSED",
       "attempt": 1,
       "file": "heavy_torso.glb",
-      "note": "Generated 2026-08-03. Shoulders FUSED to the chest plate - violates the never-fuse-slots rule, so it is not a clean TORSO. Art quality approved by Nabil. Re-generate torso-only, or keep as a combined chest+shoulder unit and skip heavy_shoulders."
+      "note": "Generated 2026-08-03, BEFORE the anti-fusion line existed in armor-prompt.cjs. Rendered on its own (scratch-armor/app-shot.mjs --solo) it is NOT a torso at all: two shoulder assemblies plus a small sternum bib, with the chest and back left as open arches. Reclassified SHOULDERS, which is what it is. Fits correctly as a yoke via: --slot torso --height 0.72 --core 0.6 --top clavicle_l --topdy 6 --inflate 0.4. A real heavy TORSO still needs generating."
     },
     {
       "id": "heavy_legs",
@@ -84,8 +84,10 @@
       "id": "medium_torso",
       "wardrobe": "medium",
       "slot": "TORSO",
-      "status": "NOT_STARTED",
-      "attempt": 0
+      "status": "FIT_PASSED",
+      "attempt": 1,
+      "note": "Sourced from scratch-armor/raw/leather+torso+armor+3d+model.glb — generated 2026-08-03 and never used. A proper CLOSED cuirass. Zero new credits. Fitted with: --slot torso --yaw 90 --core 1 --no-arms --ease 1.20 --inflate 0.5. The yaw matters: Tripo shipped it turned 90deg (0.40 wide x 0.58 deep, and a torso is wider than deep), so the auto-fit was sizing width against depth until corrected.",
+      "file": "medium_torso.glb"
     },
     {
       "id": "medium_legs",

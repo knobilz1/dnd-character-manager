@@ -6,6 +6,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import * as THREE from 'three';
 import { modelUrl, initModelUrls, NEEDS_TAURI_MODEL_INIT } from '../../utils/modelUrl';
 import { getHairStyle, hairUrlFor, modelRace, type ModelRace } from '../../data/hair';
+import { resolveArmor, loadGarmentFit, GARMENT_FIT_EVENT, type ArmorPiece, type GarmentFit } from '../../data/armor';
 
 // The merged *_Anims.glb files are compressed with EXT_meshopt_compression
 // (see scripts/compress-glb.cjs) â€” the loader needs the meshopt decoder to read
@@ -44,6 +45,8 @@ interface CharacterViewportProps {
   hairId?: string;
   /** Hex color tint for the hair mesh (e.g. '#3b2a1a'). */
   hairColor?: string;
+  /** Skinned wardrobe piece ids (ARMOR_PIECES) to render on the body, e.g. ['heavy_torso']. */
+  armorIds?: string[];
 }
 
 // â”€â”€ Asset sets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -300,6 +303,19 @@ const SIMIC_HYBRID_FEMALE_ASSETS = {
   idle:    'Simichybrid_Female_Idle.glb',
   anims:   'Human_Female_Anims.glb',
   diffuse: 'Simichybrid_Female_Diffuse.png',
+};
+// Only the PRIMARY arm pair is rigged — AccuRig's skeleton has two arms and a thri-kreen has
+// four, so the secondary pair is static geometry riding the chest. Shipped anyway because the
+// alternative was the human fallback: a mantis with still arms reads better than no mantis.
+const THRIKREEN_MALE_ASSETS = {
+  idle:    'Thrikreen_Male_Idle.glb',
+  anims:   'Human_Male_Anims.glb',
+  diffuse: 'Thrikreen_Male_Diffuse.png',
+};
+const THRIKREEN_FEMALE_ASSETS = {
+  idle:    'Thrikreen_Female_Idle.glb',
+  anims:   'Human_Female_Anims.glb',
+  diffuse: 'Thrikreen_Female_Diffuse.png',
 };
 const TORTLE_MALE_ASSETS = {
   idle:    'Tortle_Male_Idle.glb',
@@ -560,6 +576,7 @@ export const ALL_ASSET_SETS: AssetSet[] = [
   KOBOLD_MALE_ASSETS, KOBOLD_FEMALE_ASSETS,
   HARENGON_MALE_ASSETS, HARENGON_FEMALE_ASSETS,
   SIMIC_HYBRID_MALE_ASSETS, SIMIC_HYBRID_FEMALE_ASSETS,
+  THRIKREEN_MALE_ASSETS, THRIKREEN_FEMALE_ASSETS,
   TORTLE_MALE_ASSETS, TORTLE_FEMALE_ASSETS,
   LOXODON_MALE_ASSETS, LOXODON_FEMALE_ASSETS,
   GIFF_MALE_ASSETS, GIFF_FEMALE_ASSETS,
@@ -650,6 +667,7 @@ export function getAssets(raceId: string | undefined, gender: CharacterGender): 
   if (race === 'kalashtar')  return gender === 'female' ? KALASHTAR_FEMALE_ASSETS : KALASHTAR_MALE_ASSETS;
   if (race === 'harengon')   return gender === 'female' ? HARENGON_FEMALE_ASSETS : HARENGON_MALE_ASSETS;
   if (race === 'simic-hybrid') return gender === 'female' ? SIMIC_HYBRID_FEMALE_ASSETS : SIMIC_HYBRID_MALE_ASSETS;
+  if (race === 'thrikreen') return gender === 'female' ? THRIKREEN_FEMALE_ASSETS : THRIKREEN_MALE_ASSETS;
   if (race === 'owlin')      return gender === 'female' ? OWLIN_FEMALE_ASSETS : OWLIN_MALE_ASSETS;
   return gender === 'female' ? HUMAN_FEMALE_ASSETS : HUMAN_MALE_ASSETS;
 }
@@ -837,11 +855,110 @@ function applyTexture(root: THREE.Object3D, tex: THREE.Texture) {
 // (scratch-armor/tools/anim-survey.mjs) can frame ground-level animation states
 // deterministically — Playwright wheel/drag orbiting proved unreliable under SwiftShader.
 function DevCameraHook() {
-  const { camera, controls, scene } = useThree();
+  const { camera, controls, scene, gl } = useThree();
   React.useEffect(() => {
-    (window as unknown as Record<string, unknown>).__viewport = { camera, controls, scene };
+    (window as unknown as Record<string, unknown>).__viewport = { camera, controls, scene, gl };
     return () => { delete (window as unknown as Record<string, unknown>).__viewport; };
-  }, [camera, controls, scene]);
+  }, [camera, controls, scene, gl]);
+  return null;
+}
+
+/**
+ * Copy the current frame to the clipboard.
+ *
+ * The renderer runs with preserveDrawingBuffer off, so the backbuffer is undefined by the time a
+ * click handler reads it — draw one frame synchronously first or the PNG comes out blank.
+ */
+async function captureViewport(): Promise<'copied' | 'downloaded' | 'unavailable'> {
+  const v = (window as unknown as { __viewport?: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } }).__viewport;
+  if (!v) return 'unavailable';
+  v.gl.render(v.scene, v.camera);
+  const blob = await new Promise<Blob | null>((res) => v.gl.domElement.toBlob(res, 'image/png'));
+  if (!blob) return 'unavailable';
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    return 'copied';
+  } catch {
+    // Clipboard image write needs a secure context and permission; fall back to a download.
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `viewport-${Date.now()}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    return 'downloaded';
+  }
+}
+
+/**
+ * Click the model to say WHERE you mean.
+ *
+ * "The back sticks out" and "look at the arms" are precise to a human and ambiguous to me, and
+ * that ambiguity has cost several wrong fixes. Shift-clicking any point on the body or a garment
+ * raycasts it, resolves the dominant BONE at that spot, and reports it — so a spot on screen turns
+ * into `spine_04, upper-back` and lands directly on the slot allowlists and fit args that are
+ * expressed in exactly those terms. Plain clicks are left alone for OrbitControls.
+ */
+function PickProbe({ onPick }: { onPick: (label: string) => void }) {
+  const { camera, scene, gl } = useThree();
+  React.useEffect(() => {
+    const ray = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.022, 12, 12),
+      new THREE.MeshBasicMaterial({ color: '#22d3ee', depthTest: false, transparent: true, opacity: 0.9 }),
+    );
+    marker.renderOrder = 999;
+    marker.visible = false;
+    scene.add(marker);
+
+    /** Pick at normalised device coords. Exposed on window in DEV so the probe can be exercised
+     *  headlessly — a feature only reachable by a real shift-click is a feature that never gets
+     *  tested. */
+    const pickAt = (nx: number, ny: number) => {
+      ndc.set(nx, ny);
+      ray.setFromCamera(ndc, camera);
+      const targets: THREE.Object3D[] = [];
+      scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && o !== marker && o.visible) targets.push(o); });
+      const hits = ray.intersectObjects(targets, false);
+      if (!hits.length) { marker.visible = false; onPick('(nothing under the cursor)'); return; }
+      const hit = hits[0];
+      const mesh = hit.object as THREE.SkinnedMesh;
+      marker.position.copy(hit.point);
+      marker.visible = true;
+
+      // Dominant bone at the nearest vertex of the hit triangle — the name the fitting code uses.
+      let bone = '(unskinned)';
+      const geom = mesh.geometry;
+      if (mesh.isSkinnedMesh && geom.attributes.skinIndex && hit.face) {
+        const idx = [hit.face.a, hit.face.b, hit.face.c];
+        let best = -1, bw = -1;
+        for (const vi of idx) for (let k = 0; k < 4; k++) {
+          const w = geom.attributes.skinWeight.getComponent(vi, k);
+          if (w > bw) { bw = w; best = geom.attributes.skinIndex.getComponent(vi, k); }
+        }
+        bone = mesh.skeleton.bones[best]?.name ?? '(?)';
+      }
+      const what = mesh.userData?.isArmor ? mesh.name.replace('garment_', 'garment ') : 'body';
+      const side = hit.face ? (hit.point.z > 0 ? 'front' : 'back') : '';
+      onPick(`${what} · ${bone} · ${side} · y=${hit.point.y.toFixed(2)}`);
+    };
+
+    const onClick = (e: MouseEvent) => {
+      if (!e.shiftKey) return;
+      const r = gl.domElement.getBoundingClientRect();
+      pickAt(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    };
+
+    gl.domElement.addEventListener('click', onClick);
+    if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__pick = pickAt;
+    return () => {
+      gl.domElement.removeEventListener('click', onClick);
+      delete (window as unknown as Record<string, unknown>).__pick;
+      scene.remove(marker);
+      marker.geometry.dispose();
+      (marker.material as THREE.Material).dispose();
+    };
+  }, [camera, scene, gl, onPick]);
   return null;
 }
 
@@ -1128,6 +1245,109 @@ function HelmetAttachment({ scene, manualFit, bodyKey, onEffectiveFit }: {
     defaultFit={DEFAULT_HELMET_FIT} calibKey="helmet" bodyKey={bodyKey} tag="isArmor" onEffectiveFit={onEffectiveFit} />;
 }
 
+/**
+ * A garment skinned to the shared skeleton — the one path that works for anything covering more
+ * than a single rigid bone (see armor.ts). The piece is fitted once offline against the reference
+ * body and each body's own bind pose re-proportions it: 88 bodies, one mesh, no per-body tuning.
+ *
+ * A LIVE fit (armor.ts `GarmentFit`) sits on top for dev tuning. It is folded into the
+ * inverse-bind matrices rather than applied per frame: the shader computes
+ * sum_j w_j * boneWorld_j * IBM_j * v, so pre-multiplying IBM_j by F transforms the authored
+ * garment by F before skinning — 100 matrix multiplies when a slider moves, zero per frame, and
+ * the animation path is untouched.
+ *
+ * Mechanics, verified against three@0.184: the mesh is bound with an identity bindMatrix, and the
+ * default AttachedBindMode recomputes bindMatrixInverse from the mesh's own world matrix every
+ * frame — so the parent transform cancels and a vertex lands at sum_j w_j * boneWorld_j * IBM_j * v.
+ * Because boneWorld_j is the LIVE bone matrix, the garment follows every animation with no extra
+ * work; and because it includes the body scene's viewport scaling, the garment needs none of its
+ * own. A second THREE.Skeleton over bones that another skeleton already owns is supported.
+ *
+ * ⚠️ The loaded GLB's own scene is never cloned and never added. It carries a duplicate copy of
+ * the joint tree (a glTF skin must reference in-file nodes), and three's PropertyBinding resolves
+ * animation tracks by depth-first NAME search — duplicate bones in the scene would capture the
+ * body's own animation tracks.
+ */
+function SkinnedGarment({ scene, piece }: { scene: THREE.Object3D; piece: ArmorPiece }) {
+  const gltf = useLoader(GLTFLoader, modelUrl(piece.url), withMeshopt);
+
+  React.useEffect(() => {
+    let src: THREE.SkinnedMesh | undefined;
+    gltf.scene.traverse((o) => { if (!src && (o as THREE.SkinnedMesh).isSkinnedMesh) src = o as THREE.SkinnedMesh; });
+    if (!src) {
+      // eslint-disable-next-line no-console
+      console.warn(`[garment] "${piece.id}" has no skinned mesh — was it built by skin-garment.mjs?`);
+      return;
+    }
+
+    // Map the garment's joint names onto THIS body's bones. Any miss means the garment was
+    // authored against a joint set this body doesn't have; render nothing rather than a mesh
+    // collapsed onto the origin.
+    const bones: THREE.Bone[] = [];
+    for (const b of src.skeleton.bones) {
+      const found = scene.getObjectByName(b.name) as THREE.Bone | undefined;
+      if (!found) {
+        // eslint-disable-next-line no-console
+        console.warn(`[garment] "${piece.id}" needs bone "${b.name}", body has none — not rendering`);
+        return;
+      }
+      bones.push(found);
+    }
+
+    const mesh = new THREE.SkinnedMesh(src.geometry, (src.material as THREE.Material).clone());
+    mesh.name = `garment_${piece.id}`;
+    mesh.userData.isArmor = true;      // keeps applyTexture from painting the body skin onto it
+    mesh.frustumCulled = false;        // its bounds are the bind pose, not where the bones put it
+    mesh.castShadow = true;
+    const baseInverses = src.skeleton.boneInverses.map((m) => m.clone());
+    const skeleton = new THREE.Skeleton(bones, baseInverses.map((m) => m.clone()));
+    mesh.bind(skeleton, new THREE.Matrix4());
+    scene.add(mesh);
+
+    // Scale about the garment's own centre so a size change doesn't also shove it sideways.
+    if (!src.geometry.boundingBox) src.geometry.computeBoundingBox();
+    const bb = src.geometry.boundingBox!;
+    const centre = bb.getCenter(new THREE.Vector3());
+    const size = bb.getSize(new THREE.Vector3());
+
+    /**
+     * dy/dz are FRACTIONS of the piece's own size, not centimetres.
+     *
+     * The shipped GLB is meshopt-quantized, so its geometry is in normalised integer units with
+     * the dequantisation folded into the inverse-binds — "8" in this space is not 8cm, and using
+     * cm here blew the garment apart at the second slider notch (measured: dy -4 turned a
+     * 0.83..1.41 bbox into -0.49..2.49). Scaling the offset by the piece's own bbox makes the
+     * control unit-free and immune to whatever quantisation the file arrives with.
+     */
+    const applyFit = (fit: GarmentFit) => {
+      const F = new THREE.Matrix4()
+        .multiply(new THREE.Matrix4().makeTranslation(
+          centre.x, centre.y + fit.dy * size.y, centre.z + fit.dz * size.z))
+        .multiply(new THREE.Matrix4().makeScale(fit.scale * fit.girth, fit.scale, fit.scale * fit.girth))
+        .multiply(new THREE.Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z));
+      for (let i = 0; i < baseInverses.length; i++) skeleton.boneInverses[i].multiplyMatrices(baseInverses[i], F);
+    };
+    applyFit(loadGarmentFit(piece.id));
+
+    const onFit = (e: Event) => {
+      const d = (e as CustomEvent).detail as { id: string; fit: GarmentFit } | undefined;
+      if (d?.id === piece.id) applyFit(d.fit);
+    };
+    window.addEventListener(GARMENT_FIT_EVENT, onFit);
+
+    return () => {
+      window.removeEventListener(GARMENT_FIT_EVENT, onFit);
+      scene.remove(mesh);
+      mesh.skeleton.dispose();
+      (mesh.material as THREE.Material).dispose();
+      // geometry and textures belong to useLoader's cache — disposing them would break the
+      // next character that loads this piece.
+    };
+  }, [scene, gltf, piece.id, piece.url]);
+
+  return null;
+}
+
 /** Hair on the `head` bone â€” thin wrapper over BoneAttachment with color tint. */
 function HairAttachment({ scene, url, styleId, manualFit, bodyKey, tint, onEffectiveFit }: {
   scene: THREE.Object3D; url: string; styleId: string;
@@ -1140,7 +1360,7 @@ function HairAttachment({ scene, url, styleId, manualFit, bodyKey, tint, onEffec
 }
 
 // â”€â”€ Minimal character model (creator â€” idle GLB only, no merged anims) â”€â”€â”€â”€â”€â”€â”€â”€
-function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetManual, hairUrl, hairStyleId, hairManual, hairColor, bodyKey, onHelmetEffective, onHairEffective }: ModelAttachmentProps & {
+function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetManual, hairUrl, hairStyleId, hairManual, hairColor, bodyKey, garments, onHelmetEffective, onHairEffective }: ModelAttachmentProps & {
   assets: AssetSet; onLoaded?: () => void;
 }) {
   const idleGltf  = useLoader(GLTFLoader, modelUrl(assets.idle), withMeshopt);
@@ -1183,11 +1403,12 @@ function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetManual, hair
           <HelmetAttachment scene={scene} manualFit={helmetManual} bodyKey={bodyKey} onEffectiveFit={onHelmetEffective} />
         </React.Suspense>
       )}
+      <Garments scene={scene} garments={garments} />
     </>
   );
 }
 
-/** Attachment props shared by both model components (helmet + hair wiring). */
+/** Attachment props shared by both model components (helmet + hair + garment wiring). */
 type ModelAttachmentProps = {
   showArmor?: boolean;
   helmetManual: AttachmentFit | null;
@@ -1196,12 +1417,23 @@ type ModelAttachmentProps = {
   hairManual: AttachmentFit | null;
   hairColor?: string;
   bodyKey: string;
+  garments?: ArmorPiece[];
   onHelmetEffective?: (fit: AttachmentFit) => void;
   onHairEffective?: (fit: AttachmentFit) => void;
 };
 
+/** Skinned wardrobe pieces, mounted the same way in both model components. */
+function Garments({ scene, garments }: { scene: THREE.Object3D; garments?: ArmorPiece[] }) {
+  if (!garments?.length) return null;
+  return (
+    <React.Suspense fallback={null}>
+      {garments.map((p) => <SkinnedGarment key={p.id} scene={scene} piece={p} />)}
+    </React.Suspense>
+  );
+}
+
 // â”€â”€ Full character model (sheet â€” idle GLB + merged anims GLB) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetManual, hairUrl, hairStyleId, hairManual, hairColor, bodyKey, onHelmetEffective, onHairEffective }: ModelAttachmentProps & {
+function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetManual, hairUrl, hairStyleId, hairManual, hairColor, bodyKey, garments, onHelmetEffective, onHairEffective }: ModelAttachmentProps & {
   assets: AssetSet;
   animationState: AnimationState;
   onLoaded?: () => void;
@@ -1237,6 +1469,20 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetMan
     }
 
     const idleKeys = ['idle', 'idle2'].filter(k => actions[k]);
+    // DEV handle: play any clip on demand instead of waiting out the 7s idle rotation. Debugging
+    // an animation you can only reach by dice roll is most of the cost of debugging it.
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__anim = {
+        mixer, actions, idleKeys,
+        clips: Object.fromEntries(Object.entries(actions).map(([k, a]) => [k, (a as THREE.AnimationAction).getClip().name])),
+        solo: (key: string) => {
+          for (const a of Object.values(actions) as THREE.AnimationAction[]) a.stop();
+          const a = actions[key]; if (!a) return `no action "${key}"`;
+          a.reset().setLoop(THREE.LoopRepeat, Infinity).setEffectiveWeight(1).play();
+          return `playing ${key} (${a.getClip().name})`;
+        },
+      };
+    }
     return { mixer, actions, idleKeys };
   }, [scene, idleGltf.animations, animsGltf]);
 
@@ -1296,7 +1542,9 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetMan
     play(idleKeys[0], true, 0);
   }, [idleKeys, play]);
 
-  // Cycle idle â†” walk loop every 7s at full health
+  // Rotate between idle variations every 7s — inert while there is only one, which is the case
+  // now that the walk loop is no longer masquerading as one. Left in place because bodies that
+  // ship a genuine second idle should still get the variety.
   React.useEffect(() => {
     if (animationState !== 'idle' || idleKeys.length < 2) return;
     const id = setInterval(() => playRandomIdle(0.8), 7000);
@@ -1338,6 +1586,7 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetMan
           <HelmetAttachment scene={scene} manualFit={helmetManual} bodyKey={bodyKey} onEffectiveFit={onHelmetEffective} />
         </React.Suspense>
       )}
+      <Garments scene={scene} garments={garments} />
     </>
   );
 }
@@ -1470,9 +1719,11 @@ export default function CharacterViewport({
   minimal = false,
   hairId,
   hairColor,
+  armorIds,
 }: CharacterViewportProps) {
   const assets = getAssets(raceId, gender);
   const race = modelRace(raceId);
+  const garments = React.useMemo(() => resolveArmor(armorIds, race, gender), [armorIds, race, gender]);
 
   // In production Tauri builds, model files are side-loaded resources (not
   // embedded in the binary). We resolve the asset:// URLs asynchronously once
@@ -1542,6 +1793,15 @@ export default function CharacterViewport({
   const loading = !urlsReady || loadedAsset !== assets.idle;
   const handleLoaded = React.useCallback(() => setLoadedAsset(assets.idle), [assets.idle]);
 
+  // Shift-click readout: what part of the body/garment the user just pointed at.
+  const [picked, setPicked] = React.useState<string | null>(null);
+  const [shot, setShot] = React.useState<string | null>(null);
+  const grab = React.useCallback(async () => {
+    const r = await captureViewport();
+    setShot(r === 'copied' ? 'Copied — paste it to Claude' : r === 'downloaded' ? 'Saved to Downloads' : 'Capture failed');
+    setTimeout(() => setShot(null), 2500);
+  }, []);
+
   // OrbitControls ref so we can snap the camera back to its framed default.
   const controlsRef = React.useRef<React.ElementRef<typeof OrbitControls>>(null);
   const resetCamera = React.useCallback(() => {
@@ -1595,6 +1855,35 @@ export default function CharacterViewport({
               {p}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Screenshot button — one click to hand Claude exactly what is on screen. */}
+      {import.meta.env.DEV && !loading && (
+        <button
+          type="button"
+          onClick={grab}
+          title="Copy this frame to the clipboard"
+          style={{
+            position: 'absolute', bottom: 8, right: 44, zIndex: 12, height: 28, padding: '0 10px',
+            borderRadius: 14, display: 'flex', alignItems: 'center', gap: 6,
+            background: 'rgba(15,21,32,0.7)', color: '#cbd5e1',
+            border: '1px solid rgba(203,213,225,0.25)', cursor: 'pointer',
+            fontSize: 11, fontWeight: 600, backdropFilter: 'blur(4px)',
+          }}
+        >
+          {shot ?? 'Screenshot'}
+        </button>
+      )}
+
+      {/* Shift-click readout. */}
+      {import.meta.env.DEV && picked && (
+        <div style={{
+          position: 'absolute', top: 8, left: 8, zIndex: 12, maxWidth: '70%',
+          background: 'rgba(8,12,20,0.82)', color: '#67e8f9', border: '1px solid rgba(103,232,249,0.35)',
+          borderRadius: 6, padding: '4px 8px', font: '11px ui-monospace, monospace', backdropFilter: 'blur(4px)',
+        }}>
+          {picked}
         </div>
       )}
 
@@ -1687,15 +1976,16 @@ export default function CharacterViewport({
             {minimal
               ? <CharacterModelMinimal assets={assets} onLoaded={handleLoaded} showArmor={showArmor}
                   helmetManual={helmetOverride} hairUrl={effectiveHairUrl} hairStyleId={activeHairId}
-                  hairManual={hairOverride} hairColor={hairColor} bodyKey={bodyKey}
+                  hairManual={hairOverride} hairColor={hairColor} bodyKey={bodyKey} garments={garments}
                   onHelmetEffective={setHelmetEffective} onHairEffective={setHairEffective} />
               : <CharacterModel assets={assets} animationState={animationState} onLoaded={handleLoaded} showArmor={showArmor}
                   helmetManual={helmetOverride} hairUrl={effectiveHairUrl} hairStyleId={activeHairId}
-                  hairManual={hairOverride} hairColor={hairColor} bodyKey={bodyKey}
+                  hairManual={hairOverride} hairColor={hairColor} bodyKey={bodyKey} garments={garments}
                   onHelmetEffective={setHelmetEffective} onHairEffective={setHairEffective} />}
           </React.Suspense>
           <ContactShadows position={[0, 0, 0]} opacity={0.5} scale={4} blur={2.2} far={3} />
           {import.meta.env.DEV && <DevCameraHook />}
+          {import.meta.env.DEV && <PickProbe onPick={setPicked} />}
           <OrbitControls
             ref={controlsRef}
             makeDefault
