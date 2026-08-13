@@ -734,6 +734,7 @@ export function DMConsolePage() {
    *  which is fine: worst case is one repeat prompt per campaign per launch. */
   const hdPromptedRef = React.useRef<Set<string>>(new Set());
   const [lanIp, setLanIp] = React.useState<string | null>(null);
+  const [tablePin, setTablePin] = React.useState<string | null>(null);
   const [sttReady, setSttReady] = React.useState(false);
 
   const [campaigns, setCampaigns] = React.useState<CampaignMeta[]>([]);
@@ -1634,13 +1635,23 @@ export function DMConsolePage() {
         // item's playback — so by the time playback ends, the next line is
         // usually already sitting ready.
         let prepared: PreparedSpeech | null = null;
+        try {
         while (sentenceQueueRef.current.length > 0) {
           const next = sentenceQueueRef.current.shift()!;
-          const current = prepared ?? (await prepareSpeech(next.text, next.voiceId, next.pitch, next.speed));
+          let current: PreparedSpeech;
+          try {
+            current = prepared ?? (await prepareSpeech(next.text, next.voiceId, next.pitch, next.speed));
+          } catch (e) {
+            // One line that won't synthesize must not take the rest of the
+            // session's narration with it — drop it and keep draining.
+            console.error('[tts] synthesis failed, skipping line', e);
+            prepared = null;
+            continue;
+          }
           prepared = null;
 
           const upcoming = sentenceQueueRef.current[0];
-          const lookahead = upcoming ? prepareSpeech(upcoming.text, upcoming.voiceId, upcoming.pitch, upcoming.speed) : null;
+          const lookahead = upcoming ? prepareSpeech(upcoming.text, upcoming.voiceId, upcoming.pitch, upcoming.speed).catch(() => null) : null;
 
           await playPrepared(current);
           // Only count a sentence as "heard" if it wasn't the one force-cut
@@ -1651,6 +1662,7 @@ export function DMConsolePage() {
 
           if (lookahead) {
             const result = await lookahead;
+            if (!result) continue; // its synthesis failed; next loop prepares fresh
             // A barge-in (stopSpeakingAndClearQueue) replaces the queue array
             // outright, so `upcoming` — captured from the OLD array — no
             // longer matches what's actually next (or there's nothing next
@@ -1671,7 +1683,17 @@ export function DMConsolePage() {
           // never adds trailing dead air after the last sentence of a turn.
           if (sentenceQueueRef.current.length > 0) await sleep(SENTENCE_GAP_MS);
         }
-        drainingPromiseRef.current = null;
+        } catch (e) {
+          // Playback can reject (audio element error, autoplay refusal). The
+          // finally below is the load-bearing part: if this IIFE ever settled
+          // without clearing drainingPromiseRef, the ref would hold a rejected
+          // promise forever, every later enqueueSentence would see "already
+          // draining", and the console would go permanently silent until
+          // restart — with the queue still filling up behind it.
+          console.error('[tts] drain aborted', e);
+        } finally {
+          drainingPromiseRef.current = null;
+        }
       })();
     }
   }
@@ -1809,9 +1831,11 @@ export function DMConsolePage() {
 
   // Start the LAN listener + resolve this machine's LAN IP once, on mount.
   React.useEffect(() => {
-    invoke<number>('start_party_listener', { port: DM_PORT }).catch((e) =>
-      setError(`Couldn't start the LAN listener: ${e}`)
-    );
+    invoke<number>('start_party_listener', { port: DM_PORT })
+      // The PIN only exists once the listener has bound, so it's read here
+      // rather than alongside the LAN IP below.
+      .then(() => invoke<string | null>('party_listener_pin').then(setTablePin))
+      .catch((e) => setError(`Couldn't start the LAN listener: ${e}`));
     invoke<string | null>('local_lan_ip').then(setLanIp).catch(() => setLanIp(null));
     warmupSTT().then(() => setSttReady(true)).catch((e) => setError(`Speech recognition failed to load: ${e.message || e}`));
     invoke<CampaignMeta[]>('list_campaigns').then(setCampaigns).catch((e) => setError(`Couldn't load campaigns: ${e}`));
@@ -2142,23 +2166,32 @@ export function DMConsolePage() {
    *  behind this); local models have no equivalent knob, so it's ignored on
    *  that path rather than plumbed through to ask_dm_local. */
   async function callDm(prompt: string, sessionId: string | undefined, campaignId: string | undefined, effort: 'low' | 'medium') {
-    if (dmProvider === 'local') {
+    // Engine + local-model settings are read through the ref/getState, never
+    // the captured state. A remote player's turn arrives on the `dm-player-turn`
+    // listener, which is registered ONCE at mount → drainQueue → runTurn →
+    // here, so the plain `dmProvider` closure was frozen at first render: every
+    // LAN turn kept hitting whatever engine was selected when the console
+    // opened, ignoring a mid-session switch. Same reasoning as campaignIdRef /
+    // battleModeRef / moduleBusyRef above.
+    const provider = dmProviderRef.current;
+    if (provider === 'local') {
+      const s = useSettingsStore.getState();
       return invoke<{ text: string; session_id?: string }>('ask_dm_local', {
         prompt,
         sessionId,
         campaignId,
-        baseUrl: localLlmBaseUrl,
-        model: localLlmModel,
-        historyLimitTurns: localLlmHistoryTurns,
+        baseUrl: s.localLlmBaseUrl,
+        model: s.localLlmModel,
+        historyLimitTurns: s.localLlmHistoryTurns,
       });
     }
     // Claude keeps the streaming path — partial text is why the voice console
     // feels live. The other subscription engines have no verified equivalent, so
     // their turns arrive whole; that's a real downgrade, said plainly in the UI
     // rather than hidden.
-    if (dmProvider === 'codex' || dmProvider === 'gemini') {
+    if (provider === 'codex' || provider === 'gemini') {
       return invoke<{ text: string; session_id?: string }>('ask_dm_engine', {
-        engine: dmProvider, prompt, sessionId, campaignId, effort,
+        engine: provider, prompt, sessionId, campaignId, effort,
       });
     }
     return invoke<{ text: string; session_id?: string }>('ask_dm', { prompt, sessionId, campaignId, effort });
@@ -2768,14 +2801,17 @@ export function DMConsolePage() {
     const campaignId = campaignIdRef.current;
     if (campaignId && turns.length > 0) {
       setBusy(true);
+      // Declared outside the try so the catch can still reach them — that
+      // handler's whole job is to preserve this transcript when everything
+      // else failed, and a `const` inside the try block isn't in its scope.
+      const date = new Date().toISOString().slice(0, 10);
+      // The verbatim transcript of everything said this sitting — the input
+      // to the Opus session digest. 'dm' is narration, 'you' the Console's
+      // own mic, anything else a remote player's character name.
+      const transcript = turns
+        .map((t) => (t.who === 'dm' ? `DM: ${t.text}` : t.who === 'you' ? `Player: ${t.text}` : `Player (${t.who}): ${t.text}`))
+        .join('\n');
       try {
-        const date = new Date().toISOString().slice(0, 10);
-        // The verbatim transcript of everything said this sitting — the input
-        // to the Opus session digest. 'dm' is narration, 'you' the Console's
-        // own mic, anything else a remote player's character name.
-        const transcript = turns
-          .map((t) => (t.who === 'dm' ? `DM: ${t.text}` : t.who === 'you' ? `Player: ${t.text}` : `Player (${t.who}): ${t.text}`))
-          .join('\n');
         try {
           // Primary path: one Opus map-reduce over the verbatim transcript
           // (see campaign.rs's digest_session) extracts durable facts into the
@@ -2873,7 +2909,22 @@ export function DMConsolePage() {
         // top of NEXT session.
         await refreshLastRecap(campaignId);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        // Both the digest and its recap fallback failed, so nothing has saved
+        // tonight's transcript — and the reset below clears `turns`, which is
+        // the ONLY copy (see the close-guard's doc comment: the verbatim
+        // transcript lives in React state until digest_session persists it).
+        // Write it to the campaign folder before it's dropped; a raw file the
+        // DM can read beats losing the whole sitting to a failed model call.
+        await invoke('append_session_recap', {
+          id: campaignId,
+          date,
+          recap:
+            'SESSION DIGEST FAILED — verbatim transcript preserved below, not yet summarised.\n\n' +
+            transcript,
+        }).catch((saveErr) => console.error('Could not preserve the raw transcript either:', saveErr));
+        setError(
+          `${e instanceof Error ? e.message : String(e)} — tonight's transcript was saved to the campaign's recap file unsummarised.`
+        );
       } finally {
         setBusy(false);
       }
@@ -3580,7 +3631,7 @@ export function DMConsolePage() {
     };
     try {
       type RawFloor = { tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean };
-      const res = await invoke<RawFloor & { floors?: RawFloor[]; diagnostics: MapCard['artDiagnostics'] }>('get_map_tiles', { id: activeCampaignId, slug });
+      const res = await invoke<RawFloor & { floors?: RawFloor[]; diagnostics: MapCard['artDiagnostics'] }>('get_map_tiles', { id: campaignIdRef.current, slug });
       // Per-floor art (ground first). Fall back to the top-level fields as a
       // single ground floor for a backend that predates `floors`.
       const raw = res.floors?.length ? res.floors : [res];
@@ -3592,8 +3643,13 @@ export function DMConsolePage() {
     }
   }
 
+  /** Reads through campaignIdRef, not the `activeCampaignId` state: a map
+   *  finished by the DM's own `makeMap` action reaches here via the
+   *  mount-once turn listener, whose closure still holds whatever campaign was
+   *  active when the console mounted (often null) — so the card was read
+   *  against the wrong campaign and the finished map never appeared. */
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
-    const spec = await invoke<string>('read_battle_map', { id: activeCampaignId, slug: meta.slug });
+    const spec = await invoke<string>('read_battle_map', { id: campaignIdRef.current, slug: meta.slug });
     const { floorArt, artDiagnostics } = await fetchMapTiles(meta.slug);
     const floors = renderFloors(spec, floorArt);
     return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, floorArt, artDiagnostics, floors, png: floors[0]?.png ?? null };
@@ -4823,6 +4879,13 @@ export function DMConsolePage() {
         {lanIp && (
           <p className="text-xs text-slate-500 mb-4 text-center">
             Players: enter <span className="text-slate-300 font-mono">{lanIp}</span> in their app's "Send to DM" dialog to join the table.
+            {tablePin && (
+              <>
+                {' '}Tonight's PIN is{' '}
+                <span className="text-emerald-300 font-mono tracking-widest text-sm">{tablePin}</span>
+                {' '}— read it out; it changes every time you restart.
+              </>
+            )}
           </p>
         )}
 
