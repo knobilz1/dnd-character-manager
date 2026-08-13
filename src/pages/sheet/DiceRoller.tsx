@@ -23,10 +23,26 @@ const DIE_STYLE: Record<Die, { btn: string; label: string; glow: string }> = {
 
 type Tier = 'crit-fail' | 'bad' | 'neutral' | 'good' | 'crit-success';
 
-function getTier(result: number, die: Die): Tier {
-  if (result === 1) return 'crit-fail';
-  if (result === die) return 'crit-success';
-  const pct = result / die;
+/** Sum of `count` fresh dice — the one place a roll's randomness comes from. */
+function rollSum(sides: Die, count: number): number {
+  let total = 0;
+  for (let i = 0; i < count; i++) total += Math.ceil(Math.random() * sides);
+  return total;
+}
+
+/**
+ * Tiering for a settled roll. `count` matters: the crit tiers are a d20 idea
+ * (a natural 1 or a natural max on ONE die), and a 2 or a 12 on 2d6 is neither
+ * — it's just the tail of a bell curve. So multi-die rolls get the proportional
+ * tiers only, and never the "💀 Critical Fail" / "🎉 Natural 20!" banners.
+ */
+function getTier(result: number, die: Die, count = 1): Tier {
+  const max = die * count;
+  if (count === 1) {
+    if (result === 1) return 'crit-fail';
+    if (result === die) return 'crit-success';
+  }
+  const pct = result / max;
   if (pct <= 0.5) return 'bad';
   if (pct <= 0.7) return 'neutral';
   return 'good';
@@ -58,7 +74,12 @@ const DIE_SHAPE: Record<Die, React.ReactElement> = {
   100: <circle cx="50" cy="50" r="43" />,
 };
 
-interface HistoryEntry { die: Die; result: number; tier: Tier; mode?: Mode }
+interface HistoryEntry { die: Die; count?: number; result: number; tier: Tier; mode?: Mode }
+
+/** "d20" / "2d6" — how a roll of `count` dice is written. */
+function dieLabel(die: Die, count = 1): string {
+  return count > 1 ? `${count}d${die}` : `d${die}`;
+}
 
 // ── TwoDie ─────────────────────────────────────────────────────────────────
 // Renders one die in the side-by-side advantage/disadvantage layout.
@@ -185,17 +206,18 @@ const EXHAUSTION_REMINDER: Record<number, string> = {
  *  only external skill/save/initiative dispatches carry one). */
 function describeRollForDM(opts: {
   die: Die;
+  count?: number;
   label: string | null;
   modifier: number | null;
   mode: Mode;
   result: number;
   two: { v1: number; v2: number; winner: 1 | 2 } | null;
 }): string {
-  const { die, label, modifier, mode, result, two } = opts;
+  const { die, count, label, modifier, mode, result, two } = opts;
   const prefix = label ? `${label}: ` : 'Rolled ';
   const rollPart = mode !== 'normal' && two
     ? `d${die} (${mode}) — rolled ${two.v1} and ${two.v2}, took ${result}`
-    : `d${die} → ${result}`;
+    : `${dieLabel(die, count)} → ${result}`;
   const totalPart = modifier !== null ? ` + ${modifier} = ${result + modifier}` : '';
   return `${prefix}${rollPart}${totalPart}`;
 }
@@ -205,6 +227,8 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
   const [open, setOpen] = React.useState(false);
   const [mode, setMode] = React.useState<Mode>('normal');
   const [activeDie, setActiveDie] = React.useState<Die | null>(null);
+  /** Dice summed into the current result — 1 for everything except damage. */
+  const [activeCount, setActiveCount] = React.useState(1);
 
   // Single-die state
   const [display, setDisplay] = React.useState<number | null>(null);
@@ -259,7 +283,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
    *  the DM actually reacts to it as a real turn rather than it just
    *  appearing silently. Used by both the auto-send path (labeled rolls
    *  only) and the manual button (any roll). */
-  async function sendRollToDM(opts: { die: Die; result: number; mode: Mode; two: { v1: number; v2: number; winner: 1 | 2 } | null; label: string | null; modifier: number | null }) {
+  async function sendRollToDM(opts: { die: Die; count?: number; result: number; mode: Mode; two: { v1: number; v2: number; winner: 1 | 2 } | null; label: string | null; modifier: number | null }) {
     if (!connected || !characterName?.trim()) return;
     const text = describeRollForDM(opts);
     setDmStatus('Sending to DM…');
@@ -291,16 +315,21 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
     const req = consume();
     if (!req) return;
     const reqMode = req.mode ?? 'normal';
+    const count = req.count ?? 1;
     rollLabelRef.current = req.label;
     rollModifierRef.current = req.modifier;
     setOpen(true);
     setMode(reqMode);
     setRollModifier(req.modifier);
     setRollLabel(req.label);
-    if (reqMode !== 'normal') {
+    // Advantage/disadvantage is a d20 mechanic — roll two, take one. Damage is
+    // the only thing that sends count > 1, and it is never rolled with
+    // advantage, so a multi-die request always takes the summing path rather
+    // than silently losing all but one of its dice to rollTwo.
+    if (reqMode !== 'normal' && count === 1) {
       rollTwo(req.die as Die, reqMode);
     } else {
-      rollWithSides(req.die as Die);
+      rollWithSides(req.die as Die, count);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending]);
@@ -340,28 +369,29 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
    *  the ref-mirrored label/modifier (see rollModifierRef's doc comment),
    *  not the rollLabel/rollModifier state, since this runs inside the same
    *  settle closures that would otherwise see a stale value. */
-  function maybeAutoSendRoll(sides: Die, result: number, effectiveMode: Mode, two: { v1: number; v2: number; winner: 1 | 2 } | null) {
+  function maybeAutoSendRoll(sides: Die, result: number, effectiveMode: Mode, two: { v1: number; v2: number; winner: 1 | 2 } | null, count = 1) {
     if (!autoSendToDM || !rollLabelRef.current) return;
-    sendRollToDM({ die: sides, result, mode: effectiveMode, two, label: rollLabelRef.current, modifier: rollModifierRef.current });
+    sendRollToDM({ die: sides, count, result, mode: effectiveMode, two, label: rollLabelRef.current, modifier: rollModifierRef.current });
   }
 
-  function rollWithSides(sides: Die) {
+  function rollWithSides(sides: Die, count = 1) {
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
+    setActiveCount(count);
     setTwoDisplay(null);
     setTwoFinal(null);
     setDmStatus(null);
 
     if (hurryUp) {
-      const result = Math.ceil(Math.random() * sides);
-      const t = getTier(result, sides);
+      const result = rollSum(sides, count);
+      const t = getTier(result, sides, count);
       setDisplay(result);
       setTier(t);
       setResultKey(k => k + 1);
-      setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
+      setHistory(h => [{ die: sides, count, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
       setRolling(false);
-      publishResult(result, sides, rollLabelRef.current);
-      maybeAutoSendRoll(sides, result, 'normal', null);
+      publishResult(result, sides, rollLabelRef.current, count);
+      maybeAutoSendRoll(sides, result, 'normal', null, count);
       return;
     }
 
@@ -376,19 +406,19 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
       frame++;
       const progress = frame / frames;
       setShakePhase(progress < 0.45 ? 0 : progress < 0.75 ? 1 : 2);
-      setDisplay(Math.ceil(Math.random() * sides));
+      setDisplay(rollSum(sides, count));
       if (frame < frames) {
         timerRef.current = setTimeout(tick, delay(frame));
       } else {
-        const result = Math.ceil(Math.random() * sides);
-        const t = getTier(result, sides);
+        const result = rollSum(sides, count);
+        const t = getTier(result, sides, count);
         setDisplay(result);
         setTier(t);
         setResultKey(k => k + 1);
-        setHistory(h => [{ die: sides, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
+        setHistory(h => [{ die: sides, count, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
         setRolling(false);
-        publishResult(result, sides, rollLabelRef.current);
-        maybeAutoSendRoll(sides, result, 'normal', null);
+        publishResult(result, sides, rollLabelRef.current, count);
+        maybeAutoSendRoll(sides, result, 'normal', null, count);
       }
     };
     timerRef.current = setTimeout(tick, 30);
@@ -410,6 +440,8 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
     if (rolling) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
+    setActiveCount(1); // adv/dis is always a single die taken twice
+
     setDisplay(null);
     setDmStatus(null);
 
@@ -733,9 +765,9 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
                     )}
                     <p className="text-xs mt-2 relative z-10 font-semibold"
                       style={{ color: rolling ? '#475569' : t.color, opacity: rolling ? 1 : 0.85 }}>
-                      {rolling ? `Rolling d${activeDie}…`
+                      {rolling ? `Rolling ${dieLabel(activeDie!, activeCount)}…`
                         : tier === 'crit-success' ? activeDie === 20 ? '🎉 Natural 20!' : '🎉 Max roll!'
-                        : t.label || `d${activeDie}`}
+                        : t.label || dieLabel(activeDie!, activeCount)}
                     </p>
                   </>
                 ) : (
@@ -753,7 +785,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
           {connected && display !== null && !rolling && activeDie !== null && (
             <div className="flex items-center justify-center px-4 pb-1.5 -mt-1">
               <button
-                onClick={() => sendRollToDM({ die: activeDie, result: display, mode, two: twoFinal, label: rollLabel, modifier: rollModifier })}
+                onClick={() => sendRollToDM({ die: activeDie, count: activeCount, result: display, mode, two: twoFinal, label: rollLabel, modifier: rollModifier })}
                 className="flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-emerald-400 transition-colors"
                 title="Send this roll to the DM"
               >
@@ -796,7 +828,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
                     {h.mode === 'advantage' ? <span className="text-green-500 text-[10px]">▲ </span>
                       : h.mode === 'disadvantage' ? <span className="text-red-500 text-[10px]">▼ </span>
                       : null}
-                    d{h.die} <span className="font-bold" style={{ color: TIER[h.tier].color }}>{h.result}</span>
+                    {dieLabel(h.die, h.count)} <span className="font-bold" style={{ color: TIER[h.tier].color }}>{h.result}</span>
                   </span>
                 ))}
               </div>

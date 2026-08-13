@@ -4,6 +4,11 @@ export type RollDie = 4 | 6 | 8 | 10 | 12 | 20 | 100;
 
 export interface PendingRoll {
   die: RollDie;
+  /** How many dice to roll and SUM — the `2` in a greatsword's "2d6". Absent
+   *  means 1, which is every d20 check, save and attack roll. Damage is the
+   *  only thing that sends more, and it must: rolling one die for "2d6" is a
+   *  wrong number at the table, not a cosmetic shortcut. */
+  count?: number;
   modifier: number;
   label: string;
   mode?: 'normal' | 'advantage' | 'disadvantage';
@@ -15,6 +20,8 @@ export interface PendingRoll {
 export interface RollResult {
   value: number;
   die: RollDie;
+  /** Dice summed into `value` (see PendingRoll.count). 1 unless it was damage. */
+  count: number;
   label: string;
   nonce: number;
 }
@@ -23,11 +30,11 @@ interface DiceStoreState {
   pending: PendingRoll | null;
   openNonce: number; // increments to force the panel open externally
   lastResult: RollResult | null;
-  triggerRoll: (die: RollDie, modifier: number, label: string, mode?: 'normal' | 'advantage' | 'disadvantage') => void;
+  triggerRoll: (die: RollDie, modifier: number, label: string, mode?: 'normal' | 'advantage' | 'disadvantage', count?: number) => void;
   openPanel: () => void;
   consume: () => PendingRoll | null;
   /** Called by DiceRoller the moment a roll settles (after animation). */
-  publishResult: (value: number, die: RollDie, label: string) => void;
+  publishResult: (value: number, die: RollDie, label: string, count?: number) => void;
 }
 
 export const useDiceStore = create<DiceStoreState>((set, get) => ({
@@ -35,9 +42,9 @@ export const useDiceStore = create<DiceStoreState>((set, get) => ({
   openNonce: 0,
   lastResult: null,
 
-  triggerRoll: (die, modifier, label, mode) =>
+  triggerRoll: (die, modifier, label, mode, count) =>
     set(s => ({
-      pending: { die, modifier, label, mode, nonce: (s.pending?.nonce ?? 0) + 1 },
+      pending: { die, count, modifier, label, mode, nonce: (s.pending?.nonce ?? 0) + 1 },
     })),
 
   openPanel: () => set(s => ({ openNonce: s.openNonce + 1 })),
@@ -48,8 +55,8 @@ export const useDiceStore = create<DiceStoreState>((set, get) => ({
     return p;
   },
 
-  publishResult: (value, die, label) =>
+  publishResult: (value, die, label, count = 1) =>
     set(s => ({
-      lastResult: { value, die, label, nonce: (s.lastResult?.nonce ?? 0) + 1 },
+      lastResult: { value, die, count, label, nonce: (s.lastResult?.nonce ?? 0) + 1 },
     })),
 }));

@@ -41,7 +41,7 @@ import { getClass, baseClassId } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
-import type { RollDie } from '../../store/useDiceStore';
+import { parseDamageDice } from '../../utils/damageDice';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 
 // Lazy-loaded so the three/R3F bundle is a separate chunk — only fetched when the
@@ -1514,14 +1514,6 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
-const VALID_DAMAGE_DICE: RollDie[] = [4, 6, 8, 10, 12, 20, 100];
-/** Extract the die type from a weapon damage string, e.g. "1d8" → 8, "2d6" → 6. */
-function parseDamageDie(dice: string): RollDie | null {
-  if (!dice || dice === '—' || !dice.includes('d')) return null;
-  const sides = parseInt(dice.split('d')[1], 10);
-  return VALID_DAMAGE_DICE.includes(sides as RollDie) ? (sides as RollDie) : null;
-}
-
 function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mods: any; profBonus: number }) {
   const { triggerRoll } = useDiceStore();
 
@@ -1558,7 +1550,7 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
           const dmgDice = w?.damageDice ?? '1d6';
           const dmgType = w?.damageType ?? '—';
           const dmgLabel = w ? damageLine(dmgDice, abilityMod) : `?d? + ${abilityMod >= 0 ? '+' : ''}${abilityMod}`;
-          const dmgDie = parseDamageDie(dmgDice);
+          const dmg = parseDamageDice(dmgDice);
 
           return (
             <div key={item.id} className="bg-slate-900/60 rounded-lg p-3">
@@ -1591,10 +1583,10 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
                 {/* Damage roll — opens the dice window */}
                 <button
                   onClick={() => {
-                    if (!dmgDie || dmgDice === '—') return;
-                    triggerRoll(dmgDie, abilityMod, `${item.name} Damage`);
+                    if (!dmg || dmgDice === '—') return;
+                    triggerRoll(dmg.sides, abilityMod, `${item.name} Damage`, undefined, dmg.count);
                   }}
-                  disabled={!dmgDie || dmgDice === '—'}
+                  disabled={!dmg || dmgDice === '—'}
                   className="flex-1 bg-orange-900/40 hover:bg-orange-800/50 border border-orange-700/60 hover:border-orange-500 rounded-lg py-1.5 text-center transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
                   title={`Roll damage: ${dmgLabel}`}
                 >
@@ -1606,8 +1598,8 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
               {w?.versatile && (
                 <button
                   onClick={() => {
-                    const vDie = parseDamageDie(w.versatile!);
-                    if (vDie) triggerRoll(vDie, abilityMod, `${item.name} (Two-Handed) Damage`);
+                    const v = parseDamageDice(w.versatile!);
+                    if (v) triggerRoll(v.sides, abilityMod, `${item.name} (Two-Handed) Damage`, undefined, v.count);
                   }}
                   className="mt-1.5 w-full text-[10px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded py-1 transition-colors"
                 >

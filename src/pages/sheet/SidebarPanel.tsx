@@ -16,16 +16,10 @@ import { getClass } from '../../data/classes';
 import { getSpell } from '../../data/spells';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import type { SlotLevel } from '../../types';
-import type { RollDie } from '../../store/useDiceStore';
+import { parseDamageDice } from '../../utils/damageDice';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const VALID_DAMAGE_DICE: RollDie[] = [4, 6, 8, 10, 12, 20, 100];
-function parseDamageDie(dice: string): RollDie | null {
-  if (!dice || dice === '—' || !dice.includes('d')) return null;
-  const sides = parseInt(dice.split('d')[1], 10);
-  return VALID_DAMAGE_DICE.includes(sides as RollDie) ? (sides as RollDie) : null;
-}
 
 // ── ModuleCard wrapper ───────────────────────────────────────────────────────
 
@@ -276,7 +270,7 @@ function WeaponAttacksSideModule() {
         const toHit = abilityMod + profBonus;
         const dmgDice = w?.damageDice ?? '1d6';
         const dmgLabel = damageLine(dmgDice, abilityMod);
-        const dmgDie = parseDamageDie(dmgDice);
+        const dmg = parseDamageDice(dmgDice);
 
         return (
           <div key={item.id} className="bg-slate-900/60 rounded-lg p-2">
@@ -291,8 +285,8 @@ function WeaponAttacksSideModule() {
                 <p className="text-xs font-bold text-white">{toHit >= 0 ? '+' : ''}{toHit} 🎲</p>
               </button>
               <button
-                onClick={() => dmgDie && triggerRoll(dmgDie, abilityMod, `${item.name} Damage`)}
-                disabled={!dmgDie}
+                onClick={() => dmg && triggerRoll(dmg.sides, abilityMod, `${item.name} Damage`, undefined, dmg.count)}
+                disabled={!dmg}
                 className="flex-1 bg-orange-900/40 hover:bg-orange-800/50 border border-orange-700/60 rounded py-1.5 text-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 title={`Roll ${dmgLabel}`}
               >
@@ -303,8 +297,8 @@ function WeaponAttacksSideModule() {
             {w?.versatile && (
               <button
                 onClick={() => {
-                  const vd = parseDamageDie(w.versatile!);
-                  if (vd) triggerRoll(vd, abilityMod, `${item.name} (2H) Damage`);
+                  const v = parseDamageDice(w.versatile!);
+                  if (v) triggerRoll(v.sides, abilityMod, `${item.name} (2H) Damage`, undefined, v.count);
                 }}
                 className="mt-1 w-full text-[9px] text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded py-1 transition-colors"
               >
