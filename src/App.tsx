@@ -18,6 +18,7 @@ import { HauntOverlay } from './components/HauntOverlay';
 import { DeepSeaOverlay } from './components/DeepSeaOverlay';
 import { FireworksOverlay } from './components/FireworksOverlay';
 import { EidOverlay } from './components/EidOverlay';
+import { ErrorBoundary, AppCrashFallback } from './components/ErrorBoundary';
 
 export default function App() {
   const updater = useAppUpdater();
@@ -53,6 +54,10 @@ export default function App() {
           </button>
         </div>
       )}
+      {/* Without this, any render error in any page unmounts the whole tree and
+          the window goes blank with no way back — the failure mode the 3D
+          viewport already guards against locally. */}
+      <ErrorBoundary label="App" fallback={<AppCrashFallback />}>
       <Routes>
         <Route index element={<HomePage checkForUpdates={updater.checkForUpdates} checkStatus={updater.checkStatus} />} />
         <Route path="create" element={<CreatorPage />} />
@@ -77,6 +82,7 @@ export default function App() {
         )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

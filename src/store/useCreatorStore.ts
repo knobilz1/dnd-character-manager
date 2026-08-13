@@ -8,6 +8,7 @@ import { getRace } from '../data/races';
 import { getBackground } from '../data/backgrounds';
 import { ALL_FEATS, featGrantedSpells } from '../data/feats';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
+import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 import { chosenAsi } from '../utils/racialAsi';
 
 
@@ -207,24 +208,10 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       if (pm) pactMagic = { slotsTotal: pm.slots, slotsUsed: 0, slotLevel: pm.slotLevel };
     }
 
-    // Compute ability mods needed for resource max overrides (Bardic Inspiration, Flash of Genius).
-    // Mirrors computeResourceMaxOverrides in useCharacterStore: base + racial + feats.
-    const racialCha = originAsi('cha');
-    const racialInt = originAsi('int');
-    let featCha = 0, featInt = 0;
-    for (const featId of (draft.selectedFeats ?? [])) {
-      const feat = ALL_FEATS.find(f => f.id === featId);
-      if (feat?.abilityScoreIncrease) {
-        featCha += feat.abilityScoreIncrease.cha ?? 0;
-        featInt += feat.abilityScoreIncrease.int  ?? 0;
-      }
-    }
-    const effectiveCha = (finalBaseScores.cha ?? 10) + racialCha + featCha;
-    const effectiveInt = (finalBaseScores.int ?? 10) + racialInt + featInt;
-    const chaMod = Math.floor((effectiveCha - 10) / 2);
-    const intMod  = Math.floor((effectiveInt  - 10) / 2);
-
     // Build resources from both class and (if selected) subclass definitions.
+    // These maxima come from each class's level table; the ~70 resources that
+    // scale on an ability mod or proficiency bonus instead are corrected below,
+    // once the character exists to compute them from.
     const resources = [];
     for (const cl of draft.classes) {
       const def = getClass(cl.classId);
@@ -237,11 +224,6 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
           resources.push({ key: rd.key, current: max === 'unlimited' ? 99 : max, max: max === 'unlimited' ? 99 : max });
         }
       }
-    }
-    // Override Bardic Inspiration (uses CHA mod, not a level table) and Flash of Genius (INT mod).
-    for (const r of resources) {
-      if (r.key === 'bardic_inspiration') { const m = Math.max(1, chaMod); r.max = m; r.current = m; }
-      if (r.key === 'flash_of_genius')    { const m = Math.max(1, intMod);  r.max = m; r.current = m; }
     }
 
     const character: Character = {
@@ -328,6 +310,24 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       knowledgeDomainSkills: (draft.knowledgeDomainSkills as string[] | undefined) ?? [],
       appearance: draft.appearance ?? { gender: 'male' },
     };
+
+    // Resources whose max is an ability mod or proficiency bonus, not a level-table
+    // entry, carry a placeholder `maxPerLevel: 1` in the data — computeCharacterDerived
+    // owns the real table (~70 keys) and the sheet has always applied it.
+    //
+    // This used to duplicate exactly two of those rules here (bardic_inspiration,
+    // flash_of_genius), so every other one saved at its placeholder: a creator-built
+    // Light Domain cleric stored Warding Flare 1/1, a paladin Divine Sense 1/1. Load
+    // then treats an already-saved resource as pre-existing and CLAMPS current to the
+    // real max (`Math.min(r.current, ov)` in useCharacterStore.load), so the character
+    // opened its very first sheet showing 1 of 4 — three-quarters spent before play.
+    //
+    // Delegating instead of copying is the same cure the store's own comment
+    // prescribes; the two-copies shape is what let them drift in the first place.
+    const overrides = computeCharacterDerived(character).resourceMaxOverrides;
+    character.resources = character.resources.map(r =>
+      overrides[r.key] == null ? r : { ...r, max: overrides[r.key], current: overrides[r.key] }
+    );
 
     return character;
   },

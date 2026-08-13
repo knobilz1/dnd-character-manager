@@ -37,7 +37,16 @@ const STEP_COMPONENTS: Record<WizardStep, React.ComponentType> = {
   'review': StepReview,
 };
 
-function canAdvance(step: WizardStep, draft: any): boolean {
+/** Why `canAdvance` said no, for the hint under the Next button. Null when it said yes. */
+function blockedReason(step: WizardStep, draft: any): string | null {
+  if (step === 'ability-scores' && !canAdvance(step, draft)) {
+    return 'Assign a value to every ability score before continuing.';
+  }
+  return null;
+}
+
+/** Exported for tests — this predicate was silently `true` for a whole step once. */
+export function canAdvance(step: WizardStep, draft: any): boolean {
   switch (step) {
     case 'books': return draft.enabledBooks.length > 0;
     case 'race': return !!draft.raceId;
@@ -45,7 +54,17 @@ function canAdvance(step: WizardStep, draft: any): boolean {
     case 'subclass': return true; // subclass might not be available yet
     case 'class-options': return true;
     case 'background': return !!draft.backgroundId;
-    case 'ability-scores': return !!draft.baseAbilityScores;
+    // `baseAbilityScores` is always present — INITIAL_DRAFT seeds it, and rolling
+    // deliberately ZEROES all six so the player can assign the rolled values. So
+    // the old `!!draft.baseAbilityScores` was permanently true, and a player who
+    // rolled and then forgot to assign could walk to the end and create a
+    // character with 0 in every stat. 0 is not a legal score in 5e (rolled 4d6
+    // drop-lowest bottoms out at 3), so this rejects only genuinely unassigned
+    // scores and can never block a legitimate build.
+    case 'ability-scores': {
+      const scores: number[] = Object.values(draft.baseAbilityScores ?? {});
+      return scores.length === 6 && scores.every(v => (v ?? 0) >= 1);
+    }
     case 'skills': return true;
     case 'feats': return true;
     case 'spells': return true;
@@ -63,6 +82,7 @@ export function CreatorPage() {
   const currentIdx = WIZARD_STEPS.indexOf(step);
   const StepComponent = STEP_COMPONENTS[step];
   const canGo = canAdvance(step, draft);
+  const blocked = blockedReason(step, draft);
   const isLast = step === 'review';
 
   function handleFinish() {
@@ -135,9 +155,13 @@ export function CreatorPage() {
               <Check size={16} /> Create Character
             </Button>
           ) : (
-            <Button onClick={goNext} disabled={!canGo}>
-              Next <ChevronRight size={16} />
-            </Button>
+            <div className="flex items-center gap-3">
+              {/* A dead Next button with no reason reads as a bug. */}
+              {blocked && <p className="text-xs text-amber-400">{blocked}</p>}
+              <Button onClick={goNext} disabled={!canGo}>
+                Next <ChevronRight size={16} />
+              </Button>
+            </div>
           )}
         </div>
       </div>

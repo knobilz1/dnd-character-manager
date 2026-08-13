@@ -6,6 +6,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import * as THREE from 'three';
 import { modelUrl, initModelUrls, NEEDS_TAURI_MODEL_INIT } from '../../utils/modelUrl';
 import { getHairStyle, hairUrlFor, modelRace, type ModelRace } from '../../data/hair';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 import {
   resolveArmor, loadGarmentFit, GARMENT_FIT_EVENT,
   loadGarmentSections, resolveGarmentSections, GARMENT_SECTIONS_EVENT, GARMENT_PICK_EVENT,
@@ -1866,19 +1867,6 @@ function FitPanel({ title, race, fit, onChange, onReset, side = 'left' }: {
 // unmounts the ENTIRE character sheet â€” the screen goes grey. This boundary
 // confines the failure to the 3D viewport: the sheet keeps working, the viewport
 // just shows its background.
-class ViewportErrorBoundary extends React.Component<
-  { fallback: React.ReactNode; children: React.ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: unknown, info: unknown) {
-    // eslint-disable-next-line no-console
-    console.error('[CharacterViewport] 3D viewport crashed; sheet stays up:', error, info);
-  }
-  render() { return this.state.hasError ? this.props.fallback : this.props.children; }
-}
-
 // â”€â”€ Canvas wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function CharacterViewport({
   animationState = 'idle',
@@ -2124,7 +2112,7 @@ export default function CharacterViewport({
         <FitPanel title="Hair fit" race={bodyKey} fit={hairPanelFit} onChange={updateHairFit} onReset={resetHairFit} side="right" />
       )}
 
-      {urlsReady && <ViewportErrorBoundary fallback={null}>
+      {urlsReady && <ErrorBoundary label="CharacterViewport" fallback={null}>
         <Canvas
           shadows
           dpr={[1, 2]}
@@ -2167,7 +2155,7 @@ export default function CharacterViewport({
             target={[0, 0.95, 0]}
           />
         </Canvas>
-      </ViewportErrorBoundary>}
+      </ErrorBoundary>}
     </div>
   );
 }

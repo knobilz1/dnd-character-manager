@@ -42,6 +42,7 @@ import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
 import { parseDamageDice } from '../../utils/damageDice';
+import { fileToPortraitDataUrl } from '../../utils/portrait';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 
 // Lazy-loaded so the three/R3F bundle is a separate chunk — only fetched when the
@@ -246,16 +247,19 @@ export function SheetPage() {
   const { theme, toggleTheme } = useThemeStore();
   const { sidebarOpen, setSidebarOpen } = useSidebarStore();
 
-  function handlePortraitUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // Downscaled rather than stored raw — see utils/portrait.ts. The portrait is
+  // copied into the persisted library, every snapshot, and the Drive payload, so
+  // a phone photo here used to be enough to exceed the localStorage quota and
+  // silently stop all saving.
+  async function handlePortraitUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const result = ev.target?.result;
-      if (typeof result === 'string') setPortrait(result);
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+    try {
+      setPortrait(await fileToPortraitDataUrl(file));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "That image couldn't be used.");
+    }
   }
 
   // Load character on mount. Falls back to the borrowed store so a character
