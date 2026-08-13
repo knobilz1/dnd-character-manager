@@ -9,9 +9,12 @@ Published as `knobilz1`.
 **This file is auto-loaded by Codex.** Claude Code reads `CLAUDE.md`; `agy`
 (Gemini/Antigravity) reads neither — see §7, it's measured, not assumed.
 
-**State:** v0.23.9 (2026-07-28), `main` clean, 488 Rust tests (+23 `#[ignore]`d
-real-data harnesses), all feature branches merged. The updater endpoint serves
-6 signed platforms.
+**State:** v0.26.0 (2026-08-13), `main` clean, 542 Rust tests (+23 `#[ignore]`d
+real-data harnesses) and 31 frontend tests, all feature branches merged. The
+updater endpoint serves 6 signed platforms. There are now TWO workflows —
+`check.yml` (typecheck + both test suites, every push/PR) and `release.yml`
+(tags only). **Releasing now requires creating the release object by hand first
+— see §3 step 4, a tag push alone 403s.**
 
 Contents: §1 rules · §2 setup/build/test · §3 GitHub Actions · §4 repo map ·
 §5 campaign data · §6 flows · §7 multi-engine · §8 driving the app ·
@@ -119,10 +122,20 @@ catalog, real campaigns, or live models, and are driven by env vars. Run with
 
 ## 3. GitHub Actions — the whole release flow
 
-One workflow: `.github/workflows/release.yml`. **It is the only CI.** There is no
-PR check and **no test job** — pushing a tag proves the app compiles on three
-platforms and nothing more. Tests and typechecks are local-only, which is why the
-checklist below matters.
+Two workflows now.
+
+`.github/workflows/check.yml` (added 2026-08-13) runs on **every push and PR**
+(`tags-ignore: ['v*']`): a `frontend` job (`npx tsc -b --force` + `npm test`) and a
+`rust` job (`cargo test --lib`, with dummy `GOOGLE_CLIENT_ID`/`_SECRET` because
+`oauth.rs` uses `env!()`). Its one non-obvious step exists because **`tauri-build`
+resolves tauri.conf.json's bundle resource globs inside the build script**, so the
+gitignored merged `*_Anims.glb` files must at least *exist* or the crate won't
+compile — empty placeholders are enough, since `cargo test --lib` never bundles.
+Any future cargo job that skips the Node prebuild needs that step too.
+
+`.github/workflows/release.yml` still fires **only on a `v*` tag** and still runs
+no tests — a tag push proves the app compiles on three platforms and nothing more,
+which is why the checklist below matters.
 
 ### Trigger
 
@@ -191,7 +204,8 @@ Two consequences worth holding onto:
 ### Release checklist
 
 1. `cargo test --lib` (separate target dir) · `npx tsc -b --force` · `npm run build`.
-   **CI will not do any of this for you.**
+   `check.yml` now runs the first two on every push, but **`release.yml` still does
+   none of it** — a tag push proves only that three platforms compile.
 2. **If `src-tauri/src/dm.rs` changed, run the cfg-inversion check.** It's the
    only file with platform arms and nothing local compiles the macOS side.
    v0.23.2 shipped Windows-only because a `#[cfg(windows)]` got detached from its
@@ -199,10 +213,37 @@ Two consequences worth holding onto:
    `#[cfg(windows)]`→`#[cfg(any())]`, `#[cfg(target_os = "macos")]`→`#[cfg(all())]`,
    `cargo check --lib`, restore. Repeat with the linux arm on. Code using
    `std::os::unix` can't be checked this way — prefer a plain `Command` so it can.
-3. Bump `tauri.conf.json` → commit `chore: vX.Y.Z` → push `main` → push the tag.
-4. **Verify the release, don't trust green CI:**
+3. Bump `tauri.conf.json` → commit `Release vX.Y.Z` → push `main` → push the tag.
+4. **Create the release object yourself, as a PRERELEASE, before CI can get to it.**
+   Since 2026-08-13 `GITHUB_TOKEN` **cannot create a release in this repo** — every
+   leg 403s ("Resource not accessible by integration") right after logging
+   `Couldn't find release with tag vX.Y.Z. Creating one.`, and the build is wasted.
+
+   ```bash
+   gh release create vX.Y.Z --prerelease --verify-tag \
+     --title "DnD Sheet vX.Y.Z" --notes "Building…"
+   gh run rerun <run-id>          # tauri-action now UPLOADS instead of creating
+   ```
+
+   **Prerelease, never draft** — `GET /releases/tags/{tag}` doesn't return drafts, so
+   tauri-action wouldn't find one and would try to create → 403 again. Prerelease is
+   also what keeps users safe: `releases/latest` resolves to the newest *non*-prerelease,
+   so the whole build runs invisibly and a partly-failed one can't reach anybody. That
+   is the v0.23.2 hole (`publish-updater` is `needs: build`, so one failed leg skips
+   `latest.json` while the succeeding legs have already published) closed for free.
+
+   This is **not** a token problem, so don't go looking for one: the same auto-minted
+   token uploads assets fine afterwards, and upload needs `contents: write` exactly
+   like create does. `GITHUB_TOKEN` is minted per run and can't go stale. Ruled out by
+   measurement: no rulesets, no tag protection, repo not archived, GitHub operational,
+   and the job log prints `Contents: write` on the failing run. The repo's
+   `default_workflow_permissions` is `read`, but the per-job `permissions:` block
+   elevates correctly — **blaming that setting is a known-wrong dead end.** Only the
+   *create* endpoint is denied. Root cause still unknown.
+5. **Verify the release, don't trust green CI:**
    `curl -sL https://github.com/knobilz1/dnd-character-manager/releases/latest/download/latest.json`
-   must be HTTP 200, the new version, and every platform signed.
+   must be HTTP 200, the new version, and **6 platform keys each with a real signature**.
+6. Only then publish it: `gh release edit vX.Y.Z --prerelease=false --latest`.
 
 ### If you change this workflow
 
