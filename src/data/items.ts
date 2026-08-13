@@ -6,6 +6,13 @@ export interface ItemTemplate {
   weight?: number;
   description?: string;
   sourceBook?: BookId;
+  /** Other books this same item is printed in. Items are keyed by NAME and
+   *  looked up first-wins, so a reprint listed twice means the second copy is
+   *  dead data — and whichever copy happens to sit earlier in ALL_ITEMS decides
+   *  the weight and description everyone sees. One entry plus this list is the
+   *  only shape that keeps the item visible to every book that prints it.
+   *  Mirrors `alsoIn` on the other content types. */
+  alsoIn?: BookId[];
   maxCharges?: number;                         // pre-filled when item is added from template
   recharge?: 'dawn' | 'long' | 'short';        // how charges restore (undefined = no auto-restore)
 }
@@ -784,7 +791,6 @@ const TCE_ITEMS: ItemTemplate[] = [
   { name: 'Planecaller\'s Codex, +1', category: 'magic', weight: 3, description: 'Warlock focus: +1 spell attacks/save DC. Extra planar-binding spell list. Uncommon. Requires attunement (warlock).' },
   { name: 'Planecaller\'s Codex, +2', category: 'magic', weight: 3, description: '+2 warlock focus: +2 spell attacks/save DC. Extra planar-binding spell list. Rare. Requires attunement (warlock).' },
   { name: 'Planecaller\'s Codex, +3', category: 'magic', weight: 3, description: '+3 warlock focus: +3 spell attacks/save DC. Extra planar-binding spell list. Very rare. Requires attunement (warlock).' },
-  { name: 'Prosthetic Limb', category: 'magic', weight: 0, description: 'Replaces a missing limb; functions identically. Can be removed and reattached. Common.' },
   { name: 'Puppeteer\'s Tome, +1', category: 'magic', weight: 3, description: 'Wizard enchantment focus: +1 spell attacks/save DC. Extra enchantment spell list. Uncommon. Requires attunement (wizard).' },
   { name: 'Puppeteer\'s Tome, +2', category: 'magic', weight: 3, description: '+2 wizard enchantment focus: +2 spell attacks/save DC. Extra enchantment spell list. Rare. Requires attunement (wizard).' },
   { name: 'Puppeteer\'s Tome, +3', category: 'magic', weight: 3, description: '+3 wizard enchantment focus: +3 spell attacks/save DC. Extra enchantment spell list. Very rare. Requires attunement (wizard).' },
@@ -851,7 +857,6 @@ const EGTW_ITEMS: ItemTemplate[] = [
   { name: 'Ring of Obscuring', category: 'magic', weight: 0, description: 'Ring, uncommon (requires attunement). This ring has 3 charges and regains 1d3 expended charges daily at dawn. While wearing it, you can use an action and expend 1 charge to cast the fog cloud spell from the ring, centered on you. The spell lasts for 1 minute (no concentration required).', maxCharges: 3, recharge: 'dawn' },
   { name: 'Ring of Temporal Salvation', category: 'magic', weight: 0, description: 'Ring, rare (requires attunement). If you die while wearing this ring, you vanish and reappear at the start of your next turn in an unoccupied space within 5 feet of where you fell. You have a number of hit points equal to 3d6 + your Constitution modifier. If your hit point maximum is lower than that number, it rises to that number. Your exhaustion level is reduced by 1. The ring then turns to dust.' },
   { name: 'Silencer', category: 'magic', weight: 2, description: 'Shortsword. Attacks made with it produce no sound. Uncommon.' },
-  { name: 'Speaking Stone', category: 'magic', weight: 0.5, description: 'Linked to one other stone; cast sending between them at will. Very rare.' },
   { name: 'Sword of Fathoms', category: 'magic', weight: 2, description: 'Longsword. On a natural 20: +2d6 necrotic damage, and the target must succeed on a DC 14 Con save or gain 1 level of exhaustion (removed by a short or long rest). Uncommon. Requires attunement.' },
   { name: 'Verminshroud', category: 'magic', weight: 1, description: 'Cloak made from giant rat skin. Advantage on Stealth checks; you can speak with Small or smaller beasts; advantage on Perception checks relying on smell; darkvision 60 ft. Charges (spells): spider climb (2, no concentration), web (2), giant insect (3), insect plague (5). Legendary. Requires attunement.' },
   { name: 'Wavethreader', category: 'magic', weight: 1, description: 'Cloak woven from strands of solid water. You can move through liquids as if they were difficult terrain instead of being impeded. Cast freedom of movement on yourself using the cloak as a focus. Rare. Requires attunement.' },
@@ -1023,7 +1028,7 @@ const ERLW_ITEMS: ItemTemplate[] = [
   { name: 'Living Armor', category: 'magic', weight: 40, description: "Armor (any), very rare (requires attunement). This hideous armor is formed from black chitin with pulsing veins and red sinews. While wearing it, you have +1 AC and resistance to necrotic, poison, and psychic damage. Symbiotic Nature: must be worn for the entire attunement period (tendrils burrow in). Blood Thirst: after each long rest, the armor consumes half your remaining Hit Dice (rounded up). If you have no remaining Hit Dice, you gain 1 level of exhaustion instead." },
   { name: 'Living Gloves', category: 'magic', weight: 0.5, description: "Wondrous item, uncommon (requires attunement). These symbiotic gloves made of thin chitin and sinew bond with your skin. While attuned, choose one proficiency: Sleight of Hand, thieves' tools, one type of artisan's tools, or one musical instrument. You gain that proficiency, and double your proficiency bonus for checks using it. Symbiotic Nature: can't be voluntarily removed." },
   { name: 'Orb of Shielding', category: 'magic', weight: 3, description: "Wondrous item, common (requires attunement). An orb of shielding is a polished, spherical chunk of crystal or stone aligned to one of the planes of existence. If you're a spellcaster, it can serve as a spellcasting focus. When you take damage of the type associated with the orb's material, you can use your reaction to reduce the damage by 1d4. Planar materials and damage types: Fernian basalt = fire; Irian quartz = radiant; Kythrian skarn = acid and poison; Lamannian flint = lightning and thunder; Mabaran obsidian = necrotic; Risian shale = cold; Shavarran chert = force; Xorian marble = psychic." },
-  { name: 'Prosthetic Limb', category: 'magic', weight: 4, description: "Wondrous item, common (requires attunement by a creature missing some or all of a limb). This artificial limb replaces a hand, arm, foot, leg, or similar appendage that was lost or removed. While attached and attuned, it functions identically to the body part it's replacing. You can detach or reattach it as an action, and it can't be removed by anyone else. Multiple prosthetic limbs count as a single magic item for attunement purposes." },
+  { name: 'Prosthetic Limb', category: 'magic', alsoIn: ['TCE', 'EGtW'], weight: 4, description: "Wondrous item, common (requires attunement by a creature missing some or all of a limb). This artificial limb replaces a hand, arm, foot, leg, or similar appendage that was lost or removed. While attached and attuned, it functions identically to the body part it's replacing. You can detach or reattach it as an action, and it can't be removed by anyone else. Multiple prosthetic limbs count as a single magic item for attunement purposes." },
   { name: "Scribe's Pen", category: 'magic', weight: 0, description: "Wondrous item, common (requires attunement by a creature with the Mark of Scribing). You can use this pen to write on any surface — you choose whether the writing is visible or invisible. Only a creature with the Mark of Scribing can always see the invisible writing; any creature can touch the invisible writing as an action to make it visible to all. Writing on a non-construct fades after 7 days." },
   { name: 'Shiftweave', category: 'magic', weight: 1, description: "Wondrous item, common. When a suit of shiftweave is created, up to five different outfits can be embedded into the cloth. While wearing the clothing, you can speak its command word as a bonus action to transform your outfit into your choice of one of the other designs. Regardless of appearance, the outfit is nothing but clothing." },
   { name: 'Speaking Stone', category: 'magic', weight: 5, description: "Wondrous item, very rare. The key to long-distance communication across Khorvaire is House Sivis's network of message stations. Each station contains at least one speaking stone, carved from a Siberys dragonshard. If you're a gnome with the Mark of Scribing, you can touch the stone and use an action to cast the sending spell from it. The target is any other speaking stone whose location or unique sequence of symbols you know." },
@@ -1063,7 +1068,8 @@ export function searchItems(query: string, enabledBooks: BookId[], limit = 8): I
   const results: Array<{ item: ItemTemplate; score: number }> = [];
 
   for (const item of ALL_ITEMS) {
-    if (item.sourceBook && !bookSet.has(item.sourceBook)) continue;
+    if (item.sourceBook && !bookSet.has(item.sourceBook)
+        && !(item.alsoIn ?? []).some(b => bookSet.has(b))) continue;
     const name = item.name.toLowerCase();
     if (name.startsWith(q)) {
       results.push({ item, score: 2 });

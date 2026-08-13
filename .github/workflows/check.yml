@@ -1,0 +1,51 @@
+# Fast correctness gate on every push and PR.
+#
+# release.yml only ever ran on a pushed tag, and it only proved the app
+# COMPILES on three platforms — no typecheck, no tests, nothing about the data.
+# That is why the release checklist in AGENTS.md §3 is manual, and why a
+# silently-typo'd sourceBook or a duplicated id could ship. This job is the
+# cheap half of that checklist, run automatically.
+#
+# Deliberately NOT here: `tauri build` (that's release.yml's job, ~9 min × 3
+# platforms) and the tools/audit sweeps (they need the rulebook PDFs, which
+# aren't in the repo).
+name: check
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*'] # a tag push is a release; release.yml owns that
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install
+      # The ONLY typecheck that works here: the root tsconfig is `files: []`
+      # plus project references, so a bare `tsc --noEmit` checks nothing.
+      - run: npx tsc -b --force
+      - run: npm test
+
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      # oauth.rs reads these through env!(), so the crate does not compile
+      # without them. Tests never make a real Google call, so dummies are
+      # correct here — the real values are release-only secrets.
+      - name: cargo test
+        working-directory: src-tauri
+        env:
+          GOOGLE_CLIENT_ID: dummy
+          GOOGLE_CLIENT_SECRET: dummy
+        run: cargo test --lib
