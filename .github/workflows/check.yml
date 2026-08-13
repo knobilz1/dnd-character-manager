@@ -40,6 +40,22 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+      # tauri-build resolves tauri.conf.json's bundle resource globs inside the
+      # build script, so an unmatched glob fails the compile before a single
+      # test runs. The merged *_Anims.glb files it wants are gitignored —
+      # `npm run prebuild` generates them from the committed per-clip GLBs, and
+      # release.yml gets them for free because tauri-action runs the Node build
+      # first. `cargo test --lib` never bundles anything, so it only needs the
+      # glob to MATCH; empty placeholders do that in a second, where a real
+      # prebuild would spend minutes merging and meshopt-compressing assets no
+      # unit test looks at.
+      - name: Placeholder animation bundles so the resource glob resolves
+        shell: bash
+        run: |
+          for f in Human_Male Human_Female Elf_Male Elf_Female \
+                   Dwarf_Male Dwarf_Female Half_Orc_Male Half_Orc_Female; do
+            : > "public/models/${f}_Anims.glb"
+          done
       # oauth.rs reads these through env!(), so the crate does not compile
       # without them. Tests never make a real Google call, so dummies are
       # correct here — the real values are release-only secrets.
