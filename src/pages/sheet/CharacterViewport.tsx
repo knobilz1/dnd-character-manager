@@ -6,7 +6,14 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import * as THREE from 'three';
 import { modelUrl, initModelUrls, NEEDS_TAURI_MODEL_INIT } from '../../utils/modelUrl';
 import { getHairStyle, hairUrlFor, modelRace, type ModelRace } from '../../data/hair';
-import { resolveArmor, loadGarmentFit, GARMENT_FIT_EVENT, type ArmorPiece, type GarmentFit } from '../../data/armor';
+import {
+  resolveArmor, loadGarmentFit, GARMENT_FIT_EVENT,
+  loadGarmentSections, resolveGarmentSections, GARMENT_SECTIONS_EVENT, GARMENT_PICK_EVENT,
+  type ArmorPiece, type GarmentFit, type GarmentSections,
+} from '../../data/armor';
+// Shared with the offline baker (skin-garment.mjs) — plain JS on purpose, see the module header.
+// @ts-expect-error untyped shared module
+import { computeSectionWeights, applySections } from '../../../scripts/garment-sections.mjs';
 
 // The merged *_Anims.glb files are compressed with EXT_meshopt_compression
 // (see scripts/compress-glb.cjs) â€” the loader needs the meshopt decoder to read
@@ -1268,8 +1275,55 @@ function HelmetAttachment({ scene, manualFit, bodyKey, onEffectiveFit }: {
  * animation tracks by depth-first NAME search — duplicate bones in the scene would capture the
  * body's own animation tracks.
  */
-function SkinnedGarment({ scene, piece }: { scene: THREE.Object3D; piece: ArmorPiece }) {
-  const gltf = useLoader(GLTFLoader, modelUrl(piece.url), withMeshopt);
+/**
+ * Falls back to the shipped file when the raw dev copy is missing. A HEAD probe was tried first
+ * and lied twice (it raced a restarting dev server into a cached "no", and vite answers missing
+ * files with the SPA page as 200 text/html) — catching the loader's own failure is the only
+ * signal that can't drift from what the loader actually did. Thrown promises pass through
+ * untouched (that's Suspense, not an error).
+ */
+class GarmentDevBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode }, { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err: Error) {
+    // eslint-disable-next-line no-console
+    console.warn('[garment] raw dev copy failed to load, sculpting disabled:', err?.message);
+  }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+
+function SkinnedGarment({ scene, piece, bodyKey }: {
+  scene: THREE.Object3D; piece: ArmorPiece; bodyKey: string;
+}) {
+  /**
+   * On /model-review, load the RAW pre-meshopt copy from armor-dev/ (baked with --devraw), so the
+   * section sliders can sculpt real centimetre vertex data (the shipped GLB is quantized — its
+   * positions are integer-normalised and folded into the inverse binds, unsculptable). armor-dev/
+   * is dev-only: the tauri bundle glob is armor/*.glb and the vite plugin strips dist/models.
+   */
+  const wantDev = window.location.pathname.startsWith('/model-review');
+  const shipped = <SkinnedGarmentInner scene={scene} piece={piece} bodyKey={bodyKey} url={modelUrl(piece.url)} sculpt={false} />;
+  if (!wantDev) return shipped;
+  return (
+    <GarmentDevBoundary fallback={shipped}>
+      <SkinnedGarmentInner scene={scene} piece={piece} bodyKey={bodyKey}
+        url={modelUrl(piece.url.replace(/^armor\//, 'armor-dev/'))} sculpt />
+    </GarmentDevBoundary>
+  );
+}
+
+function SkinnedGarmentInner({ scene, piece, bodyKey, url, sculpt }: {
+  scene: THREE.Object3D; piece: ArmorPiece; bodyKey: string; url: string; sculpt: boolean;
+}) {
+  const gltf = useLoader(GLTFLoader, url, withMeshopt);
+  const { camera, gl } = useThree();
+  // bodyKey is `<raceId>:<gender>` (bodyKeyOf); sections resolve on the MODEL family, which is
+  // what the mesh actually is — several raceIds share one body.
+  const [rawRace, rawGender] = bodyKey.split(':');
+  const family = modelRace(rawRace);
+  const gender = rawGender || 'male';
 
   React.useEffect(() => {
     let src: THREE.SkinnedMesh | undefined;
@@ -1294,7 +1348,10 @@ function SkinnedGarment({ scene, piece }: { scene: THREE.Object3D; piece: ArmorP
       bones.push(found);
     }
 
-    const mesh = new THREE.SkinnedMesh(src.geometry, (src.material as THREE.Material).clone());
+    // Sculpt mode owns a CLONE of the geometry — the section deform writes vertex positions, and
+    // the loader's cached copy must stay pristine for the next body that loads this piece.
+    const geometry = sculpt ? src.geometry.clone() : src.geometry;
+    const mesh = new THREE.SkinnedMesh(geometry, (src.material as THREE.Material).clone());
     mesh.name = `garment_${piece.id}`;
     mesh.userData.isArmor = true;      // keeps applyTexture from painting the body skin onto it
     mesh.frustumCulled = false;        // its bounds are the bind pose, not where the bones put it
@@ -1335,15 +1392,125 @@ function SkinnedGarment({ scene, piece }: { scene: THREE.Object3D; piece: ArmorP
     };
     window.addEventListener(GARMENT_FIT_EVENT, onFit);
 
+    /**
+     * Section sculpting (dev, raw file only): per-vertex deform through the SAME masks and math
+     * the offline baker uses — scripts/garment-sections.mjs is imported by both, so the slider
+     * preview and the baked --sections output are one implementation. The cap boundary W comes
+     * from the GLB's scene extras (written by skin-garment), so even the region borders match
+     * the bake exactly.
+     */
+    let onSec: ((e: Event) => void) | undefined;
+    let pickCleanup: (() => void) | undefined;
+    /**
+     * Section deform runs on EVERY body, not just the dev page — that is how per-race fit
+     * reaches the sheet with one mesh shipping. It works on the quantized file too: three's
+     * BufferAttribute get/setXYZ denormalize and re-normalize around the raw int16 store, so
+     * reads and writes are in the file's own units; `authoredHeight` from the GLB's extras
+     * converts the panel's centimetres into those units.
+     */
+    const extras = gltf.scene.userData as { sectionW?: number; authoredHeight?: number } | undefined;
+    const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const nV = posAttr.count;
+    let unitScale = 1;
+    if (extras?.authoredHeight) {
+      let yLo = Infinity, yHi = -Infinity;
+      for (let i = 0; i < nV; i++) { const y = posAttr.getY(i); if (y < yLo) yLo = y; if (y > yHi) yHi = y; }
+      unitScale = (yHi - yLo) / extras.authoredHeight;
+    }
+    const canSection = !!extras?.authoredHeight;
+    if (!canSection && sculpt) {
+      // eslint-disable-next-line no-console
+      console.warn(`[garment] "${piece.id}" has no authoredHeight extra — re-bake with the current skin-garment.mjs to enable section fitting`);
+    }
+    if (canSection) {
+      /**
+       * Read/write through the attribute API, never `.array`. gltf-transform writes the raw dev
+       * file with INTERLEAVED vertex buffers, so `.array` there is position+normal+uv soup at a
+       * stride — treating it as packed xyz made every mask classify garbage and every write
+       * corrupt the buffer (measured: "x" range -17.6..83.9 on a garment authored ±18).
+       * getX/setXYZ are layout-proof on interleaved, packed AND normalized-int attributes.
+       */
+      const base = new Float32Array(nV * 3);
+      for (let i = 0; i < nV; i++) {
+        base[i * 3] = posAttr.getX(i); base[i * 3 + 1] = posAttr.getY(i); base[i * 3 + 2] = posAttr.getZ(i);
+      }
+      const out = new Float32Array(nV * 3);
+      const { weights, meta } = computeSectionWeights(base, nV, {
+        W: extras?.sectionW ? extras.sectionW * unitScale : undefined,
+        unitScale,
+        indices: geometry.getIndex()?.array,   // enables the real armhole-rim masks
+      });
+      const applySec = (sections: GarmentSections) => {
+        applySections(base, out, nV, weights, sections, meta);
+        for (let i = 0; i < nV; i++) posAttr.setXYZ(i, out[i * 3], out[i * 3 + 1], out[i * 3 + 2]);
+        posAttr.needsUpdate = true;
+        geometry.computeBoundingSphere();
+      };
+      // baked data for this body, then any dev override dialled for exactly this body
+      const resolved = (override?: GarmentSections) =>
+        resolveGarmentSections(piece, family, gender, override ?? loadGarmentSections(piece.id, bodyKey));
+      applySec(resolved());
+      onSec = (e: Event) => {
+        const d = (e as CustomEvent).detail as { id: string; bodyKey?: string; sections: GarmentSections } | undefined;
+        if (d?.id !== piece.id) return;
+        if (d.bodyKey && d.bodyKey !== bodyKey) return;   // another body's panel edit
+        applySec(resolved(d.sections));
+      };
+      window.addEventListener(GARMENT_SECTIONS_EVENT, onSec);
+
+      /**
+       * Click-to-pick: click the garment, get the section whose weight is strongest at the hit
+       * face, tell the panel (GARMENT_PICK_EVENT). Raycasting a SkinnedMesh is pose-aware in
+       * three r160+ (Mesh.raycast reads getVertexPosition, which SkinnedMesh overrides with the
+       * bone transform). A drag filter keeps orbiting from counting as a pick.
+       */
+      const ray = new THREE.Raycaster();
+      const down = new THREE.Vector2();
+      const onDown = (ev: PointerEvent) => down.set(ev.clientX, ev.clientY);
+      const onUp = sculpt ? (ev: PointerEvent) => {
+        if (Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 5) return;   // that was an orbit
+        const rect = gl.domElement.getBoundingClientRect();
+        const ndc = new THREE.Vector2(
+          ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+          -((ev.clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        ray.setFromCamera(ndc, camera);
+        const hit = ray.intersectObject(mesh, false)[0];
+        const face = hit?.face;
+        if (!face) return;
+        let bestSec = '', bestW = 0.12;
+        for (const [sec, w] of Object.entries(weights as Record<string, Float32Array>)) {
+          const wv = Math.max(w[face.a], w[face.b], w[face.c]);
+          if (wv > bestW) { bestW = wv; bestSec = sec; }
+        }
+        if (bestSec) window.dispatchEvent(new CustomEvent(GARMENT_PICK_EVENT, { detail: { id: piece.id, section: bestSec } }));
+      } : undefined;
+      if (onUp) {
+        gl.domElement.addEventListener('pointerdown', onDown);
+        gl.domElement.addEventListener('pointerup', onUp);
+        pickCleanup = () => {
+          gl.domElement.removeEventListener('pointerdown', onDown);
+          gl.domElement.removeEventListener('pointerup', onUp);
+        };
+        // dev hook: lets the masks be audited against what the component ACTUALLY computed
+        (window as unknown as Record<string, unknown>).__garmentDebug = { weights, meta, base, unitScale, bodyKey };
+        // eslint-disable-next-line no-console
+        console.log(`[garment] sculpt armed for "${piece.id}" on ${bodyKey} (${nV} verts, ${unitScale.toFixed(4)} units/cm)`);
+      }
+    }
+
     return () => {
       window.removeEventListener(GARMENT_FIT_EVENT, onFit);
+      if (onSec) window.removeEventListener(GARMENT_SECTIONS_EVENT, onSec);
+      pickCleanup?.();
       scene.remove(mesh);
       mesh.skeleton.dispose();
       (mesh.material as THREE.Material).dispose();
-      // geometry and textures belong to useLoader's cache — disposing them would break the
-      // next character that loads this piece.
+      if (sculpt) geometry.dispose();
+      // in normal mode geometry and textures belong to useLoader's cache — disposing them would
+      // break the next character that loads this piece.
     };
-  }, [scene, gltf, piece.id, piece.url]);
+  }, [scene, gltf, piece, piece.id, piece.url, sculpt, camera, gl, bodyKey, family, gender]);
 
   return null;
 }
@@ -1403,7 +1570,7 @@ function CharacterModelMinimal({ assets, onLoaded, showArmor, helmetManual, hair
           <HelmetAttachment scene={scene} manualFit={helmetManual} bodyKey={bodyKey} onEffectiveFit={onHelmetEffective} />
         </React.Suspense>
       )}
-      <Garments scene={scene} garments={garments} />
+      <Garments scene={scene} garments={garments} bodyKey={bodyKey} />
     </>
   );
 }
@@ -1423,11 +1590,13 @@ type ModelAttachmentProps = {
 };
 
 /** Skinned wardrobe pieces, mounted the same way in both model components. */
-function Garments({ scene, garments }: { scene: THREE.Object3D; garments?: ArmorPiece[] }) {
+function Garments({ scene, garments, bodyKey }: {
+  scene: THREE.Object3D; garments?: ArmorPiece[]; bodyKey: string;
+}) {
   if (!garments?.length) return null;
   return (
     <React.Suspense fallback={null}>
-      {garments.map((p) => <SkinnedGarment key={p.id} scene={scene} piece={p} />)}
+      {garments.map((p) => <SkinnedGarment key={`${p.id}:${bodyKey}`} scene={scene} piece={p} bodyKey={bodyKey} />)}
     </React.Suspense>
   );
 }
@@ -1586,7 +1755,7 @@ function CharacterModel({ assets, animationState, onLoaded, showArmor, helmetMan
           <HelmetAttachment scene={scene} manualFit={helmetManual} bodyKey={bodyKey} onEffectiveFit={onHelmetEffective} />
         </React.Suspense>
       )}
-      <Garments scene={scene} garments={garments} />
+      <Garments scene={scene} garments={garments} bodyKey={bodyKey} />
     </>
   );
 }

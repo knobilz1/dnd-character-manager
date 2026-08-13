@@ -56,3 +56,4 @@ scripts/freeze-capture.log
 
 # Tripo raw downloads — staging only, keepers get optimized into public/models/
 scratch-armor/
+public/models/armor-dev/

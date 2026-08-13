@@ -76,16 +76,30 @@ function toBindWorld(doc, prim, skin) {
   const ibm = skin.getInverseBindMatrices().getArray();
   const mats = joints.map((j, i) => new THREE.Matrix4().multiplyMatrices(world(j), new THREE.Matrix4().fromArray(ibm, i * 16)));
   const P = prim.getAttribute('POSITION'), J = prim.getAttribute('JOINTS_0'), W = prim.getAttribute('WEIGHTS_0');
+  // The mesh's AUTHORED normals, skinned with the same blend (rotation part — G*IBM is rigid at
+  // rest). Recomputing normals from winding was the first fleet run's core lie: Tripo/FBX meshes
+  // carry inconsistently-wound patches, computeVertexNormals dutifully flips those normals, and a
+  // flipped vertex casts "inward" that is really outward — reporting its healthy standoff as a
+  // burial. The giveaway was burial p95s mirroring standoff p95s cell by cell. The app itself
+  // lights with the authored normals, so they are the ground truth here.
+  const N = prim.getAttribute('NORMAL');
   const n = P.getCount(), out = new Float32Array(n * 3);
+  const nrm = N ? new Float32Array(n * 3) : null;
   const v = new THREE.Vector3(), acc = new THREE.Vector3(), tmp = new THREE.Vector3();
+  const nv = new THREE.Vector3(), nacc = new THREE.Vector3();
+  const m3 = new THREE.Matrix3();
   const je = [0, 0, 0, 0], we = [0, 0, 0, 0];
   for (let i = 0; i < n; i++) {
     v.fromArray(P.getElement(i, [0, 0, 0])); J.getElement(i, je); W.getElement(i, we);
-    acc.set(0, 0, 0);
-    for (let k = 0; k < 4; k++) if (we[k]) acc.add(tmp.copy(v).applyMatrix4(mats[je[k]]).multiplyScalar(we[k]));
+    acc.set(0, 0, 0); nacc.set(0, 0, 0);
+    for (let k = 0; k < 4; k++) if (we[k]) {
+      acc.add(tmp.copy(v).applyMatrix4(mats[je[k]]).multiplyScalar(we[k]));
+      if (nrm) { nv.fromArray(N.getElement(i, [0, 0, 0])); nacc.add(nv.applyMatrix3(m3.setFromMatrix4(mats[je[k]])).multiplyScalar(we[k])); }
+    }
     acc.toArray(out, i * 3);
+    if (nrm) nacc.normalize().toArray(nrm, i * 3);
   }
-  return out;
+  return { pos: out, nrm };
 }
 
 // ── garment, once ──────────────────────────────────────────────────────────────
@@ -134,14 +148,19 @@ for (const name of bodies) {
       acc.toArray(posed, i * 3);
     } }
 
-  // 3. body surface, same space, with normals
-  const bodyVerts = toBindWorld(bDoc, bPrim, bSkin);
-  const bIdx = bPrim.getIndices();
-  const bodyGeom = new THREE.BufferGeometry();
-  bodyGeom.setAttribute('position', new THREE.BufferAttribute(bodyVerts, 3));
-  bodyGeom.setIndex(new THREE.BufferAttribute(Uint32Array.from({ length: bIdx.getCount() }, (_, i) => bIdx.getScalar(i)), 1));
-  bodyGeom.computeVertexNormals();
-  const bodyNrm = bodyGeom.getAttribute('normal').array;
+  // 3. body surface, same space, with the body's own skinned normals (see toBindWorld for why
+  // recomputed-from-winding normals are disqualified here)
+  const { pos: bodyVerts, nrm: authoredNrm } = toBindWorld(bDoc, bPrim, bSkin);
+  let bodyNrm = authoredNrm;
+  if (!bodyNrm) {
+    console.log(`  ${name}: NO AUTHORED NORMALS — falling back to winding-derived (flip-suspect)`);
+    const bIdx0 = bPrim.getIndices();
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(bodyVerts, 3));
+    g.setIndex(new THREE.BufferAttribute(Uint32Array.from({ length: bIdx0.getCount() }, (_, i) => bIdx0.getScalar(i)), 1));
+    g.computeVertexNormals();
+    bodyNrm = g.getAttribute('normal').array;
+  }
 
   // …and a BVH over the POSED GARMENT, because the question worth asking runs this direction.
   const gIdxAcc = gPrim.getIndices();
@@ -170,8 +189,13 @@ for (const name of bodies) {
    * zero-protrusion sheet.
    */
   const OUT_REACH = 12;   // cm the garment may legitimately stand off the skin
-  const IN_REACH = 3;     // cm; further in than this and the ray has crossed the torso and hit
-                          // the garment's FAR wall — which says nothing about this vertex
+  /** --clearance widens the inward reach so burial depth reads as a real number instead of
+   *  saturating: the first fleet run reported max 3.00cm on 90/90 bodies, which was IN_REACH
+   *  itself — the instrument's ceiling, not a measurement. 8cm is still shy of crossing a torso
+   *  (~20cm deep) to the far wall; treat inward hits beyond ~6cm with suspicion anyway. */
+  const CLEARANCE = argv.includes('--clearance');
+  const IN_REACH = CLEARANCE ? 8 : 3;   // cm; further in and the ray may have crossed the torso
+                                        // and hit the garment's FAR wall — says nothing here
   /** The region the garment is responsible for = body vertices whose dominant joint is one the
    *  garment actually weights. Using a plain height band instead counts the arms hanging beside
    *  the chest as "uncovered torso" and drags a good fit's coverage number down by half. */
@@ -229,6 +253,57 @@ for (const name of bodies) {
   const where = [...pokeRegion.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k}:${n}`).join(' ');
   const hot = [...hotJoints.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2).map(([k, n]) => `${k}x${n}`).join(' ');
 
+  /**
+   * --clearance: per-height-band SILHOUETTE comparison, the measurement a re-fit is chosen from.
+   *
+   * Two per-vertex raycast formulations were tried first and both produced uninterpretable
+   * numbers: rays from arm/shoulder vertices cross the air gap and hit the cuirass wall beyond
+   * it, reporting a healthy garment as "buried 7cm" (fixing normals changed nothing — the rays
+   * were honest, the QUESTION was wrong). Band silhouettes cannot be fooled that way: in each
+   * 4cm y-slice compare the body's outer extents (front +z / back -z / half-width |x|, torso-
+   * dominated vertices only, so the A-pose arms stay out — the exact 2.31x-shoulder trap) with
+   * the garment's. delta = garment_extent - body_extent, signed so NEGATIVE = the garment is
+   * inside the body's skin there = buried. Garment z-extents only use verts within the body's
+   * core half-width so the flared pauldron wings don't pollute the front/back reading.
+   */
+  if (CLEARANCE) {
+    const TORSO = /^(pelvis|spine|neck|clavicle)/;
+    const BAND = 4;
+    const bands = new Map(); // slice index -> {body:{f,b,w}, gar:{f,b,w}}
+    const at = (y) => { const k = Math.floor(y / BAND); if (!bands.has(k)) bands.set(k, { body: null, gar: null }); return bands.get(k); };
+    const grow = (side, cell, x, z) => {
+      const s = cell[side] ?? (cell[side] = { f: -1e9, b: 1e9, w: 0 });
+      if (z > s.f) s.f = z; if (z < s.b) s.b = z; if (Math.abs(x) > s.w) s.w = Math.abs(x);
+    };
+    for (let i = 0; i < bodyVerts.length / 3; i++) {
+      bJ.getElement(i, bje); bW.getElement(i, bwe);
+      let bdom = bje[0], bdw = bwe[0];
+      for (let k = 1; k < 4; k++) if (bwe[k] > bdw) { bdw = bwe[k]; bdom = bje[k]; }
+      if (!TORSO.test(bJointNames[bdom])) continue;
+      grow('body', at(bodyVerts[i * 3 + 1]), bodyVerts[i * 3], bodyVerts[i * 3 + 2]);
+    }
+    // pass 1: garment width per band (needs body width known first for the z-core filter)
+    for (let i = 0; i < nG; i++) grow('gar', at(posed[i * 3 + 1]), posed[i * 3], posed[i * 3 + 2]);
+    // pass 2: garment front/back within the body's core width only
+    for (const cell of bands.values()) if (cell.gar) { cell.gar.f = -1e9; cell.gar.b = 1e9; }
+    for (let i = 0; i < nG; i++) {
+      const cell = at(posed[i * 3 + 1]);
+      if (!cell.body || !cell.gar) continue;
+      if (Math.abs(posed[i * 3]) > cell.body.w * 0.6) continue;
+      const z = posed[i * 3 + 2];
+      if (z > cell.gar.f) cell.gar.f = z; if (z < cell.gar.b) cell.gar.b = z;
+    }
+    console.log(`  ${'y-band'.padEnd(10)} ${'front Δ'.padStart(8)} ${'back Δ'.padStart(8)} ${'width Δ'.padStart(8)}   (+ = garment outside skin, − = buried; blank = garment absent)`);
+    for (const k of [...bands.keys()].sort((a, b2) => b2 - a)) {
+      const { body, gar } = bands.get(k);
+      if (!body) continue;
+      const y0 = k * BAND, y1 = y0 + BAND;
+      const fd = gar && gar.f > -1e8 ? (gar.f - body.f).toFixed(1).padStart(8) : ''.padStart(8);
+      const bd = gar && gar.b < 1e8 ? (body.b - gar.b).toFixed(1).padStart(8) : ''.padStart(8);
+      const wd = gar ? (gar.w - body.w).toFixed(1).padStart(8) : ''.padStart(8);
+      console.log(`  ${`${y0}-${y1}cm`.padEnd(10)} ${fd} ${bd} ${wd}`);
+    }
+  }
   rows.push({ name, pokePct: +pokePct.toFixed(1), p95: +p95.toFixed(2), max: +worstPoke.toFixed(2), coverPct: +coverPct.toFixed(1), ratio: +ratio.toFixed(3), explode, hot });
   console.log(`${name.padEnd(22)} poke ${pokePct.toFixed(1).padStart(5)}%  p95 ${p95.toFixed(2).padStart(5)}cm  max ${worstPoke.toFixed(2).padStart(5)}cm  ` +
     `cover ${coverPct.toFixed(1).padStart(5)}%  h/H ${ratio.toFixed(3)}${explode ? '  *** EXPLOSION ***' : ''}${where ? `  where=[${where}]` : ''}`);

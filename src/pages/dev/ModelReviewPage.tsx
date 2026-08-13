@@ -18,7 +18,17 @@ import { Link } from 'react-router-dom';
 import { ALL_RACES } from '../../data/races';
 import { modelRace, type ModelRace } from '../../data/hair';
 import CharacterViewport, { getAssets, type AnimationState, type CharacterGender } from '../sheet/CharacterViewport';
-import { DEFAULT_GARMENT_FIT, loadGarmentFit, saveGarmentFit, clearGarmentFit, type GarmentFit } from '../../data/armor';
+import {
+  DEFAULT_GARMENT_FIT, loadGarmentFit, saveGarmentFit, clearGarmentFit,
+  loadGarmentSections, saveGarmentSections, clearGarmentSections, resolvedSectionsForBody,
+  saveGarmentSectionsToRepo, promoteGarmentSectionsToBase, GARMENT_PICK_EVENT,
+  type GarmentFit, type GarmentSections,
+} from '../../data/armor';
+// Shared with the offline baker — the section masks and math live in ONE module (see its header).
+// @ts-expect-error untyped shared module
+import { SECTIONS } from '../../../scripts/garment-sections.mjs';
+
+const SECTION_DEFS = SECTIONS as Record<string, { label: string; params: Record<string, [string, number, number]> }>;
 
 const STATES: { id: AnimationState; label: string; note?: string }[] = [
   { id: 'idle', label: 'Idle' },
@@ -54,7 +64,7 @@ function buildEntries(): Entry[] {
  * real animation. Nothing here ships: the values are read off and baked into skin-garment.mjs args,
  * which the readout at the bottom writes out ready to paste.
  */
-function GarmentFitPanel({ ids }: { ids: string[] }) {
+function GarmentFitPanel({ ids, bodyKey }: { ids: string[]; bodyKey: string }) {
   const id = ids[0];
   const [fit, setFit] = React.useState<GarmentFit>(() => loadGarmentFit(id));
   React.useEffect(() => { setFit(loadGarmentFit(id)); }, [id]);
@@ -89,14 +99,193 @@ function GarmentFitPanel({ ids }: { ids: string[] }) {
       {row('Girth (width + depth)', 'girth', 0.7, 1.6, 0.01, '×')}
       {row('Up / down', 'dy', -0.5, 0.5, 0.005, ' of height')}
       {row('Forward / back', 'dz', -0.5, 0.5, 0.005, ' of depth')}
+      <GarmentSectionsPanel id={id} bodyKey={bodyKey} />
       <p className="mt-2 break-all rounded bg-neutral-950 p-2 font-mono text-[10px] leading-snug text-emerald-300">
         --scale {fit.scale.toFixed(2)} --ease {fit.girth.toFixed(2)} --dy {(fit.dy * 35).toFixed(1)} --dz {(fit.dz * 22).toFixed(1)}
       </p>
       <p className="mt-1 text-[10px] leading-snug text-neutral-500">
-        Live only — multiplies onto whatever the GLB was baked with. Offsets are fractions of the
-        piece's own size; the cm figures above assume a ~35×22cm torso piece. Flip through the
-        animation states and check the fit holds before baking.
+        Live only — multiplies onto whatever the GLB was baked with. Flip through the animation
+        states and check the fit holds before baking.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Per-section sculpting — named after the real thing (tailoring's armscye is the arm hole;
+ * pauldron/gorget/fauld are the armour part names), symmetric sections split L/R so each side
+ * dials alone. Values are CENTIMETRES of displacement at the section's core, fading smoothly at
+ * its border. Live preview and bake share one implementation (scripts/garment-sections.mjs); the
+ * readout at the bottom is the --sections arg to paste into the skin-garment bake.
+ *
+ * Only active when the piece has a raw dev copy under public/models/armor-dev/ (baked with
+ * --devraw) — the shipped GLB is quantized and cannot be sculpted. Without the raw file the
+ * sliders move nothing and the panel says so.
+ */
+function GarmentSectionsPanel({ id, bodyKey }: { id: string; bodyKey: string }) {
+  // Values are per BODY (see resolveGarmentSections): the same piece needs different residue on
+  // a giff than on a halfling, because silhouette lives in the mesh, not the skeleton.
+  /**
+   * Two states, deliberately: `vals` is what the sliders SHOW (the resolved total — base plus
+   * this body's own), and `own` is the set of `<section>.<param>` this body actually owns.
+   *
+   * Only owned params are written to the override. Writing the whole displayed blob instead —
+   * which is what the first version did — silently BAKED every inherited value into whichever
+   * body you happened to touch, so a tweak on aarakocra copied human's pauldrons onto it and the
+   * two bodies read identical. Tracking ownership also lets 0 be a real value: dialling an
+   * inherited +2cm down to 0 is now an override that sticks, instead of being pruned as "unset"
+   * and springing back to the inherited number.
+   */
+  const ownKeysOf = (s: GarmentSections) => new Set(
+    Object.entries(s).flatMap(([sec, ps]) => Object.keys(ps || {}).map((p) => `${sec}.${p}`)));
+  const pickOwn = (vals: GarmentSections, ownSet: Set<string>) => {
+    const out: GarmentSections = {};
+    for (const [sec, ps] of Object.entries(vals)) {
+      for (const [p, v] of Object.entries(ps || {})) {
+        if (!ownSet.has(`${sec}.${p}`)) continue;
+        (out[sec] ||= {})[p] = v;
+      }
+    }
+    return out;
+  };
+  const [sections, setSections] = React.useState<GarmentSections>(() => resolvedSectionsForBody(id, bodyKey));
+  const [ownSet, setOwnSet] = React.useState<Set<string>>(() => ownKeysOf(loadGarmentSections(id, bodyKey)));
+  const own = ownSet.size > 0;
+  React.useEffect(() => {
+    setSections(resolvedSectionsForBody(id, bodyKey));
+    setOwnSet(ownKeysOf(loadGarmentSections(id, bodyKey)));
+  }, [id, bodyKey]);
+
+  // Click-to-pick: the viewport raycasts a click on the garment to its strongest section and
+  // announces it; that section opens (others close), scrolls into view and flashes.
+  const [open, setOpen] = React.useState<Record<string, boolean>>({});
+  const [flash, setFlash] = React.useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = React.useState<string | null>(null);
+  const rowRefs = React.useRef<Record<string, HTMLDetailsElement | null>>({});
+  React.useEffect(() => {
+    const onPick = (e: Event) => {
+      const d = (e as CustomEvent).detail as { id: string; section: string } | undefined;
+      if (d?.id !== id) return;
+      setOpen({ [d.section]: true });
+      setFlash(d.section);
+      rowRefs.current[d.section]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      window.setTimeout(() => setFlash(null), 900);
+    };
+    window.addEventListener(GARMENT_PICK_EVENT, onPick);
+    return () => window.removeEventListener(GARMENT_PICK_EVENT, onPick);
+  }, [id]);
+
+  /**
+   * PER-SLIDER mirror (⇄, default on): while a slider's mirror is lit, dragging it writes the
+   * same value to the twin section's same param — pauldron R in/out drives pauldron L in/out
+   * live. The flag is keyed on the base name so the L and R rows share one toggle, and it works
+   * for any *_l / *_r pair (future pieces inherit it). Unlit = that slider dials its side alone.
+   */
+  const twinOf = (sec: string) =>
+    sec.endsWith('_l') ? `${sec.slice(0, -2)}_r` : sec.endsWith('_r') ? `${sec.slice(0, -2)}_l` : undefined;
+  const mirrorKey = (sec: string, param: string) => `${sec.replace(/_[lr]$/, '')}.${param}`;
+  const [mirror, setMirror] = React.useState<Record<string, boolean>>({});
+  const isMirrored = (sec: string, param: string) => !!twinOf(sec) && (mirror[mirrorKey(sec, param)] ?? true);
+
+  const set = (sec: string, param: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value);
+    setSections((prev) => {
+      const next = { ...prev, [sec]: { ...prev[sec], [param]: v } };
+      const nextOwn = new Set(ownSet);
+      nextOwn.add(`${sec}.${param}`);
+      const twin = twinOf(sec);
+      if (twin && twin in SECTION_DEFS && isMirrored(sec, param)) {
+        next[twin] = { ...prev[twin], [param]: v };
+        nextOwn.add(`${twin}.${param}`);
+      }
+      setOwnSet(nextOwn);
+      saveGarmentSections(id, pickOwn(next, nextOwn), bodyKey);   // own params only
+      return next;
+    });
+  };
+
+  const nonZero = pickOwn(sections, ownSet);   // what THIS body overrides, not what it inherits
+
+  return (
+    <div className="mt-3 border-t border-neutral-800 pt-2">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-[11px] font-bold uppercase tracking-wide">
+          Sections <span className={`ml-1 font-normal ${own ? 'text-amber-400' : 'text-neutral-500'}`}>{bodyKey}{own ? '' : ' · inherited'}</span>
+        </h3>
+        <button
+          onClick={() => { clearGarmentSections(id, bodyKey); setSections(resolvedSectionsForBody(id, bodyKey)); setOwnSet(new Set()); }}
+          className="rounded bg-neutral-800 px-2 py-0.5 text-[10px] hover:bg-neutral-700"
+        >reset all</button>
+      </div>
+      <div className="mb-2 flex items-center gap-1">
+        <button
+          onClick={async () => {
+            setSaveMsg('saving…');
+            const r = await saveGarmentSectionsToRepo();
+            setSaveMsg(r.ok ? `saved ✓ ${r.bodies} body override(s)` : `failed: ${r.error}`);
+            window.setTimeout(() => setSaveMsg(null), 4000);
+          }}
+          className="rounded bg-emerald-700 px-2 py-1 text-[10px] font-semibold hover:bg-emerald-600"
+        >Save to armor data</button>
+        <button
+          title="Copy this body's values to the base every other body inherits"
+          onClick={() => { promoteGarmentSectionsToBase(id, bodyKey); setSaveMsg('set as base for all bodies'); window.setTimeout(() => setSaveMsg(null), 3000); }}
+          className="rounded bg-neutral-800 px-2 py-1 text-[10px] hover:bg-neutral-700"
+        >Set as base</button>
+        {saveMsg && <span className="text-[10px] text-neutral-400">{saveMsg}</span>}
+      </div>
+      {Object.entries(SECTION_DEFS).map(([sec, def]) => (
+        <details key={sec} open={!!open[sec]}
+          ref={(el) => { rowRefs.current[sec] = el; }}
+          className={`mb-1 rounded transition-colors ${flash === sec ? 'bg-amber-900/40' : ''}`}>
+          <summary
+            onClick={(e) => { e.preventDefault(); setOpen((o) => ({ ...o, [sec]: !o[sec] })); }}
+            className="cursor-pointer select-none text-[11px] text-neutral-300">
+            {def.label}
+            {nonZero[sec] ? <span className="ml-1 text-amber-400">●</span>
+              : sections[sec] && Object.values(sections[sec]).some((x) => x)
+                ? <span className="ml-1 text-neutral-600">●</span> : null}
+          </summary>
+          <div className="mt-1 pl-2">
+            {Object.entries(def.params).map(([param, [label, min, max]]) => {
+              const v = sections[sec]?.[param] ?? 0;
+              const sided = !!twinOf(sec);
+              const on = isMirrored(sec, param);
+              // grey "inh" = this value comes from the base, not from this body; dragging it (even
+              // to 0) makes it this body's own and the tag clears.
+              const inherited = !ownSet.has(`${sec}.${param}`) && v !== 0;
+              return (
+                <label key={param} className="mb-1 block">
+                  <span className="flex items-center justify-between text-[10px] text-neutral-400">
+                    <span>{label}</span>
+                    <span className="flex items-center gap-1">
+                      {sided && (
+                        <button
+                          title={on ? 'mirrored — drives the other side too' : 'this side only'}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setMirror((m) => ({ ...m, [mirrorKey(sec, param)]: !(m[mirrorKey(sec, param)] ?? true) }));
+                          }}
+                          className={`rounded px-1 leading-none ${on ? 'bg-amber-600/30 text-amber-300' : 'bg-neutral-800 text-neutral-500'}`}
+                        >⇄</button>
+                      )}
+                      {inherited && <span className="rounded bg-neutral-800 px-1 text-[9px] text-neutral-500">inh</span>}
+                      <span className={`font-mono tabular-nums ${inherited ? 'text-neutral-500' : ''}`}>{v.toFixed(1)}cm</span>
+                    </span>
+                  </span>
+                  <input type="range" min={min} max={max} step={0.1} value={v}
+                    onChange={set(sec, param)} className="w-full" />
+                </label>
+              );
+            })}
+          </div>
+        </details>
+      ))}
+      {Object.keys(nonZero).length > 0 && (
+        <p className="mt-2 break-all rounded bg-neutral-950 p-2 font-mono text-[10px] leading-snug text-amber-300">
+          {`"${bodyKey}": `}{JSON.stringify(nonZero)}
+        </p>
+      )}
     </div>
   );
 }
@@ -150,7 +339,7 @@ export default function ModelReviewPage() {
           ↑/↓ body · G gender · drag to orbit. Check the <em>limp</em> and <em>down</em> states —
           idle hides bad knees.
         </p>
-        {armorIds.length > 0 && <GarmentFitPanel ids={armorIds} />}
+        {armorIds.length > 0 && <GarmentFitPanel ids={armorIds} bodyKey={`${entry.raceId}:${gender}`} />}
         <ol className="mt-3 space-y-0.5 border-t border-neutral-700 pt-3">
           {entries.map((e, i) => (
             <li key={e.family}>

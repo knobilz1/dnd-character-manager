@@ -46,6 +46,8 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import { MeshBVH } from 'three-mesh-bvh';
 import * as THREE from 'three';
 import path from 'node:path';
+import fs from 'node:fs';
+import { computeSectionWeights, applySections } from './garment-sections.mjs';
 
 // ── args ───────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -66,6 +68,7 @@ const S = { x: num('sx', 1) * uni, y: num('sy', 1) * uni, z: num('sz', 1) * uni 
 const D = { x: num('dx', 0), y: num('dy', 0), z: num('dz', 0) };
 const rotY = num('rotY', 0) * Math.PI / 180;
 const yaw = num('yaw', 0) * Math.PI / 180;   // PRE-fit turn; --rotY runs after fitting, too late to help it
+const pitch = num('pitch', 0) * Math.PI / 180; // PRE-fit lean about X; positive = top backward
 const heightFactor = num('height', 1.15);   // garment height as a multiple of the slot's bone span
 const ease = num('ease', 1);                // x/z slack over the body silhouette (>1 = looser shell)
 const core = num('core', 0.6);              // fraction of the garment's half-width that is "body"
@@ -231,19 +234,29 @@ const refIdx = refPrim.getIndices();
 const nRef = refPos.getCount();
 
 const bodyVerts = new Float32Array(nRef * 3);
+/** The body's AUTHORED normals, skinned with the same blend. Winding-derived normals are
+ *  disqualified for anything directional: Tripo meshes carry inconsistently-wound patches, and a
+ *  flipped normal turns an inside/outside test into its own opposite (learned in
+ *  validate-garment, where recomputed normals reported healthy standoffs as burials). */
+const refNrmAttr = refPrim.getAttribute('NORMAL');
+const bodyNrms = refNrmAttr ? new Float32Array(nRef * 3) : null;
 {
   const v = new THREE.Vector3(), acc = new THREE.Vector3(), tmp = new THREE.Vector3();
+  const nv = new THREE.Vector3(), nacc = new THREE.Vector3();
+  const m3 = new THREE.Matrix3();
   const je = [0, 0, 0, 0], we = [0, 0, 0, 0];
   for (let i = 0; i < nRef; i++) {
     v.fromArray(refPos.getElement(i, [0, 0, 0]));
     refJnt.getElement(i, je); refWgt.getElement(i, we);
-    acc.set(0, 0, 0);
+    acc.set(0, 0, 0); nacc.set(0, 0, 0);
     for (let k = 0; k < 4; k++) {
       if (!we[k]) continue;
       tmp.copy(v).applyMatrix4(refBindMat[je[k]]).multiplyScalar(we[k]);
       acc.add(tmp);
+      if (bodyNrms) { nv.fromArray(refNrmAttr.getElement(i, [0, 0, 0])); nacc.add(nv.applyMatrix3(m3.setFromMatrix4(refBindMat[je[k]])).multiplyScalar(we[k])); }
     }
     bodyVerts[i * 3] = acc.x; bodyVerts[i * 3 + 1] = acc.y; bodyVerts[i * 3 + 2] = acc.z;
+    if (bodyNrms) { nacc.normalize(); bodyNrms[i * 3] = nacc.x; bodyNrms[i * 3 + 1] = nacc.y; bodyNrms[i * 3 + 2] = nacc.z; }
   }
 }
 
@@ -280,6 +293,16 @@ const canonicalName = (n) => {
 const jointIndex = new Map(refJoints.map((j, i) => [j.getName(), i]));
 const idxOf = (n) => { const i = jointIndex.get(n); if (i === undefined) { console.error(`ref body lacks joint "${n}"`); process.exit(1); } return i; };
 const allow = new Set(slotDef.joints);
+/**
+ * --no-arms also bars the ARM CHAIN from the weight transfer, not just the shell-swing pass.
+ * Measured on the cuirass (a piece with zero arm coverage): 5,500 verts of its side and skirt
+ * panels grabbed >25% upperarm weight anyway, because in the A-pose bind the arms hang right
+ * beside the torso and the closest body surface to a hip-level hem corner is the elbow. Every
+ * animation that moves the arms then drags the hem with them — the idle dropped the arms ~40°
+ * and the rear hem swung out into a rigid fin behind the hips (Nabil: "the bottom isn't
+ * correctly rigged"). A no-arms piece must be driven by the trunk alone.
+ */
+if (noArms) for (const n of [...allow]) if (/^(upperarm|lowerarm|hand)_[lr]$/.test(n)) allow.delete(n);
 const allowIdx = new Set([...allow].map(idxOf));
 const measureIdx = new Set(slotDef.measure.map(idxOf));
 /** Body joint index -> the index this slot should treat it as (identity unless it's a helper). */
@@ -338,6 +361,30 @@ if (yaw) {
   }
   console.log(`pre-fit yaw: turned ${(yaw * 180 / Math.PI).toFixed(0)}deg about Y before measuring`);
 }
+
+/**
+ * Pre-fit pitch, about the garment's own centre. Same reasoning as yaw, different defect: the
+ * medium cuirass sat pitched FORWARD relative to the body — validate-garment --clearance read
+ * front +5cm standoff and back -2cm BURIED, worsening with height, on the very body it was fitted
+ * to. That gradient is a rotation, not a size or shift problem: positive --pitch leans the top
+ * backward, trading front slack for back clearance at the shoulder blades while the waist stays
+ * put. Applied before the fit so every measurement sees the corrected lean.
+ */
+if (pitch) {
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < nG; i++) box.expandByPoint(v.fromArray(gPos, i * 3));
+  const c = box.getCenter(new THREE.Vector3());
+  // makeRotationX(+θ) sends the top toward +z (forward); negate so positive --pitch = top backward
+  const m = new THREE.Matrix4().makeRotationX(-pitch);
+  for (let i = 0; i < nG; i++) {
+    v.fromArray(gPos, i * 3).sub(c).applyMatrix4(m).add(c).toArray(gPos, i * 3);
+    v.fromArray(gNrm, i * 3).applyMatrix4(m).normalize().toArray(gNrm, i * 3);
+  }
+  console.log(`pre-fit pitch: leaned ${(pitch * 180 / Math.PI).toFixed(0)}deg about X (top ${pitch > 0 ? 'backward' : 'forward'}) before measuring`);
+}
+
+let slabHalfX = 0;   // body chest half-width x ease, set by auto-fit pass 2; used by --tuck
 
 const boxOf = (arr) => {
   const b = new THREE.Box3();
@@ -416,6 +463,7 @@ if (autoFit) {
   const split = halfW * core;
   const kIn = ((bs.x / 2) * ease) / split;
   const kz = (bs.z / gs.z) * ease;
+  slabHalfX = (bs.x / 2) * ease;   // remembered for the --tuck pass
   for (let i = 0; i < nG; i++) {
     const d = gPos[i * 3] - gc.x, s = Math.sign(d), a = Math.abs(d);
     gPos[i * 3] = s * (kIn * Math.min(a, split) + pauldron * Math.max(a - split, 0)) + bc.x;
@@ -513,11 +561,264 @@ if (S.x !== 1 || S.y !== 1 || S.z !== 1 || rotY || D.x || D.y || D.z) {
   console.log(`overrides: scale ${S.x}/${S.y}/${S.z} offset ${D.x}/${D.y}/${D.z}cm rotY ${(rotY * 180 / Math.PI).toFixed(0)}deg`);
 }
 
+/**
+ * Per-band z registration (--zfit): fit the garment's DEPTH to the body band by band.
+ *
+ * The slab fit gives one affine z for the whole piece, but a torso's back is an S — shoulder
+ * blades and seat both stick out with a hollow between. Measured on the very body the cuirass was
+ * fitted to (validate-garment --clearance): back -1.9cm INSIDE the skin at the shoulder blades,
+ * -1.2cm at the seat, +3.0cm adrift at mid-back — and no rigid transform + uniform inflate can
+ * satisfy all three, because pitch trades the ends against each other and inflate floats the
+ * middle. So do for depth exactly what the graded-width pass does for width: in each 4cm y-band,
+ * map garment [back..front] onto body [back-zgapb .. front+zgapf] (torso-dominated body verts
+ * only), clamp the band scale so degenerate bands (neck ring, skirt hem with no front panel)
+ * pin to the BACK target instead of exploding, smooth A/B across bands, lerp between band
+ * centres per vertex. Deterministic, measured, no solver.
+ *
+ * Two placement rules learned from Nabil's review of the first zfit bake:
+ *  - runs AFTER the manual --dy/--dz overrides, or a deliberate lift would de-register the bands;
+ *  - the warp fades out beyond the body's own half-width in each band. The first version warped
+ *    the pauldron caps with the chest's band map, shearing the cap-to-chest junction — the caps
+ *    keep their authored z-relation now, exactly like the graded-width pass leaves them their
+ *    authored width.
+ */
+if (autoFit && flag('zfit')) {
+  const ZGAPF = num('zgapf', 2.0), ZGAPB = num('zgapb', 1.0);
+  const BAND = 4;
+  const gb0 = boxOf(gPos);
+  const k0 = Math.floor(gb0.min.y / BAND), k1 = Math.floor(gb0.max.y / BAND);
+  const nB = k1 - k0 + 1;
+  const body = Array.from({ length: nB }, () => ({ f: -1e9, b: 1e9, w: 0 }));
+  const gar = Array.from({ length: nB }, () => ({ f: -1e9, b: 1e9 }));
+  const v = new THREE.Vector3();
+  const je0 = [0, 0, 0, 0], we0 = [0, 0, 0, 0];
+  for (let i = 0; i < nRef; i++) {
+    v.fromArray(bodyVerts, i * 3);
+    const k = Math.floor(v.y / BAND) - k0;
+    if (k < 0 || k >= nB) continue;
+    refJnt.getElement(i, je0); refWgt.getElement(i, we0);
+    let dom = je0[0], dw = we0[0];
+    for (let q = 1; q < 4; q++) if (we0[q] > dw) { dw = we0[q]; dom = je0[q]; }
+    if (!measureIdx.has(dom)) continue;
+    if (v.z > body[k].f) body[k].f = v.z;
+    if (v.z < body[k].b) body[k].b = v.z;
+    if (Math.abs(v.x) > body[k].w) body[k].w = Math.abs(v.x);
+  }
+  // garment extents from CORE verts only (within the band's body half-width) — the flared wings
+  // must not define the depth the chest is registered by
+  for (let i = 0; i < nG; i++) {
+    const y = gPos[i * 3 + 1], z = gPos[i * 3 + 2];
+    const k = Math.floor(y / BAND) - k0;
+    if (k < 0 || k >= nB) continue;
+    if (body[k].w > 0 && Math.abs(gPos[i * 3]) > body[k].w) continue;
+    if (z > gar[k].f) gar[k].f = z;
+    if (z < gar[k].b) gar[k].b = z;
+  }
+  // per-band affine z' = A z + B; A clamped, degenerate bands pin the back
+  const A = new Float64Array(nB).fill(1), B = new Float64Array(nB);
+  for (let k = 0; k < nB; k++) {
+    const bd = body[k], gd = gar[k];
+    const bodyOk = bd.f > -1e8 && bd.b < 1e8, garOk = gd.f > -1e8 && gd.b < 1e8;
+    if (!bodyOk || !garOk) { A[k] = 1; B[k] = 0; continue; }
+    const tf = bd.f + ZGAPF, tb = bd.b - ZGAPB;
+    const depth = gd.f - gd.b;
+    let a = depth > 6 ? (tf - tb) / depth : 1;
+    a = Math.min(1.6, Math.max(0.6, a));
+    A[k] = a; B[k] = tb - a * gd.b;           // pin the BACK; burial is the visible defect
+  }
+  // fill bands with no data from neighbours, then 3-tap smooth so bands don't step
+  for (let k = 0; k < nB; k++) if (B[k] === 0 && A[k] === 1) { const src = k > 0 ? k - 1 : k + 1; if (src >= 0 && src < nB) { A[k] = A[src]; B[k] = B[src]; } }
+  const As = A.slice(), Bs = B.slice();
+  for (let k = 1; k < nB - 1; k++) { As[k] = (A[k - 1] + A[k] + A[k + 1]) / 3; Bs[k] = (B[k - 1] + B[k] + B[k + 1]) / 3; }
+  for (let i = 0; i < nG; i++) {
+    const y = gPos[i * 3 + 1];
+    const t = y / BAND - k0 - 0.5;
+    const k = Math.min(nB - 1, Math.max(0, Math.floor(t)));
+    const k2 = Math.min(nB - 1, k + 1);
+    const u = Math.min(1, Math.max(0, t - k));
+    const a = As[k] * (1 - u) + As[k2] * u, b2 = Bs[k] * (1 - u) + Bs[k2] * u;
+    // fade the warp to identity beyond the body's half-width so wings keep their authored z
+    const w = body[Math.min(nB - 1, Math.max(0, Math.round(t)))].w || 1e9;
+    const excess = Math.abs(gPos[i * 3]) - w;
+    const fade = excess <= 0 ? 1 : Math.max(0, 1 - excess / 8);
+    const zz = gPos[i * 3 + 2];
+    gPos[i * 3 + 2] = (a * zz + b2) * fade + zz * (1 - fade);
+  }
+  console.log(`z-fit: per-band depth registration over ${nB} bands (gaps front ${ZGAPF}cm back ${ZGAPB}cm), core-faded beyond the body's half-width`);
+}
+
+/**
+ * --tuck / --tuckdrop: rein in the shoulder-cap TIPS without touching the chest.
+ *
+ * The graded-width knobs cannot do this: shrinking `core` re-scales the chest plates themselves
+ * (core 0.62 stretched the mid-chest 2.08x and collapsed the caps into it — the v6 mess Nabil
+ * rejected on sight). This instead ramps only on |x| beyond the body's chest half-width W:
+ * x' = W + (|x|-W)*tuck, y' -= (|x|-W)*tuckdrop. Continuous at W, identity inside it, and the
+ * drop also lowers the armhole's outer rim ("the hole for the arm needs to come down"). Runs
+ * before --clear, which then guarantees the moved tips still clear the deltoid.
+ */
+const tuckK = num('tuck', 1), tuckDrop = num('tuckdrop', 0);
+if (tuckK !== 1 || tuckDrop) {
+  const W = slabHalfX + num('tuckstart', 1);
+  // Smoothstep the ramp in over BLEND cm. The first version applied the full gradient from the
+  // boundary onward: triangles spanning |x|=W had one corner held and one displaced, and the
+  // shear tore the stacked cap lames apart — a black gash across the shoulder (Nabil's shot).
+  const BLEND = 4;
+  let nT = 0;
+  for (let i = 0; i < nG; i++) {
+    const ax = Math.abs(gPos[i * 3]);
+    if (ax <= W) continue;
+    const excess = ax - W;
+    const t = Math.min(1, excess / BLEND);
+    const g = t * t * (3 - 2 * t);
+    gPos[i * 3] = Math.sign(gPos[i * 3]) * (ax - (1 - tuckK) * excess * g);
+    gPos[i * 3 + 1] -= excess * tuckDrop * g;
+    nT++;
+  }
+  console.log(`tuck: beyond |x|=${W.toFixed(1)}cm scaled x${tuckK}${tuckDrop ? ` and dropped ${tuckDrop}cm/cm` : ''}, eased over ${BLEND}cm (${nT} verts)`);
+}
+
+/**
+ * --sections '<json>': bake the values dialled on the /model-review section panel. Same masks,
+ * same math, same W as the live preview — all three come from garment-sections.mjs, so what was
+ * seen on the sliders is what ships. Runs before inflate/clear so the safety passes still guard
+ * the sculpted result.
+ */
+if (arg('sections')) {
+  const params = JSON.parse(arg('sections'));
+  const { weights, meta } = computeSectionWeights(gPos, nG, {
+    W: slabHalfX + 1,
+    indices: gPrim.getIndices()?.getArray(),   // enables the real armhole-rim masks
+  });
+  applySections(Float32Array.from(gPos), gPos, nG, weights, params, meta);
+  const dialled = Object.entries(params)
+    .flatMap(([s, ps]) => Object.entries(ps).filter(([, v]) => v).map(([p, v]) => `${s}.${p}=${v}`));
+  console.log(`sections: ${dialled.length ? dialled.join(' ') : '(all zero)'}`);
+}
+
 // Clearance. The bodies have clothes PAINTED ON, so there is nothing to hide behind —
 // separation has to be geometric, and baking it here costs nothing at runtime.
 if (inflateCm) {
   for (let i = 0; i < nG; i++) for (let k = 0; k < 3; k++) gPos[i * 3 + k] += gNrm[i * 3 + k] * inflateCm;
   console.log(`inflated ${inflateCm}cm along normals`);
+}
+
+/**
+ * LOCAL clearance (--clear <cm>): push out only the vertices the body actually violates.
+ *
+ * Global --inflate at the size needed to stop shirt wrinkles poking through the back panel
+ * (1.4cm, tried) melts the sculpt — plate edges, straps and studs balloon into blobs. The poke-
+ * through is local (wrinkle bulges crossing plate concavities), so the fix must be local too:
+ * per vertex, signed distance to the reference body via the existing BVH (sign from the body's
+ * AUTHORED skinned normals — winding-derived normals flip on Tripo meshes), then displacement
+ * = max(0, clear - signed), the FIELD smoothed over seam-welded adjacency so a pushed patch
+ * carries its neighbours smoothly instead of denting, applied along the body's normal (away
+ * from the skin — the garment's own normal on a strap points sideways). Deterministic single
+ * pass; proud plates keep their authored shape to the millimetre.
+ */
+const clearCm = num('clear', 0);
+if (clearCm) {
+  if (!bodyNrms) { console.error('--clear needs authored NORMAL on the ref body'); process.exit(1); }
+  const armClear = num('armclear', 0);
+  const disp = new Float32Array(nG);
+  const dirs = new Float32Array(nG * 3);
+  const bIdxArr = bodyGeom.getIndex().array;
+  const p = new THREE.Vector3(), bn = new THREE.Vector3(), dv = new THREE.Vector3();
+  const target = {};
+  const hje = [0, 0, 0, 0], hwe = [0, 0, 0, 0];
+  let touched = 0, buried = 0;
+  for (let i = 0; i < nG; i++) {
+    p.fromArray(gPos, i * 3);
+    bvh.closestPointToPoint(p, target);
+    if (target.distance > clearCm + armClear + 1) continue;
+    const f = target.faceIndex * 3;
+    bn.set(0, 0, 0);
+    for (let k = 0; k < 3; k++) {
+      const vi = bIdxArr[f + k];
+      bn.x += bodyNrms[vi * 3]; bn.y += bodyNrms[vi * 3 + 1]; bn.z += bodyNrms[vi * 3 + 2];
+    }
+    bn.normalize();
+    const signed = dv.copy(p).sub(target.point).dot(bn) >= 0 ? target.distance : -target.distance;
+    /**
+     * Over the ARM the floor is higher (--armclear, cm on top of --clear). The bind is an
+     * A-pose but the piece is trunk-weighted, so every animation that drops the arms rotates
+     * the deltoid INTO a cap that fit perfectly at bind — clearance at bind must pre-pay for
+     * that swing. Only garment over arm-dominated skin pays it; the chest stays snug.
+     */
+    const hv = bIdxArr[f];
+    refJnt.getElement(hv, hje); refWgt.getElement(hv, hwe);
+    let hdom = hje[0], hdw = hwe[0];
+    for (let k = 1; k < 4; k++) if (hwe[k] > hdw) { hdw = hwe[k]; hdom = hje[k]; }
+    const overArm = /^(upperarm|lowerarm|hand)_[lr]$/.test(canonicalName(refJoints[hdom].getName()));
+    const req = overArm ? clearCm + armClear : clearCm;
+    if (signed < req) {
+      disp[i] = req - signed;
+      dirs[i * 3] = bn.x; dirs[i * 3 + 1] = bn.y; dirs[i * 3 + 2] = bn.z;
+      touched++; if (signed < 0) buried++;
+    }
+  }
+  // smooth the displacement FIELD (not positions) over seam-welded adjacency; coincident seam
+  // twins compute identical displacement (same position -> same closest point), so seams hold
+  const gIdxAcc = gPrim.getIndices();
+  const key = (i) => `${Math.round(gPos[i * 3] * 100)},${Math.round(gPos[i * 3 + 1] * 100)},${Math.round(gPos[i * 3 + 2] * 100)}`;
+  const weld = new Map(), rep = new Int32Array(nG);
+  for (let i = 0; i < nG; i++) { const k = key(i); if (!weld.has(k)) weld.set(k, i); rep[i] = weld.get(k); }
+  const adj = new Map();
+  const link = (u, v) => { if (u === v) return; (adj.get(u) || adj.set(u, new Set()).get(u)).add(v); };
+  for (let f = 0; f < gIdxAcc.getCount(); f += 3) {
+    const t = [rep[gIdxAcc.getScalar(f)], rep[gIdxAcc.getScalar(f + 1)], rep[gIdxAcc.getScalar(f + 2)]];
+    for (const u of t) for (const v of t) link(u, v);
+  }
+  let field = new Float64Array(nG);
+  for (let i = 0; i < nG; i++) field[i] = disp[rep[i]];
+  for (let pass = 0; pass < 2; pass++) {
+    const next = Float64Array.from(field);
+    for (const [, i] of weld) {
+      const nb = adj.get(i);
+      if (!nb || !nb.size) continue;
+      let acc = 0;
+      for (const n of nb) acc += field[n];
+      // max-leaning blend: a violating vertex must KEEP its full push (this is a floor, not a
+      // diffusion target), while clear neighbours get carried partway out to meet it
+      next[i] = Math.max(field[i], 0.6 * (acc / nb.size) + 0.4 * field[i]);
+    }
+    for (let i = 0; i < nG; i++) next[i] = next[rep[i]];
+    field = next;
+  }
+  /**
+   * Push DIRECTIONS live on welded reps and propagate to dragged verts from their neighbours.
+   * The first version fell back to each vertex's OWN authored normal — and UV-seam twins have
+   * different normals, so the two sides of a seam moved apart and the chest plate showed a
+   * jagged crack down the sternum (Nabil's screenshot). Everything here keys off rep[i]; twins
+   * cannot disagree by construction.
+   */
+  for (let pass = 0; pass < 3; pass++) {
+    let filled = 0;
+    for (const [, i] of weld) {
+      if (field[i] <= 1e-4) continue;
+      if (dirs[i * 3] || dirs[i * 3 + 1] || dirs[i * 3 + 2]) continue;
+      const nb = adj.get(i);
+      if (!nb) continue;
+      let dx = 0, dy = 0, dz = 0;
+      for (const n of nb) { dx += dirs[n * 3]; dy += dirs[n * 3 + 1]; dz += dirs[n * 3 + 2]; }
+      const len = Math.hypot(dx, dy, dz);
+      if (len > 1e-6) { dirs[i * 3] = dx / len; dirs[i * 3 + 1] = dy / len; dirs[i * 3 + 2] = dz / len; filled++; }
+    }
+    if (!filled) break;
+  }
+  const fallback = new THREE.Vector3();
+  for (let i = 0; i < nG; i++) {
+    const d = field[i];
+    if (d <= 1e-4) continue;
+    const r = rep[i];
+    let dx = dirs[r * 3], dy = dirs[r * 3 + 1], dz = dirs[r * 3 + 2];
+    if (!dx && !dy && !dz) {
+      // truly isolated: use the REP twin's normal so seam twins still agree
+      fallback.fromArray(gNrm, r * 3); dx = fallback.x; dy = fallback.y; dz = fallback.z;
+    }
+    gPos[i * 3] += dx * d; gPos[i * 3 + 1] += dy * d; gPos[i * 3 + 2] += dz * d;
+  }
+  console.log(`local clearance ${clearCm}cm: ${touched} verts violated (${buried} inside the skin), field-smoothed x2`);
 }
 
 const gBox = boxOf(gPos);
@@ -700,7 +1001,35 @@ const skin = gDoc.createSkin('garment_skin')
 for (const n of jointNodes) skin.addJoint(n);
 gNode.setSkin(skin);
 
+/**
+ * Carried in the file so the RUNTIME can apply per-body section values with the same masks and
+ * the same units the baker used:
+ *   sectionW       cap boundary, cm — identical region borders live and baked
+ *   authoredHeight garment height in CM. The shipped copy is meshopt-quantized to a normalised
+ *                  ±1 range (measured: 2.00 units for a 35.72cm piece), so a runtime reading it
+ *                  divides its own measured height by this to get units-per-cm. Without it a
+ *                  "+3cm" section value would land as +3 NORMALISED units — half the model away.
+ */
+{
+  const gb = boxOf(gPos);
+  scene.setExtras({ sectionW: slabHalfX + 1, authoredHeight: gb.max.y - gb.min.y });
+}
+
 await io.write(outPath, gDoc);
+
+/**
+ * --devraw <name>: also drop this raw (float, pre-meshopt) build at
+ * public/models/armor-dev/<name>.glb for the /model-review section sliders. The optimized file
+ * that ships is quantized and cannot be sculpted; the dev copy never ships (the tauri bundle
+ * glob is armor/*.glb and the vite build strips dist/models).
+ */
+if (arg('devraw')) {
+  const devDir = 'public/models/armor-dev';
+  fs.mkdirSync(devDir, { recursive: true });
+  const devPath = `${devDir}/${arg('devraw')}.glb`;
+  await io.write(devPath, gDoc);
+  console.log(`dev raw copy: ${devPath}`);
+}
 
 // ── 6. self-check: read back and CPU-skin at rest ──────────────────────────────
 // The point of the whole design is that G*IBM is identity at bind, so the written file must
