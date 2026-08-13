@@ -15,6 +15,13 @@ interface SettingsState {
    *  "192.168.1.50:7777". Empty until the player sets it for game night. */
   dmIp: string;
   setDmIp: (v: string) => void;
+  /** Tonight's table PIN, shown in the DM Console for the DM to read out. Sent
+   *  as `X-Tavern-Pin` on every DM request except the reachability probe — see
+   *  utils/dmConnect.ts. The DM's listener mints a new one each app run, so
+   *  this is expected to go stale between sessions; a wrong or empty PIN comes
+   *  back as a 401 telling the player to ask for tonight's. */
+  dmPin: string;
+  setDmPin: (v: string) => void;
   /** Ids of characters that have been sent to the DM at least once (via the
    *  "Send to DM"/"Send All" buttons). Marks a character as "connected" —
    *  see hooks/useDmPushSync.ts, which auto-pushes further edits only for
@@ -121,6 +128,8 @@ export const useSettingsStore = create<SettingsState>()(
       setShow3DCharacter: (v) => set({ show3DCharacter: v }),
       dmIp: '',
       setDmIp: (v) => set({ dmIp: v }),
+      dmPin: '',
+      setDmPin: (v) => set({ dmPin: v.trim().toUpperCase() }),
       dmSyncedCharacterIds: [],
       addDmSyncedCharacter: (id) => {
         if (get().dmSyncedCharacterIds.includes(id)) return;

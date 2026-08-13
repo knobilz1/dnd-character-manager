@@ -60,6 +60,18 @@ fn generate_pkce() -> (String, String) {
     (verifier, challenge)
 }
 
+/// Generates the opaque `state` value that ties a callback back to the request
+/// that started it. PKCE alone proves the *code* wasn't intercepted, but it says
+/// nothing about where the code came from: the loopback listener accepts one
+/// connection from anything on localhost, so without `state` any local process
+/// that reached the port first could hand us *its* authorization code and
+/// silently bind the user's Drive sync to an attacker's Google account.
+fn generate_state() -> String {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
 // ── URL helpers ───────────────────────────────────────────────────────────────
 
 /// Percent-encodes a string for use in a URL query value (RFC 3986 unreserved chars pass through).
@@ -76,7 +88,7 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-fn build_auth_url(redirect_uri: &str, challenge: &str) -> String {
+fn build_auth_url(redirect_uri: &str, challenge: &str, state: &str) -> String {
     format!(
         "https://accounts.google.com/o/oauth2/v2/auth\
          ?client_id={client_id}\
@@ -85,28 +97,39 @@ fn build_auth_url(redirect_uri: &str, challenge: &str) -> String {
          &scope={scope}\
          &code_challenge={challenge}\
          &code_challenge_method=S256\
+         &state={state}\
          &access_type=offline\
          &prompt=consent",
         client_id = GOOGLE_CLIENT_ID,
         redirect_uri = percent_encode(redirect_uri),
         scope = percent_encode(SCOPES),
         challenge = challenge,
+        state = percent_encode(state),
     )
 }
 
 // ── TCP request helpers ───────────────────────────────────────────────────────
 
-/// Parses the authorization code from an HTTP request line like:
-///   GET /callback?code=4/0Ab...&scope=... HTTP/1.1
-fn extract_code(request_line: &str) -> Option<String> {
+/// Parses one query parameter out of an HTTP request line like:
+///   GET /callback?code=4/0Ab...&state=xyz&scope=... HTTP/1.1
+///
+/// Splits the query on `&` and matches whole parameter names. The previous
+/// version searched the raw path for `"code="`, which also matches the tail of
+/// an unrelated parameter (`?xcode=…`) — fine in practice for Google's own
+/// callback, wrong the moment this is used for `state`, where a near-miss must
+/// not be read as a match.
+fn extract_param(request_line: &str, name: &str) -> Option<String> {
     let path = request_line.split_whitespace().nth(1).unwrap_or("");
-    let start = path.find("code=")? + 5;
-    let after = &path[start..];
-    let end = after
-        .find(|c| matches!(c, '&' | ' ' | '#'))
-        .unwrap_or(after.len());
-    let code = &after[..end];
-    if code.is_empty() { None } else { Some(code.to_string()) }
+    let query = path.split_once('?')?.1;
+    for pair in query.split('&') {
+        let pair = pair.split(['#', ' ']).next().unwrap_or(pair);
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == name && !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn send_html_response(stream: &mut impl Write, success: bool) {
@@ -228,6 +251,7 @@ fn do_token_refresh(refresh_token: &str) -> Result<FreshTokenResult, String> {
 #[tauri::command]
 pub async fn start_oauth_server(app: AppHandle) -> Result<String, String> {
     let (verifier, challenge) = generate_pkce();
+    let state = generate_state();
 
     let listener =
         TcpListener::bind("127.0.0.1:0").map_err(|e| format!("bind error: {e}"))?;
@@ -237,7 +261,7 @@ pub async fn start_oauth_server(app: AppHandle) -> Result<String, String> {
         .port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
-    let auth_url = build_auth_url(&redirect_uri, &challenge);
+    let auth_url = build_auth_url(&redirect_uri, &challenge, &state);
 
     // Spawn a thread to handle the callback, do the token exchange, and emit the result.
     std::thread::spawn(move || {
@@ -253,7 +277,19 @@ pub async fn start_oauth_server(app: AppHandle) -> Result<String, String> {
                     .next()
                     .and_then(|l| l.ok())
                     .unwrap_or_default();
-                let code_opt = extract_code(&first_line);
+                // Checked before the code is looked at, let alone exchanged: a
+                // callback that can't echo back the state we generated did not
+                // come from the authorization request we started.
+                if extract_param(&first_line, "state").as_deref() != Some(state.as_str()) {
+                    send_html_response(&mut stream, false);
+                    let _ = app.emit(
+                        "oauth-error",
+                        "Sign-in callback failed its state check and was ignored. Try again.",
+                    );
+                    return;
+                }
+
+                let code_opt = extract_param(&first_line, "code");
                 send_html_response(&mut stream, code_opt.is_some());
 
                 let code = match code_opt {
@@ -322,5 +358,56 @@ pub fn clear_google_token() -> Result<(), String> {
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const REAL: &str = "GET /callback?code=4/0AbCd-_x&state=SbW9tZQ&scope=drive.file HTTP/1.1";
+
+    #[test]
+    fn extracts_each_param_by_whole_name() {
+        assert_eq!(extract_param(REAL, "code").as_deref(), Some("4/0AbCd-_x"));
+        assert_eq!(extract_param(REAL, "state").as_deref(), Some("SbW9tZQ"));
+        assert_eq!(extract_param(REAL, "scope").as_deref(), Some("drive.file"));
+        assert_eq!(extract_param(REAL, "nope"), None);
+    }
+
+    /// The bug the rewrite exists to prevent: a substring search for `"code="`
+    /// finds `xcode=`, so a callback carrying no real `code` at all would have
+    /// yielded one. Same shape would let a near-miss satisfy the state check.
+    #[test]
+    fn does_not_match_a_parameter_name_suffix() {
+        let line = "GET /callback?xcode=attacker&mystate=attacker HTTP/1.1";
+        assert_eq!(extract_param(line, "code"), None);
+        assert_eq!(extract_param(line, "state"), None);
+    }
+
+    #[test]
+    fn empty_value_and_missing_query_are_none() {
+        assert_eq!(extract_param("GET /callback?code=&state=x HTTP/1.1", "code"), None);
+        assert_eq!(extract_param("GET /callback HTTP/1.1", "code"), None);
+        assert_eq!(extract_param("", "code"), None);
+    }
+
+    /// A mismatched state must never compare equal — this is the whole gate in
+    /// start_oauth_server, expressed against the same helper it calls.
+    #[test]
+    fn state_from_a_foreign_callback_does_not_match() {
+        let ours = generate_state();
+        let theirs = format!("GET /callback?code=stolen&state={} HTTP/1.1", generate_state());
+        assert_ne!(extract_param(&theirs, "state").as_deref(), Some(ours.as_str()));
+        let good = format!("GET /callback?code=ok&state={ours} HTTP/1.1");
+        assert_eq!(extract_param(&good, "state").as_deref(), Some(ours.as_str()));
+    }
+
+    #[test]
+    fn generated_state_is_unique_and_url_safe() {
+        let a = generate_state();
+        let b = generate_state();
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'), "{a}");
     }
 }

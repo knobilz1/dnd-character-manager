@@ -6,13 +6,37 @@
  *
  * Uses the Tauri HTTP plugin (not the webview fetch) so the request isn't bound
  * by the webview origin/CSP. The LAN endpoint is allow-listed in
- * src-tauri/capabilities/default.json (any LAN host, any port).
+ * src-tauri/capabilities/default.json (any LAN host, port 7777).
+ *
+ * Every route except the `GET /` reachability probe carries the table PIN the
+ * DM reads out, in the `X-Tavern-Pin` header — see dmHeaders below and
+ * party_listener.rs's `session_pin`.
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { useSnapshotStore } from '../store/useSnapshotStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import type { Character } from '../types';
 
 export const DM_DEFAULT_PORT = 7777;
+
+/** Headers for every request except the reachability probe: whatever the call
+ *  itself needs, plus tonight's table PIN (party_listener.rs's `session_pin`).
+ *
+ *  Read from the store at call time rather than threaded through all ten
+ *  function signatures — the polling hooks are long-lived, and a PIN captured
+ *  when a hook mounted would keep 401ing after the player fixed a typo. */
+function dmHeaders(extra?: Record<string, string>): Record<string, string> {
+  const pin = useSettingsStore.getState().dmPin.trim();
+  return { ...extra, ...(pin ? { 'X-Tavern-Pin': pin } : {}) };
+}
+
+/** A failed response as an error the player can act on. Every 401 from the DM
+ *  listener means the PIN, and "DM responded 401" tells them nothing useful. */
+function dmError(status: number): Error {
+  return status === 401
+    ? new Error("Wrong or missing table PIN — ask the DM for tonight's PIN.")
+    : new Error(`DM responded ${status}`);
+}
 
 /** Normalize a user-entered address into a bare base URL (no trailing path).
  *  Accepts "192.168.1.5", "192.168.1.5:7777", or "http://host:7777". */
@@ -53,11 +77,11 @@ export async function pingDM(ip: string): Promise<boolean> {
 export async function sendTalkToDM(text: string, characterName: string, ip: string): Promise<string | null> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/talk`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name: characterName, text }),
     connectTimeout: 5000,
   });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  if (!res.ok) throw dmError(res.status);
   const data = (await res.json().catch(() => null)) as { reply?: string | null } | null;
   return data?.reply ?? null;
 }
@@ -68,11 +92,11 @@ export async function sendCharacterToDM(character: Character, ip: string): Promi
   const payload = { tavernSheet: true, version: 1, character, snapshots };
   const res = await tauriFetch(dmUrl(ip), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
     connectTimeout: 5000,
   });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  if (!res.ok) throw dmError(res.status);
 }
 
 /** One line of narration the DM has spoken, as broadcast to every connected
@@ -100,8 +124,8 @@ export async function fetchNarrationSince(
   // to run tonight. Both are additive; an older DM build just ignores the
   // parameter and returns no proxyFor.
   const suffix = who?.trim() ? `&who=${encodeURIComponent(who.trim())}` : '';
-  const res = await tauriFetch(`${dmBaseUrl(ip)}/narration?since=${since}${suffix}`, { method: 'GET', connectTimeout: 5000 });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/narration?since=${since}${suffix}`, { method: 'GET', headers: dmHeaders(), connectTimeout: 5000 });
+  if (!res.ok) throw dmError(res.status);
   const j = (await res.json()) as {
     entries?: NarrationEntry[]; latest?: number; proxyFor?: string[]; yourSheetUpdatedAt?: number | null;
   };
@@ -126,10 +150,11 @@ export async function fetchNarrationSince(
 export async function fetchSharedCharacter(name: string, ip: string): Promise<Character | null> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/character?name=${encodeURIComponent(name)}`, {
     method: 'GET',
+    headers: dmHeaders(),
     connectTimeout: 10000, // a full sheet carries a data-URL portrait
   });
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  if (!res.ok) throw dmError(res.status);
   const j = (await res.json()) as { character?: Character } | null;
   return j?.character ?? null;
 }
@@ -156,8 +181,8 @@ export interface BroadcastMap {
  *  it hasn't, `map` is absent. Throws on an unreachable DM, same as
  *  fetchNarrationSince — callers treat that as "try again next poll." */
 export async function fetchBroadcastMap(since: number, ip: string): Promise<{ version: number; map?: BroadcastMap | null }> {
-  const res = await tauriFetch(`${dmBaseUrl(ip)}/map?since=${since}`, { method: 'GET', connectTimeout: 5000 });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/map?since=${since}`, { method: 'GET', headers: dmHeaders(), connectTimeout: 5000 });
+  if (!res.ok) throw dmError(res.status);
   return (await res.json()) as { version: number; map?: BroadcastMap | null };
 }
 
@@ -176,8 +201,8 @@ export async function fetchBroadcastInitiative(
   since: number,
   ip: string,
 ): Promise<{ version: number; initiative?: BroadcastInitiative | null }> {
-  const res = await tauriFetch(`${dmBaseUrl(ip)}/initiative?since=${since}`, { method: 'GET', connectTimeout: 5000 });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/initiative?since=${since}`, { method: 'GET', headers: dmHeaders(), connectTimeout: 5000 });
+  if (!res.ok) throw dmError(res.status);
   return (await res.json()) as { version: number; initiative?: BroadcastInitiative | null };
 }
 
@@ -193,8 +218,8 @@ export async function fetchBroadcastInitiative(
 export async function fetchTableCameraState(
   ip: string,
 ): Promise<{ holder: string | null; requestSeq: number; enabled: boolean }> {
-  const res = await tauriFetch(`${dmBaseUrl(ip)}/camera`, { method: 'GET', connectTimeout: 5000 });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/camera`, { method: 'GET', headers: dmHeaders(), connectTimeout: 5000 });
+  if (!res.ok) throw dmError(res.status);
   const j = (await res.json()) as { holder?: string | null; requestSeq?: number; enabled?: boolean };
   return { holder: j.holder ?? null, requestSeq: j.requestSeq ?? 0, enabled: !!j.enabled };
 }
@@ -207,11 +232,11 @@ export async function claimTableCamera(
 ): Promise<{ granted: boolean; holder: string | null; error: string | null }> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/camera-claim`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, release }),
     connectTimeout: 5000,
   });
-  if (!res.ok) throw new Error(`DM responded ${res.status}`);
+  if (!res.ok) throw dmError(res.status);
   const j = (await res.json()) as { granted?: boolean; holder?: string | null; error?: string | null };
   return { granted: !!j.granted, holder: j.holder ?? null, error: j.error ?? null };
 }
@@ -222,7 +247,7 @@ export async function claimTableCamera(
 export async function sendTablePhoto(name: string, photo: string, ip: string): Promise<void> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/table-photo`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, photo }),
     connectTimeout: 15000, // a photo is a far bigger body than a line of talk
   });

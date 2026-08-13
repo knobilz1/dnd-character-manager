@@ -64,6 +64,39 @@ fn narration_log() -> &'static Mutex<NarrationLog> {
 /// device never hangs forever if the DM Console is closed mid-turn.
 const TALK_REPLY_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Hard ceiling on a request body, checked BEFORE the buffer is allocated.
+/// `Content-Length` is attacker-supplied and this listener answers anything
+/// that can reach the port, so allocating straight from it let a single
+/// `Content-Length: 2000000000` request force a multi-GB zeroed allocation and
+/// take the app down. The largest legitimate body is a base64 table photo (a
+/// few MB); 16 MiB leaves generous headroom.
+const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Header every player request carries the table PIN in (see `session_pin`).
+const PIN_HEADER: &str = "x-tavern-pin";
+
+/// PIN alphabet: uppercase minus the characters that get misheard or mistyped
+/// when a PIN is read out loud across a table (O/0, I/1).
+const PIN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+static SESSION_PIN: OnceLock<String> = OnceLock::new();
+
+/// The join PIN for this run, generated once when the listener binds and shown
+/// in the DM Console for the DM to read out.
+///
+/// 32^6 ≈ 1.1e9 combinations, which is why there is no attempt limiter here:
+/// guessing it over LAN HTTP would take far longer than a game night, and a
+/// lockout would hand anyone on the WiFi a way to shut the table's own players
+/// out. It rotates every app run — a PIN read out last week is already dead.
+fn session_pin() -> &'static str {
+    SESSION_PIN.get_or_init(|| {
+        let mut rng = rand::thread_rng();
+        (0..6)
+            .map(|_| PIN_ALPHABET[rng.gen_range(0..PIN_ALPHABET.len())] as char)
+            .collect()
+    })
+}
+
 /// One entry per in-flight `/talk` request, keyed by a request id handed to
 /// the frontend in the `dm-player-turn` event payload. The connection thread
 /// blocks on the receiving half (see `handle_conn`) until DMConsolePage.tsx
@@ -384,21 +417,35 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str, content_type:
         200 => "OK",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
+        409 => "Conflict",
+        413 => "Payload Too Large",
         _ => "OK",
     };
+    // No Access-Control-Allow-* headers on purpose. Every real client reaches
+    // this listener through the Tauri HTTP plugin (see dmConnect.ts), which is
+    // Rust-side and never subject to browser CORS — so the wildcard ACAO that
+    // used to be here bought legitimate players nothing and instead let any web
+    // page open in any browser on the network read narration and lent character
+    // sheets, and post turns, cross-origin.
     let resp = format!(
         "HTTP/1.1 {status} {status_text}\r\n\
          Content-Type: {content_type}\r\n\
          Content-Length: {len}\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type\r\n\
          Connection: close\r\n\r\n{body}",
         len = body.len(),
     );
     let _ = stream.write_all(resp.as_bytes());
     let _ = stream.flush();
+}
+
+/// Whether this request line is the one route that answers without a PIN — the
+/// bare `GET /` reachability probe. Split out of `handle_conn` because it is
+/// the PIN gate's only exemption: too loose and every route is open again, too
+/// tight and players can't discover a DM at all.
+fn is_reachability_probe(request_line: &str) -> bool {
+    request_line.starts_with("GET / ") || request_line.starts_with("GET /?")
 }
 
 fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
@@ -413,6 +460,7 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
     }
 
     let mut content_length: usize = 0;
+    let mut supplied_pin = String::new();
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
@@ -425,6 +473,8 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
                 if let Some(v) = trimmed.split_once(':') {
                     if v.0.eq_ignore_ascii_case("content-length") {
                         content_length = v.1.trim().parse().unwrap_or(0);
+                    } else if v.0.eq_ignore_ascii_case(PIN_HEADER) {
+                        supplied_pin = v.1.trim().to_string();
                     }
                 }
             }
@@ -434,6 +484,22 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
 
     if request_line.starts_with("OPTIONS") {
         return write_response(&mut stream, 204, "", "text/plain");
+    }
+
+    // The bare reachability probe stays open: it is how a player's app decides
+    // whether to show its "Talk to DM" button at all, and all it discloses is
+    // that a console is listening here. Every route that carries or accepts
+    // real table data needs the PIN the DM reads out — without this the
+    // listener answered anything that could reach the port, so any device on
+    // the WiFi could push a turn straight into the DM's engine queue or read
+    // back narration and lent character sheets.
+    if !is_reachability_probe(&request_line) && !supplied_pin.eq_ignore_ascii_case(session_pin()) {
+        return write_response(
+            &mut stream,
+            401,
+            "{\"ok\":false,\"error\":\"Wrong or missing table PIN — ask the DM for tonight's PIN.\"}",
+            "application/json",
+        );
     }
     if request_line.starts_with("GET /narration") {
         let since = parse_since_param(&request_line);
@@ -541,6 +607,14 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         return write_response(&mut stream, 200, "dnd-dm listening.\n", "text/plain");
     }
 
+    if content_length > MAX_BODY_BYTES {
+        return write_response(
+            &mut stream,
+            413,
+            "{\"ok\":false,\"error\":\"body too large\"}",
+            "application/json",
+        );
+    }
     let mut body = vec![0u8; content_length];
     if content_length > 0 && reader.read_exact(&mut body).is_err() {
         return write_response(
@@ -763,6 +837,9 @@ pub fn start_party_listener(app: AppHandle, port: u16) -> Result<u16, String> {
         .map_err(|e| format!("Couldn't bind port {port}: {e}"))?;
     let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     let _ = LISTENER_PORT.set(bound_port);
+    // Mint the PIN here rather than on the first request, so the DM Console can
+    // show it the moment the listener is up.
+    let _ = session_pin();
 
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -778,6 +855,14 @@ pub fn start_party_listener(app: AppHandle, port: u16) -> Result<u16, String> {
 #[tauri::command]
 pub fn party_listener_port() -> Option<u16> {
     LISTENER_PORT.get().copied()
+}
+
+/// Tonight's table PIN, for the DM Console to display so the DM can read it out
+/// to the table. `None` until the listener has actually bound — there is
+/// nothing for a player to join before that.
+#[tauri::command]
+pub fn party_listener_pin() -> Option<String> {
+    LISTENER_PORT.get().map(|_| session_pin().to_string())
 }
 
 /// Completes a still-blocked `/talk` request with the DM's actual reply text
@@ -902,6 +987,54 @@ pub fn local_lan_ip() -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Only `GET /` is exempt from the PIN. Every route that carries table data
+    /// must fall through to the gate — a stray match here silently reopens the
+    /// unauthenticated listener this check exists to close.
+    #[test]
+    fn only_the_bare_probe_skips_the_pin_gate() {
+        assert!(is_reachability_probe("GET / HTTP/1.1"));
+        assert!(is_reachability_probe("GET /?x=1 HTTP/1.1"));
+
+        for line in [
+            "GET /narration?since=0 HTTP/1.1",
+            "GET /character?name=Mira HTTP/1.1",
+            "GET /map?since=0 HTTP/1.1",
+            "GET /initiative?since=0 HTTP/1.1",
+            "GET /camera HTTP/1.1",
+            "POST /talk HTTP/1.1",
+            "POST /character HTTP/1.1",
+            "POST /table-photo HTTP/1.1",
+            "POST /camera-claim HTTP/1.1",
+        ] {
+            assert!(!is_reachability_probe(line), "{line} must require the PIN");
+        }
+    }
+
+    #[test]
+    fn session_pin_is_stable_within_a_run_and_readable_aloud() {
+        let first = session_pin();
+        assert_eq!(first, session_pin(), "PIN must not change mid-session");
+        assert_eq!(first.len(), 6);
+        // The ambiguous glyphs are excluded on purpose — this gets spoken.
+        assert!(
+            first.chars().all(|c| PIN_ALPHABET.contains(&(c as u8))),
+            "unexpected character in {first}"
+        );
+        for bad in ['O', '0', 'I', '1'] {
+            assert!(!first.contains(bad), "{first} contains ambiguous {bad}");
+        }
+    }
+
+    /// The comparison the gate makes, against the values it will really see.
+    #[test]
+    fn pin_comparison_accepts_case_but_not_near_misses() {
+        let pin = session_pin().to_string();
+        assert!(pin.to_lowercase().eq_ignore_ascii_case(&pin));
+        assert!(!"".eq_ignore_ascii_case(&pin), "empty header must not pass");
+        assert!(!format!("{pin}X").eq_ignore_ascii_case(&pin));
+        assert!(!pin[..pin.len() - 1].eq_ignore_ascii_case(&pin));
+    }
+
     /// Exercises the real registry + channel `respond_to_player_turn` uses —
     /// the same mechanism a live `/talk` connection thread blocks on inside
     /// `handle_conn`, just without needing an actual TCP connection or
@@ -985,7 +1118,6 @@ mod tests {
         assert_eq!(parse_since_param("GET /narration?foo=bar&since=7 HTTP/1.1"), 7, "since not the first param");
     }
 
-    #[test]
     /// Same contract as the map slot: a client on the current version gets no payload back, and a
     /// NULL payload on a new version is the "combat is over, clear everything" signal — which is
     /// the only way a player device learns to drop the initiative it rolled.

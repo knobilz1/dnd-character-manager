@@ -60,6 +60,7 @@ pub fn run() {
       local_llm::set_ingestion_engine,
       party_listener::start_party_listener,
       party_listener::party_listener_port,
+      party_listener::party_listener_pin,
       party_listener::local_lan_ip,
       party_listener::respond_to_player_turn,
       party_listener::push_narration,

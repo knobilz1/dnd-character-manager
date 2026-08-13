@@ -62,7 +62,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const borrowed = useBorrowedStore((s) => s.borrowed);
   const { theme, toggleTheme } = useThemeStore();
   const { show3DCharacter, setShow3DCharacter } = useSettingsStore();
-  const { dmIp, setDmIp, addDmSyncedCharacter } = useSettingsStore();
+  const { dmIp, setDmIp, dmPin, setDmPin, addDmSyncedCharacter } = useSettingsStore();
   const [dmOpen, setDmOpen] = React.useState(false);
   // All persisted app-wide settings except theme (which stays in its own
   // header toggle) live behind this one gear-triggered dialog — see
@@ -497,6 +497,20 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm mb-1 focus:outline-none focus:border-emerald-600"
           />
           <p className="text-[11px] text-slate-500">Port defaults to 7777 if you don't specify one. Used by "Send to DM" and per-character sync.</p>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Table PIN</label>
+          <input
+            type="text"
+            value={dmPin}
+            onChange={e => { setDmPin(e.target.value); setDmStatus(null); }}
+            placeholder="ABC123"
+            maxLength={6}
+            autoCapitalize="characters"
+            spellCheck={false}
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm mb-1 font-mono tracking-widest uppercase focus:outline-none focus:border-emerald-600"
+          />
+          <p className="text-[11px] text-slate-500">Ask the DM — their console shows tonight's PIN. It changes each time they restart the app.</p>
         </div>
 
         <div className="mt-4 pt-4 border-t border-slate-700 flex flex-col gap-2">
