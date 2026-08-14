@@ -16,6 +16,9 @@ import { getRace } from '../../data/races';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import { casterClassOf } from '../../hooks/useCharacterDerived';
 import { useCharacterStore } from '../../store/useCharacterStore';
+import { useDiceStore } from '../../store/useDiceStore';
+import { spellAttackKind, spellRoll, formatSpellRoll } from '../../utils/spellRoll';
+import { rollMode } from '../../utils/rollMode';
 
 const SCHOOL_COLORS: Record<string, string> = {
   Abjuration: 'blue', Conjuration: 'purple', Divination: 'indigo',
@@ -42,6 +45,69 @@ interface SpellPanelProps {
 // list this replaced omitted every 2024 class, so a 2024 cleric/druid/wizard/bard/paladin/ranger
 // was rendered as a known caster with no prepared-spell UI at all.
 
+/**
+ * Attack and damage/healing dice for one spell. Weapons have had roll buttons since the
+ * beginning while 547 spells had none, so a wizard rolled Fireball's 8d6 by hand next to a
+ * fighter clicking a button.
+ *
+ * Takes the bonus and modifier as props rather than reading `derived`, because the three lists
+ * that use it cast from three different abilities: the spellbook uses the casting class's, while
+ * a racial or feat-granted spell uses whichever ability that grant names.
+ */
+function SpellRollButtons({ spell, charLevel, attackBonus, spellMod, slotLevel, advAttacks, disadvAttacks }: {
+  spell: Spell;
+  charLevel: number;
+  attackBonus: number;
+  spellMod: number;
+  /** The slot last spent on this spell, so an upcast Fireball rolls what it dealt. */
+  slotLevel?: number;
+  advAttacks: string[];
+  disadvAttacks: string[];
+}) {
+  const triggerRoll = useDiceStore(s => s.triggerRoll);
+  const attack = spellAttackKind(spell);
+  const roll = spellRoll(spell, { charLevel, slotLevel, spellMod });
+  if (!attack && !roll) return null;
+
+  const sign = attackBonus >= 0 ? '+' : '';
+  const kindLabel = roll?.kind === 'healing' ? 'Healing' : 'Damage';
+  return (
+    <>
+      {attack && (
+        <button
+          // A spell attack IS an attack roll, so Poisoned, Prone and exhaustion 3+ reach it
+          // exactly as they reach a greatsword. Armour penalties deliberately don't: those
+          // apply to Strength and Dexterity attack rolls, and this one uses the casting ability.
+          onClick={() => triggerRoll(20, attackBonus, `${spell.name} Attack`, rollMode(advAttacks.length > 0, disadvAttacks.length > 0))}
+          className="shrink-0 text-xs px-2 py-1 rounded border border-red-700/60 bg-red-950/40 text-red-200 hover:bg-red-800/50 transition-all font-medium"
+          title={`Roll ${attack} spell attack: d20 ${sign}${attackBonus}`
+            + (disadvAttacks.length ? ` — disadvantage (${disadvAttacks.join(', ')})` : '')
+            + (advAttacks.length ? ` — advantage (${advAttacks.join(', ')})` : '')}
+        >
+          {sign}{attackBonus} 🎲
+        </button>
+      )}
+      {roll && (
+        <button
+          onClick={() => triggerRoll(roll.dice.sides, roll.modifier, `${spell.name} ${kindLabel}`, undefined, roll.dice.count)}
+          className={cn(
+            'shrink-0 text-xs px-2 py-1 rounded border transition-all font-medium',
+            roll.kind === 'healing'
+              ? 'border-green-700/60 bg-green-950/40 text-green-200 hover:bg-green-800/50'
+              : 'border-orange-700/60 bg-orange-950/40 text-orange-200 hover:bg-orange-800/50',
+          )}
+          title={`Roll ${kindLabel.toLowerCase()}: ${formatSpellRoll(roll)}`
+            + (slotLevel && slotLevel > spell.level ? ` (cast at level ${slotLevel})` : '')
+            // Never let an under-scaled upcast pass as final — see SpellRoll.unscaled.
+            + (roll.unscaled ? `\n\n⚠ This spell's "At Higher Levels" text couldn't be read automatically, so these dice are its base amount. Check the spell description.` : '')}
+        >
+          {formatSpellRoll(roll)}{roll.unscaled ? '?' : ''} 🎲
+        </button>
+      )}
+    </>
+  );
+}
+
 export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell, setInnateSpellAbility }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
@@ -50,6 +116,10 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
 
   const [castSpell, setCastSpell] = React.useState<Spell | null>(null);
   const [summonSpell, setSummonSpell] = React.useState<Spell | null>(null);
+  // The slot each spell was last cast with. Deliberately not persisted: it exists so the damage
+  // button follows the slot you just spent (a 5th-level Fireball reads 10d6, not 8d6), and a
+  // stale choice surviving a reload would be worse than starting over at the spell's own level.
+  const [castAtLevel, setCastAtLevel] = React.useState<Record<string, number>>({});
 
   // Everything below reads the CASTING class, not classes[0]. On a fighter/wizard the latter meant
   // the known-caster layout for a prepared caster, and the "Paladins gain spellcasting at level 2"
@@ -110,6 +180,19 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
 
   const isPreparedCaster = !!classDef && isPreparedCasterId(classDef.id);
   const levels = [0,1,2,3,4,5,6,7,8,9] as SpellLevel[];
+
+  // Shared by every roll button below. `mods` and the condition arrays come straight from the
+  // derive so a Poisoned wizard's Fire Bolt is disadvantaged for the same reason their dagger is.
+  const mods = derived?.mods ?? {};
+  const spellMod: number = derived?.spellcastingAbility ? (mods[derived.spellcastingAbility] ?? 0) : 0;
+  const rollCtx = {
+    charLevel: derived?.totalLevel ?? 1,
+    advAttacks: (derived?.conditionAdvAttacks ?? []) as string[],
+    disadvAttacks: [
+      ...(derived?.conditionDisadvAttacks ?? []),
+      ...(derived?.exhaustionDisadvAttacks ? ['exhaustion'] : []),
+    ] as string[],
+  };
 
   // Total slots available across all levels (excluding pact magic).
   const totalSlots = Object.values(slotTotals ?? {}).reduce((sum: number, n) => sum + (n as number), 0);
@@ -242,6 +325,14 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                       </div>
                       <p className="text-xs text-slate-500">{spell.castingTime} · {spell.range} · {spell.school}</p>
                     </div>
+
+                    <SpellRollButtons
+                      spell={spell}
+                      attackBonus={derived?.spellAttackBonus ?? 0}
+                      spellMod={spellMod}
+                      slotLevel={castAtLevel[spell.id]}
+                      {...rollCtx}
+                    />
 
                     {/* Concentration toggle */}
                     {spell.concentration && canCast(spell, prepared, alwaysPrepared) && (
@@ -379,6 +470,20 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                         {rechargeLabel && <span className="text-slate-600"> · {rechargeLabel}</span>}
                       </p>
                     </div>
+                    {/* Cast off the ability the RACE names, not the class's — a tiefling
+                        fighter's Hellish Rebuke is Charisma-based whatever they multiclass into. */}
+                    {(() => {
+                      const ability = abilityChoices ? (character.innateSpellAbility ?? innate.ability) : innate.ability;
+                      const mod = mods[ability] ?? 0;
+                      return (
+                        <SpellRollButtons
+                          spell={spell}
+                          attackBonus={profBonus + mod}
+                          spellMod={mod}
+                          {...rollCtx}
+                        />
+                      );
+                    })()}
                     {isCantrip ? (
                       <span className="text-xs text-slate-400 shrink-0">At will</span>
                     ) : (
@@ -465,6 +570,12 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                         <span className="text-slate-600"> · {featName}</span>
                       </p>
                     </div>
+                    <SpellRollButtons
+                      spell={spell}
+                      attackBonus={profBonus + (mods[ability] ?? 0)}
+                      spellMod={mods[ability] ?? 0}
+                      {...rollCtx}
+                    />
                     {isCantrip ? (
                       <span className="text-xs text-slate-400 shrink-0">At will</span>
                     ) : (
@@ -515,6 +626,9 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                 className="w-full text-left p-3 rounded-lg border-2 border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 transition-all"
                 onClick={() => {
                   usePactSlot();
+                  // A pact slot is always the warlock's highest, so this is genuinely an upcast —
+                  // Armor of Agathys off a level-3 pact slot is a 3rd-level casting.
+                  setCastAtLevel(m => ({ ...m, [castSpell.id]: pactMagic.slotLevel }));
                   if (summonSpecFor(castSpell.id)) setSummonSpell(castSpell);
                   if (castSpell.concentration) startConcentration(castSpell.id);
                   setCastSpell(null);
@@ -551,6 +665,7 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                       disabled={disabled}
                       onClick={() => {
                         useSpellSlot(lvl);
+                        setCastAtLevel(m => ({ ...m, [castSpell.id]: lvl }));
                         if (castSpell.concentration) startConcentration(castSpell.id);
                         if (summonSpecFor(castSpell.id)) setSummonSpell(castSpell);
                         setCastSpell(null);
@@ -566,6 +681,17 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                       <p className="text-sm font-bold text-white">
                         Level {lvl} Slot {lvl > castSpell.level && <span className="text-xs text-amber-400 font-normal">(upcast)</span>}
                       </p>
+                      {/* What this slot is actually worth. "Upcasting: …" above quotes the rules
+                          text; this answers the question the player opened the dialog to ask. */}
+                      {(() => {
+                        const r = spellRoll(castSpell, { charLevel: rollCtx.charLevel, slotLevel: lvl, spellMod });
+                        if (!r) return null;
+                        return (
+                          <p className={cn('text-xs font-medium', r.kind === 'healing' ? 'text-green-300' : 'text-orange-300')}>
+                            {formatSpellRoll(r)}{r.unscaled ? '?' : ''} {r.kind === 'healing' ? 'healing' : (castSpell.damageType ?? 'damage')}
+                          </p>
+                        );
+                      })()}
                       <p className="text-xs text-slate-400">{avail}/{total} remaining</p>
                     </button>
                   );
