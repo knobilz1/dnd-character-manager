@@ -58,6 +58,9 @@ const REMOTE_ACTION_LABELS: Record<string, string> = {
   recap: 'started the recap',
   end_battle: 'ended the battle',
   replay: 'replayed the last line',
+  roll_call_mark: 'updated roll call',
+  roll_call_all_here: 'marked everyone here',
+  roll_call_done: 'finished roll call',
 };
 
 /** Canned reply for any turn (local mic or a remote player's /talk) that
@@ -2200,12 +2203,30 @@ export function DMConsolePage() {
    *  solved the same way but for functions: reassigned every render, so the
    *  listener always dispatches into closures that see current state. Function
    *  declarations hoist, which is why referencing them here is fine. */
-  const remoteActionsRef = React.useRef<Record<string, () => void>>({});
+  const remoteActionsRef = React.useRef<Record<string, (p: { member?: string; here?: boolean }) => void>>({});
   remoteActionsRef.current = {
     stop: stopSpeakingAndClearQueue,
     recap: () => { void handleSpeakRecap(); },
     end_battle: endBattleCleanup,
     replay: handleReplayLastResponse,
+    // The controller's roll call reuses the dialog's own primitives (hoisted
+    // function declarations), so a remote mark and a console click are the same
+    // operation. Roster/absence/sheet knowledge is read through `live` — this
+    // assignment runs during render above rollCallRows' declaration, so the
+    // memo itself would be a TDZ crash — and the member is validated against
+    // that live roster: the listener passes names through untrusted, and an
+    // unknown one must do nothing rather than plant a ghost in the absence map.
+    roll_call_mark: ({ member, here }) => {
+      if (!member) return;
+      const key = partyKey(member);
+      if (!live.current.partyRoster.some((m) => partyKey(m.name) === key)) return;
+      const sheet = live.current.party.find((c) => partyKey(c.name) === key);
+      // Marking away uses the same default the dialog's Away button does; the DM
+      // refines the mode (autopilot/proxy) on the console if it matters.
+      setRowAbsence(key, here ? null : (live.current.absent[key] ?? { mode: sheet ? 'dm' : 'autopilot' }));
+    },
+    roll_call_all_here: () => markEveryonePresent(),
+    roll_call_done: () => confirmRollCall(),
   };
 
   // One remote button press from whoever holds the table controller. The
@@ -2214,11 +2235,11 @@ export function DMConsolePage() {
   // asked — a console that suddenly falls silent or ends a battle on its own
   // must always say why.
   React.useEffect(() => {
-    const unlisten = listen<{ name: string; action: string }>('dm-remote-control', (event) => {
+    const unlisten = listen<{ name: string; action: string; member?: string; here?: boolean }>('dm-remote-control', (event) => {
       const run = remoteActionsRef.current[event.payload.action];
       if (!run) return;
       setLastRemoteAction(`${event.payload.name} ${REMOTE_ACTION_LABELS[event.payload.action] ?? event.payload.action}`);
-      run();
+      run(event.payload);
     });
     return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4857,6 +4878,23 @@ export function DMConsolePage() {
       return next;
     });
   }
+
+  // Mirror the roll-call snapshot into the listener whenever it changes, so the
+  // controller's device can SHOW the roster and its marks. Null when the feature
+  // is off — the listener should hold no roster it has no reason to serve.
+  React.useEffect(() => {
+    const state = dmRemoteControlEnabled
+      ? {
+          taken: rollCallTaken,
+          members: rollCallRows.map((r) => ({
+            name: r.name,
+            here: !absent[r.key],
+            mode: absent[r.key]?.mode ?? null,
+          })),
+        }
+      : null;
+    void invoke('set_roll_call_state', { state }).catch(() => {});
+  }, [dmRemoteControlEnabled, rollCallTaken, rollCallRows, absent]);
 
   /** Every sheet at the table, digested once for the DM.
    *

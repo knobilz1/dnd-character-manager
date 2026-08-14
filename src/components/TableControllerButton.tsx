@@ -2,7 +2,7 @@ import React from 'react';
 import { Gamepad2 } from 'lucide-react';
 import { useDmConnection } from '../hooks/useDmConnection';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { fetchTableControllerState, claimTableController, sendTableControl } from '../utils/dmConnect';
+import { fetchTableControllerState, claimTableController, sendTableControl, type RollCallView, type TableControlAction } from '../utils/dmConnect';
 import { Dialog, Button } from './ui';
 
 /**
@@ -29,6 +29,10 @@ export function TableControllerButton({ characterName }: { characterName: string
   const [busy, setBusy] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
   const [open, setOpen] = React.useState(false);
+  /** The DM's roll call, mirrored through the listener so the controller can
+   *  run it from their seat. Null until the DM has a campaign open. */
+  const [rollCall, setRollCall] = React.useState<RollCallView | null>(null);
+  const [online, setOnline] = React.useState<string[]>([]);
 
   // Poll whether the feature is on and who holds it. Always, not just while the
   // panel is open — the poll is what makes the button appear at all.
@@ -37,10 +41,12 @@ export function TableControllerButton({ characterName }: { characterName: string
     let cancelled = false;
     const tick = async () => {
       try {
-        const { holder: h, enabled: on } = await fetchTableControllerState(dmIp);
+        const { holder: h, enabled: on, rollCall: rc, online: onl } = await fetchTableControllerState(dmIp);
         if (cancelled) return;
         setHolder(h);
         setEnabled(on);
+        setRollCall(rc);
+        setOnline(onl);
       } catch { /* unreachable this tick — try again next one */ }
     };
     void tick();
@@ -70,12 +76,20 @@ export function TableControllerButton({ characterName }: { characterName: string
     }
   }
 
-  async function press(action: 'stop' | 'recap' | 'end_battle' | 'replay', label: string) {
+  async function press(action: TableControlAction, label: string, extra?: { member?: string; here?: boolean }) {
     setBusy(label);
     setStatus(null);
     try {
-      await sendTableControl(characterName, action, dmIp);
-      setStatus('Done.');
+      await sendTableControl(characterName, action, dmIp, extra);
+      if (action.startsWith('roll_call')) {
+        // Re-poll immediately so the mark shows now, not in 4 seconds — the
+        // console applied it, this device just hasn't seen the mirror yet.
+        const { rollCall: rc, online: onl } = await fetchTableControllerState(dmIp);
+        setRollCall(rc);
+        setOnline(onl);
+      } else {
+        setStatus('Done.');
+      }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
     } finally {
@@ -127,6 +141,58 @@ export function TableControllerButton({ characterName }: { characterName: string
                 title="End the battle — clears the log, the spell areas and everyone's initiative">
                 🏳️ End battle
               </Button>
+            </div>
+          )}
+
+          {/* Roll call, from the controller's seat. Here/Away only — the nuanced
+              half (autopilot anchors, proxies) needs sheet knowledge and stays on
+              the DM's console. */}
+          {mine && rollCall && rollCall.members.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-slate-700">
+              <p className="text-xs font-bold text-slate-300">
+                Roll call {rollCall.taken && <span className="font-normal text-emerald-400">— taken</span>}
+              </p>
+              {rollCall.members.map((m) => {
+                const isOnline = online.some((n) => n.trim().toLowerCase() === m.name.trim().toLowerCase());
+                return (
+                  <div key={m.name} className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5">
+                    <p className="text-xs text-white truncate flex items-center gap-1.5 min-w-0">
+                      <span
+                        title={isOnline ? 'Their sheet is open on the network' : 'No sheet open on the network'}
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}`}
+                      />
+                      <span className="truncate">{m.name}</span>
+                      {!m.here && m.mode && <span className="text-[10px] text-slate-500 shrink-0">({m.mode})</span>}
+                    </p>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        disabled={!!busy}
+                        onClick={() => void press('roll_call_mark', 'Marking\u2026', { member: m.name, here: true })}
+                        className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${m.here ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-400 hover:text-white'}`}
+                      >
+                        Here
+                      </button>
+                      <button
+                        disabled={!!busy}
+                        onClick={() => void press('roll_call_mark', 'Marking\u2026', { member: m.name, here: false })}
+                        className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${!m.here ? 'bg-amber-900/40 border-amber-700 text-amber-300' : 'border-slate-700 text-slate-400 hover:text-white'}`}
+                      >
+                        Away
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" disabled={!!busy} onClick={() => void press('roll_call_all_here', 'Marking\u2026')}>
+                  Everyone's here
+                </Button>
+                {!rollCall.taken && (
+                  <Button size="sm" disabled={!!busy} onClick={() => void press('roll_call_done', 'Confirming\u2026')}>
+                    Start the session
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 

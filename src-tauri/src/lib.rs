@@ -62,6 +62,7 @@ pub fn run() {
       party_listener::party_listener_port,
       party_listener::party_listener_pin,
       party_listener::set_remote_control,
+      party_listener::set_roll_call_state,
       party_listener::release_table_controller,
       party_listener::table_controller_holder,
       party_listener::set_party_pin_required,

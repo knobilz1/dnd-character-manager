@@ -227,13 +227,19 @@ export async function fetchTableCameraState(
 /** Who currently holds the "table controller" role, and whether the DM allows
  *  one at all. Same pull-only channel as the camera: `enabled` false means hide
  *  the control entirely. */
+/** The DM's roll call, as mirrored for the controller's screen. */
+export interface RollCallView {
+  taken: boolean;
+  members: { name: string; here: boolean; mode: string | null }[];
+}
+
 export async function fetchTableControllerState(
   ip: string,
-): Promise<{ holder: string | null; enabled: boolean }> {
+): Promise<{ holder: string | null; enabled: boolean; rollCall: RollCallView | null; online: string[] }> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/control`, { method: 'GET', headers: dmHeaders(), connectTimeout: 5000 });
   if (!res.ok) throw dmError(res.status);
-  const j = (await res.json()) as { holder?: string | null; enabled?: boolean };
-  return { holder: j.holder ?? null, enabled: !!j.enabled };
+  const j = (await res.json()) as { holder?: string | null; enabled?: boolean; rollCall?: RollCallView | null; online?: string[] };
+  return { holder: j.holder ?? null, enabled: !!j.enabled, rollCall: j.rollCall ?? null, online: j.online ?? [] };
 }
 
 /** Claim (or with `release`, hand back) the table controller. Mirrors
@@ -254,13 +260,18 @@ export async function claimTableController(
 
 /** One remote button press. The listener only obeys the current holder and only
  *  for its fixed allowlist (see party_listener.rs CONTROL_ACTIONS). */
+export type TableControlAction =
+  | 'stop' | 'recap' | 'end_battle' | 'replay'
+  | 'roll_call_mark' | 'roll_call_all_here' | 'roll_call_done';
+
 export async function sendTableControl(
-  name: string, action: 'stop' | 'recap' | 'end_battle' | 'replay', ip: string,
+  name: string, action: TableControlAction, ip: string,
+  extra?: { member?: string; here?: boolean },
 ): Promise<void> {
   const res = await tauriFetch(`${dmBaseUrl(ip)}/control`, {
     method: 'POST',
     headers: dmHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ name, action }),
+    body: JSON.stringify({ name, action, ...extra }),
     connectTimeout: 5000,
   });
   if (!res.ok) throw dmError(res.status);

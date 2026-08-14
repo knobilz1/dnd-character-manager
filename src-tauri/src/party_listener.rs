@@ -448,7 +448,14 @@ fn resolve_camera_claim(
 /// the console dispatches whatever event arrives, so the listener is the place
 /// where "remote control" stays a remote with four buttons rather than an RPC
 /// surface that grows by accident.
-const CONTROL_ACTIONS: &[&str] = &["stop", "recap", "end_battle", "replay"];
+const CONTROL_ACTIONS: &[&str] = &[
+    "stop", "recap", "end_battle", "replay",
+    // Roll call from the controller's seat: mark one member here/away, mark the
+    // whole table present, confirm and start the session. The nuanced half of
+    // roll call (absence modes, autopilot anchors, proxies) deliberately stays
+    // on the console — it needs sheet knowledge the controller doesn't have.
+    "roll_call_mark", "roll_call_all_here", "roll_call_done",
+];
 
 /// Whether the DM allows a table controller at all. Defaults OFF and mirrors a
 /// console setting (see `set_remote_control`) — same "an unsynced listener
@@ -461,6 +468,16 @@ static REMOTE_CONTROL: AtomicBool = AtomicBool::new(false);
 fn controller_holder() -> &'static Mutex<Option<CameraHolder>> {
     static HOLDER: OnceLock<Mutex<Option<CameraHolder>>> = OnceLock::new();
     HOLDER.get_or_init(|| Mutex::new(None))
+}
+
+/// The console's roll-call state, mirrored here so the controller's device can
+/// SHOW it — roster names, who's marked away, whether roll call is done. The
+/// console owns the truth (the roster and absence map are React state); this is
+/// a display copy pushed on every change, kept as an opaque JSON value so the
+/// listener never grows a schema for it. Null when the feature is off.
+fn roll_call_state() -> &'static Mutex<serde_json::Value> {
+    static STATE: OnceLock<Mutex<serde_json::Value>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(serde_json::Value::Null))
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, body: &str, content_type: &str) {
@@ -643,9 +660,15 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let mut slot = controller_holder().lock().unwrap();
         let holder = fresh_camera_holder(&mut slot);
         drop(slot);
+        // `online` is the roll-call dialog's presence dot, computed here because
+        // presence already lives listener-side — the controller gets the same
+        // hint the DM sees, at no extra round trip.
+        let online = { let mut seen = presence().lock().unwrap(); fresh_presence(&mut seen) };
         let body = serde_json::json!({
             "holder": holder,
             "enabled": REMOTE_CONTROL.load(Ordering::Relaxed),
+            "rollCall": roll_call_state().lock().unwrap().clone(),
+            "online": online,
         })
         .to_string();
         return write_response(&mut stream, 200, &body, "application/json");
@@ -845,6 +868,14 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         if !CONTROL_ACTIONS.contains(&action.as_str()) {
             return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"unknown action\"}", "application/json");
         }
+        // roll_call_mark carries who and which way. Validated for presence here;
+        // whether the member actually exists is the console's call — it owns the
+        // roster, and an unknown name is ignored there rather than trusted.
+        let member = parsed.get("member").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let here = parsed.get("here").and_then(|v| v.as_bool()).unwrap_or(true);
+        if action == "roll_call_mark" && member.is_empty() {
+            return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"who is being marked?\"}", "application/json");
+        }
         // Checked before the holder check, same order and same reason as
         // /table-photo: a holder from before the DM switched off deserves the
         // true reason, not a misleading "claim it first".
@@ -865,7 +896,7 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         // A button press is activity — an in-use controller never expires.
         *slot = Some(CameraHolder { name: name.clone(), at: std::time::Instant::now() });
         drop(slot);
-        let _ = app.emit("dm-remote-control", serde_json::json!({ "name": name, "action": action }));
+        let _ = app.emit("dm-remote-control", serde_json::json!({ "name": name, "action": action, "member": member, "here": here }));
         return write_response(&mut stream, 200, "{\"ok\":true}", "application/json");
     }
 
@@ -944,6 +975,14 @@ pub fn set_remote_control(enabled: bool) {
     if !enabled {
         *controller_holder().lock().unwrap() = None;
     }
+}
+
+/// The console pushes its roll-call snapshot here on every change (and Null
+/// when the controller feature is off) so GET /control can serve it. See
+/// roll_call_state.
+#[tauri::command]
+pub fn set_roll_call_state(state: serde_json::Value) {
+    *roll_call_state().lock().unwrap() = state;
 }
 
 /// Force-release the table controller (the DM's revoke).
@@ -1165,9 +1204,13 @@ mod tests {
 
     /// The action allowlist is the remote's whole surface — a rename or an
     /// accidental addition here should be a deliberate, test-visible change.
+    /// v2 added roll call (mark / all-here / done).
     #[test]
-    fn the_remote_has_exactly_the_four_buttons_it_shipped_with() {
-        assert_eq!(CONTROL_ACTIONS, &["stop", "recap", "end_battle", "replay"]);
+    fn the_remote_has_exactly_the_buttons_it_shipped_with() {
+        assert_eq!(CONTROL_ACTIONS, &[
+            "stop", "recap", "end_battle", "replay",
+            "roll_call_mark", "roll_call_all_here", "roll_call_done",
+        ]);
     }
 
     /// The gate is ON unless someone turns it off. A default that shipped as
