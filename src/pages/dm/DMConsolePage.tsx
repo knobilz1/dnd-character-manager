@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLive } from '../../hooks/useLive';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -792,7 +793,7 @@ export function DMConsolePage() {
   }, [moduleBusy]);
   // Mirrors moduleBusy for runTurn/drainQueue/handleTalkToggle, which close
   // over refs rather than state to avoid stale reads from listeners
-  // registered once at mount (same reasoning as campaignIdRef etc.).
+  // registered once at mount (same reasoning as the `live` bundle).
   const moduleBusyRef = React.useRef<string | null>(null);
   React.useEffect(() => { moduleBusyRef.current = moduleBusy; }, [moduleBusy]);
   const [creatingCampaign, setCreatingCampaign] = React.useState(false);
@@ -989,8 +990,6 @@ export function DMConsolePage() {
   // someone new joins next week, and someone has stopped coming.
   const [partyRoster, setPartyRoster] = React.useState<{ name: string; description: string }[]>([]);
   // runTurn closes over refs, not state — the roll-call gate reads this one.
-  const partyRosterRef = React.useRef(partyRoster);
-  partyRosterRef.current = partyRoster;
   const [rosterBusy, setRosterBusy] = React.useState<string | null>(null);
   const [rosterNotice, setRosterNotice] = React.useState<string | null>(null);
   const [addPlayerOpen, setAddPlayerOpen] = React.useState(false);
@@ -1033,23 +1032,13 @@ export function DMConsolePage() {
   const [boardBusy, setBoardBusy] = React.useState<string | null>(null);
   // The dm-table-photo listener is mounted once (deps []), so it must read the
   // CURRENT cards/presented map through refs rather than close over the first
-  // render's copies — same reason battleLogRef exists.
-  const planMapCardsRef = React.useRef(planMapCards);
-  planMapCardsRef.current = planMapCards;
-  const adHocMapCardsRef = React.useRef(adHocMapCards);
-  adHocMapCardsRef.current = adHocMapCards;
-  const presentingSlugRef = React.useRef(presentingSlug);
-  presentingSlugRef.current = presentingSlug;
-  const tableCameraSourceRef = React.useRef(tableCameraSource);
-  tableCameraSourceRef.current = tableCameraSource;
+  // render's copies — same reason the `live` bundle exists.
   /** Cross-check settings reach the board read through a ref for the same reason
    *  the cards above do: the dm-table-photo listener is mounted once, so reading
    *  these as plain state would freeze them at whatever they were on first
    *  render — a reviewer the DM ticked mid-session would be ignored on exactly
    *  the photo source most tables use. (The primary engine already has
-   *  dmProviderRef, further down.) */
-  const crossCheckRef = React.useRef({ enabled: crossCheckEnabled, engines: crossCheckEngines });
-  crossCheckRef.current = { enabled: crossCheckEnabled, engines: crossCheckEngines };
+   *  live.current.dmProvider, further down.) */
   /** A finished board read waiting for the DM to confirm it. The read is a HINT,
    *  never authority: measured accuracy is ~4-6 of 6 with the misses landing one
    *  column out, so the DM assigns each piece to a combatant and fixes any square
@@ -1189,34 +1178,24 @@ export function DMConsolePage() {
   const sessionIdRef = React.useRef<string | undefined>(undefined);
   const processingRef = React.useRef(false);
   const queueRef = React.useRef<PlayerTurn[]>([]);
-  const partyRef = React.useRef(party);
-  partyRef.current = party;
   // dm-player-turn's listener is registered once (mount) and would otherwise
-  // close over a stale activeCampaignId — mirror it into a ref like partyRef.
-  const campaignIdRef = React.useRef(activeCampaignId);
-  campaignIdRef.current = activeCampaignId;
+  // close over a stale activeCampaignId — read it from the `live` bundle.
   // Whether closing the window right now would LOSE something. Same condition
   // wrapUpCurrentSession uses to decide there's anything to recap — a campaign
   // is open and the table has actually said something. Mirrored into a ref
   // because the close-requested listener is registered once at mount and would
   // otherwise close over an empty `turns`.
-  const sittingIsLiveRef = React.useRef(false);
-  sittingIsLiveRef.current = !!activeCampaignId && turns.length > 0;
-  // Mirrors activeModuleId for the same reason campaignIdRef exists — runTurn
+  // live.current.activeModuleId exists for the same reason campaignId does — runTurn
   // can fire from a listener registered once at mount (drainQueue) and would
   // otherwise close over a stale value. Also lets resolveChapterSection
   // capture whatever module was active at the moment it's dispatched, rather
   // than racing a later switchActiveModule (see campaign.rs's
   // trim_resolved_chapter_section_at doc comment for why that matters).
-  const activeModuleIdRef = React.useRef(activeModuleId);
-  activeModuleIdRef.current = activeModuleId;
   // Mirrors dmProvider for the campaign-switch effect below, which needs to
   // read the CURRENT provider at the moment a campaign is picked, not react
   // to the provider changing on its own — listing dmProvider as a dependency
   // would re-run the whole (expensive) DM-rules/plan/party sync every time
   // someone just toggles Claude/Local mid-campaign.
-  const dmProviderRef = React.useRef(dmProvider);
-  dmProviderRef.current = dmProvider;
   // The active campaign's module/plan.md, fetched once per campaign switch —
   // NOT re-read every turn (see dmPrompt.ts's planCheckIn doc comment for why).
   // Starts each sitting/campaign "due" (Infinity) so the very first turn
@@ -1287,8 +1266,6 @@ export function DMConsolePage() {
   // `endBattle`; it's fed back every turn via dmPrompt.ts's battleLogStatusText
   // so a long fight can't lose state when the model's context compacts.
   const [battleLog, setBattleLog] = React.useState<BattleLog | null>(null);
-  const battleLogRef = React.useRef(battleLog);
-  battleLogRef.current = battleLog;
   // DEV-only escape hatch, same idea as useCreatorStore's `__creator`: the log is React state
   // and never touches disk, so a headless harness has no other way to read what the DM actually
   // recorded — and `environment` is exactly the field whose bugs are invisible from the prose.
@@ -1300,14 +1277,10 @@ export function DMConsolePage() {
   // Same lifetime as battleLog — ephemeral, cleared on endBattle — and shown ONLY on
   // the popped-out TV window, in grid mode only. Never broadcast to player devices.
   const [placedEffects, setPlacedEffects] = React.useState<PlacedEffect[]>([]);
-  const placedEffectsRef = React.useRef(placedEffects);
-  placedEffectsRef.current = placedEffects;
   // The campaign's positioning style (theater / grid / hex), loaded per campaign
   // from the backend (read_battle_mode) and sent to the DM every turn. Ref so
   // runTurn/drainQueue (which close over refs, not state) read the live value.
   const [battleMode, setBattleMode] = React.useState<BattleMode>('theater');
-  const battleModeRef = React.useRef(battleMode);
-  battleModeRef.current = battleMode;
 
   // Tonight's roll call — who isn't at the table and how their character is
   // being covered (see the RollCallDialog below). Same lifetime rules as
@@ -1316,14 +1289,48 @@ export function DMConsolePage() {
   // that never expires and is silently wrong the following week — and the
   // recovery for losing it to a crash is one click of the roll-call button.
   const [absent, setAbsent] = React.useState<AbsenceMap>({});
-  const absentRef = React.useRef(absent);
-  absentRef.current = absent;
   // Whether roll call has been taken this sitting. Gates the first turn (see
   // runTurn) so a night can't start without the DM saying who showed up.
   const [rollCallTaken, setRollCallTaken] = React.useState(false);
-  const rollCallTakenRef = React.useRef(rollCallTaken);
-  rollCallTakenRef.current = rollCallTaken;
   const [rollCallOpen, setRollCallOpen] = React.useState(false);
+
+  /**
+   * Everything a listener registered once at mount is allowed to read.
+   *
+   * This replaced sixteen hand-written mirror refs. Each one existed because a
+   * long-lived callback — the `dm-player-turn` listener, the close-requested
+   * handler, the TTS drain loop — closes over state as it was at mount, and four
+   * shipped bugs came from reading that stale copy. The refs worked; what didn't
+   * was that nothing said a NEW piece of state needed one, so joining the bug
+   * family was silent. One literal makes the whole set reviewable at a glance,
+   * and `live.current.` marks every read that had to be fresh.
+   *
+   * Add state that any listener reads → add a key here. See hooks/useLive.ts.
+   */
+  const live = useLive({
+    party,
+    partyRoster,
+    // The campaign, module and engine the DM is on RIGHT NOW. Reading the state
+    // instead gave whatever was open when the console loaded — that is the map
+    // card that loaded against the wrong campaign, and the mid-session engine
+    // switch that LAN player turns ignored.
+    campaignId: activeCampaignId,
+    activeModuleId,
+    dmProvider,
+    // Whether closing the window right now would LOSE something: the same
+    // condition wrapUpCurrentSession uses to decide there is anything to recap.
+    sittingIsLive: !!activeCampaignId && turns.length > 0,
+    battleLog,
+    battleMode,
+    placedEffects,
+    absent,
+    rollCallTaken,
+    planMapCards,
+    adHocMapCards,
+    presentingSlug,
+    tableCameraSource,
+    crossCheck: { enabled: crossCheckEnabled, engines: crossCheckEngines },
+  });
   const [partyOpen, setPartyOpen] = React.useState(false);
   // Character names whose device has polled the narration feed recently — i.e.
   // has their sheet open on the network. Shown as a dot beside each roll-call
@@ -1715,7 +1722,7 @@ export function DMConsolePage() {
       console.warn('Failed to re-read the campaign plan:', e);
       return null;
     });
-    if (plan !== null && campaignIdRef.current === campaignId) campaignPlanRef.current = plan;
+    if (plan !== null && live.current.campaignId === campaignId) campaignPlanRef.current = plan;
   }
 
   React.useEffect(() => {
@@ -1769,7 +1776,7 @@ export function DMConsolePage() {
       window.clearTimeout(hookTimerRef.current);
       hookTimerRef.current = null;
     }
-    partyRef.current.forEach(syncPartyMemberToCampaign);
+    live.current.party.forEach(syncPartyMemberToCampaign);
 
     // The campaign's roster, which roll call enumerates and the first-turn gate
     // checks. Previously only fetched when the Plan Next Session dialog opened,
@@ -1790,7 +1797,7 @@ export function DMConsolePage() {
     // campaign is picked, not when the player actually starts talking — see
     // dm.rs's warmup_dm_session doc comment. Claude-only; the local LLM path
     // has no equivalent prompt-cache cold start to warm.
-    if (dmProviderRef.current === 'claude') {
+    if (live.current.dmProvider === 'claude') {
       ensureClaudeConnected().then((connected) => {
         if (!connected) return;
         invoke('warmup_dm_session', { campaignId: activeCampaignId }).catch((e) =>
@@ -1810,10 +1817,10 @@ export function DMConsolePage() {
             // Only refresh if it actually assigned something AND the user
             // hasn't switched campaigns out from under this async call — a
             // stale refresh would clobber the now-active campaign's voices.
-            if (assigned > 0 && campaignIdRef.current === activeCampaignId) {
+            if (assigned > 0 && live.current.campaignId === activeCampaignId) {
               invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId })
                 .then((voices) => {
-                  if (campaignIdRef.current === activeCampaignId) { npcVoicesRef.current = voices; setNpcVoices(voices); }
+                  if (live.current.campaignId === activeCampaignId) { npcVoicesRef.current = voices; setNpcVoices(voices); }
                 })
                 .catch(() => {});
             }
@@ -1823,7 +1830,7 @@ export function DMConsolePage() {
     }
     // ensureClaudeConnected is a plain function redefined every render (not
     // useCallback-wrapped) — deliberately not a reactive dependency here,
-    // same reasoning as dmProviderRef above: this effect calls whatever it
+    // same reasoning as live.current.dmProvider: this effect calls whatever it
     // currently resolves to at campaign-switch time, and doesn't need (or
     // want) to re-run just because that reference changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1955,7 +1962,7 @@ export function DMConsolePage() {
     hdPromptedRef.current.add(activeCampaignId);
     invoke<number>('campaign_archetype_voice_count', { id: activeCampaignId })
       .then((count) => {
-        if (count > 0 && campaignIdRef.current === activeCampaignId) {
+        if (count > 0 && live.current.campaignId === activeCampaignId) {
           setHdPromptCount(count);
           setHdPromptOpen(true);
         }
@@ -1993,7 +2000,7 @@ export function DMConsolePage() {
    *  members without one and returns without a model call if that's empty), so
    *  a redundant fire costs an IPC round trip and nothing else. */
   function scheduleHookReconcile(names: string[]) {
-    const campaignId = campaignIdRef.current;
+    const campaignId = live.current.campaignId;
     if (!campaignId) return;
     const fresh = names.filter((n) => n.trim() && !hookedNamesRef.current.has(n.trim().toLowerCase()));
     if (!fresh.length) return;
@@ -2003,7 +2010,7 @@ export function DMConsolePage() {
       hookTimerRef.current = null;
       // Re-read the campaign at fire time: a campaign switch during the wait
       // must not tie these characters into the wrong campaign's lore.
-      const target = campaignIdRef.current;
+      const target = live.current.campaignId;
       if (!target) return;
       invoke('reconcile_campaign_hooks', { id: target }).catch((e) =>
         console.warn('Automatic campaign-hooks reconciliation failed (the Lore dialog button still works):', e),
@@ -2019,7 +2026,7 @@ export function DMConsolePage() {
    *  campaign — the campaign-switch effect below re-syncs the whole party the
    *  moment one is picked, so nothing pushed early is lost. */
   function syncPartyMemberToCampaign(character: Character) {
-    const campaignId = campaignIdRef.current;
+    const campaignId = live.current.campaignId;
     if (!campaignId || !character.name?.trim()) return;
     invoke('upsert_party_member', { id: campaignId, name: character.name, description: buildPartyMemberSummary(character) })
       .then(() => scheduleHookReconcile([character.name]))
@@ -2105,9 +2112,9 @@ export function DMConsolePage() {
       // Whoever holds the camera role can send one at any moment, and with
       // photos off (the default) or pointed at this machine, acting on it would
       // spend a vision call and pop a confirm panel the DM never asked for.
-      if (tableCameraSourceRef.current !== 'player') return;
-      const cards = [...planMapCardsRef.current, ...adHocMapCardsRef.current];
-      const card = cards.find((c) => c.slug === presentingSlugRef.current) ?? (cards.length === 1 ? cards[0] : undefined);
+      if (live.current.tableCameraSource !== 'player') return;
+      const cards = [...live.current.planMapCards, ...live.current.adHocMapCards];
+      const card = cards.find((c) => c.slug === live.current.presentingSlug) ?? (cards.length === 1 ? cards[0] : undefined);
       if (!card) {
         setError(`${event.payload.name} sent a table photo, but there's no map to read it against — present a map first.`);
         return;
@@ -2171,9 +2178,9 @@ export function DMConsolePage() {
     // listener, which is registered ONCE at mount → drainQueue → runTurn →
     // here, so the plain `dmProvider` closure was frozen at first render: every
     // LAN turn kept hitting whatever engine was selected when the console
-    // opened, ignoring a mid-session switch. Same reasoning as campaignIdRef /
-    // battleModeRef / moduleBusyRef above.
-    const provider = dmProviderRef.current;
+    // opened, ignoring a mid-session switch. Same reasoning as the `live`
+    // bundle and moduleBusyRef above.
+    const provider = live.current.dmProvider;
     if (provider === 'local') {
       const s = useSettingsStore.getState();
       return invoke<{ text: string; session_id?: string }>('ask_dm_local', {
@@ -2230,7 +2237,7 @@ export function DMConsolePage() {
     // tested), and a campaign with no roster has nothing to ask about — so
     // neither case may be blocked. Deliberately NOT spoken aloud: this is an
     // admin step for the DM's screen, not something the table should hear.
-    if (!rollCallTakenRef.current && campaignIdRef.current && partyRosterRef.current.length > 0) {
+    if (!live.current.rollCallTaken && live.current.campaignId && live.current.partyRoster.length > 0) {
       setRollCallOpen(true);
       setWarning("Take roll call first — the DM needs to know who's at the table tonight.");
       return { narration: '', interrupted: false, error: 'Roll call not taken yet.' };
@@ -2268,17 +2275,17 @@ export function DMConsolePage() {
       const partySheets = pendingPartySheetsRef.current ?? undefined;
       pendingPartySheetsRef.current = null;
       const prompt = buildTurnPrompt({
-        party: partyRef.current,
+        party: live.current.party,
         spokenText,
-        battleMode: battleModeRef.current,
+        battleMode: live.current.battleMode,
         speaker,
         planCheckIn: dueForPlanCheck ? campaignPlanRef.current : undefined,
         recalledSession,
         recalledMap,
         recalledChapter,
-        battleLog: battleLogRef.current,
+        battleLog: live.current.battleLog,
         interruption,
-        absent: absentRef.current,
+        absent: live.current.absent,
         partySheets,
       });
       turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
@@ -2286,7 +2293,7 @@ export function DMConsolePage() {
       // Ordinary turns stay on low effort (fast — see callDm's doc comment);
       // only the rare plan-check-in turns, where the DM is deliberately asked
       // to reconcile more context than usual, get bumped to medium.
-      const reply = await callDm(prompt, sessionIdRef.current, campaignIdRef.current ?? undefined, dueForPlanCheck ? 'medium' : 'low');
+      const reply = await callDm(prompt, sessionIdRef.current, live.current.campaignId ?? undefined, dueForPlanCheck ? 'medium' : 'low');
       if (reply.session_id) sessionIdRef.current = reply.session_id;
 
       if (suppressNarrationRef.current) {
@@ -2320,12 +2327,12 @@ export function DMConsolePage() {
       }
 
       if (actions) {
-        const { updated, warnings } = applyDmActions(partyRef.current, actions);
-        updated.forEach((c, i) => { if (c !== partyRef.current[i]) upsert(c); });
+        const { updated, warnings } = applyDmActions(live.current.party, actions);
+        updated.forEach((c, i) => { if (c !== live.current.party[i]) upsert(c); });
         const allWarnings = [...parseWarnings, ...warnings];
         if (allWarnings.length) setWarning(allWarnings.join(' '));
 
-        const campaignId = campaignIdRef.current;
+        const campaignId = live.current.campaignId;
         if (campaignId && actions.remember?.length) {
           const date = new Date().toISOString().slice(0, 10);
           for (const note of actions.remember) {
@@ -2429,7 +2436,7 @@ export function DMConsolePage() {
           // moduleId is captured NOW (whatever's active this instant), not
           // re-resolved lazily inside the backend call, so a module switch
           // racing this in-flight trim can't apply it to the wrong module.
-          const moduleId = activeModuleIdRef.current;
+          const moduleId = live.current.activeModuleId;
           if (moduleId) {
             invoke('resolve_chapter_section', { id: campaignId, moduleId, description: actions.resolveChapterSection }).catch((e) =>
               console.warn('Failed to trim resolved chapter section:', e)
@@ -2442,7 +2449,7 @@ export function DMConsolePage() {
           // to run UNCONDITIONALLY, so a rejected switch (bad module id)
           // still left local state claiming the new module was active while
           // the backend silently kept the old one — a desync where every
-          // subsequent read (activeModuleIdRef, resolve_chapter_section's
+          // subsequent read (live.current.activeModuleId, resolve_chapter_section's
           // moduleId) targets a module the backend disagrees with. Only
           // commit the local state (and force a plan re-check) once the
           // backend confirms the switch actually happened.
@@ -2495,7 +2502,7 @@ export function DMConsolePage() {
           });
           if (spec) pendingRecalledMapRef.current = { slug: actions.recallMap, spec };
         }
-        if (campaignId && actions.recallChapter && activeModuleIdRef.current) {
+        if (campaignId && actions.recallChapter && live.current.activeModuleId) {
           // Same fetch-and-stash, for a chapter the DM isn't in — usually a
           // [REFERENCE] appendix of stat blocks or item rules, which is kept in
           // full precisely because it's too big to carry every turn. Non-fatal
@@ -2503,7 +2510,7 @@ export function DMConsolePage() {
           // already had.
           const text = await invoke<string>('read_chapter_text', {
             id: campaignId,
-            moduleId: activeModuleIdRef.current,
+            moduleId: live.current.activeModuleId,
             chapterId: actions.recallChapter,
           }).catch((e) => {
             console.warn('Failed to read a recalled chapter:', e);
@@ -2517,7 +2524,7 @@ export function DMConsolePage() {
         // fits neither, and the action list that advertises makeMap is not
         // itself mode-specific. Minutes of model work is not something to spend
         // on the DM misreading its own instructions.
-        if (campaignId && actions.makeMap?.trim() && battleModeRef.current === 'grid') {
+        if (campaignId && actions.makeMap?.trim() && live.current.battleMode === 'grid') {
           // Deliberately NOT awaited. A map is minutes of model work and this is
           // the middle of a live turn — the DM asks the moment the fiction turns
           // toward a fight, keeps narrating, and the card lands when it lands.
@@ -2576,8 +2583,8 @@ export function DMConsolePage() {
         // radius-vs-diameter maths is exactly what an LLM gets wrong. Applied after the battle
         // log above so a newly-placed effect stamps the round this turn actually advanced to.
         if (actions.placeEffect?.length || actions.moveEffect?.length || actions.removeEffect?.length || actions.battleLog?.round !== undefined) {
-          const round = actions.battleLog?.round ?? battleLogRef.current?.round ?? 1;
-          let next = placedEffectsRef.current;
+          const round = actions.battleLog?.round ?? live.current.battleLog?.round ?? 1;
+          let next = live.current.placedEffects;
 
           for (const req of actions.placeEffect ?? []) {
             const result = resolvePlacedEffect(req, round, next.map((e) => e.id));
@@ -2596,7 +2603,7 @@ export function DMConsolePage() {
           }
           next = next.filter((e) => !isExpired(e, round));
 
-          if (next !== placedEffectsRef.current) {
+          if (next !== live.current.placedEffects) {
             setPlacedEffects(next);
             refreshTableEffects(next);
           }
@@ -2621,7 +2628,7 @@ export function DMConsolePage() {
       // flush above — that leftover sentence is spoken, so its decision belongs
       // in the log; writing earlier silently dropped the last line of every
       // turn. Fire-and-forget — a diagnostic must never break a live turn.
-      const debugCampaignId = campaignIdRef.current;
+      const debugCampaignId = live.current.campaignId;
       if (debugCampaignId) {
         const voiceMap = Object.entries(npcVoicesRef.current)
           .map(([k, v]) => `${k}=${v.voice_id}`)
@@ -2798,7 +2805,7 @@ export function DMConsolePage() {
    *  switching the active campaign without closing out the old one first
    *  would make the very next turn error out. */
   async function wrapUpCurrentSession() {
-    const campaignId = campaignIdRef.current;
+    const campaignId = live.current.campaignId;
     if (campaignId && turns.length > 0) {
       setBusy(true);
       // Declared outside the try so the catch can still reach them — that
@@ -2837,7 +2844,7 @@ export function DMConsolePage() {
           // location catch-up, so a local-only session still gets a MEMORY.md
           // recap and captures what it can.
           console.warn('Opus session digest unavailable — falling back to a provider recap:', digestErr);
-          const reply = await callDm(buildRecapPrompt(partyRef.current, absentRef.current), sessionIdRef.current, campaignId, 'low');
+          const reply = await callDm(buildRecapPrompt(live.current.party, live.current.absent), sessionIdRef.current, campaignId, 'low');
           const { narration, actions } = parseDmReply(reply.text);
           await invoke('append_session_recap', { id: campaignId, date, recap: narration });
           if (actions?.rememberEntity?.length) {
@@ -3004,7 +3011,7 @@ export function DMConsolePage() {
     let disposed = false;
     getCurrentWindow()
       .onCloseRequested((event) => {
-        if (!sittingIsLiveRef.current) return; // nothing to lose — the wrapper destroys it
+        if (!live.current.sittingIsLive) return; // nothing to lose — the wrapper destroys it
         event.preventDefault();
         setCloseGuardOpen(true);
       })
@@ -3605,7 +3612,7 @@ export function DMConsolePage() {
   async function handleChangeBattleMode(mode: BattleMode) {
     const campaignId = activeCampaignId;
     if (!campaignId) return;
-    const prev = battleModeRef.current;
+    const prev = live.current.battleMode;
     setBattleMode(mode);
     try {
       await invoke('set_battle_mode', { id: campaignId, mode });
@@ -3631,7 +3638,7 @@ export function DMConsolePage() {
     };
     try {
       type RawFloor = { tiles: MapTileArt[]; floor: string | null; liquid: string | null; natural_walls: boolean };
-      const res = await invoke<RawFloor & { floors?: RawFloor[]; diagnostics: MapCard['artDiagnostics'] }>('get_map_tiles', { id: campaignIdRef.current, slug });
+      const res = await invoke<RawFloor & { floors?: RawFloor[]; diagnostics: MapCard['artDiagnostics'] }>('get_map_tiles', { id: live.current.campaignId, slug });
       // Per-floor art (ground first). Fall back to the top-level fields as a
       // single ground floor for a backend that predates `floors`.
       const raw = res.floors?.length ? res.floors : [res];
@@ -3643,13 +3650,13 @@ export function DMConsolePage() {
     }
   }
 
-  /** Reads through campaignIdRef, not the `activeCampaignId` state: a map
+  /** Reads through live.current.campaignId, not the `activeCampaignId` state: a map
    *  finished by the DM's own `makeMap` action reaches here via the
    *  mount-once turn listener, whose closure still holds whatever campaign was
    *  active when the console mounted (often null) — so the card was read
    *  against the wrong campaign and the finished map never appeared. */
   async function loadMapCard(meta: BattleMapMeta): Promise<MapCard> {
-    const spec = await invoke<string>('read_battle_map', { id: campaignIdRef.current, slug: meta.slug });
+    const spec = await invoke<string>('read_battle_map', { id: live.current.campaignId, slug: meta.slug });
     const { floorArt, artDiagnostics } = await fetchMapTiles(meta.slug);
     const floors = renderFloors(spec, floorArt);
     return { slug: meta.slug, name: meta.name, summary: meta.summary, spec, floorArt, artDiagnostics, floors, png: floors[0]?.png ?? null };
@@ -3973,13 +3980,13 @@ export function DMConsolePage() {
    *  slot TableView polls. Same revealed, zone-free floors as the LAN broadcast
    *  (revealedPayload) — the TV is a player-facing surface, so it must never
    *  show an unrevealed floor or the enemy/party start-zones. */
-  function writeTableMap(card: MapCard, activeFloor = 0, effects = placedEffectsRef.current) {
+  function writeTableMap(card: MapCard, activeFloor = 0, effects = live.current.placedEffects) {
     const payload: Record<string, unknown> = { ...revealedPayload(card), activeFloor };
     // Spell areas ride along ONLY here, and only in grid mode: this is the TV's private
     // channel. revealedPayload/broadcastMapCard feed players' own devices over :7777 and
     // deliberately stay untouched. Grid geometry travels with them because the table
     // window has no store, no Tauri access and no spell data of its own.
-    if (battleModeRef.current === 'grid' && effects.length) {
+    if (live.current.battleMode === 'grid' && effects.length) {
       const floor = parseBattleMapFloors(card.spec)[0];
       if (floor) {
         payload.effects = effects;
@@ -3996,9 +4003,9 @@ export function DMConsolePage() {
   /** Re-push the presented map when the effect list or the round changes. Cheap enough
    *  to do unconditionally: writeTableMap no-ops when nothing is on the TV. */
   function refreshTableEffects(effects: PlacedEffect[]) {
-    const slug = presentingSlugRef.current;
+    const slug = live.current.presentingSlug;
     if (!slug) return;
-    const card = [...planMapCardsRef.current, ...adHocMapCardsRef.current].find((c) => c.slug === slug);
+    const card = [...live.current.planMapCards, ...live.current.adHocMapCards].find((c) => c.slug === slug);
     if (card) writeTableMap(card, 0, effects);
   }
 
@@ -4099,7 +4106,7 @@ export function DMConsolePage() {
       assign: read.minis.map(() => ''),        // unassigned until the DM says who
       cells: read.minis.map((m) => m.cell),    // editable, so a one-off drift is fixable
     });
-    if (!crossCheckRef.current.enabled) return;
+    if (!live.current.crossCheck.enabled) return;
     setBoardBusy('Second opinion…');
     const cc = await crossCheckBoard(photo, cols, rows, read.minis);
     if (cc) setBoardRead((b) => (b ? { ...b, disputed: cc.disputed, checkedBy: cc.checkedBy } : b));
@@ -4125,8 +4132,8 @@ export function DMConsolePage() {
     // "anything that isn't Claude" meant a Codex-primary table with Claude as
     // its reviewer silently got no second opinion, because the only candidate
     // left was Gemini, which refuses vision and threw straight into the catch.
-    const { enabled, engines } = crossCheckRef.current;
-    const reviewer = engines.find((e) => e !== dmProviderRef.current && (e === 'claude' || e === 'codex'));
+    const { enabled, engines } = live.current.crossCheck;
+    const reviewer = engines.find((e) => e !== live.current.dmProvider && (e === 'claude' || e === 'codex'));
     if (!enabled || !reviewer || first.length === 0) return null;
     try {
       const second = await invoke<BoardReadResult>('read_table_positions', {
@@ -4722,7 +4729,7 @@ export function DMConsolePage() {
    *  the owner ever gets their character back. */
   async function publishSharedCharacters() {
     try {
-      await invoke('set_shared_characters', { characters: partyRef.current });
+      await invoke('set_shared_characters', { characters: live.current.party });
     } catch (e) {
       console.warn('Could not publish party sheets to the LAN listener:', e);
     }
