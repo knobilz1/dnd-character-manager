@@ -748,6 +748,11 @@ export function SheetPage() {
                 effectiveMaxHP={effectiveMaxHP}
                 mods={mods}
                 profBonus={profBonus}
+                // For the concentration prompt: the already-computed CON save, with
+                // proficiency folded in, rather than re-deriving it inside CombatTab —
+                // that is how two copies of one rule drift apart.
+                conSave={savingThrows.con}
+                exhaustionDisadvSaves={exhaustionDisadvSaves}
                 resourceMaxOverrides={resourceMaxOverrides}
                 activeEffects={activeEffects}
                 setActiveEffects={setActiveEffects}
@@ -1742,6 +1747,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
+  conSave, exhaustionDisadvSaves,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay,
   sendToGraveyard, navigate, useItemCharge,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
@@ -1781,6 +1787,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
    *  whether routine rolls become chatter; initiative is not chatter, it is the input the DM
    *  cannot run the encounter without, and defaulting it off would leave the bot guessing. */
   const setInitiativeRoll = useCharacterStore(st => st.setInitiativeRoll);
+  // Read straight from the store rather than as props: damageHP raises this, and it
+  // must reach the banner no matter which control dealt the damage.
+  const concentrationCheck = useCharacterStore(st => st.concentrationCheck);
+  const clearConcentrationCheck = useCharacterStore(st => st.clearConcentrationCheck);
   const dmIp = useSettingsStore((st) => st.dmIp);
   const dmConnected = useDmConnection();
   const turnOrder = useDmInitiativeFeed();
@@ -1917,6 +1927,40 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
           <button onClick={endConcentration} className="text-xs text-amber-400 hover:text-amber-200 px-2 py-1 rounded border border-amber-700 hover:border-amber-500 transition-colors">
             End
           </button>
+        </div>
+      )}
+
+      {/* Raised by damageHP whenever damage lands while concentrating. The save is
+          the player's to roll — this only makes sure it is never silently skipped,
+          and does the DC arithmetic (10 or half the damage, whichever is higher). */}
+      {concentrationCheck && concentrationSpellId && (
+        <div className="bg-amber-950/60 border-2 border-amber-500 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-amber-200 text-sm">
+            Took <span className="font-bold">{concentrationCheck.damage}</span> damage —
+            {' '}<span className="font-bold">DC {concentrationCheck.dc} Constitution</span> save
+            {' '}or lose <span className="font-bold">{getSpell(concentrationSpellId)?.name ?? concentrationSpellId}</span>.
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => dsTrigger(20, conSave, 'Concentration (CON Save)',
+                rollMode(false, exhaustionDisadvSaves))}
+              className="text-xs px-2 py-1 rounded border border-amber-600 text-amber-300 hover:bg-amber-900/50 transition-colors"
+            >
+              Roll {conSave >= 0 ? '+' : ''}{conSave} 🎲
+            </button>
+            <button
+              onClick={clearConcentrationCheck}
+              className="text-xs px-2 py-1 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-900/40 transition-colors"
+            >
+              Held
+            </button>
+            <button
+              onClick={() => { endConcentration(); clearConcentrationCheck(); }}
+              className="text-xs px-2 py-1 rounded border border-red-700 text-red-300 hover:bg-red-900/40 transition-colors"
+            >
+              Lost it
+            </button>
+          </div>
         </div>
       )}
 

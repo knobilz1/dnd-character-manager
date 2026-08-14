@@ -37,6 +37,13 @@ interface CharacterState {
   load: (c: Character) => void;
   save: () => void;
 
+  /** Set by `damageHP` when damage lands while concentrating: the save the player
+   *  now owes, and the damage that caused it. Transient UI state, deliberately NOT
+   *  on the character and never persisted — it belongs to this moment at the table,
+   *  not to the sheet. Null when nothing is owed. */
+  concentrationCheck: { dc: number; damage: number } | null;
+  clearConcentrationCheck: () => void;
+
   // HP
   setCurrentHP: (hp: number) => void;
   healHP: (amount: number) => void;
@@ -141,6 +148,8 @@ interface CharacterState {
 
 export const useCharacterStore = create<CharacterState>((set, get) => ({
   character: null,
+  concentrationCheck: null,
+  clearConcentrationCheck: () => set({ concentrationCheck: null }),
 
   load: (c) => {
     // Migrate old characters that were created before the resources field existed.
@@ -395,7 +404,18 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         ? Math.floor(s.character.maxHP / 2)
         : s.character.maxHP;
       const next = Math.min(s.character.currentHP + amount, effMax);
-      return { character: { ...s.character, currentHP: next } };
+      // Any healing above 0 ends the dying condition, and the marked saves go with
+      // it (PHB p.197 — regaining hit points resets them). They used to persist, so
+      // the next time that character went down they started partway to dead, with
+      // failures carried over from a fight they had already survived.
+      const revived = s.character.currentHP === 0 && next > 0;
+      return {
+        character: {
+          ...s.character,
+          currentHP: next,
+          deathSaves: revived ? { successes: 0, failures: 0 } : s.character.deathSaves,
+        },
+      };
     }),
 
   damageHP: (amount, type) =>
@@ -406,10 +426,30 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // is every call site that predates this.
       const dealt = applyResistance(s.character, amount, type);
       let { tempHP, currentHP } = s.character;
+      const wasDown = currentHP === 0;
       const tempAbsorb = Math.min(tempHP, dealt);
       tempHP -= tempAbsorb;
       currentHP = Math.max(0, currentHP - (dealt - tempAbsorb));
-      return { character: { ...s.character, currentHP, tempHP } };
+
+      // Taking damage at 0 HP is a death saving throw failure (PHB p.197). This was
+      // entirely manual, so a downed character being hit again looked untouched on
+      // the sheet. A critical hit costs two failures, but nothing on this path knows
+      // whether the hit was a crit, so the second is still the player's to add.
+      let deathSaves = s.character.deathSaves;
+      if (wasDown && dealt > 0) {
+        deathSaves = { ...deathSaves, failures: Math.min(deathSaves.failures + 1, 3) };
+      }
+
+      // Concentration is broken by a failed Constitution save, DC 10 or half the
+      // damage taken, whichever is higher (PHB p.203). The rule was in the tooltip
+      // and nowhere else: the banner said what you were concentrating on and left
+      // the save to memory. Raising the prompt here — rather than at one button —
+      // means it fires for every damage source, including the sidebar's quick -1/-5.
+      const concentrationCheck = s.character.concentrationSpellId && dealt > 0
+        ? { dc: Math.max(10, Math.floor(dealt / 2)), damage: dealt }
+        : s.concentrationCheck;
+
+      return { character: { ...s.character, currentHP, tempHP, deathSaves }, concentrationCheck };
     }),
 
   setTempHP: (hp) =>
@@ -544,11 +584,17 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   removeSpellFromBook: (spellId) =>
     set((s) => s.character ? { character: { ...s.character, spellbook: s.character.spellbook.filter(sp => sp.spellId !== spellId) } } : s),
 
+  // Both of these clear any owed save: it belongs to the spell that was interrupted,
+  // so it must not survive into the next one or hang around after you drop the spell.
   startConcentration: (spellId) =>
-    set((s) => s.character ? { character: { ...s.character, concentrationSpellId: spellId } } : s),
+    set((s) => s.character
+      ? { character: { ...s.character, concentrationSpellId: spellId }, concentrationCheck: null }
+      : s),
 
   endConcentration: () =>
-    set((s) => s.character ? { character: { ...s.character, concentrationSpellId: undefined } } : s),
+    set((s) => s.character
+      ? { character: { ...s.character, concentrationSpellId: undefined }, concentrationCheck: null }
+      : s),
 
   setInitiativeRoll: (total) =>
     set((s) => s.character ? { character: { ...s.character, initiativeRoll: total } } : s),
