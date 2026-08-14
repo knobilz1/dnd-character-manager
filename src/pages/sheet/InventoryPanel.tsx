@@ -4,6 +4,7 @@ import { Button, Dialog, HoverCard, SectionHeader } from '../../components/ui';
 import { cn } from '../../utils/cn';
 import type { Character, InventoryItem, ItemCategory } from '../../types';
 import { searchItems, type ItemTemplate } from '../../data/items';
+import { requiresAttunement, attunementSlots, attunedItems, canAttune as canAttuneItem, BASE_ATTUNEMENT_SLOTS as BASE_SLOTS } from '../../utils/attunement';
 import { TOWN_STORE } from '../../data/townStore';
 import { itemSummonSpecFor } from '../../data/summonOptions';
 import { SummonPicker } from '../../components/SummonPicker';
@@ -35,6 +36,7 @@ interface InventoryPanelProps {
   renameInventoryItem: (id: string, name: string) => void;
   setInventoryDescription: (id: string, description: string | undefined) => void;
   setItemCharges: (id: string, charges: number) => void;
+  toggleAttunement: (id: string) => void;
   updateCurrency: (coin: 'cp' | 'sp' | 'ep' | 'gp' | 'pp', value: number) => void;
 }
 
@@ -48,8 +50,12 @@ export function InventoryPanel({
   renameInventoryItem,
   setInventoryDescription,
   setItemCharges,
+  toggleAttunement,
   updateCurrency,
 }: InventoryPanelProps) {
+  const slots = attunementSlots(character);
+  const attunedNow = attunedItems(character).length;
+
   const [addOpen, setAddOpen] = React.useState(false);
   const [summonItem, setSummonItem] = React.useState<string | null>(null);
   const [draftItem, setDraftItem] = React.useState<{
@@ -134,6 +140,19 @@ export function InventoryPanel({
         <div className="text-sm text-slate-400 flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span><span className="font-bold text-white">{inventory.length}</span> items</span>
+            {/* Shown only once something is attuned, or once the slots are full —
+                an "0/3" on every character is noise for the majority who carry no
+                magic items at all. */}
+            {(attunedNow > 0 || slots < BASE_SLOTS) && (
+              <>
+                <span className="text-slate-600">·</span>
+                <span title="Attunement slots. PHB p.138: three, unless a feature says otherwise.">
+                  <span className={cn('font-bold', attunedNow >= slots ? 'text-amber-300' : 'text-white')}>
+                    {attunedNow}/{slots}
+                  </span>{' '}attuned
+                </span>
+              </>
+            )}
             {totalWeight > 0 && (
               <>
                 <span className="text-slate-600">·</span>
@@ -187,6 +206,8 @@ export function InventoryPanel({
                       onDescriptionChange={desc => setInventoryDescription(item.id, desc)}
                       onChargesChange={charges => setItemCharges(item.id, charges)}
                       onSummon={() => setSummonItem(item.name)}
+                      onToggleAttunement={requiresAttunement(item) ? () => toggleAttunement(item.id) : undefined}
+                      canAttune={canAttuneItem(character, item)}
                     />
                   </HoverCard>
                 ))}
@@ -412,9 +433,13 @@ interface InventoryRowProps {
   onDescriptionChange: (d: string | undefined) => void;
   onChargesChange: (c: number) => void;
   onSummon?: () => void;
+  /** Undefined for items that don't ask for attunement — the control is hidden. */
+  onToggleAttunement?: () => void;
+  /** False when the slots are full and this item isn't one of them. */
+  canAttune?: boolean;
 }
 
-function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename, onDescriptionChange, onChargesChange, onSummon }: InventoryRowProps) {
+function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename, onDescriptionChange, onChargesChange, onSummon, onToggleAttunement, canAttune }: InventoryRowProps) {
   const [editingName, setEditingName] = React.useState(false);
   const [nameDraft, setNameDraft] = React.useState(item.name);
   const [editingDesc, setEditingDesc] = React.useState(false);
@@ -441,6 +466,32 @@ function InventoryRow({ item, onRemove, onQtyChange, onToggleEquipped, onRename,
             title={item.equipped ? 'Equipped' : 'Equip'}
           >
             {item.category === 'shield' ? <Shield size={14} /> : <Sword size={14} />}
+          </button>
+        )}
+
+        {/* Attunement. Only rendered for items whose own text asks for it, so the
+            control never appears on a rope. Disabled rather than hidden when the
+            slots are full — a missing button reads as a bug, a disabled one with a
+            reason teaches the rule. */}
+        {onToggleAttunement && (
+          <button
+            onClick={onToggleAttunement}
+            disabled={!item.attuned && !canAttune}
+            className={cn(
+              'w-7 h-7 rounded shrink-0 flex items-center justify-center transition-all text-sm',
+              item.attuned
+                ? 'bg-amber-900/40 text-amber-300 border border-amber-600/60'
+                : canAttune
+                  ? 'bg-slate-900 text-slate-500 border border-slate-700 hover:text-amber-300 hover:border-amber-700'
+                  : 'bg-slate-900 text-slate-700 border border-slate-800 cursor-not-allowed',
+            )}
+            title={item.attuned
+              ? 'Attuned — click to break attunement'
+              : canAttune
+                ? 'Requires attunement — click to attune'
+                : 'Requires attunement, but all your attunement slots are full'}
+          >
+            ✦
           </button>
         )}
 

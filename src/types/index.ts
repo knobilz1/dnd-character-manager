@@ -507,6 +507,10 @@ export interface InventoryItem {
   description?: string;
   weight?: number;        // in pounds, per item
   source?: 'class' | 'background' | 'manual';
+  /** Attuned to this item. Real state, not derived: whether an item REQUIRES
+   *  attunement is read from its description, but whether you have actually spent
+   *  one of your three slots on it is a choice only the player can make. */
+  attuned?: boolean;
   maxCharges?: number;    // optional charge tracking (e.g. magic items)
   charges?: number;       // current charges remaining
   recharge?: 'dawn' | 'long' | 'short';  // when charges restore (undefined = no auto-restore)

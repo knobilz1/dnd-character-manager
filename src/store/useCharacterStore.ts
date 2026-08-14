@@ -12,6 +12,7 @@ import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPre
 import { chosenAsi } from '../utils/racialAsi';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 import { applyResistance } from '../utils/damageResistance';
+import { canAttune } from '../utils/attunement';
 
 /**
  * Resource maxima that scale off an ability modifier or proficiency bonus.
@@ -143,6 +144,8 @@ interface CharacterState {
   renameInventoryItem: (id: string, name: string) => void;
   setInventoryDescription: (id: string, description: string | undefined) => void;
   setItemCharges: (id: string, charges: number) => void;
+  /** Attune to / un-attune from an item. Refuses to exceed the character's slots. */
+  toggleAttunement: (id: string) => void;
   useItemCharge: (itemId: string) => void;
 
   // Level up / hit dice
@@ -684,6 +687,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       if (!s.character) return s;
       const inventory = (s.character.inventory ?? []).map(i =>
         i.id === id ? { ...i, description: description || undefined } : i
+      );
+      return { character: { ...s.character, inventory } };
+    }),
+
+  toggleAttunement: (id) =>
+    set((s) => {
+      if (!s.character) return s;
+      const item = (s.character.inventory ?? []).find(i => i.id === id);
+      // canAttune already allows un-attuning unconditionally and blocks a fourth
+      // item — the cap is enforced HERE rather than in the panel so no other caller
+      // can route around it, which is how the equipped flag ended up inconsistent.
+      if (!item || !canAttune(s.character, item)) return s;
+      const inventory = (s.character.inventory ?? []).map(i =>
+        i.id === id ? { ...i, attuned: !i.attuned } : i
       );
       return { character: { ...s.character, inventory } };
     }),
