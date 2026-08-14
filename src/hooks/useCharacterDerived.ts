@@ -742,7 +742,11 @@ export function computeCharacterDerived(character: Character) {
 
     // Exhaustion flags
     const exhaustionDisadvChecks = exhaustionLevel >= 1; // disadvantage on ability checks / skills
+    // Level 3 imposes disadvantage on attack rolls AND saving throws (PHB p.291).
+    // Only the saves half existed, so an exhausted character rolled attacks straight
+    // — the more visible half of the penalty, and the one that comes up every turn.
     const exhaustionDisadvSaves  = exhaustionLevel >= 3; // disadvantage on saving throws
+    const exhaustionDisadvAttacks = exhaustionLevel >= 3; // disadvantage on attack rolls
     const exhaustionHpMaxHalved  = exhaustionLevel >= 4; // HP maximum is halved
     const baseSpeed = _baseSpeed; // keep reference for tooltip display
 
@@ -799,6 +803,7 @@ export function computeCharacterDerived(character: Character) {
       exhaustionLevel,
       exhaustionDisadvChecks,
       exhaustionDisadvSaves,
+      exhaustionDisadvAttacks,
       advantage,
       advantageNotes,
       armorPen,

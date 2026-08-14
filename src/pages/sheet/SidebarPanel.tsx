@@ -17,6 +17,9 @@ import { getSpell } from '../../data/spells';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import type { SlotLevel } from '../../types';
 import { parseDamageDice } from '../../utils/damageDice';
+import { rollMode } from '../../utils/rollMode';
+import { armorPenalty } from '../../utils/armorProficiency';
+import { isProficientWithWeapon } from '../../utils/weaponProficiency';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -247,7 +250,8 @@ function WeaponAttacksSideModule() {
   const { triggerRoll } = useDiceStore();
   if (!character || !derived) return null;
 
-  const { mods, profBonus } = derived;
+  const { mods, profBonus, exhaustionDisadvAttacks } = derived;
+  const armorPen = armorPenalty(character);
   const equippedWeapons = (character.inventory ?? []).filter(
     (item: any) => item.equipped && item.category === 'weapon',
   );
@@ -267,7 +271,10 @@ function WeaponAttacksSideModule() {
       {equippedWeapons.map((item: any) => {
         const w = lookupWeapon(item.name);
         const abilityMod = abilityModForWeapon(w);
-        const toHit = abilityMod + profBonus;
+        // The main Weapon Attacks panel gates this on real proficiency; this copy
+        // added the bonus to every weapon, so an unproficient one read too high.
+        const proficient = isProficientWithWeapon(character, item.name);
+        const toHit = abilityMod + (proficient ? profBonus : 0);
         const dmgDice = w?.damageDice ?? '1d6';
         const dmgLabel = damageLine(dmgDice, abilityMod);
         const dmg = parseDamageDice(dmgDice);
@@ -277,7 +284,8 @@ function WeaponAttacksSideModule() {
             <p className="text-xs font-semibold text-white mb-1.5 truncate">{item.name}</p>
             <div className="flex gap-1.5">
               <button
-                onClick={() => triggerRoll(20, toHit, `${item.name} Attack`)}
+                onClick={() => triggerRoll(20, toHit, `${item.name} Attack`,
+                  rollMode(false, exhaustionDisadvAttacks || armorPen.strDexDisadvantage))}
                 className="flex-1 bg-red-900/40 hover:bg-red-800/50 border border-red-700/60 rounded py-1.5 text-center transition-colors"
                 title={`d20 + ${toHit}`}
               >

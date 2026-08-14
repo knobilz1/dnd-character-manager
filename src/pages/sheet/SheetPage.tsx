@@ -42,6 +42,7 @@ import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
 import { parseDamageDice } from '../../utils/damageDice';
+import { rollMode } from '../../utils/rollMode';
 import { fileToPortraitDataUrl } from '../../utils/portrait';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 
@@ -121,12 +122,6 @@ const PIP_LIMIT = 20;
  *  may be summarised, but the value written back is always derived from `current`. */
 /** PHB p.173: if circumstances grant both advantage and disadvantage, you have neither, however
  *  many of each apply. Returned as the dice layer's mode so both callers stay honest. */
-function rollMode(adv: boolean, dis: boolean): 'advantage' | 'disadvantage' | undefined {
-  if (adv && dis) return undefined;
-  if (adv) return 'advantage';
-  if (dis) return 'disadvantage';
-  return undefined;
-}
 
 function ResourceCounter({ current, max, onChange }: {
   current: number; max: number; onChange: (next: number) => void;
@@ -312,7 +307,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -753,6 +748,7 @@ export function SheetPage() {
                 // that is how two copies of one rule drift apart.
                 conSave={savingThrows.con}
                 exhaustionDisadvSaves={exhaustionDisadvSaves}
+                exhaustionDisadvAttacks={exhaustionDisadvAttacks}
                 resourceMaxOverrides={resourceMaxOverrides}
                 activeEffects={activeEffects}
                 setActiveEffects={setActiveEffects}
@@ -1523,7 +1519,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
-function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mods: any; profBonus: number }) {
+function WeaponAttacksPanel({ character, mods, profBonus, exhaustionDisadvAttacks }: { character: any; mods: any; profBonus: number; exhaustionDisadvAttacks: boolean }) {
   const { triggerRoll } = useDiceStore();
 
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
@@ -1582,7 +1578,7 @@ function WeaponAttacksPanel({ character, mods, profBonus }: { character: any; mo
               <div className="flex items-center gap-2">
                 {/* Attack roll */}
                 <button
-                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`, rollMode(false, weaponArmorPen.strDexDisadvantage))}
+                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`, rollMode(false, exhaustionDisadvAttacks || weaponArmorPen.strDexDisadvantage))}
                   className="flex-1 bg-red-900/40 hover:bg-red-800/50 border border-red-700/60 hover:border-red-500 rounded-lg py-1.5 text-center transition-colors group"
                   title={`Roll attack: d20 + ${toHit >= 0 ? '+' : ''}${toHit}`}
                 >
@@ -1747,7 +1743,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
-  conSave, exhaustionDisadvSaves,
+  conSave, exhaustionDisadvSaves, exhaustionDisadvAttacks,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay,
   sendToGraveyard, navigate, useItemCharge,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
@@ -1889,7 +1885,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       )}
 
       {/* Weapon Attacks */}
-      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} />
+      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} exhaustionDisadvAttacks={exhaustionDisadvAttacks} />
 
       {/* Companions — a second creature, not a transformation. Renders nothing unless the
           character can have one or already does. */}
