@@ -6,6 +6,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'berserker-2024', name: 'Path of the Berserker', classId: 'barbarian-2024', sourceBook: 'PHB2024',
     description: 'The Path of the Berserker channels fury into overwhelming aggression.',
+    resources: [
+      {
+        name: "Intimidating Presence",
+        key: 'intimidating_presence',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Frenzy', level: 3, description: 'When you use Reckless Attack while Raging: your first successful Strength melee hit that turn deals extra damage equal to a number of d6s = your Rage Damage bonus (same damage type as the weapon).' },
       { name: 'Mindless Rage', level: 6, description: 'You are Immune to the Charmed and Frightened conditions while Raging. If you have those conditions when you enter Rage, they end on you.' },
@@ -37,6 +45,27 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'zealot-2024', name: 'Path of the Zealot', classId: 'barbarian-2024', sourceBook: 'PHB2024',
     description: 'Channel divine fury into devastating combat prowess.',
+    resources: [
+      {
+        name: "Warrior of the Gods",
+        key: 'warrior_of_the_gods',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:4,6:5,7:5,8:5,9:5,10:5,11:5,12:6,13:6,14:6,15:6,16:6,17:7,18:7,19:7,20:7 },
+        resourceDie: { 3: 12 },
+      },
+      {
+        name: "Zealous Presence",
+        key: 'zealous_presence',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Rage of the Gods",
+        key: 'rage_of_the_gods',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Divine Fury', level: 3, description: 'While Raging: first hit on each turn with a weapon or Unarmed Strike deals +1d6 + ½ Barbarian level extra Necrotic or Radiant damage (your choice each hit).' },
       { name: 'Warrior of the Gods', level: 3, description: 'Pool of 4d12s (increases: 5d12 at level 6, 6d12 at 12, 7d12 at 17). Bonus Action: expend any number, roll them, regain that many HP. Regain all dice on Long Rest.' },
@@ -60,6 +89,26 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'college-of-glamour-2024', name: 'College of Glamour', classId: 'bard-2024', sourceBook: 'PHB2024',
     description: 'Wield the beguiling magic of the Feywild.',
+    resources: [
+      {
+        name: "Beguiling Magic",
+        key: 'beguiling_magic',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Mantle of Majesty",
+        key: 'mantle_of_majesty',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Unbreakable Majesty",
+        key: 'unbreakable_majesty',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Beguiling Magic', level: 3, description: 'Always have Charm Person and Mirror Image prepared. After casting an Enchantment/Illusion with a slot: 1 creature within 60 ft makes a Wis save or is Charmed or Frightened (your choice) for 1 min (repeat save end of turns). Once per Long Rest; restore by expending 1 Bardic Inspiration (no action).' },
       { name: 'Mantle of Inspiration', level: 3, description: 'Bonus Action + 1 Bardic Inspiration die: roll it; up to Cha mod (min 1) creatures within 60 ft each gain Temp HP = 2× roll and can Reaction-move up to their Speed (no OAs).' },
@@ -103,6 +152,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'light-domain-2024', name: 'Light Domain', classId: 'cleric-2024', sourceBook: 'PHB2024',
     description: 'Wield the power of radiance and fire against darkness.',
+    resources: [
+      {
+        name: "Warding Flare",
+        key: 'warding_flare',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Corona of Light",
+        key: 'corona_of_light',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Radiance of the Dawn', level: 3, description: 'Magic action + Channel Divinity: 30-ft Emanation. Dispels magical Darkness. Each creature you choose in the area: Con save → fail = 2d10+Cleric level Radiant damage; success = half.' },
       { name: 'Warding Flare', level: 3, description: 'Reaction when a creature within 30 ft makes an attack roll: impose Disadvantage on that roll. Uses = Wis mod (min 1); regain all on Long Rest.' },
@@ -125,6 +188,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'war-domain-2024', name: 'War Domain', classId: 'cleric-2024', sourceBook: 'PHB2024',
     description: 'Martial prowess and divine power combine in the War Domain.',
+    resources: [
+      {
+        name: "War Priest",
+        key: 'war_priest',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'War Priest', level: 3, description: 'Bonus Action: make one weapon attack or Unarmed Strike. Uses = Wis mod (min 1); regain on Short or Long Rest.' },
       { name: 'Guided Strike', level: 3, description: 'Channel Divinity + Reaction when a creature misses an attack roll: add +10 to that roll, potentially turning the miss into a hit.' },
@@ -138,6 +209,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'circle-of-the-land-2024', name: 'Circle of the Land', classId: 'druid-2024', sourceBook: 'PHB2024',
     description: 'Draw power from the natural world and a particular terrain.',
+    resources: [
+      {
+        name: "Natural Recovery (free cast)",
+        key: 'natural_recovery_cast',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Natural Recovery (slots)",
+        key: 'natural_recovery_slots',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Land\'s Aid', level: 3, description: 'Magic action + Wild Shape use: create a 10-ft Sphere within 60 ft. Each chosen creature: Con save or 2d6 Necrotic (half on success); 1 chosen creature regains 2d6 HP. Scales: 3d6 at level 10, 4d6 at level 14.' },
       { name: 'Natural Recovery', level: 6, description: 'On each Long Rest: cast one of your Circle Spells once without a spell slot. Also, on a Short Rest: recover spell slots totaling ≤ half Druid level (round up), no slot level 6+. Once per Long Rest.' },
@@ -148,6 +233,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'circle-of-the-moon-2024', name: 'Circle of the Moon', classId: 'druid-2024', sourceBook: 'PHB2024',
     description: 'Transform into powerful beasts with enhanced abilities.',
+    resources: [
+      {
+        name: "Moonlight Step",
+        key: 'moonlight_step',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Circle Forms', level: 3, description: 'Wild Shape improvements: max CR = Druid level ÷ 3 (round down); base AC = maximum of Beast AC or 13 + Wis mod; Temp HP = 3× Druid level when entering Wild Shape.' },
       { name: 'Improved Circle Forms', level: 6, description: 'While Wild Shaped — Lunar Radiance: attacks deal normal or Radiant damage (your choice each hit). Increased Toughness: add Wis mod to Constitution saving throws.' },
@@ -173,6 +266,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
   // 2014 features at 2014 levels.
   { id: 'circle-of-stars-2024', name: 'Circle of the Stars', classId: 'druid-2024', sourceBook: 'PHB2024',
     description: 'Tap into the magic of constellations and the night sky.',
+    resources: [
+      {
+        name: "Star Map",
+        key: 'star_map_2024',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Cosmic Omen",
+        key: 'cosmic_omen_2024',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Star Map', level: 3, description: 'Hold star map (created on Long Rest): always have Guidance and Guiding Bolt prepared. Cast Guiding Bolt without slot = Wis mod (min 1) times per Long Rest.' },
       { name: 'Starry Form', level: 3, description: 'Bonus Action (Wild Shape use): take on a constellation form for 10 min instead of Wild Shape. Choose one: Archer (BA: Luminous Arrow: ranged spell attack, 1d8+Wis mod Radiant); Chalice (when casting healing spell: also restore 1d8+Wis mod HP to yourself or creature within 30 ft); Dragon (automatically succeed Int/Wis saves once per turn, minimum 10 on those checks).' },
@@ -186,6 +293,21 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'battle-master-2024', name: 'Battle Master', classId: 'fighter-2024', sourceBook: 'PHB2024',
     description: 'Master tactical combat maneuvers.',
+    // The level-up dialog has always offered this subclass its maneuvers, but with
+    // no resource declared there was nothing to spend them with — the sheet showed
+    // maneuvers and no dice. PHB 2024 Combat Superiority: "4 Superiority Dice (d8s);
+    // regain all on Short/Long Rest ... Additional die at levels 7 (5 dice) and 15
+    // (6 dice)", then d10 at 10 and d12 at 18. Same numbers as the 2014 archetype.
+    resources: [
+      {
+        name: 'Superiority Dice',
+        key: 'superiority_dice',
+        rechargeOn: 'short',
+        // Keyed on FIGHTER level, not character level — matters when multiclassing.
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:4,6:4,7:5,8:5,9:5,10:5,11:5,12:5,13:5,14:5,15:6,16:6,17:6,18:6,19:6,20:6 },
+        resourceDie: { 3: 8, 10: 10, 18: 12 },
+      },
+    ],
     features: [
       { name: 'Combat Superiority', level: 3, description: 'Superiority Dice: 4d8 (→5d8 at 7, →6d8 at 15). Regain all on Short/Long Rest. Die increases: d10 at 10, d12 at 18. Know 3 maneuvers at level 3 (+2 at levels 7, 10, and 15; replace 1 each time). Save DC = 8+Prof+Str or Dex (your choice). Choose from: Commander\'s Strike, Disarming Attack, Distracting Strike, Evasive Footwork, Feinting Attack, Goading Attack, Lunging Attack, Maneuvering Attack, Menacing Attack, Parry, Precision Attack, Pushing Attack, Rally, Riposte, Sweeping Attack, Tactical Assessment, Trip Attack.' },
       { name: 'Student of War', level: 3, description: 'Proficiency with one type of Artisan\'s Tools and one skill from the Fighter skill list.' },
@@ -227,6 +349,40 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'psi-warrior-2024', name: 'Psi Warrior', classId: 'fighter-2024', sourceBook: 'PHB2024',
     description: 'Awaken psionic powers to augment your combat.',
+    resources: [
+      {
+        name: "Psionic Energy Dice",
+        key: 'psionic_energy_psi_warrior',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+        resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+        shortRestRegain: 1,
+      },
+      {
+        name: "Telekinetic Movement",
+        key: 'telekinetic_movement',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Psi-Powered Leap",
+        key: 'psi_powered_leap',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Bulwark of Force",
+        key: 'bulwark_of_force',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Telekinetic Master",
+        key: 'telekinetic_master',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Psionic Power', level: 3, description: 'Psionic Energy Dice (PED): d6→d8 at 5→d10 at 11→d12 at 17; count = 2× Prof Bonus. Regain 1 on Short Rest, all on Long Rest. Protective Field (Reaction when you or ally within 30 ft takes damage: roll 1 PED, reduce damage by roll + Int mod); Psionic Strike (once per turn after weapon hit on target within 30 ft: expend 1 PED, deal Force = roll + Int mod); Telekinetic Movement (Magic action: move loose Large-or-smaller object or willing creature within 30 ft up to 30 ft; once per Short/Long Rest, restore with 1 PED).' },
       { name: 'Telekinetic Adept', level: 7, description: 'Psi-Powered Leap (Bonus Action: Fly Speed = 2× Speed until end of turn; 1 PED; once per Short/Long Rest, restore with PED). Telekinetic Thrust: on Psionic Strike hit, also force Str save (DC 8 + Int mod + Prof) or Prone or horizontal teleport 10 ft.' },
@@ -240,6 +396,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'warrior-of-mercy-2024', name: 'Warrior of Mercy', classId: 'monk-2024', sourceBook: 'PHB2024',
     description: 'Combine healing and harm through practiced touch.',
+    resources: [
+      {
+        name: "Flurry of Healing and Harm",
+        key: 'flurry_of_healing_and_harm',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Hand of Ultimate Mercy",
+        key: 'hand_of_ultimate_mercy',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Implements of Mercy', level: 3, description: 'Proficiency with Insight, Medicine, and Herbalism Kit. Hand of Harm (once per turn): when Unarmed Strike hits, spend 1 Focus Point → +1 Martial Arts die + Wis mod Necrotic damage. Hand of Healing (Magic action + 1 Focus Point): touch creature to restore 1 Martial Arts die + Wis mod HP. When using Flurry of Blows: can replace 1 Unarmed Strike with Hand of Healing (no extra Focus cost).' },
       { name: 'Physician\'s Touch', level: 6, description: 'Hand of Healing: also end one of Blinded/Deafened/Paralyzed/Poisoned/Stunned on the target. Hand of Harm: also impose the Poisoned condition on the target until end of its next turn.' },
@@ -250,6 +420,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'warrior-of-open-hand-2024', name: 'Warrior of the Open Hand', classId: 'monk-2024', sourceBook: 'PHB2024',
     description: 'Perfect unarmed combat to push, topple, and stun foes.',
+    resources: [
+      {
+        name: "Wholeness of Body",
+        key: 'wholeness_of_body',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Open Hand Technique', level: 3, description: 'Each Flurry of Blows hit can impose one: Addle (no Opportunity Attacks until start of its next turn); Push (Str save or pushed 15 ft away from you); Topple (Dex save or knocked Prone).' },
       { name: 'Wholeness of Body', level: 6, description: 'Bonus Action: roll your Martial Arts die and regain that many HP + Wis mod (min 1). Uses = Wis mod (min 1); regain all on Long Rest.' },
@@ -282,6 +460,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'oath-of-devotion-2024', name: 'Oath of Devotion', classId: 'paladin-2024', sourceBook: 'PHB2024',
     description: 'Uphold the highest ideals of justice and order.',
+    resources: [
+      {
+        name: "Holy Nimbus",
+        key: 'holy_nimbus',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 },
+      },
+    ],
     features: [
       { name: 'Sacred Weapon', level: 3, description: 'Attack action + Channel Divinity: imbue held Melee weapon for 10 min. Benefits: +Cha mod to attacks (min +1); weapon deals Radiant or another chosen type; emits Bright Light 20 ft + Dim Light 20 ft. Ends if not carrying weapon.' },
       { name: 'Aura of Devotion', level: 7, description: 'You and allies within your Aura of Protection (10/30 ft) are Immune to the Charmed condition.' },
@@ -293,6 +479,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'oath-of-glory-2024', name: 'Oath of Glory', classId: 'paladin-2024', sourceBook: 'PHB2024',
     description: 'Inspire greatness and achieve legendary deeds.',
+    resources: [
+      {
+        name: "Glorious Defense",
+        key: 'glorious_defense',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Living Legend",
+        key: 'living_legend',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 },
+      },
+    ],
     features: [
       { name: 'Inspiring Smite', level: 3, description: 'Immediately after casting Divine Smite + Channel Divinity: distribute Temp HP = 2d8+Paladin level among creatures within 30 ft.' },
       { name: 'Peerless Athlete', level: 3, description: 'Bonus Action + Channel Divinity: 1 hour. Advantage on Str (Athletics) and Dex (Acrobatics) checks. Long and High Jump distance +10 ft.' },
@@ -305,6 +505,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'oath-of-the-ancients-2024', name: 'Oath of the Ancients', classId: 'paladin-2024', sourceBook: 'PHB2024',
     description: 'Side with nature and the light against the darkness.',
+    resources: [
+      {
+        name: "Undying Sentinel",
+        key: 'undying_sentinel',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Elder Champion",
+        key: 'elder_champion',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 },
+      },
+    ],
     features: [
       { name: 'Nature\'s Wrath', level: 3, description: 'Magic action + Channel Divinity: chosen creatures within 15 ft — Str save or Restrained for 1 min (repeat save end of each turn).' },
       { name: 'Aura of Warding', level: 7, description: 'You and allies within your Aura of Protection: Resistance to Necrotic, Psychic, and Radiant damage.' },
@@ -316,6 +530,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'oath-of-vengeance-2024', name: 'Oath of Vengeance', classId: 'paladin-2024', sourceBook: 'PHB2024',
     description: 'Punish those who have committed great evils.',
+    resources: [
+      {
+        name: "Avenging Angel",
+        key: 'avenging_angel',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:1 },
+      },
+    ],
     features: [
       { name: 'Vow of Enmity', level: 3, description: 'Attack action + Channel Divinity: Advantage on attacks vs. one creature within 30 ft for 1 min. If target drops to 0 HP: can transfer vow to different creature within 30 ft (no action required).' },
       { name: 'Relentless Avenger', level: 7, description: 'When hitting a creature with an Opportunity Attack: reduce that creature\'s Speed to 0 until end of turn + move up to half your Speed (no OAs from this movement; Reaction).' },
@@ -339,6 +561,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'fey-wanderer-2024', name: 'Fey Wanderer', classId: 'ranger-2024', sourceBook: 'PHB2024',
     description: 'Channel the beguiling magic of the Feywild.',
+    resources: [
+      {
+        name: "Fey Reinforcements",
+        key: 'fey_reinforcements',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Misty Wanderer",
+        key: 'misty_wanderer',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Dreadful Strikes', level: 3, description: 'When you hit a creature with a weapon: +1d4 Psychic damage (once per turn per target). Becomes 1d6 at level 11.' },
       { name: 'Otherworldly Glamour', level: 3, description: 'Add Wis mod (min +1) to Cha checks. Gain proficiency in Deception, Performance, or Persuasion (choose 1).' },
@@ -351,6 +587,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'gloom-stalker-2024', name: 'Gloom Stalker', classId: 'ranger-2024', sourceBook: 'PHB2024',
     description: 'Strike from darkness with supernatural speed.',
+    resources: [
+      {
+        name: "Dreadful Strike",
+        key: 'dreadful_strike',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Dread Ambusher', level: 3, description: 'Ambusher\'s Leap: first turn in combat, Speed +10 ft. Dreadful Strike: once per turn on weapon hit: +2d6 Psychic; uses = Wis mod (min 1), regain on Long Rest. Initiative Bonus: +Wis mod.' },
       { name: 'Umbral Sight', level: 3, description: 'Darkvision 60 ft (or +60 ft if you already have it). While entirely in Darkness: Invisible to creatures relying on Darkvision to see you.' },
@@ -381,6 +625,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
     // PHB 2024 AT: cantrips 3→4 at lv10; no school restriction; same prepared table as PHB 2014 AT
     cantripsKnownByClassLevel: [0,0,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4],
     spellsKnownByClassLevel:   [0,0,3,4,4,4,5,6,6,7,8,8,9,10,10,11,11,11,12,13],
+    resources: [
+      {
+        name: "Spell Thief",
+        key: 'spell_thief',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Spellcasting', level: 3, description: 'Int-based third-caster. Arcane Focus. Prepared caster (change 1 spell on level-up; no school restriction). Cantrips: 3 (Mage Hand always + 2 Wizard cantrips). Gain 1 more cantrip at level 10.' },
       { name: 'Mage Hand Legerdemain', level: 3, description: 'Cast Mage Hand as Bonus Action; the hand is Invisible. Control the hand as Bonus Action; make Dex (Sleight of Hand) checks through it.' },
@@ -403,8 +655,30 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'soulknife-2024', name: 'Soulknife', classId: 'rogue-2024', sourceBook: 'PHB2024',
     description: 'Manifest blades of psionic energy.',
+    resources: [
+      {
+        name: "Psionic Energy Dice",
+        key: 'psionic_energy_soulknife',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:4,5:6,6:6,7:6,8:6,9:8,10:8,11:8,12:8,13:10,14:10,15:10,16:10,17:12,18:12,19:12,20:12 },
+        resourceDie: { 3: 6, 5: 8, 11: 10, 17: 12 },
+        shortRestRegain: 1,
+      },
+      {
+        name: "Psychic Veil",
+        key: 'psychic_veil',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Rend Mind",
+        key: 'rend_mind',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
-      { name: 'Psionic Power', level: 3, description: 'Psionic Energy Dice (PED): d6→d8 at 5→d10 at 11→d12 at 17; count = 2× Prof Bonus. Regain 1 on Bonus Action, all on Long Rest. Psi-Bolstered Knack: when you fail an ability check using a proficient skill or tool → roll 1 PED, add result to check (die expended only if it then succeeds). Psychic Whispers (Magic action + 1 PED): up to Prof Bonus creatures you can see can communicate telepathically with you (and you with them) for hours = roll. First use per Long Rest: free (no PED).' },
+      { name: 'Psionic Power', level: 3, description: 'Psionic Energy Dice (PED): d6→d8 at 5→d10 at 11→d12 at 17; count = 2× Prof Bonus. Regain 1 on a Short Rest, all on a Long Rest. Psi-Bolstered Knack: when you fail an ability check using a proficient skill or tool → roll 1 PED, add result to check (die expended only if it then succeeds). Psychic Whispers (Magic action + 1 PED): up to Prof Bonus creatures you can see can communicate telepathically with you (and you with them) for hours = roll. First use per Long Rest: free (no PED).' },
       { name: 'Psychic Blades', level: 3, description: 'Manifest blade as part of attack with your Bonus Action: melee weapon (Dex-based, Finesse, Light, Thrown 60/120) dealing 1d6+Dex Psychic. After attacking, blade vanishes. Can manifeset 2 blades (1 main + 1 off-hand BA attack). Psychic blades can\'t be disarmed.' },
       { name: 'Soul Blades', level: 9, description: 'Homing Strikes: spend 1 PED on a missed Psychic Blade attack → roll PED, add to attack roll (potentially turning miss to hit). Psychic Teleportation: Bonus Action + 1 PED: throw blade up to 10× PED roll feet; teleport to land where blade lands; blade vanishes.' },
       { name: 'Psychic Veil', level: 13, description: 'Cast Invisibility on yourself without material, no Concentration: 1 hr. Once per Long Rest; restore with 1 PED (no action).' },
@@ -427,6 +701,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'aberrant-mind-2024', name: 'Aberrant Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Your mind brushes the Far Realm, granting alien psionic power.',
+    resources: [
+      {
+        name: "Warping Implosion",
+        key: 'warping_implosion',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Psionic Spells', level: 3, description: 'Always have prepared (by tier): level 3 — Arms of Hadar, Calm Emotions, Detect Thoughts, Dissonant Whispers, Mind Sliver; level 5 — Hunger of Hadar, Sending; level 7 — Evard\'s Black Tentacles, Summon Aberration; level 9 — Rary\'s Telepathic Bond, Telekinesis. Can replace one of these on level-up with a Divination or Enchantment spell of the same level.' },
       { name: 'Telepathic Speech', level: 3, description: 'Bonus Action: establish telepathic connection with 1 creature within 30 ft; lasts 1 min or until you end it (no action). While connected: telepathic communication in any language; speaking doesn\'t break concentration.' },
@@ -439,9 +721,29 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'clockwork-soul-2024', name: 'Clockwork Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Tap the cosmic force of order for reliable, balanced magic.',
+    resources: [
+      {
+        name: "Restore Balance",
+        key: 'restore_balance_2024',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Trance of Order",
+        key: 'trance_of_order',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Clockwork Cavalcade",
+        key: 'clockwork_cavalcade',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Clockwork Magic', level: 3, description: 'Always have prepared (by tier): level 3 — Aid, Alarm, Lesser Restoration, Protection from Evil and Good; level 5 — Dispel Magic, Protection from Energy; level 7 — Freedom of Movement, Summon Construct; level 9 — Greater Restoration, Wall of Force. Can replace one of these on level-up with a spell of the same level from any list.' },
-      { name: 'Restore Balance', level: 3, description: 'Reaction when a creature within 60 ft is about to roll a D20 Test with Advantage or Disadvantage: cancel the Advantage or Disadvantage. Uses = Prof Bonus; regain on Long Rest.' },
+      { name: 'Restore Balance', level: 3, description: 'Reaction when a creature within 60 ft is about to roll a D20 Test with Advantage or Disadvantage: cancel the Advantage or Disadvantage. Uses = Charisma modifier (minimum 1); regain on Long Rest.' },
       { name: 'Bastion of Law', level: 6, description: 'Magic action: expend 1–5 SP; target creature within 30 ft gains Ward dice = SP spent (d8s). When taking damage, roll remaining dice: reduce damage by total, then remove those dice. Ward lasts until Long Rest or re-cast.' },
       { name: 'Trance of Order', level: 14, description: 'Bonus Action (once per Long Rest; restore with 5 SP): Clockwork state for 1 min. D20 Tests: minimum 10 on each roll. Also: attacks vs. you can\'t have Advantage.' },
       { name: 'Clockwork Cavalcade', level: 18, description: 'Magic action (once per Long Rest; restore with 7 SP): call mechanical servants. In a 30-ft Cube: Heal — restore up to 100 HP total distributed among creatures of your choice; Repair — instantly repair damaged objects (as Mending); Dispel — end all active spells of level 6 or lower on chosen creatures and objects. Once per Long Rest; restore with 7 SP (no action).' },
@@ -450,6 +752,31 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'draconic-bloodline-2024', name: 'Draconic Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Your innate magic flows from draconic blood.',
+    // 2024 Draconic Sorcery grants an always-prepared list this entry was missing
+    // entirely, so the subclass gave no spells at all. Summon Dragon (level 9) is
+    // deliberately absent below: that spell is not in the app's spell data yet, and
+    // a dangling id resolves to nothing — it would silently show a shorter list
+    // rather than an error. Add it here once the spell exists.
+    alwaysPreparedSpells: {
+      3: ['alter-self', 'chromatic-orb', 'command', 'dragons-breath'],
+      5: ['fear', 'fly'],
+      7: ['arcane-eye', 'charm-monster'],
+      9: ['legend-lore'],
+    },
+    resources: [
+      {
+        name: "Dragon Wings",
+        key: 'dragon_wings',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Dragon Companion",
+        key: 'dragon_companion',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Draconic Resilience', level: 3, description: 'HP max increases by +3 at level 3, then +1 per additional Sorcerer level. While not wearing armor: AC = 10 + Dex mod + Cha mod.' },
       { name: 'Elemental Affinity', level: 6, description: 'Choose Acid, Cold, Fire, Lightning, or Poison → gain Resistance to that damage type. When casting a spell that deals that damage type: add Cha mod to one damage roll.' },
@@ -461,6 +788,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'wild-magic-2024', name: 'Wild Magic Sorcery', classId: 'sorcerer-2024', sourceBook: 'PHB2024',
     description: 'Harness the chaos of untamed arcane magic.',
+    resources: [
+      {
+        name: "Tides of Chaos",
+        key: 'tides_of_chaos',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Tamed Surge",
+        key: 'tamed_surge',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Wild Magic Surge', level: 3, description: 'Once per turn, after casting a Sorcerer spell with a slot, you can roll a d20. On a 20: roll on the Wild Magic Surge table (see PHB 2024 p.149–150). If the surge is a spell, it can\'t be affected by Metamagic.' },
       { name: 'Tides of Chaos', level: 3, description: 'Give yourself Advantage on one D20 Test (declare before rolling). After using: to use it again, you must either finish a Long Rest or cast a Sorcerer spell with a slot (which then automatically triggers a Wild Magic Surge).' },
@@ -474,6 +815,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'archfey-patron-2024', name: 'Archfey Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'Your patron is a lord or lady of the fey, a creature of legend and trickery.',
+    resources: [
+      {
+        name: "Steps of the Fey",
+        key: 'steps_of_the_fey',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Beguiling Defenses",
+        key: 'beguiling_defenses',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Archfey Spells', level: 3, description: 'Always have Calm Emotions, Faerie Fire, Misty Step, Phantasmal Force, Sleep prepared; level 5: Blink, Plant Growth; level 7: Dominate Beast, Greater Invisibility; level 9: Dominate Person, Seeming.' },
       { name: 'Steps of the Fey', level: 3, description: 'Cast Misty Step without a slot = Cha mod (min 1) times per Long Rest. Each casting: choose one effect — Refreshing Step (you or creature within 10 ft gains 1d10 Temp HP); Taunting Step (creatures within 5 ft of vacated space: Wis save or Disadvantage vs. non-you until start of your next turn).' },
@@ -486,6 +841,21 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'celestial-patron-2024', name: 'Celestial Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'A powerful celestial grants you access to healing light.',
+    resources: [
+      {
+        name: "Healing Light",
+        key: 'healing_light',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:4,4:5,5:6,6:7,7:8,8:9,9:10,10:11,11:12,12:13,13:14,14:15,15:16,16:17,17:18,18:19,19:20,20:21 },
+        resourceDie: { 3: 6 },
+      },
+      {
+        name: "Searing Vengeance",
+        key: 'searing_vengeance',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Celestial Spells', level: 3, description: 'Always have Aid, Cure Wounds, Guiding Bolt, Lesser Restoration, Light, Sacred Flame prepared; level 5: Daylight, Revivify; level 7: Guardian of Faith, Wall of Fire; level 9: Greater Restoration, Summon Celestial.' },
       { name: 'Healing Light', level: 3, description: 'Pool of d6s = 1+Warlock level; regain all on Long Rest. Bonus Action: expend up to Cha mod (min 1) dice → roll → heal yourself or creature within 60 ft that many HP.' },
@@ -498,6 +868,20 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'fiend-patron-2024', name: 'Fiend Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'A fiend of tremendous power has entered into a pact with you.',
+    resources: [
+      {
+        name: "Dark One's Own Luck",
+        key: 'dark_ones_own_luck_2024',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Hurl Through Hell",
+        key: 'hurl_through_hell',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Fiend Spells', level: 3, description: 'Always have Burning Hands, Command, Scorching Ray, Suggestion prepared; level 5: Fireball, Stinking Cloud; level 7: Fire Shield, Wall of Fire; level 9: Geas, Insect Plague.' },
       { name: 'Dark One\'s Blessing', level: 3, description: 'When you reduce an enemy to 0 HP: gain Temp HP = Cha mod + Warlock level (min 1). Also triggered when an ally within 10 ft reduces an enemy to 0 HP.' },
@@ -510,6 +894,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'great-old-one-2024', name: 'Great Old One Patron', classId: 'warlock-2024', sourceBook: 'PHB2024',
     description: 'Your patron is a mysterious entity of the Far Realm.',
+    resources: [
+      {
+        name: "Clairvoyant Combatant",
+        key: 'clairvoyant_combatant',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Great Old One Spells', level: 3, description: 'Always have prepared (by tier): level 3 — Detect Thoughts, Dissonant Whispers, Phantasmal Force, Tasha\'s Hideous Laughter; level 5 — Clairvoyance, Hunger of Hadar; level 7 — Confusion, Summon Aberration; level 9 — Modify Memory, Telekinesis.' },
       { name: 'Awakened Mind', level: 3, description: 'Bonus Action: choose a creature you can see within 30 ft → telepathic communication for Warlock level minutes (range = Cha mod miles). Ends if you use it on a different creature.' },
@@ -526,6 +918,14 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'abjurer-2024', name: 'Abjurer', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Expert in protective and warding magic.',
+    resources: [
+      {
+        name: "Arcane Ward",
+        key: 'arcane_ward',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:1,4:1,5:1,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Abjuration Savant', level: 3, description: 'Add 2 Abjuration spells (level 1–2) to spellbook for free. Each time you gain a new slot level, add 1 free Abjuration spell of that level.' },
       { name: 'Arcane Ward', level: 3, description: 'When casting an Abjuration spell with a slot: create a ward on yourself (HP max = 2×Wizard level+Int mod). Ward absorbs damage first. If ward = 0, you take the rest. When casting Abjuration slot spell: ward regains HP = 2×slot level. Bonus Action: expend slot → ward regains 2×slot level HP. Ward lasts until disrupted; create once per Long Rest (costs casting any Abjuration slot spell).' },
@@ -537,6 +937,21 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'diviner-2024', name: 'Diviner', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Pierce the veil of time and space to know the unknowable.',
+    resources: [
+      {
+        name: "Portent",
+        key: 'portent',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:2,12:2,13:2,14:3,15:3,16:3,17:3,18:3,19:3,20:3 },
+        resourceDie: { 3: 20 },
+      },
+      {
+        name: "The Third Eye",
+        key: 'the_third_eye',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Divination Savant', level: 3, description: 'Add 2 Divination spells (level 1–2) free. Each new slot level: +1 free Divination spell.' },
       { name: 'Portent', level: 3, description: 'After each Long Rest: roll 2d20 and record results. Can replace any D20 Test (you or visible creature) with one portent roll (choose before rolling; once per turn; each die usable once). Unused portent dice vanish on next Long Rest.' },
@@ -559,6 +974,26 @@ export const PHB2024_SUBCLASSES: Subclass[] = [
 
   { id: 'illusionist-2024', name: 'Illusionist', classId: 'wizard-2024', sourceBook: 'PHB2024',
     description: 'Master the art of deception through magical illusions.',
+    resources: [
+      {
+        name: "Phantasmal Creatures: Summon Beast",
+        key: 'phantasmal_summon_beast',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Phantasmal Creatures: Summon Fey",
+        key: 'phantasmal_summon_fey',
+        rechargeOn: 'long',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:1,7:1,8:1,9:1,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+      {
+        name: "Illusory Self",
+        key: 'illusory_self',
+        rechargeOn: 'short',
+        maxPerLevel: { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:1,11:1,12:1,13:1,14:1,15:1,16:1,17:1,18:1,19:1,20:1 },
+      },
+    ],
     features: [
       { name: 'Illusion Savant', level: 3, description: 'Add 2 Illusion spells (level 1–2) free. Each new slot level: +1 free Illusion spell.' },
       { name: 'Improved Illusions', level: 3, description: 'Cast Illusion spells without Verbal components. Illusion spells with range ≥10 ft: range increases by 60 ft. Know Minor Illusion as free cantrip; can create both sound and image simultaneously; cast as Bonus Action.' },

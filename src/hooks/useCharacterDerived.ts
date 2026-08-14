@@ -550,10 +550,13 @@ export function computeCharacterDerived(character: Character) {
     // Psi Warrior / Soulknife (TCE): each grants its own Psionic Energy pool of 2 x proficiency
     // bonus. Separate keys, so a Fighter/Rogue holding both subclasses gets two pools, not one.
     // Mirrors computeResourceMaxOverrides in useCharacterStore — keep the two in sync.
-    if (character.classes.some(c => c.subclassId === 'psi-warrior')) {
+    // Both editions size this pool at 2x proficiency bonus, so the -2024 subclasses
+    // share the key and this branch; only the recharge wording differs, and that
+    // lives on the subclass entry.
+    if (character.classes.some(c => c.subclassId === 'psi-warrior' || c.subclassId === 'psi-warrior-2024')) {
       resourceMaxOverrides['psionic_energy_psi_warrior'] = profBonus * 2;
     }
-    if (character.classes.some(c => c.subclassId === 'soulknife')) {
+    if (character.classes.some(c => c.subclassId === 'soulknife' || c.subclassId === 'soulknife-2024')) {
       resourceMaxOverrides['psionic_energy_soulknife'] = profBonus * 2;
     }
     // Proficiency-bonus subclass pools, level-gated to when the feature is actually gained.
@@ -636,8 +639,10 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'way-of-the-ascendant-dragon' && c.level >= 3)) {
       resourceMaxOverrides['breath_of_the_dragon'] = profBonus;
     }
-    // Light Domain Warding Flare (PHB): Wisdom modifier uses, minimum 1.
-    if (character.classes.some(c => c.subclassId === 'light-domain')) {
+    // Light Domain Warding Flare (PHB, and unchanged in 2024): Wisdom modifier uses,
+    // minimum 1. The 2024 version recharges on a short rest from level 6 — that lives
+    // on the subclass entry, not here; only the pool SIZE is shared.
+    if (character.classes.some(c => c.subclassId === 'light-domain' || c.subclassId === 'light-domain-2024')) {
       resourceMaxOverrides['warding_flare'] = Math.max(1, mods.wis);
     }
     // Wisdom-modifier-per-long-rest features (PHB / XGtE / TCE), minimum 1 use each.
@@ -645,7 +650,20 @@ export function computeCharacterDerived(character: Character) {
       const wisUses = Math.max(1, mods.wis);
       const has = (id: string, lvl = 1) => character.classes.some(c => c.subclassId === id && c.level >= lvl);
       if (has('tempest-domain')) resourceMaxOverrides['wrath_of_the_storm'] = wisUses;
-      if (has('war-domain')) resourceMaxOverrides['war_priest'] = wisUses;
+      if (has('war-domain') || has('war-domain-2024')) resourceMaxOverrides['war_priest'] = wisUses;
+      // ── PHB 2024 Wisdom-modifier pools ──────────────────────────────────────
+      // Their maxPerLevel in phb2024.ts is a placeholder 1 (the same convention the
+      // 2014 entries use), so without these lines every one of them would sit at
+      // 1 use forever — and load() would then clamp `current` to it, which is the
+      // shape that made creator-built characters look part-spent.
+      if (has('light-domain-2024', 17)) resourceMaxOverrides['corona_of_light'] = wisUses;
+      if (has('circle-of-the-moon-2024', 10)) resourceMaxOverrides['moonlight_step'] = wisUses;
+      if (has('circle-of-stars-2024', 3)) resourceMaxOverrides['star_map_2024'] = wisUses;
+      if (has('circle-of-stars-2024', 6)) resourceMaxOverrides['cosmic_omen_2024'] = wisUses;
+      if (has('warrior-of-mercy-2024', 11)) resourceMaxOverrides['flurry_of_healing_and_harm'] = wisUses;
+      if (has('warrior-of-open-hand-2024', 6)) resourceMaxOverrides['wholeness_of_body'] = wisUses;
+      if (has('fey-wanderer-2024', 15)) resourceMaxOverrides['misty_wanderer'] = wisUses;
+      if (has('gloom-stalker-2024', 3)) resourceMaxOverrides['dreadful_strike'] = wisUses;
       if (has('grave-domain')) resourceMaxOverrides['eyes_of_the_grave'] = wisUses;
       if (has('grave-domain', 6)) resourceMaxOverrides['sentinel_at_deaths_door'] = wisUses;
       if (has('monster-slayer', 3)) resourceMaxOverrides['hunters_sense'] = wisUses;
@@ -667,8 +685,24 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'fey-wanderer' && c.level >= 15)) {
       resourceMaxOverrides['misty_wanderer'] = Math.max(1, mods.wis);
     }
-    if (character.classes.some(c => c.subclassId === 'oath-of-glory' && c.level >= 15)) {
+    if (character.classes.some(c =>
+        (c.subclassId === 'oath-of-glory' || c.subclassId === 'oath-of-glory-2024') && c.level >= 15)) {
       resourceMaxOverrides['glorious_defense'] = Math.max(1, mods.cha);
+    }
+    // ── PHB 2024 Charisma-modifier pools ────────────────────────────────────────
+    // These carry placeholder maxima in phb2024.ts and are inert without these lines.
+    // Three of them changed scaling between editions — 2014's Restore Balance and
+    // Dark One's Own Luck are proficiency-bonus and 1/short-rest respectively — so
+    // they use `_2024`-suffixed keys rather than sharing the 2014 ones. Sharing would
+    // make a character holding both editions of the class last-write-wins, since
+    // resourceMaxOverrides is a flat key -> number map.
+    {
+      const chaUses = Math.max(1, mods.cha);
+      const has2024 = (id: string, lvl = 1) =>
+        character.classes.some(c => c.subclassId === id && c.level >= lvl);
+      if (has2024('clockwork-soul-2024', 3)) resourceMaxOverrides['restore_balance_2024'] = chaUses;
+      if (has2024('archfey-patron-2024', 3)) resourceMaxOverrides['steps_of_the_fey'] = chaUses;
+      if (has2024('fiend-patron-2024', 6)) resourceMaxOverrides['dark_ones_own_luck_2024'] = chaUses;
     }
     if (character.classes.some(c => c.subclassId === 'alchemist' && c.level >= 9)) {
       resourceMaxOverrides['restorative_reagents'] = Math.max(1, mods.int);
@@ -680,9 +714,18 @@ export function computeCharacterDerived(character: Character) {
     if (character.classes.some(c => c.subclassId === 'tob-captain' && c.level >= 3)) {
       resourceMaxOverrides['captains_call'] = Math.max(1, 1 + mods.cha);
     }
-    // Abjuration Arcane Ward (PHB): a hit point pool of 2x wizard level + Int modifier.
-    if (character.classes.some(c => c.subclassId === 'school-of-abjuration')) {
-      resourceMaxOverrides['arcane_ward'] = classLevel(character.classes, 'wizard') * 2 + mods.int;
+    // Abjuration Arcane Ward (PHB, same formula in 2024): a hit point pool of
+    // 2x wizard level + Int modifier. The 2024 subclass sits on `wizard-2024`, and
+    // classLevel() matches on the exact class id — reading only 'wizard' returns 0
+    // there, which would cap the ward at the Int modifier alone.
+    {
+      const abj2014 = character.classes.some(c => c.subclassId === 'school-of-abjuration');
+      const abj2024 = character.classes.some(c => c.subclassId === 'abjurer-2024');
+      if (abj2014 || abj2024) {
+        const wizLevel = classLevel(character.classes, 'wizard')
+          + classLevel(character.classes, 'wizard-2024');
+        resourceMaxOverrides['arcane_ward'] = wizLevel * 2 + mods.int;
+      }
     }
     // Paladin: Divine Sense = 1 + Cha mod; Cleansing Touch (14th) = Cha mod, min 1.
     if (paladinLevel > 0) {
