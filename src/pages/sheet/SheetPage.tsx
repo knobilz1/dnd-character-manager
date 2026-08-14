@@ -27,6 +27,7 @@ import { TalkToDMButton } from '../../components/TalkToDMButton';
 import { DmNarrationLog } from '../../components/DmNarrationLog';
 import { DmMapView } from '../../components/DmMapView';
 import { TableCameraButton } from '../../components/TableCameraButton';
+import { TableControllerButton } from '../../components/TableControllerButton';
 import { SendToDmButton } from '../../components/SendToDmButton';
 import { DmSyncOfferDialog } from '../../components/DmSyncOffer';
 import { InspirationOverlay } from '../../components/InspirationOverlay';
@@ -433,6 +434,7 @@ export function SheetPage() {
           <DmNarrationLog characterName={character.name} />
           <DmMapView />
           <TableCameraButton characterName={character.name} />
+          <TableControllerButton characterName={character.name} />
           <div className="relative">
             <button
               onClick={async () => {

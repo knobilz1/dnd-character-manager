@@ -52,6 +52,14 @@ const F5_MIN_VRAM_MB = 6000;
  *  and campaign.rs for why this isn't just always-on via CLAUDE.md. */
 const PLAN_CHECK_INTERVAL = 8;
 
+/** How a remote button press reads in the console's own display. */
+const REMOTE_ACTION_LABELS: Record<string, string> = {
+  stop: 'stopped the DM',
+  recap: 'started the recap',
+  end_battle: 'ended the battle',
+  replay: 'replayed the last line',
+};
+
 /** Canned reply for any turn (local mic or a remote player's /talk) that
  *  arrives while a one-shot ingestion call — establish_campaign_lore,
  *  chapterize_and_import_module, update_campaign_lore, NPC-voice
@@ -1044,6 +1052,8 @@ export function DMConsolePage() {
   const [tableCameras, setTableCameras] = React.useState<TableCamera[]>([]);
   const dmPinRequired = useSettingsStore((s) => s.dmPinRequired);
   const setDmPinRequired = useSettingsStore((s) => s.setDmPinRequired);
+  const dmRemoteControlEnabled = useSettingsStore((s) => s.dmRemoteControlEnabled);
+  const setDmRemoteControlEnabled = useSettingsStore((s) => s.setDmRemoteControlEnabled);
   const tableCameraSource = useSettingsStore((s) => s.tableCameraSource);
   const setTableCameraSource = useSettingsStore((s) => s.setTableCameraSource);
   const tableCameraId = useSettingsStore((s) => s.tableCameraDeviceId);
@@ -1051,6 +1061,11 @@ export function DMConsolePage() {
   /** Which player currently holds the table camera, polled while the source is
    *  'player' so the DM can see who to ask (and revoke a hold someone forgot). */
   const [cameraHolder, setCameraHolder] = React.useState<string | null>(null);
+  /** Who holds the "table controller" role, and the last button they pressed —
+   *  shown beside the enable toggle so a console that just did something on its
+   *  own always says who asked for it. */
+  const [controllerHolder, setControllerHolder] = React.useState<string | null>(null);
+  const [lastRemoteAction, setLastRemoteAction] = React.useState<string | null>(null);
   const [boardBusy, setBoardBusy] = React.useState<string | null>(null);
   // The dm-table-photo listener is mounted once (deps []), so it must read the
   // CURRENT cards/presented map through refs rather than close over the first
@@ -1129,6 +1144,18 @@ export function DMConsolePage() {
     const id = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [tableCameraSource]);
+  // Mirror the table-controller setting into the listener (mount + change) and
+  // poll the holder for display — the same two jobs the camera effect above does.
+  React.useEffect(() => {
+    void invoke('set_remote_control', { enabled: dmRemoteControlEnabled }).catch(() => {});
+    if (!dmRemoteControlEnabled) { setControllerHolder(null); setLastRemoteAction(null); return; }
+    let cancelled = false;
+    const tick = () => { void invoke<string | null>('table_controller_holder').then((h) => { if (!cancelled) setControllerHolder(h); }).catch(() => {}); };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [dmRemoteControlEnabled]);
+
   // Draw the translucent Enemies/Party start-zones over the map previews. On by
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
@@ -2152,6 +2179,38 @@ export function DMConsolePage() {
       )
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setBoardBusy(null));
+    });
+    return () => { unlisten.then((fn) => fn()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** The controller's four buttons, resolved to THIS render's handlers.
+   *
+   *  The dm-remote-control listener below is mounted once, so calling handlers it
+   *  captured would run mount-stale closures — handleSpeakRecap reads `lastRecap`
+   *  state, which is null at mount. Same bug family the `live` bundle exists for,
+   *  solved the same way but for functions: reassigned every render, so the
+   *  listener always dispatches into closures that see current state. Function
+   *  declarations hoist, which is why referencing them here is fine. */
+  const remoteActionsRef = React.useRef<Record<string, () => void>>({});
+  remoteActionsRef.current = {
+    stop: stopSpeakingAndClearQueue,
+    recap: () => { void handleSpeakRecap(); },
+    end_battle: endBattleCleanup,
+    replay: handleReplayLastResponse,
+  };
+
+  // One remote button press from whoever holds the table controller. The
+  // listener already refused non-holders and unknown actions (see
+  // party_listener.rs CONTROL_ACTIONS); this side dispatches and records who
+  // asked — a console that suddenly falls silent or ends a battle on its own
+  // must always say why.
+  React.useEffect(() => {
+    const unlisten = listen<{ name: string; action: string }>('dm-remote-control', (event) => {
+      const run = remoteActionsRef.current[event.payload.action];
+      if (!run) return;
+      setLastRemoteAction(`${event.payload.name} ${REMOTE_ACTION_LABELS[event.payload.action] ?? event.payload.action}`);
+      run();
     });
     return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5000,6 +5059,47 @@ export function DMConsolePage() {
                 : '⚠ PIN off — anyone on this network can join and talk to the DM'}
             </span>
           </label>
+        )}
+
+        {/* The table controller — one player's sheet gets Stop/Recap/End battle/
+            Replay buttons that drive THIS console. Off by default; the listener
+            refuses claims and presses while it's off, and turning it off revokes
+            the current holder (see set_remote_control). */}
+        {lanIp && (
+          <div className="flex items-center justify-center gap-2 text-xs mb-4 select-none flex-wrap">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dmRemoteControlEnabled}
+                onChange={(e) => setDmRemoteControlEnabled(e.target.checked)}
+                className="accent-emerald-500"
+              />
+              <span className="text-slate-400">Allow a table controller</span>
+            </label>
+            {/* The DM doesn't pick the person — a player claims the role from
+                their own sheet, exactly like the table camera. Without this line
+                the checkbox looks like it should come with a name picker. */}
+            {dmRemoteControlEnabled && !controllerHolder && (
+              <span className="text-slate-500">
+                unclaimed — players take it from the {'\u{1F3AE}'} button on their sheet
+              </span>
+            )}
+            {dmRemoteControlEnabled && controllerHolder && (
+              <span className="text-emerald-300">
+                {'\u{1F3AE}'} {controllerHolder} holds the controller
+                <button
+                  onClick={() => { void invoke('release_table_controller').catch(() => {}); setControllerHolder(null); }}
+                  className="ml-1.5 text-slate-500 hover:text-red-400 underline"
+                  title="Take the controller role back"
+                >
+                  revoke
+                </button>
+              </span>
+            )}
+            {dmRemoteControlEnabled && lastRemoteAction && (
+              <span className="text-slate-500">- {lastRemoteAction}</span>
+            )}
+          </div>
         )}
 
         <div className="grid gap-6 md:grid-cols-[1fr_260px]">

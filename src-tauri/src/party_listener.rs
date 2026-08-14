@@ -432,6 +432,37 @@ fn resolve_camera_claim(
     }
 }
 
+// ── The table controller ─────────────────────────────────────────────────────
+//
+// Same shape as the table camera above, for a different job: exactly ONE player
+// may be designated the "table controller", and their device can trigger a small
+// set of the DM Console's own controls. The DM machine often sits by the TV out
+// of arm's reach; this is the remote for it.
+//
+// The claim policy is deliberately the SAME code the camera uses
+// (`fresh_camera_holder` / `resolve_camera_claim`): those functions are generic
+// over which role they arbitrate, and one tested policy serving two roles beats
+// two copies that can drift. Only the slots differ.
+
+/// What a controller may trigger. An allowlist HERE, not just in the console:
+/// the console dispatches whatever event arrives, so the listener is the place
+/// where "remote control" stays a remote with four buttons rather than an RPC
+/// surface that grows by accident.
+const CONTROL_ACTIONS: &[&str] = &["stop", "recap", "end_battle", "replay"];
+
+/// Whether the DM allows a table controller at all. Defaults OFF and mirrors a
+/// console setting (see `set_remote_control`) — same "an unsynced listener
+/// refuses rather than accepts" stance as TABLE_PHOTOS.
+static REMOTE_CONTROL: AtomicBool = AtomicBool::new(false);
+
+/// The player currently holding the controller role. Shares the camera's holder
+/// record and lazy expiry — the roles behave identically, they just do
+/// different things.
+fn controller_holder() -> &'static Mutex<Option<CameraHolder>> {
+    static HOLDER: OnceLock<Mutex<Option<CameraHolder>>> = OnceLock::new();
+    HOLDER.get_or_init(|| Mutex::new(None))
+}
+
 fn write_response(stream: &mut TcpStream, status: u16, body: &str, content_type: &str) {
     let status_text = match status {
         200 => "OK",
@@ -604,6 +635,21 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         drop(current);
         return write_response(&mut stream, 200, &body, "application/json");
     }
+    if request_line.starts_with("GET /control") {
+        // Who the controller is + whether the DM allows one. `enabled` rides the
+        // poll for the same reason the camera's does: players PULL, so this is
+        // how the DM's setting reaches their device, and the player-side panel
+        // hides itself when it's false.
+        let mut slot = controller_holder().lock().unwrap();
+        let holder = fresh_camera_holder(&mut slot);
+        drop(slot);
+        let body = serde_json::json!({
+            "holder": holder,
+            "enabled": REMOTE_CONTROL.load(Ordering::Relaxed),
+        })
+        .to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
     if request_line.starts_with("GET /camera") {
         // Who currently holds the table camera, so a player's toggle can show
         // "Ana is the table camera" instead of letting them think it's free.
@@ -764,6 +810,65 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         return write_response(&mut stream, 200, &body, "application/json");
     }
 
+    if request_line.starts_with("POST /control-claim") {
+        // Toggle the "table controller" role — the same dance as /camera-claim.
+        let parsed: serde_json::Value = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::Null);
+        let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let release = parsed.get("release").and_then(|v| v.as_bool()).unwrap_or(false);
+        if name.is_empty() {
+            return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"who are you?\"}", "application/json");
+        }
+        let mut slot = controller_holder().lock().unwrap();
+        let current = fresh_camera_holder(&mut slot);
+        let enabled = REMOTE_CONTROL.load(Ordering::Relaxed);
+        let (holder, granted) = resolve_camera_claim(current.as_deref(), &name, release, enabled);
+        *slot = holder.clone().map(|n| CameraHolder { name: n, at: std::time::Instant::now() });
+        drop(slot);
+        let _ = app.emit("dm-table-controller", serde_json::json!({ "holder": holder }));
+        let body = serde_json::json!({
+            "ok": true, "granted": granted, "holder": holder,
+            "error": (!granted && !enabled && !release).then_some("The DM hasn't enabled a table controller."),
+        })
+        .to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
+    }
+
+    // Trailing space: "POST /control" is a prefix of "POST /control-claim", and
+    // the request line is always "POST /control HTTP/1.1".
+    if request_line.starts_with("POST /control ") {
+        // One remote button press from the controller. Only the current, fresh
+        // holder is obeyed, and only for the allowlisted actions — see
+        // CONTROL_ACTIONS for why the list lives here.
+        let parsed: serde_json::Value = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::Null);
+        let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        if !CONTROL_ACTIONS.contains(&action.as_str()) {
+            return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"unknown action\"}", "application/json");
+        }
+        // Checked before the holder check, same order and same reason as
+        // /table-photo: a holder from before the DM switched off deserves the
+        // true reason, not a misleading "claim it first".
+        if !REMOTE_CONTROL.load(Ordering::Relaxed) {
+            let body = "{\"ok\":false,\"error\":\"The DM hasn't enabled a table controller.\"}";
+            return write_response(&mut stream, 409, body, "application/json");
+        }
+        let mut slot = controller_holder().lock().unwrap();
+        let current = fresh_camera_holder(&mut slot);
+        if !current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&name)) {
+            drop(slot);
+            let body = serde_json::json!({
+                "ok": false,
+                "error": match current { Some(h) => format!("{h} is the table controller right now."), None => "Turn on 'table controller' first.".into() },
+            }).to_string();
+            return write_response(&mut stream, 409, &body, "application/json");
+        }
+        // A button press is activity — an in-use controller never expires.
+        *slot = Some(CameraHolder { name: name.clone(), at: std::time::Instant::now() });
+        drop(slot);
+        let _ = app.emit("dm-remote-control", serde_json::json!({ "name": name, "action": action }));
+        return write_response(&mut stream, 200, "{\"ok\":true}", "application/json");
+    }
+
     if request_line.starts_with("POST /table-photo") {
         // A photo of the physical table from the player holding the camera. Only
         // the holder may send, so the DM can't be fed two different boards at
@@ -827,6 +932,31 @@ pub fn set_table_photos(enabled: bool) {
     if !enabled {
         *camera_holder().lock().unwrap() = None;
     }
+}
+
+/// Mirror the console's table-controller setting, exactly as set_table_photos
+/// mirrors board photos. Turning it off frees the role for the same reason:
+/// a controller that no longer controls anything is a stale light on someone's
+/// sheet.
+#[tauri::command]
+pub fn set_remote_control(enabled: bool) {
+    REMOTE_CONTROL.store(enabled, Ordering::Relaxed);
+    if !enabled {
+        *controller_holder().lock().unwrap() = None;
+    }
+}
+
+/// Force-release the table controller (the DM's revoke).
+#[tauri::command]
+pub fn release_table_controller() {
+    *controller_holder().lock().unwrap() = None;
+}
+
+/// Who holds the controller right now, for the DM Console's own display.
+#[tauri::command]
+pub fn table_controller_holder() -> Option<String> {
+    let mut slot = controller_holder().lock().unwrap();
+    fresh_camera_holder(&mut slot)
 }
 
 /// Who holds the table camera right now, for the DM Console's own display.
@@ -1026,6 +1156,20 @@ pub fn local_lan_ip() -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The remote-control gate defaults OFF: a DM who never opens the setting
+    /// must not be controllable, the mirror image of the PIN defaulting on.
+    #[test]
+    fn remote_control_is_off_by_default() {
+        assert!(!REMOTE_CONTROL.load(Ordering::Relaxed));
+    }
+
+    /// The action allowlist is the remote's whole surface — a rename or an
+    /// accidental addition here should be a deliberate, test-visible change.
+    #[test]
+    fn the_remote_has_exactly_the_four_buttons_it_shipped_with() {
+        assert_eq!(CONTROL_ACTIONS, &["stop", "recap", "end_battle", "replay"]);
+    }
+
     /// The gate is ON unless someone turns it off. A default that shipped as
     /// `false` would leave every existing table open with nothing on screen to
     /// say so, which is the whole reason the PIN was added.
@@ -1066,6 +1210,9 @@ mod tests {
             "POST /character HTTP/1.1",
             "POST /table-photo HTTP/1.1",
             "POST /camera-claim HTTP/1.1",
+            "GET /control HTTP/1.1",
+            "POST /control-claim HTTP/1.1",
+            "POST /control HTTP/1.1",
         ] {
             assert!(!is_reachability_probe(line), "{line} must require the PIN");
         }

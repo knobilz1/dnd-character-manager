@@ -29,6 +29,12 @@ interface SettingsState {
    *  occasionally has to be switched off again. See party_listener.rs PIN_REQUIRED. */
   dmPinRequired: boolean;
   setDmPinRequired: (v: boolean) => void;
+  /** DM SIDE ONLY: whether one player may hold the "table controller" role and
+   *  drive a fixed set of console buttons from their sheet. Default false; the
+   *  Rust gate resets to OFF each app start and the console re-applies this on
+   *  mount — same stance as dmPinRequired above. */
+  dmRemoteControlEnabled: boolean;
+  setDmRemoteControlEnabled: (v: boolean) => void;
   /** Ids of characters that have been sent to the DM at least once (via the
    *  "Send to DM"/"Send All" buttons). Marks a character as "connected" —
    *  see hooks/useDmPushSync.ts, which auto-pushes further edits only for
@@ -139,6 +145,8 @@ export const useSettingsStore = create<SettingsState>()(
       setDmPin: (v) => set({ dmPin: v.trim().toUpperCase() }),
       dmPinRequired: true,
       setDmPinRequired: (v) => set({ dmPinRequired: v }),
+      dmRemoteControlEnabled: false,
+      setDmRemoteControlEnabled: (v) => set({ dmRemoteControlEnabled: v }),
       dmSyncedCharacterIds: [],
       addDmSyncedCharacter: (id) => {
         if (get().dmSyncedCharacterIds.includes(id)) return;

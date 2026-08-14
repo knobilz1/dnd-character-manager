@@ -224,6 +224,50 @@ export async function fetchTableCameraState(
   return { holder: j.holder ?? null, requestSeq: j.requestSeq ?? 0, enabled: !!j.enabled };
 }
 
+/** Who currently holds the "table controller" role, and whether the DM allows
+ *  one at all. Same pull-only channel as the camera: `enabled` false means hide
+ *  the control entirely. */
+export async function fetchTableControllerState(
+  ip: string,
+): Promise<{ holder: string | null; enabled: boolean }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/control`, { method: 'GET', headers: dmHeaders(), connectTimeout: 5000 });
+  if (!res.ok) throw dmError(res.status);
+  const j = (await res.json()) as { holder?: string | null; enabled?: boolean };
+  return { holder: j.holder ?? null, enabled: !!j.enabled };
+}
+
+/** Claim (or with `release`, hand back) the table controller. Mirrors
+ *  claimTableCamera — same policy, same no-stealing refusal. */
+export async function claimTableController(
+  name: string, ip: string, release = false,
+): Promise<{ granted: boolean; holder: string | null; error: string | null }> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/control-claim`, {
+    method: 'POST',
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name, release }),
+    connectTimeout: 5000,
+  });
+  if (!res.ok) throw dmError(res.status);
+  const j = (await res.json()) as { granted?: boolean; holder?: string | null; error?: string | null };
+  return { granted: !!j.granted, holder: j.holder ?? null, error: j.error ?? null };
+}
+
+/** One remote button press. The listener only obeys the current holder and only
+ *  for its fixed allowlist (see party_listener.rs CONTROL_ACTIONS). */
+export async function sendTableControl(
+  name: string, action: 'stop' | 'recap' | 'end_battle' | 'replay', ip: string,
+): Promise<void> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/control`, {
+    method: 'POST',
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name, action }),
+    connectTimeout: 5000,
+  });
+  if (!res.ok) throw dmError(res.status);
+  const j = (await res.json()) as { ok?: boolean; error?: string | null };
+  if (!j.ok) throw new Error(j.error ?? "The DM's console refused the button press.");
+}
+
 /** Claim (or with `release`, hand back) the table camera. `granted` is false
  *  when someone else already holds it — the caller shows who rather than
  *  silently stealing it. */
