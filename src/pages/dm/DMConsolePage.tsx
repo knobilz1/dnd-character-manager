@@ -1022,6 +1022,8 @@ export function DMConsolePage() {
   // normal, fully-supported case: no camera means the "Read the board" control
   // never appears and nothing else about the console or the DM changes.
   const [tableCameras, setTableCameras] = React.useState<TableCamera[]>([]);
+  const dmPinRequired = useSettingsStore((s) => s.dmPinRequired);
+  const setDmPinRequired = useSettingsStore((s) => s.setDmPinRequired);
   const tableCameraSource = useSettingsStore((s) => s.tableCameraSource);
   const setTableCameraSource = useSettingsStore((s) => s.setTableCameraSource);
   const tableCameraId = useSettingsStore((s) => s.tableCameraDeviceId);
@@ -1842,6 +1844,9 @@ export function DMConsolePage() {
       // The PIN only exists once the listener has bound, so it's read here
       // rather than alongside the LAN IP below.
       .then(() => invoke<string | null>('party_listener_pin').then(setTablePin))
+      // The Rust flag resets to ON every app start, so the DM's saved choice has
+      // to be pushed back each launch — see party_listener.rs PIN_REQUIRED.
+      .then(() => invoke('set_party_pin_required', { required: dmPinRequired }))
       .catch((e) => setError(`Couldn't start the LAN listener: ${e}`));
     invoke<string | null>('local_lan_ip').then(setLanIp).catch(() => setLanIp(null));
     warmupSTT().then(() => setSttReady(true)).catch((e) => setError(`Speech recognition failed to load: ${e.message || e}`));
@@ -4886,7 +4891,7 @@ export function DMConsolePage() {
         {lanIp && (
           <p className="text-xs text-slate-500 mb-4 text-center">
             Players: enter <span className="text-slate-300 font-mono">{lanIp}</span> in their app's "Send to DM" dialog to join the table.
-            {tablePin && (
+            {tablePin && dmPinRequired && (
               <>
                 {' '}Tonight's PIN is{' '}
                 <span className="text-emerald-300 font-mono tracking-widest text-sm">{tablePin}</span>
@@ -4894,6 +4899,31 @@ export function DMConsolePage() {
               </>
             )}
           </p>
+        )}
+
+        {/* Turning the gate off is a real choice with a real cost, so the switch
+            says what it does rather than hiding behind a label. Off means anything
+            that can reach this port can push a turn into the engine queue and read
+            back narration and lent character sheets. */}
+        {lanIp && (
+          <label className="flex items-center justify-center gap-2 text-xs mb-4 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={dmPinRequired}
+              onChange={e => {
+                const required = e.target.checked;
+                setDmPinRequired(required);
+                invoke('set_party_pin_required', { required })
+                  .catch(() => setError("Couldn't change the PIN requirement on the listener."));
+              }}
+              className="accent-emerald-500"
+            />
+            <span className={dmPinRequired ? 'text-slate-400' : 'text-amber-300'}>
+              {dmPinRequired
+                ? 'Require the PIN to join'
+                : '⚠ PIN off — anyone on this network can join and talk to the DM'}
+            </span>
+          </label>
         )}
 
         <div className="grid gap-6 md:grid-cols-[1fr_260px]">

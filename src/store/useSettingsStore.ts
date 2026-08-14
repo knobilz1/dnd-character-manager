@@ -22,6 +22,13 @@ interface SettingsState {
    *  back as a 401 telling the player to ask for tonight's. */
   dmPin: string;
   setDmPin: (v: string) => void;
+  /** DM SIDE ONLY: whether this machine's listener demands the PIN. Default true.
+   *  The Rust flag it drives lives in memory and resets to ON every app start, so
+   *  the DM console re-applies this on mount — a gate that silently stayed off
+   *  across restarts because of a forgotten setting would be worse than one that
+   *  occasionally has to be switched off again. See party_listener.rs PIN_REQUIRED. */
+  dmPinRequired: boolean;
+  setDmPinRequired: (v: boolean) => void;
   /** Ids of characters that have been sent to the DM at least once (via the
    *  "Send to DM"/"Send All" buttons). Marks a character as "connected" —
    *  see hooks/useDmPushSync.ts, which auto-pushes further edits only for
@@ -130,6 +137,8 @@ export const useSettingsStore = create<SettingsState>()(
       setDmIp: (v) => set({ dmIp: v }),
       dmPin: '',
       setDmPin: (v) => set({ dmPin: v.trim().toUpperCase() }),
+      dmPinRequired: true,
+      setDmPinRequired: (v) => set({ dmPinRequired: v }),
       dmSyncedCharacterIds: [],
       addDmSyncedCharacter: (id) => {
         if (get().dmSyncedCharacterIds.includes(id)) return;

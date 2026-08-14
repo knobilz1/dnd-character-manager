@@ -81,6 +81,26 @@ const PIN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 static SESSION_PIN: OnceLock<String> = OnceLock::new();
 
+/// Whether the PIN gate is enforced. ON by default, and it stays that way for
+/// anyone who never touches the setting: the gate is what stops any device on the
+/// WiFi pushing a turn into the DM's engine queue or reading back narration and
+/// lent character sheets.
+///
+/// It can be turned off because the friction is real and it lands on the players,
+/// not the DM — every device 401s until its owner types tonight's PIN, and the PIN
+/// rotates each app run. A table on a trusted home network, or one mid-session
+/// when someone's phone won't take the code, is entitled to make that trade.
+///
+/// Deliberately NOT persisted on the Rust side: this resets to ON every app start,
+/// and the console re-applies the DM's saved choice on mount. A security gate that
+/// silently stays off across restarts because of a setting nobody remembers is a
+/// worse failure than one that occasionally has to be switched off again.
+static PIN_REQUIRED: AtomicBool = AtomicBool::new(true);
+
+fn pin_required() -> bool {
+    PIN_REQUIRED.load(Ordering::Relaxed)
+}
+
 /// The join PIN for this run, generated once when the listener binds and shown
 /// in the DM Console for the DM to read out.
 ///
@@ -493,7 +513,10 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
     // listener answered anything that could reach the port, so any device on
     // the WiFi could push a turn straight into the DM's engine queue or read
     // back narration and lent character sheets.
-    if !is_reachability_probe(&request_line) && !supplied_pin.eq_ignore_ascii_case(session_pin()) {
+    if pin_required()
+        && !is_reachability_probe(&request_line)
+        && !supplied_pin.eq_ignore_ascii_case(session_pin())
+    {
         return write_response(
             &mut stream,
             401,
@@ -865,6 +888,22 @@ pub fn party_listener_pin() -> Option<String> {
     LISTENER_PORT.get().map(|_| session_pin().to_string())
 }
 
+/// Turns the PIN gate on or off for this run. Called by the DM Console on mount
+/// with the DM's saved preference, and again whenever they flip the switch — the
+/// flag lives only in memory, so that mount call is what carries the choice across
+/// an app restart. See `PIN_REQUIRED`.
+#[tauri::command]
+pub fn set_party_pin_required(required: bool) {
+    PIN_REQUIRED.store(required, Ordering::Relaxed);
+}
+
+/// Whether the gate is currently enforced, so the console can show the truth
+/// rather than its own idea of it.
+#[tauri::command]
+pub fn party_pin_required() -> bool {
+    pin_required()
+}
+
 /// Completes a still-blocked `/talk` request with the DM's actual reply text
 /// — called by DMConsolePage.tsx once a remote-originated turn finishes (see
 /// runTurn/drainQueue). A missing `request_id` (already timed out and
@@ -986,6 +1025,28 @@ pub fn local_lan_ip() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The gate is ON unless someone turns it off. A default that shipped as
+    /// `false` would leave every existing table open with nothing on screen to
+    /// say so, which is the whole reason the PIN was added.
+    #[test]
+    fn the_pin_gate_is_on_by_default() {
+        assert!(pin_required(), "PIN enforcement must default to on");
+    }
+
+    /// The DM can switch it off and back on, and the flag is what the gate reads
+    /// — not a copy the console keeps. Restores the default so test order can't
+    /// leak a disabled gate into another case.
+    #[test]
+    fn the_dm_can_turn_the_gate_off_and_on_again() {
+        let original = pin_required();
+        set_party_pin_required(false);
+        assert!(!pin_required(), "turning it off must actually disable the gate");
+        assert!(!party_pin_required(), "the console must be told the truth");
+        set_party_pin_required(true);
+        assert!(pin_required(), "turning it back on must re-arm the gate");
+        set_party_pin_required(original);
+    }
 
     /// Only `GET /` is exempt from the PIN. Every route that carries table data
     /// must fall through to the gate — a stray match here silently reopens the
