@@ -10,6 +10,7 @@ import { ALL_FEATS, featGrantedSpells } from '../data/feats';
 import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPrepared';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 import { chosenAsi } from '../utils/racialAsi';
+import { sanitizeCreatorDraft } from '../utils/sanitizeCreatorDraft';
 
 
 
@@ -101,7 +102,12 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
   },
 
   updateDraft: (patch) =>
-    set((s) => ({ draft: { ...s.draft, ...patch } })),
+    // Every edit passes through the sanitizer, so a class or level change trims
+    // the choices that no longer fit (subclass below its unlock level, spells
+    // off the new list or above the new cap, over-budget maneuvers/invocations/
+    // feats). At the chokepoint rather than in StepClass, so new steps and the
+    // random-character path can't forget it. See sanitizeCreatorDraft.
+    set((s) => ({ draft: sanitizeCreatorDraft({ ...s.draft, ...patch }) })),
 
   setPointBuyScore: (ability, score) =>
     set((s) => {

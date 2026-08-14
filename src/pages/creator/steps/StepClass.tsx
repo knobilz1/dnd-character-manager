@@ -25,6 +25,13 @@ export function StepClass() {
       classes: [{ classId: cls.id, level: currentLevel, hitPointsRolled: [] }],
       selectedFeats: [],
       classOptions: { fightingStyles: [], invocations: [], metamagic: [], maneuvers: [], infusions: [], optionalFeatures: [] },
+      // Equipment picks are bare indices into THIS class's choice list — under a
+      // different class the same numbers mean different items, so they can't be
+      // trimmed to legality the way the sanitizer trims spells and skills; they
+      // can only be discarded. Everything else (spellbook, skill picks) is left
+      // to sanitizeCreatorDraft, which keeps what the new class also allows —
+      // a wizard turned sorcerer keeps the spells both lists share.
+      equipmentChoices: {},
     });
   }
 
