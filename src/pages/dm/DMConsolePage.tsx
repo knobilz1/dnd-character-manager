@@ -2591,15 +2591,7 @@ export function DMConsolePage() {
               console.warn('Failed to save a battle result:', e)
             );
           }
-          setBattleLog(null);
-          // Spell areas die with the fight — stale ones must not bleed onto the next map.
-          setPlacedEffects([]);
-          refreshTableEffects([]);
-          // Combat is over: every connected sheet clears the order AND the initiative it rolled
-          // for this fight. Fire-and-forget — a listener that isn't running must not stop the
-          // battle from ending on the DM's own screen.
-          invoke('clear_broadcast_initiative').catch((e) =>
-            console.warn('Failed to clear the players\' initiative:', e));
+          endBattleCleanup();
         } else if (actions.battleLog || actions.removeCombatant?.length) {
           setBattleLog((prev) => {
             const next = applyBattleLog(prev, actions.battleLog, actions.removeCombatant);
@@ -4038,8 +4030,15 @@ export function DMConsolePage() {
     }
     try {
       localStorage.setItem('tavern-sheet-table-map', JSON.stringify(payload));
-    } catch {
-      /* localStorage quota — the map is large; nothing we can do but skip. */
+    } catch (e) {
+      // "Nothing we can do but skip" was half true — nothing can be WRITTEN, but
+      // skipping silently is the worst of the options. The table window keeps
+      // rendering the PREVIOUS map, so the DM reveals a room, looks at their own
+      // screen, sees it revealed, and the players are looking at something else.
+      // A blank TV would at least be visible; a confidently stale one isn't.
+      // Now that notices stack, saying so costs nothing.
+      console.warn('Table map write failed:', e);
+      setWarning("The table screen is out of date — the browser's storage is full, so the map couldn't be handed over. Close the table window and present the map again.");
     }
   }
 
@@ -4050,6 +4049,30 @@ export function DMConsolePage() {
     if (!slug) return;
     const card = [...live.current.planMapCards, ...live.current.adHocMapCards].find((c) => c.slug === slug);
     if (card) writeTableMap(card, 0, effects);
+  }
+
+  /**
+   * Everything that has to stop when a fight does.
+   *
+   * The DM's `endBattle` action did all four of these; the two manual "End battle"
+   * buttons did only the first, so ending a fight by hand left the spell areas
+   * painted on the TV and the initiative order sitting on every player's sheet
+   * until something else cleared them. Same fight, same word on the button, two
+   * different outcomes depending on who said it.
+   *
+   * Saving the outcome to campaign memory deliberately stays OUT of here: that
+   * needs the DM's own summary text, which a button press doesn't have.
+   */
+  function endBattleCleanup() {
+    setBattleLog(null);
+    // Spell areas die with the fight — stale ones must not bleed onto the next map.
+    setPlacedEffects([]);
+    refreshTableEffects([]);
+    // Combat is over: every connected sheet clears the order AND the initiative it rolled
+    // for this fight. Fire-and-forget — a listener that isn't running must not stop the
+    // battle from ending on the DM's own screen.
+    invoke('clear_broadcast_initiative').catch((e) =>
+      console.warn('Failed to clear the players\' initiative:', e));
   }
 
   /** Open (or just focus) the chrome-less table window. Places it full-screen on
@@ -4319,6 +4342,10 @@ export function DMConsolePage() {
     setPlanMapCards([]);
     setAdHocMapCards([]);
     setFailedMaps([]);
+    // Was the one list this reset missed, so the "N later fights have no map yet
+    // (…)" warning kept naming encounters from whichever plan was open last —
+    // including a different campaign's, after a switch.
+    setSkippedMaps([]);
     setSessionZeroText('');
     setSessionZeroExpanded(false);
     setSessionZeroCopied(false);
@@ -4337,6 +4364,10 @@ export function DMConsolePage() {
       if (cached) {
         setPlanText(cached.plan_text);
         setPlanMapCards(await Promise.all(planned.map(loadMapCard)));
+        // Rehydrated for the same reason the cards are: the warning has to describe
+        // the plan actually on screen, and a cached plan is still a plan with gaps.
+        setSkippedMaps(cached.skipped_maps ?? []);
+        setFailedMaps(cached.failed_maps ?? []);
       }
       // Rehydrate the ad-hoc maps too. They persist on disk exactly like the
       // plan's own, but nothing ever read them back: `adHocMapCards` was only
@@ -4419,6 +4450,13 @@ export function DMConsolePage() {
       const { sentences, remainder } = extractCompleteSentences(`${line} `);
       for (const s of sentences) enqueueSentence(s);
       if (remainder.trim()) enqueueSentence(remainder);
+      // Wait for the table to actually HEAR it, not just for the queue to accept
+      // it. enqueueSentence is fire-and-forget, so this used to fall straight
+      // through to the finally, re-enabling the button while the recap was still
+      // being read — and a second click enqueued the whole thing again, on top of
+      // itself. Same handle runTurn waits on in two places; enqueueSentence sets
+      // it synchronously above, so it is already populated by the time we get here.
+      if (drainingPromiseRef.current) await drainingPromiseRef.current;
     } finally {
       setRecapSpeaking(false);
     }
@@ -5118,7 +5156,7 @@ export function DMConsolePage() {
                     <Swords size={14} /> Active Battle Log
                     {battleLog.round !== undefined && <span className="text-[11px] font-normal text-slate-500">round {battleLog.round}</span>}
                   </h2>
-                  <button onClick={() => setBattleLog(null)} title="End battle (clears the log)" className="text-slate-500 hover:text-red-400 transition-colors">
+                  <button onClick={endBattleCleanup} title="End battle (clears the log, the spell areas and the players' initiative)" className="text-slate-500 hover:text-red-400 transition-colors">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -5181,7 +5219,7 @@ export function DMConsolePage() {
                   <p className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-800">{battleLog.environment}</p>
                 )}
                 <button
-                  onClick={() => setBattleLog(null)}
+                  onClick={endBattleCleanup}
                   className="mt-3 w-full text-xs text-slate-400 hover:text-red-400 border border-slate-700 rounded-lg py-1.5 transition-colors"
                 >
                   End battle
