@@ -23,6 +23,45 @@ const DIE_STYLE: Record<Die, { btn: string; label: string; glow: string }> = {
 
 type Tier = 'crit-fail' | 'bad' | 'neutral' | 'good' | 'crit-success';
 
+/**
+ * The "18 +5 +3d4 = 26" line under a settled roll.
+ *
+ * One component because the panel renders this twice — once for advantage/
+ * disadvantage and once for a single die — and a rider added to only one of them
+ * would make the total depend on how the roll happened to be made.
+ */
+function TotalRow({ display, modifier, rider, color, shadow, big }: {
+  display: number;
+  modifier: number | null;
+  rider: { die: Die; value: number } | null;
+  color: string;
+  shadow: string;
+  /** The single-die layout has more room than the adv/dis one. */
+  big: boolean;
+}) {
+  if (modifier === null && rider === null) return null;
+  return (
+    <div className="flex items-center gap-1.5 mt-1 relative z-10">
+      {modifier !== null && (
+        <span className={cn('text-slate-400 font-bold', big ? 'text-base' : 'text-sm')}>
+          {modifier >= 0 ? `+${modifier}` : `${modifier}`}
+        </span>
+      )}
+      {rider !== null && (
+        <span className={cn('text-amber-300 font-bold', big ? 'text-base' : 'text-sm')}
+              title={`Rider: 1d${rider.die} rolled ${rider.value}`}>
+          +{rider.value}
+          <span className="text-amber-500/70 text-[10px] ml-0.5">d{rider.die}</span>
+        </span>
+      )}
+      <span className={cn('text-slate-500', big ? 'text-base' : 'text-sm')}>=</span>
+      <span className={cn('font-black', big ? 'text-2xl' : 'text-xl')} style={{ color, textShadow: shadow }}>
+        {display + (modifier ?? 0) + (rider?.value ?? 0)}
+      </span>
+    </div>
+  );
+}
+
 /** Sum of `count` fresh dice — the one place a roll's randomness comes from. */
 function rollSum(sides: Die, count: number): number {
   let total = 0;
@@ -204,7 +243,7 @@ const EXHAUSTION_REMINDER: Record<number, string> = {
  *  (any roll). `label` absent means an unlabeled manual click; `modifier`
  *  absent means no modifier was attached (always the case for manual clicks —
  *  only external skill/save/initiative dispatches carry one). */
-function describeRollForDM(opts: {
+export function describeRollForDM(opts: {
   die: Die;
   count?: number;
   label: string | null;
@@ -212,13 +251,21 @@ function describeRollForDM(opts: {
   mode: Mode;
   result: number;
   two: { v1: number; v2: number; winner: 1 | 2 } | null;
+  /** A Bless/Guidance/Bardic die added to this roll, if one was armed. */
+  rider?: { die: Die; value: number } | null;
 }): string {
-  const { die, count, label, modifier, mode, result, two } = opts;
+  const { die, count, label, modifier, mode, result, two, rider } = opts;
   const prefix = label ? `${label}: ` : 'Rolled ';
   const rollPart = mode !== 'normal' && two
     ? `d${die} (${mode}) — rolled ${two.v1} and ${two.v2}, took ${result}`
     : `${dieLabel(die, count)} → ${result}`;
-  const totalPart = modifier !== null ? ` + ${modifier} = ${result + modifier}` : '';
+  // The rider has to reach the DM. Sending "18 + 5 = 23" for a roll the player
+  // saw as 26 puts a number the table will act on out of step with the sheet.
+  const riderPart = rider ? ` + ${rider.value} (1d${rider.die})` : '';
+  const total = result + (modifier ?? 0) + (rider?.value ?? 0);
+  const totalPart = modifier !== null || rider
+    ? `${modifier !== null ? ` + ${modifier}` : ''}${riderPart} = ${total}`
+    : '';
   return `${prefix}${rollPart}${totalPart}`;
 }
 
@@ -283,7 +330,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
    *  the DM actually reacts to it as a real turn rather than it just
    *  appearing silently. Used by both the auto-send path (labeled rolls
    *  only) and the manual button (any roll). */
-  async function sendRollToDM(opts: { die: Die; count?: number; result: number; mode: Mode; two: { v1: number; v2: number; winner: 1 | 2 } | null; label: string | null; modifier: number | null }) {
+  async function sendRollToDM(opts: { die: Die; count?: number; result: number; mode: Mode; two: { v1: number; v2: number; winner: 1 | 2 } | null; label: string | null; modifier: number | null; rider?: { die: Die; value: number } | null }) {
     if (!connected || !characterName?.trim()) return;
     const text = describeRollForDM(opts);
     setDmStatus('Sending to DM…');
@@ -298,6 +345,39 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
   // External trigger state (skill/save/initiative rolls)
   const [rollModifier, setRollModifier] = React.useState<number | null>(null);
   const [rollLabel, setRollLabel] = React.useState<string | null>(null);
+
+  /**
+   * Rider dice — a second die added to the next roll's total: Bless and Guidance
+   * (+1d4), Bardic Inspiration (+1d6 up to +1d12), and on the damage side Hex,
+   * Hunter's Mark and Divine Favor. One control covers all of them because they
+   * are all the same mechanic, and it is manual because the sheet cannot know:
+   * Bless is cast BY someone else ON you, so nothing on this character records it.
+   *
+   * ONE-SHOT on purpose. Bless would prefer to stay armed for its whole minute,
+   * but a rider that silently survives into the next roll is a wrong number at the
+   * table with no visible cause — the same failure this app keeps fixing. Re-arming
+   * costs one tap, exactly like picking advantage.
+   */
+  const [armedRider, setArmedRider] = React.useState<Die | null>(null);
+  const [riderResult, setRiderResult] = React.useState<{ die: Die; value: number } | null>(null);
+  // Mirrored for the same reason rollModifierRef is: the settle callbacks below run
+  // inside closures that would otherwise read a stale value.
+  const armedRiderRef = React.useRef<Die | null>(null);
+  function armRider(die: Die | null) {
+    const next = armedRider === die ? null : die; // tapping the armed one disarms it
+    setArmedRider(next);
+    armedRiderRef.current = next;
+  }
+  /** Rolls the armed rider, if any, and disarms it. Called once per settled roll. */
+  function consumeRider(): { die: Die; value: number } | null {
+    const die = armedRiderRef.current;
+    if (die === null) return null;
+    const rider = { die, value: Math.ceil(Math.random() * die) };
+    setRiderResult(rider);
+    armedRiderRef.current = null;
+    setArmedRider(null);
+    return rider;
+  }
   const { pending, consume, openNonce, publishResult } = useDiceStore();
 
   // Inspiration — pulled directly so we don't need an extra prop
@@ -369,9 +449,9 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
    *  the ref-mirrored label/modifier (see rollModifierRef's doc comment),
    *  not the rollLabel/rollModifier state, since this runs inside the same
    *  settle closures that would otherwise see a stale value. */
-  function maybeAutoSendRoll(sides: Die, result: number, effectiveMode: Mode, two: { v1: number; v2: number; winner: 1 | 2 } | null, count = 1) {
+  function maybeAutoSendRoll(sides: Die, result: number, effectiveMode: Mode, two: { v1: number; v2: number; winner: 1 | 2 } | null, count = 1, rider: { die: Die; value: number } | null = null) {
     if (!autoSendToDM || !rollLabelRef.current) return;
-    sendRollToDM({ die: sides, count, result, mode: effectiveMode, two, label: rollLabelRef.current, modifier: rollModifierRef.current });
+    sendRollToDM({ die: sides, count, result, mode: effectiveMode, two, label: rollLabelRef.current, modifier: rollModifierRef.current, rider });
   }
 
   function rollWithSides(sides: Die, count = 1) {
@@ -381,6 +461,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
     setTwoDisplay(null);
     setTwoFinal(null);
     setDmStatus(null);
+    setRiderResult(null);
 
     if (hurryUp) {
       const result = rollSum(sides, count);
@@ -390,8 +471,11 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
       setResultKey(k => k + 1);
       setHistory(h => [{ die: sides, count, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
       setRolling(false);
+      const rider = consumeRider();
+      // The rider is deliberately NOT folded into publishResult or the tier: those
+      // read the raw die, and the death-save tracker keys on a natural 20 or 1.
       publishResult(result, sides, rollLabelRef.current, count);
-      maybeAutoSendRoll(sides, result, 'normal', null, count);
+      maybeAutoSendRoll(sides, result, 'normal', null, count, rider);
       return;
     }
 
@@ -417,8 +501,9 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
         setResultKey(k => k + 1);
         setHistory(h => [{ die: sides, count, result, tier: t, mode: 'normal' as Mode }, ...h].slice(0, 8));
         setRolling(false);
+        const rider = consumeRider();
         publishResult(result, sides, rollLabelRef.current, count);
-        maybeAutoSendRoll(sides, result, 'normal', null, count);
+        maybeAutoSendRoll(sides, result, 'normal', null, count, rider);
       }
     };
     timerRef.current = setTimeout(tick, 30);
@@ -444,6 +529,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
 
     setDisplay(null);
     setDmStatus(null);
+    setRiderResult(null);
 
     if (hurryUp) {
       const v1 = Math.ceil(Math.random() * sides);
@@ -461,8 +547,9 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
       setResultKey(k => k + 1);
       setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
       setRolling(false);
+      const rider = consumeRider();
       publishResult(finalVal, sides, rollLabelRef.current);
-      maybeAutoSendRoll(sides, finalVal, effectiveMode, { v1, v2, winner });
+      maybeAutoSendRoll(sides, finalVal, effectiveMode, { v1, v2, winner }, 1, rider);
       return;
     }
 
@@ -498,8 +585,9 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
         setResultKey(k => k + 1);
         setHistory(h => [{ die: sides, result: finalVal, tier: t, mode: effectiveMode }, ...h].slice(0, 8));
         setRolling(false);
+        const rider = consumeRider();
         publishResult(finalVal, sides, rollLabelRef.current);
-        maybeAutoSendRoll(sides, finalVal, effectiveMode, { v1, v2, winner });
+        maybeAutoSendRoll(sides, finalVal, effectiveMode, { v1, v2, winner }, 1, rider);
       }
     };
     timerRef.current = setTimeout(tick, 30);
@@ -560,6 +648,29 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
                 )}
               >
                 {m === 'normal' ? 'Normal' : m === 'advantage' ? '⬆ ADV' : '⬇ DIS'}
+              </button>
+            ))}
+          </div>
+
+          {/* Rider dice — added to the NEXT roll only. See armedRider's comment for
+              why this is manual and why it doesn't stay armed. */}
+          <div className="flex items-center gap-1 px-4 pt-1.5">
+            <span className="text-[10px] text-slate-500 shrink-0 mr-0.5" title="Bless, Guidance, Bardic Inspiration, Hex, Hunter's Mark — a die added to the next roll's total">
+              Add
+            </span>
+            {([4, 6, 8, 10, 12] as Die[]).map(d => (
+              <button
+                key={d}
+                onClick={() => armRider(d)}
+                className={cn(
+                  'flex-1 text-[11px] font-bold py-1 rounded border transition-all',
+                  armedRider === d
+                    ? 'bg-amber-800/60 border-amber-500 text-amber-200'
+                    : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-500',
+                )}
+                title={armedRider === d ? `+1d${d} armed — tap to cancel` : `Add 1d${d} to the next roll`}
+              >
+                +d{d}
               </button>
             ))}
           </div>
@@ -700,17 +811,8 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
                         ? '💀 Critical Fail'
                         : `${mode === 'advantage' ? '⬆ Adv' : '⬇ Dis'} → ${display} (took ${twoFinal.winner === 1 ? twoFinal.v1 : twoFinal.v2})`}
                     </p>
-                    {rollModifier !== null && (
-                      <div className="flex items-center gap-1.5 mt-1 relative z-10">
-                        <span className="text-slate-400 text-sm font-bold">
-                          {rollModifier >= 0 ? `+${rollModifier}` : `${rollModifier}`}
-                        </span>
-                        <span className="text-slate-500 text-sm">=</span>
-                        <span className="text-xl font-black" style={{ color: t.color, textShadow: t.shadow }}>
-                          {display + rollModifier}
-                        </span>
-                      </div>
-                    )}
+                    <TotalRow display={display} modifier={rollModifier} rider={riderResult}
+                              color={t.color} shadow={t.shadow} big={false} />
                   </>
                 )}
               </>
@@ -751,17 +853,10 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
                       }>
                       {display}
                     </div>
-                    {/* Modifier + total row */}
-                    {rollModifier !== null && !rolling && (
-                      <div className="flex items-center gap-1.5 mt-1 relative z-10">
-                        <span className="text-slate-400 text-base font-bold">
-                          {rollModifier >= 0 ? `+${rollModifier}` : `${rollModifier}`}
-                        </span>
-                        <span className="text-slate-500 text-base">=</span>
-                        <span className="text-2xl font-black" style={{ color: t.color, textShadow: t.shadow }}>
-                          {display + rollModifier}
-                        </span>
-                      </div>
+                    {/* Modifier + rider + total row */}
+                    {!rolling && (
+                      <TotalRow display={display} modifier={rollModifier} rider={riderResult}
+                                color={t.color} shadow={t.shadow} big />
                     )}
                     <p className="text-xs mt-2 relative z-10 font-semibold"
                       style={{ color: rolling ? '#475569' : t.color, opacity: rolling ? 1 : 0.85 }}>
@@ -785,7 +880,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
           {connected && display !== null && !rolling && activeDie !== null && (
             <div className="flex items-center justify-center px-4 pb-1.5 -mt-1">
               <button
-                onClick={() => sendRollToDM({ die: activeDie, count: activeCount, result: display, mode, two: twoFinal, label: rollLabel, modifier: rollModifier })}
+                onClick={() => sendRollToDM({ die: activeDie, count: activeCount, result: display, mode, two: twoFinal, label: rollLabel, modifier: rollModifier, rider: riderResult })}
                 className="flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-emerald-400 transition-colors"
                 title="Send this roll to the DM"
               >
