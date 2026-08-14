@@ -30,6 +30,46 @@ function computeResourceMaxOverrides(c: Character): Record<string, number> {
   return computeCharacterDerived(c).resourceMaxOverrides;
 }
 
+/**
+ * Fills in the collections the Character type promises but real save data does not
+ * always carry — a JSON exported by an older build, a hand-edited file, a truncated
+ * Drive record, a character written before a field existed.
+ *
+ * This must run BEFORE anything in load() reads the character, and that ordering is
+ * the whole point. load() calls computeResourceMaxOverrides -> computeCharacterDerived
+ * on its raw input, and `casterClassOf` there does `character.classes.find(...)`, so
+ * the defaults at the *bottom* of load() land far too late to protect it: a character
+ * with no `classes` threw out of load() itself and took the entire sheet down behind
+ * the error boundary (observed live 2026-08-13). load() already worked around this
+ * internally with seven separate `c.classes ?? []`, which is the tell — the value was
+ * known to be missing and was still stored raw for every consumer downstream.
+ *
+ * Everything listed here is non-optional in the type, so nothing in the ~5k lines of
+ * sheet that reads it checks first. That is why they are filled at the door rather
+ * than guarded at each of the hundreds of call sites.
+ */
+function fillRequiredFields(c: Character): Character {
+  return {
+    ...c,
+    classes: c.classes ?? [],
+    inventory: c.inventory ?? [],
+    spellbook: c.spellbook ?? [],
+    resources: c.resources ?? [],
+    conditions: c.conditions ?? [],
+    selectedFeats: c.selectedFeats ?? [],
+    selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
+    enabledBooks: c.enabledBooks ?? ['PHB'],
+    hitDiceUsed: c.hitDiceUsed ?? {},
+    deathSaves: c.deathSaves ?? { successes: 0, failures: 0 },
+    currencies: c.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+    exhaustionLevel: c.exhaustionLevel ?? 0,
+    classOptions: c.classOptions ?? {
+      fightingStyles: [], invocations: [], metamagic: [],
+      maneuvers: [], infusions: [], optionalFeatures: [],
+    },
+  };
+}
+
 
 
 interface CharacterState {
@@ -151,7 +191,9 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   concentrationCheck: null,
   clearConcentrationCheck: () => set({ concentrationCheck: null }),
 
-  load: (c) => {
+  load: (raw) => {
+    // Before anything below reads it — see fillRequiredFields for why the order matters.
+    const c = fillRequiredFields(raw);
     // Migrate old characters that were created before the resources field existed.
     // If resources is empty but the character has classes, compute them from the
     // class/subclass definitions at the character's current level. For classes with
@@ -297,22 +339,15 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     });
 
     set({
-      // Defensive defaults for characters created before fields like
-      // classOptions existed in the schema.
+      // The plain missing-field defaults now live in fillRequiredFields, applied at the
+      // top of load(). What remains here is only what needs real logic: the pre-2023 HP
+      // schema, slot-map completion, and the two collections that are rewritten rather
+      // than defaulted.
       character: {
         ...c,
         maxHP: c.maxHP ?? oldHP?.max ?? 10,
         currentHP: c.currentHP ?? oldHP?.current ?? c.maxHP ?? oldHP?.max ?? 10,
         tempHP: c.tempHP ?? oldHP?.temp ?? 0,
-        exhaustionLevel: c.exhaustionLevel ?? 0,
-        classOptions: c.classOptions ?? {
-          fightingStyles: [],
-          invocations: [],
-          metamagic: [],
-          maneuvers: [],
-          infusions: [],
-          optionalFeatures: [],
-        },
         // Ensure all 9 slot levels are present; {} is truthy so can't use ?? alone.
         spellSlotsUsed: (c.spellSlotsUsed && Object.keys(c.spellSlotsUsed).length === 9)
           ? c.spellSlotsUsed
@@ -320,12 +355,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         resources,
         // Strip 'Exhaustion' from the conditions array — it is tracked via exhaustionLevel.
         // Older characters may have it set both ways; migrate to the canonical representation.
-        conditions: (c.conditions ?? []).filter((cond) => cond !== 'Exhaustion'),
-        selectedFeats: c.selectedFeats ?? [],
-        selectedSkillProficiencies: c.selectedSkillProficiencies ?? [],
+        conditions: c.conditions.filter((cond) => cond !== 'Exhaustion'),
         spellbook: syncAlwaysPrepared(
-          c.spellbook ?? [],
-          computeAlwaysPreparedIds(c.classes ?? [], c.classOptions, c.subclassOptions),
+          c.spellbook,
+          computeAlwaysPreparedIds(c.classes, c.classOptions, c.subclassOptions),
         ),
         // Migrate existing characters: add innate spell uses for any unlocked spells
         // that weren't tracked yet (cantrips are unlimited and not stored).
@@ -348,12 +381,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           }
           return merged;
         })(),
-        inventory: c.inventory ?? [],
-        hitDiceUsed: c.hitDiceUsed ?? {},
-        currencies: c.currencies ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
         experiencePoints: c.experiencePoints ?? 0,
-        enabledBooks: c.enabledBooks ?? ['PHB'],
-        deathSaves: c.deathSaves ?? { successes: 0, failures: 0 },
         notes: c.notes ?? '',
         alignment: c.alignment ?? '',
         playerName: c.playerName ?? '',
