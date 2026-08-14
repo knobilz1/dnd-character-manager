@@ -92,7 +92,12 @@ export function TalkToDMButton({ characterName }: { characterName: string }) {
     setBusy(true);
     try {
       const text = await stopAndTranscribe();
-      if (text) {
+      // Same silent-nothing as the DM console had: an empty transcription used to
+      // fall out of this `if` with no branch, so a muted mic was indistinguishable
+      // from a working one that sent something.
+      if (!text) {
+        setStatus('Nothing was heard — check your microphone and try again.');
+      } else {
         // The request can now sit for a while (server-side blocks for the
         // real reply, see below) — show something other than a frozen
         // button while it's in flight, especially if queued behind others.

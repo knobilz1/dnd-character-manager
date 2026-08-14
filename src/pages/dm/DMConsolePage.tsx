@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLive } from '../../hooks/useLive';
+import { pushNotice, dismissNotice, type Notice, type NoticeKind } from '../../utils/notices';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -715,8 +716,27 @@ export function DMConsolePage() {
   const [closeGuardOpen, setCloseGuardOpen] = React.useState(false);
   const [closeGuardEnding, setCloseGuardEnding] = React.useState(false);
   const [turns, setTurns] = React.useState<Turn[]>([]);
-  const [error, setError] = React.useState<string | null>(null);
-  const [warning, setWarning] = React.useState<string | null>(null);
+  /**
+   * Errors and warnings the DM hasn't dismissed yet.
+   *
+   * These were two single slots, so the 68th thing that went wrong erased the
+   * 67th — a failed map render followed by a failed memory write showed only the
+   * memory write, and nobody knew the map had gone. During a live session the DM
+   * is looking at the table, not the screen, so "it was on screen for two
+   * seconds" is the same as never shown.
+   *
+   * `setError`/`setWarning` keep their old one-argument shape (null still
+   * clears), so all 82 call sites are unchanged — they just append now. Capped at
+   * MAX_NOTICES so a failing poll can't grow it without bound, and de-duplicated
+   * by text so a retry loop reads as one problem rather than forty.
+   */
+  const [notices, setNotices] = React.useState<Notice[]>([]);
+  const noticeSeq = React.useRef(0);
+  const addNotice = React.useCallback((kind: NoticeKind, text: string | null) => {
+    setNotices((prev) => pushNotice(prev, kind, text, ++noticeSeq.current));
+  }, []);
+  const setError = React.useCallback((m: string | null) => addNotice('error', m), [addNotice]);
+  const setWarning = React.useCallback((m: string | null) => addNotice('warning', m), [addNotice]);
   const [dmModelOpen, setDmModelOpen] = React.useState(false);
   const [localModels, setLocalModels] = React.useState<string[]>([]);
   const [localModelsLoading, setLocalModelsLoading] = React.useState(false);
@@ -2264,21 +2284,25 @@ export function DMConsolePage() {
     interruptedTurnRef.current = null;
     try {
       const dueForPlanCheck = !!campaignPlanRef.current && turnsSincePlanCheckRef.current >= PLAN_CHECK_INTERVAL;
+      // The one-shot payloads are READ here and cleared only once the engine has
+      // actually taken them, further down. They used to be cleared on the way in,
+      // which meant a turn that threw consumed them anyway — and the catch below
+      // RETRIES the turn after reconnecting, so the retry rebuilt its prompt with
+      // all of this missing. A session the DM asked to recall arrived empty, and
+      // the party's sheet digests were gone for the whole sitting, since nothing
+      // refills that ref until the next roll call.
+      //
       // A session the DM asked to recall last turn (recallSession dm-action) —
-      // consumed exactly once here, then cleared, since the full record is
-      // large and only the turn that referenced it needs it.
+      // sent exactly once, since the full record is large and only the turn that
+      // referenced it needs it.
       const recalledSession = pendingRecalledSessionRef.current ?? undefined;
-      pendingRecalledSessionRef.current = null;
-      // Same one-shot consume for a recalled battle map.
+      // Same one-shot for a recalled battle map.
       const recalledMap = pendingRecalledMapRef.current ?? undefined;
-      pendingRecalledMapRef.current = null;
       // And for a recalled chapter — reference material the DM pulled up.
       const recalledChapter = pendingRecalledChapterRef.current ?? undefined;
-      pendingRecalledChapterRef.current = null;
-      // Same one-shot consume for the party's sheet digests, handed over on the
-      // first turn after roll call and never repeated.
+      // Same one-shot for the party's sheet digests, handed over on the first turn
+      // after roll call and never repeated.
       const partySheets = pendingPartySheetsRef.current ?? undefined;
-      pendingPartySheetsRef.current = null;
       const prompt = buildTurnPrompt({
         party: live.current.party,
         spokenText,
@@ -2293,13 +2317,25 @@ export function DMConsolePage() {
         absent: live.current.absent,
         partySheets,
       });
-      turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
-
       // Ordinary turns stay on low effort (fast — see callDm's doc comment);
       // only the rare plan-check-in turns, where the DM is deliberately asked
       // to reconcile more context than usual, get bumped to medium.
       const reply = await callDm(prompt, sessionIdRef.current, live.current.campaignId ?? undefined, dueForPlanCheck ? 'medium' : 'low');
       if (reply.session_id) sessionIdRef.current = reply.session_id;
+
+      // The engine has the prompt, so the one-shots are genuinely spent and the
+      // plan check-in genuinely happened. Everything above this line is still
+      // pending if the call threw.
+      //
+      // If callDm throws AFTER the engine read the prompt — a timeout waiting on
+      // the reply — the retry sends these again. That is the right way round to be
+      // wrong: repeating a recalled map or the party digest costs a little context,
+      // where dropping them costs the DM the thing it just asked for.
+      pendingRecalledSessionRef.current = null;
+      pendingRecalledMapRef.current = null;
+      pendingRecalledChapterRef.current = null;
+      pendingPartySheetsRef.current = null;
+      turnsSincePlanCheckRef.current = dueForPlanCheck ? 0 : turnsSincePlanCheckRef.current + 1;
 
       if (suppressNarrationRef.current) {
         // Interrupted before this turn finished — stopSpeakingAndClearQueue
@@ -2422,10 +2458,7 @@ export function DMConsolePage() {
             .catch((e) => {
               const message = e instanceof Error ? e.message : String(e);
               console.warn('Failed to advance chapter:', e);
-              setWarning((prev) =>
-                (prev ? `${prev} ` : '') +
-                  `The DM tried to move the story to a new chapter, but it didn't take (${message}). Still on the same chapter — switch manually via the Module button if needed.`
-              );
+              setWarning(`The DM tried to move the story to a new chapter, but it didn't take (${message}). Still on the same chapter — switch manually via the Module button if needed.`);
               return false;
             });
           if (advanced) {
@@ -2463,10 +2496,7 @@ export function DMConsolePage() {
             .catch((e) => {
               const message = e instanceof Error ? e.message : String(e);
               console.warn('Failed to switch active module:', e);
-              setWarning((prev) =>
-                (prev ? `${prev} ` : '') +
-                  `The DM tried to switch to a different module, but it didn't take (${message}). Still on the same module — switch manually via the Module button if needed.`
-              );
+              setWarning(`The DM tried to switch to a different module, but it didn't take (${message}). Still on the same module — switch manually via the Module button if needed.`);
               return false;
             });
           if (switched) {
@@ -2777,7 +2807,15 @@ export function DMConsolePage() {
       setError(e instanceof Error ? e.message : String(e));
       return;
     }
-    if (!spokenText) return;
+    // Whisper heard nothing. Returning quietly here made a muted mic, a mic the
+    // OS handed to another app, and genuinely silent audio all look identical to
+    // "the button did nothing" — the DM clicks Talk, speaks, clicks Stop, and the
+    // console sits there. Say so instead; it costs one line and it's the
+    // difference between a broken mic and a broken app.
+    if (!spokenText) {
+      setWarning('Nothing was heard — check the microphone is unmuted and picked up by the app, then try again.');
+      return;
+    }
 
     if (processingRef.current) {
       // Whatever we just interrupted (or a remote player's turn) hasn't
@@ -4947,8 +4985,34 @@ export function DMConsolePage() {
               ))}
             </div>
 
-            {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
-            {warning && <p className="text-xs text-amber-400 mb-3">⚠️ {warning}</p>}
+            {notices.length > 0 && (
+              <div className="mb-3 space-y-1">
+                {notices.map((n) => (
+                  <p
+                    key={n.id}
+                    className={cn(
+                      'flex items-start gap-2 cursor-pointer',
+                      n.kind === 'error' ? 'text-sm text-red-400' : 'text-xs text-amber-400',
+                    )}
+                    // Click to dismiss one. Nothing auto-expires: a message that
+                    // vanishes on its own is how the single slot lost things.
+                    onClick={() => setNotices((prev) => dismissNotice(prev, n.id))}
+                    title="Click to dismiss"
+                  >
+                    <span>{n.kind === 'error' ? '✕' : '⚠️'}</span>
+                    <span className="flex-1">{n.text}</span>
+                  </p>
+                ))}
+                {notices.length > 1 && (
+                  <button
+                    onClick={() => setNotices([])}
+                    className="text-[11px] text-slate-500 hover:text-slate-300"
+                  >
+                    Dismiss all {notices.length}
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-center gap-3">
               <Button
