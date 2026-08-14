@@ -250,7 +250,7 @@ function WeaponAttacksSideModule() {
   const { triggerRoll } = useDiceStore();
   if (!character || !derived) return null;
 
-  const { mods, profBonus, exhaustionDisadvAttacks } = derived;
+  const { mods, profBonus, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
   const armorPen = armorPenalty(character);
   const equippedWeapons = (character.inventory ?? []).filter(
     (item: any) => item.equipped && item.category === 'weapon',
@@ -285,7 +285,8 @@ function WeaponAttacksSideModule() {
             <div className="flex gap-1.5">
               <button
                 onClick={() => triggerRoll(20, toHit, `${item.name} Attack`,
-                  rollMode(false, exhaustionDisadvAttacks || armorPen.strDexDisadvantage))}
+                  rollMode(conditionAdvAttacks.length > 0,
+                    exhaustionDisadvAttacks || conditionDisadvAttacks.length > 0 || armorPen.strDexDisadvantage))}
                 className="flex-1 bg-red-900/40 hover:bg-red-800/50 border border-red-700/60 rounded py-1.5 text-center transition-colors"
                 title={`d20 + ${toHit}`}
               >

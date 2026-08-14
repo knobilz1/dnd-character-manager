@@ -307,7 +307,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks, conditionDisadvChecks, conditionDisadvDexSaves, conditionAutoFailStrDexSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -616,18 +616,26 @@ export function SheetPage() {
               {abilityKeys.map(k => {
                 const val = savingThrows[k];
                 const isProficient = savingThrowProficiencies.has(k);
+                // Paralyzed, Stunned, Petrified and Unconscious fail Str and Dex
+                // saves outright — no roll can succeed, so say so instead of
+                // handing the player a die that cannot help them.
+                const autoFail = (k === 'str' || k === 'dex') && conditionAutoFailStrDexSaves.length > 0;
                 return (
                   <button
                     key={k}
-                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`, rollMode(k === 'dex' && advantage.dexSaves, exhaustionDisadvSaves || ((k === 'str' || k === 'dex') && armorPen.strDexDisadvantage)))}
+                    onClick={() => triggerRoll(20, val, `${abilityLabels[k]} Save`, rollMode(k === 'dex' && advantage.dexSaves, exhaustionDisadvSaves || (k === 'dex' && conditionDisadvDexSaves.length > 0) || ((k === 'str' || k === 'dex') && armorPen.strDexDisadvantage)))}
                     className="flex items-center justify-between py-1 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
-                    title={`Roll ${abilityLabels[k]} saving throw`}
+                    title={autoFail
+                      ? `Automatically fails while ${conditionAutoFailStrDexSaves.join(', ')}`
+                      : `Roll ${abilityLabels[k]} saving throw`}
                   >
                     <div className="flex items-center gap-2">
                       <div className={cn('w-2 h-2 rounded-full', isProficient ? 'bg-green-400' : 'bg-slate-600')} />
                       <span className={cn('text-sm', exhaustionDisadvSaves ? 'text-orange-300' : 'text-slate-300 group-hover:text-white')}>{abilityLabels[k]}</span>
                     </div>
-                    <span className={cn('text-sm font-bold', val >= 0 ? (exhaustionDisadvSaves ? 'text-orange-300' : 'text-white') : 'text-red-400')}>
+                    <span className={cn('text-sm font-bold',
+                      autoFail ? 'text-red-400 line-through'
+                        : val >= 0 ? (exhaustionDisadvSaves ? 'text-orange-300' : 'text-white') : 'text-red-400')}>
                       {val >= 0 ? '+' : ''}{val}
                     </span>
                   </button>
@@ -651,7 +659,7 @@ export function SheetPage() {
                 return (
                   <button
                     key={skill}
-                    onClick={() => triggerRoll(20, bonus, `${skill} Check`, rollMode(false, exhaustionDisadvChecks || (armorPen.strDexDisadvantage && ['str','dex'].includes(SKILL_ABILITY[skill]))))}
+                    onClick={() => triggerRoll(20, bonus, `${skill} Check`, rollMode(false, exhaustionDisadvChecks || conditionDisadvChecks.length > 0 || (armorPen.strDexDisadvantage && ['str','dex'].includes(SKILL_ABILITY[skill]))))}
                     className="flex items-center justify-between py-0.5 px-2 rounded hover:bg-slate-800 w-full transition-colors group"
                     title={`Roll ${skill} check${hasExpertise ? ' (Expertise)' : ''}`}
                   >
@@ -749,6 +757,8 @@ export function SheetPage() {
                 conSave={savingThrows.con}
                 exhaustionDisadvSaves={exhaustionDisadvSaves}
                 exhaustionDisadvAttacks={exhaustionDisadvAttacks}
+                conditionDisadvAttacks={conditionDisadvAttacks}
+                conditionAdvAttacks={conditionAdvAttacks}
                 resourceMaxOverrides={resourceMaxOverrides}
                 activeEffects={activeEffects}
                 setActiveEffects={setActiveEffects}
@@ -1519,7 +1529,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
-function WeaponAttacksPanel({ character, mods, profBonus, exhaustionDisadvAttacks }: { character: any; mods: any; profBonus: number; exhaustionDisadvAttacks: boolean }) {
+function WeaponAttacksPanel({ character, mods, profBonus, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
   const { triggerRoll } = useDiceStore();
 
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
@@ -1578,7 +1588,7 @@ function WeaponAttacksPanel({ character, mods, profBonus, exhaustionDisadvAttack
               <div className="flex items-center gap-2">
                 {/* Attack roll */}
                 <button
-                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`, rollMode(false, exhaustionDisadvAttacks || weaponArmorPen.strDexDisadvantage))}
+                  onClick={() => triggerRoll(20, toHit, `${item.name} Attack`, rollMode(conditionAdvAttacks.length > 0, exhaustionDisadvAttacks || conditionDisadvAttacks.length > 0 || weaponArmorPen.strDexDisadvantage))}
                   className="flex-1 bg-red-900/40 hover:bg-red-800/50 border border-red-700/60 hover:border-red-500 rounded-lg py-1.5 text-center transition-colors group"
                   title={`Roll attack: d20 + ${toHit >= 0 ? '+' : ''}${toHit}`}
                 >
@@ -1743,7 +1753,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   useSpellSlot, restoreSpellSlot, restoreAllSpellSlots, pactMagic, usePactSlot,
   restorePactSlots, spellSlotsUsed, concentrationSpellId, startConcentration, endConcentration,
   useHitDie, restoreHitDie, effectiveMaxHP, mods, profBonus, resourceMaxOverrides,
-  conSave, exhaustionDisadvSaves, exhaustionDisadvAttacks,
+  conSave, exhaustionDisadvSaves, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks,
   activeEffects, setActiveEffects, isRaging, setShowRageOverlay,
   sendToGraveyard, navigate, useItemCharge,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
@@ -1885,7 +1895,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       )}
 
       {/* Weapon Attacks */}
-      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} exhaustionDisadvAttacks={exhaustionDisadvAttacks} />
+      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
 
       {/* Companions — a second creature, not a transformation. Renders nothing unless the
           character can have one or already does. */}

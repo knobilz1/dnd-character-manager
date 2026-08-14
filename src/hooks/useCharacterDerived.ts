@@ -14,6 +14,7 @@ import { SKILL_NAMES } from '../data/mechanics';
 import { ARTISAN_TOOLS, MUSICAL_INSTRUMENTS, GAMING_SETS } from '../data/tools';
 import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
+import { conditionsCausing } from '../data/conditionEffects';
 import { armorPenalty } from '../utils/armorProficiency';
 
 // Eldritch Knight and Arcane Trickster get spellcasting via subclass.
@@ -748,6 +749,17 @@ export function computeCharacterDerived(character: Character) {
     const exhaustionDisadvSaves  = exhaustionLevel >= 3; // disadvantage on saving throws
     const exhaustionDisadvAttacks = exhaustionLevel >= 3; // disadvantage on attack rolls
     const exhaustionHpMaxHalved  = exhaustionLevel >= 4; // HP maximum is halved
+
+    // Conditions, which until now were labels the sheet displayed and nothing read.
+    // Kept as the LIST of conditions responsible rather than a bare boolean, so the
+    // roll button can say why it is rolling at disadvantage instead of silently
+    // changing the number under the player.
+    const conditionDisadvAttacks = conditionsCausing(character.conditions, 'disadvAttacks');
+    const conditionAdvAttacks = conditionsCausing(character.conditions, 'advAttacks');
+    const conditionDisadvChecks = conditionsCausing(character.conditions, 'disadvChecks');
+    const conditionDisadvDexSaves = conditionsCausing(character.conditions, 'disadvDexSaves');
+    const conditionAutoFailStrDexSaves = conditionsCausing(character.conditions, 'autoFailStrDexSaves');
+    const conditionSpeedZero = conditionsCausing(character.conditions, 'speedZero');
     const baseSpeed = _baseSpeed; // keep reference for tooltip display
 
     // Class-scaling display values
@@ -804,6 +816,12 @@ export function computeCharacterDerived(character: Character) {
       exhaustionDisadvChecks,
       exhaustionDisadvSaves,
       exhaustionDisadvAttacks,
+      conditionDisadvAttacks,
+      conditionAdvAttacks,
+      conditionDisadvChecks,
+      conditionDisadvDexSaves,
+      conditionAutoFailStrDexSaves,
+      conditionSpeedZero,
       advantage,
       advantageNotes,
       armorPen,
