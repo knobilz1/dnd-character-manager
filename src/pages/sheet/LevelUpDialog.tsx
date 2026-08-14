@@ -8,6 +8,7 @@ import { getBackground } from '../../data/backgrounds';
 import {
   abilityMod, cantripsKnownFor, maxPreparedSpellsFor, spellsKnownFor,
   FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
+  warlockInvocationsKnown, sorcererMetamagicKnown, battleMasterManeuversKnown, artificerInfusionsKnown,
 } from '../../data/mechanics';
 import { ALL_FEATS, getEligibleFeats } from '../../data/feats';
 import { ALL_FIGHTING_STYLES, fightingStylesAllowed } from '../../data/fightingStyles';
@@ -43,66 +44,6 @@ const ABILITY_KEYS: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 const ABILITY_LABELS: Record<AbilityKey, string> = {
   str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA',
 };
-
-function warlockInvocationCount(level: number): number {
-  if (level < 2) return 0;
-  if (level >= 18) return 8;
-  if (level >= 15) return 7;
-  if (level >= 12) return 6;
-  if (level >= 9) return 5;
-  if (level >= 7) return 4;
-  if (level >= 5) return 3;
-  return 2;
-}
-
-function sorcererMetamagicCount(level: number): number {
-  if (level >= 17) return 4;
-  if (level >= 10) return 3;
-  if (level >= 3) return 2;
-  return 0;
-}
-
-// PHB 2024 Sorcerer: Metamagic starts at level 2 (not 3)
-function sorcererMetamagicCount2024(level: number): number {
-  if (level >= 17) return 4;
-  if (level >= 10) return 3;
-  if (level >= 2) return 2;
-  return 0;
-}
-
-// PHB 2024 Warlock: different invocation counts than 2014
-function warlockInvocationCount2024(level: number): number {
-  if (level >= 18) return 10;
-  if (level >= 15) return 9;
-  if (level >= 12) return 8;
-  if (level >= 9) return 7;
-  if (level >= 7) return 6;
-  if (level >= 5) return 5;
-  if (level >= 2) return 3;
-  if (level >= 1) return 1;
-  return 0;
-}
-
-function battleMasterManeuverCount(level: number): number {
-  // Below 3 there is no Battle Master, so the count is 0 — exactly as artificerInfusionCount
-  // guards level < 2 below. Without this the function returned 3 at levels 1 and 2, so the
-  // grant at level 3 was computed as a delta of 3 - 3 = 0 and the initial three maneuvers were
-  // never offered. Every later grant then under-delivered too (7th gave 2 instead of 5).
-  if (level < 3) return 0;
-  if (level >= 15) return 9;
-  if (level >= 10) return 7;
-  if (level >= 7) return 5;
-  return 3;
-}
-
-function artificerInfusionCount(level: number): number {
-  if (level < 2) return 0;
-  if (level >= 18) return 12;
-  if (level >= 14) return 10;
-  if (level >= 10) return 8;
-  if (level >= 6) return 6;
-  return 4;
-}
 
 // Compact selector for class options (invocations, metamagic, maneuvers, infusions)
 interface OptionPickerProps {
@@ -660,13 +601,13 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // NOT the difference against what's stored. Using stored length was wrong: if options were
   // set during the wizard they'd be counted as "already leveled-up", showing 0 new picks at
   // levels that do grant new ones.
-  const invocCountFn = classId === 'warlock-2024' ? warlockInvocationCount2024 : warlockInvocationCount;
+  const invocCountFn = (lv: number) => warlockInvocationsKnown(classId, lv);
   const totalNewInvocations = isWarlock ? Math.max(0, invocCountFn(newLevel) - invocCountFn(currentLevel)) : 0;
   const invocationsRemaining = Math.max(0, totalNewInvocations - pendingInvocations.length);
   const allPickedInvocations = [...classOpts.invocations, ...pendingInvocations];
 
   const isSorcerer = classId === 'sorcerer' || classId === 'sorcerer-2024';
-  const metaCountFn = classId === 'sorcerer-2024' ? sorcererMetamagicCount2024 : sorcererMetamagicCount;
+  const metaCountFn = (lv: number) => sorcererMetamagicKnown(classId, lv);
   const totalNewMetamagic = isSorcerer ? Math.max(0, metaCountFn(newLevel) - metaCountFn(currentLevel)) : 0;
   const metamagicRemaining = Math.max(0, totalNewMetamagic - pendingMetamagic.length);
   const allPickedMetamagic = [...classOpts.metamagic, ...pendingMetamagic];
@@ -675,12 +616,12 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     primary?.subclassId === 'battle-master' || pendingSubclass === 'battle-master' ||
     primary?.subclassId === 'battle-master-2024' || pendingSubclass === 'battle-master-2024'
   );
-  const totalNewManeuvers = isBattleMaster ? Math.max(0, battleMasterManeuverCount(newLevel) - battleMasterManeuverCount(currentLevel)) : 0;
+  const totalNewManeuvers = isBattleMaster ? Math.max(0, battleMasterManeuversKnown(newLevel) - battleMasterManeuversKnown(currentLevel)) : 0;
   const maneuversRemaining = Math.max(0, totalNewManeuvers - pendingManeuvers.length);
   const allPickedManeuvers = [...classOpts.maneuvers, ...pendingManeuvers];
 
   const isArtificer = classId === 'artificer';
-  const totalNewInfusions = isArtificer ? Math.max(0, artificerInfusionCount(newLevel) - artificerInfusionCount(currentLevel)) : 0;
+  const totalNewInfusions = isArtificer ? Math.max(0, artificerInfusionsKnown(newLevel) - artificerInfusionsKnown(currentLevel)) : 0;
   const infusionsRemaining = Math.max(0, totalNewInfusions - pendingInfusions.length);
   const allPickedInfusions = [...classOpts.infusions, ...pendingInfusions];
 

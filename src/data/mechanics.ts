@@ -337,3 +337,93 @@ export function maxPreparedSpellsFor(
       return null; // sorcerer, bard, ranger, warlock are known/spontaneous
   }
 }
+
+// ── Class option counts ───────────────────────────────────────────────────────
+//
+// How many invocations / metamagics / maneuvers / infusions a character KNOWS at a
+// given level. These live here, keyed on the raw class id, because they were
+// previously written out twice — once in the creator (StepClassOptions) and once
+// in LevelUpDialog — and the two copies disagreed. The creator's copies were
+// 2014-only, so a PHB 2024 warlock or sorcerer built in the creator was handed the
+// wrong number of class-defining choices, and because level-up grants a DELTA
+// (new count minus what you already picked), the shortfall was never offered again.
+//
+// Level-up's own 2024 copies were not right either: the sorcerer one had been
+// cloned from the 2014 ladder with only the starting level changed.
+
+/** PHB 2024 ids carry a `-2024` suffix; everything else is the 2014 edition. */
+const is2024 = (classId: string) => classId.endsWith('-2024');
+
+/**
+ * Eldritch Invocations known.
+ *
+ * The 2024 table is not the 2014 table shifted — it starts at level 1 with 1 and
+ * climbs to 10, where 2014 starts at level 2 with 2 and stops at 8. Transcribed
+ * from the 2024 Warlock features table (Invocations column) and the 2014 PHB.
+ */
+export function warlockInvocationsKnown(classId: string, level: number): number {
+  if (is2024(classId)) {
+    if (level >= 18) return 10;
+    if (level >= 15) return 9;
+    if (level >= 12) return 8;
+    if (level >= 9) return 7;
+    if (level >= 7) return 6;
+    if (level >= 5) return 5;
+    if (level >= 2) return 3;
+    return level >= 1 ? 1 : 0;
+  }
+  if (level < 2) return 0;
+  if (level >= 18) return 8;
+  if (level >= 15) return 7;
+  if (level >= 12) return 6;
+  if (level >= 9) return 5;
+  if (level >= 7) return 4;
+  if (level >= 5) return 3;
+  return 2;
+}
+
+/**
+ * Metamagic options known.
+ *
+ * 2024 PHB, Sorcerer level 2: "Gain 2 options ... Gain 2 more at level 10, 2 more
+ * at level 17" — so 2 / 4 / 6, where 2014 grants one at a time for 2 / 3 / 4. Both
+ * earlier copies of this had the 2014 counts, which left a level-20 2024 sorcerer
+ * two metamagics short.
+ */
+export function sorcererMetamagicKnown(classId: string, level: number): number {
+  if (is2024(classId)) {
+    if (level >= 17) return 6;
+    if (level >= 10) return 4;
+    return level >= 2 ? 2 : 0;
+  }
+  if (level >= 17) return 4;
+  if (level >= 10) return 3;
+  return level >= 3 ? 2 : 0;
+}
+
+/**
+ * Battle Master maneuvers known — 3 at level 3, then 2 more at 7, 10 and 15.
+ * Identical in both editions (2024: "Learn 3 maneuvers; add 2 more at levels 7,
+ * 10, 15"), so this one takes no class id.
+ *
+ * Returning 0 below 3 matters: the grant at level 3 is computed as a delta, so a
+ * non-zero answer at levels 1–2 makes it 3 − 3 = 0 and the initial three
+ * maneuvers are never offered at all.
+ */
+export function battleMasterManeuversKnown(level: number): number {
+  if (level < 3) return 0;
+  if (level >= 15) return 9;
+  if (level >= 10) return 7;
+  if (level >= 7) return 5;
+  return 3;
+}
+
+/** Artificer infusions known (TCE). No 2024 artificer exists, so there is one table. */
+export function artificerInfusionsKnown(level: number): number {
+  if (level < 2) return 0;
+  if (level >= 18) return 12;
+  if (level >= 14) return 10;
+  if (level >= 10) return 8;
+  if (level >= 6) return 6;
+  return 4;
+}

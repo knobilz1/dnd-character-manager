@@ -12,6 +12,9 @@ import { ALL_INFUSIONS } from '../../../data/infusions';
 import { ALL_OPTIONAL_CLASS_FEATURES } from '../../../data/optionalClassFeatures';
 import { bookEnabled } from '../../../utils/bookEnabled';
 import { baseClassId } from '../../../data/classes';
+import {
+  warlockInvocationsKnown, sorcererMetamagicKnown, battleMasterManeuversKnown, artificerInfusionsKnown,
+} from '../../../data/mechanics';
 import type { BookId, ClassOptionsState } from '../../../types';
 
 function bookColor(b: BookId): 'red' | 'amber' | 'purple' | 'blue' | 'green' | 'orange' | 'teal' | 'indigo' | 'violet' | 'rose' | 'yellow' | 'cyan' | 'gray' {
@@ -168,16 +171,11 @@ export function StepClassOptions() {
 
   // ── Eldritch Invocations & Pact Boon ────────────────────────────────
   const isWarlock = baseId === 'warlock';
-  let invocationCount = 0;
-  if (isWarlock) {
-    if (level >= 2) invocationCount = 2;
-    if (level >= 5) invocationCount = 3;
-    if (level >= 7) invocationCount = 4;
-    if (level >= 9) invocationCount = 5;
-    if (level >= 12) invocationCount = 6;
-    if (level >= 15) invocationCount = 7;
-    if (level >= 18) invocationCount = 8;
-  }
+  // Edition-aware and shared with LevelUpDialog. This used to be a 2014-only
+  // ladder written out by hand, so a PHB 2024 warlock was offered 0 invocations
+  // at level 1 (RAW: 1) and 2 at level 2 (RAW: 3) — and since level-up grants the
+  // DELTA against what you already hold, the missing ones were never offered again.
+  const invocationCount = isWarlock ? warlockInvocationsKnown(classId, level) : 0;
   const hasPactBoon = isWarlock && level >= 3;
 
   const invocationsAvail = ALL_INVOCATIONS
@@ -189,33 +187,17 @@ export function StepClassOptions() {
 
   // ── Metamagic ────────────────────────────────────────────────────────
   const isSorcerer = baseId === 'sorcerer';
-  let metamagicCount = 0;
-  if (isSorcerer) {
-    if (level >= 3) metamagicCount = 2;
-    if (level >= 10) metamagicCount = 3;
-    if (level >= 17) metamagicCount = 4;
-  }
+  const metamagicCount = isSorcerer ? sorcererMetamagicKnown(classId, level) : 0;
   const metamagicAvail = ALL_METAMAGIC.filter(m => bookEnabled(m, enabledBooks));
 
   // ── Maneuvers (Battle Master) ────────────────────────────────────────
   const isBattleMaster = baseId === 'fighter' && (subclassId === 'battle-master' || subclassId === 'battle-master-2024');
-  let maneuverCount = 0;
-  if (isBattleMaster) {
-    maneuverCount = 3;
-    if (level >= 7) maneuverCount = 5;
-    if (level >= 10) maneuverCount = 7;
-    if (level >= 15) maneuverCount = 9;
-  }
+  const maneuverCount = isBattleMaster ? battleMasterManeuversKnown(level) : 0;
   const maneuversAvail = ALL_MANEUVERS.filter(m => bookEnabled(m, enabledBooks));
 
   // ── Infusions (Artificer) ────────────────────────────────────────────
   const isArtificer = baseId === 'artificer';
-  let infusionsKnownCount = 0;
-  if (isArtificer && level >= 2) infusionsKnownCount = 4;
-  if (isArtificer && level >= 6) infusionsKnownCount = 6;
-  if (isArtificer && level >= 10) infusionsKnownCount = 8;
-  if (isArtificer && level >= 14) infusionsKnownCount = 10;
-  if (isArtificer && level >= 18) infusionsKnownCount = 12;
+  const infusionsKnownCount = isArtificer ? artificerInfusionsKnown(level) : 0;
   const infusionsAvail = ALL_INFUSIONS
     .filter(i => bookEnabled(i, enabledBooks))
     .filter(i => i.minLevel <= level);
