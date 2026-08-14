@@ -745,6 +745,14 @@ export function DMConsolePage() {
   }, []);
   const setError = React.useCallback((m: string | null) => addNotice('error', m), [addNotice]);
   const setWarning = React.useCallback((m: string | null) => addNotice('warning', m), [addNotice]);
+
+  /** The last turn that failed outright, kept so one click can re-run it. The
+   *  DM's words were spoken into a mic and are otherwise GONE when the engine
+   *  errors — the error notice said what broke but the only recovery was saying
+   *  the whole thing again. Cleared the moment any new attempt starts. */
+  const [failedTurn, setFailedTurn] = React.useState<{ text: string; speaker?: string; who: string } | null>(null);
+  /** Draft in the typed-turn input — the mic path's fallback. */
+  const [typedTurn, setTypedTurn] = React.useState('');
   const [dmModelOpen, setDmModelOpen] = React.useState(false);
   const [localModels, setLocalModels] = React.useState<string[]>([]);
   const [localModelsLoading, setLocalModelsLoading] = React.useState(false);
@@ -2294,6 +2302,9 @@ export function DMConsolePage() {
    *  and reported via `setError`/the returned `error` field, so callers
    *  (drainQueue in particular) can always inspect the outcome. */
   async function runTurn(spokenText: string, speaker: string | undefined, who: string, isReconnectRetry = false): Promise<TurnResult> {
+    // Any new attempt supersedes a stored failure — a Retry chip offering to
+    // re-run something older than the conversation would be worse than none.
+    setFailedTurn(null);
     if (!isReconnectRetry) setTurns((t) => [...t, { who, text: spokenText }]);
 
     // An ingestion call is actively (re)writing this campaign's memory/
@@ -2757,6 +2768,11 @@ export function DMConsolePage() {
       }
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
+      // Keep what failed so the Retry chip can re-run it verbatim. Stored for
+      // player turns too: their /talk request has long since gotten its error,
+      // but the narration their line deserved can still be produced and
+      // broadcast rather than lost.
+      setFailedTurn({ text: spokenText, speaker, who });
       return { narration: null, interrupted: false, error: message };
     }
   }
@@ -2811,6 +2827,48 @@ export function DMConsolePage() {
     autoRevertedRef.current = false;
     const { sentences } = extractCompleteSentences(lastDmNarrationRef.current);
     for (const sentence of sentences) enqueueSentence(sentence);
+  }
+
+  /** Runs one DM-side turn through the queue/processing gate. One function so
+   *  the mic path, the typed fallback and the Retry chip cannot drift apart —
+   *  all three queue behind an in-flight turn exactly like a remote player's
+   *  line does, and all three drain the queue when they settle. */
+  async function submitDmTurn(text: string, speaker: string | undefined, who: string, isRetry = false) {
+    if (processingRef.current) {
+      queueRef.current.push({ text });
+      return;
+    }
+    processingRef.current = true;
+    setBusy(true);
+    try {
+      await runTurn(text, speaker, who, isRetry);
+    } finally {
+      processingRef.current = false;
+      setBusy(false);
+      drainQueue(); // pick up anything a player sent while this turn ran
+    }
+  }
+
+  /** The typed fallback. The mic pipeline has real failure modes — no device on
+   *  this machine, the OS handing it to another app, Whisper failing to load —
+   *  and every one of them used to mean the DM could not run a turn AT ALL.
+   *  Deliberately not gated on sttReady: being usable while speech is broken is
+   *  the entire point. */
+  function submitTypedTurn() {
+    const text = typedTurn.trim();
+    if (!text) return;
+    setTypedTurn('');
+    void submitDmTurn(text, undefined, 'you');
+  }
+
+  /** Re-runs the stored failure. isRetry=true reuses the reconnect-retry
+   *  contract: the speaker's line is already in the transcript from the failed
+   *  attempt, so it must not be added twice. */
+  function retryFailedTurn() {
+    const f = failedTurn;
+    if (!f) return;
+    setFailedTurn(null);
+    void submitDmTurn(f.text, f.speaker, f.who, true);
   }
 
   async function handleTalkToggle() {
@@ -2868,24 +2926,7 @@ export function DMConsolePage() {
       return;
     }
 
-    if (processingRef.current) {
-      // Whatever we just interrupted (or a remote player's turn) hasn't
-      // finished resolving in the background yet — queue behind it, the
-      // same mechanism already used for remote players. Its own `finally`
-      // drains this the moment it settles (see drainQueue above).
-      queueRef.current.push({ text: spokenText });
-      return;
-    }
-
-    processingRef.current = true;
-    setBusy(true);
-    try {
-      await runTurn(spokenText, undefined, 'you');
-    } finally {
-      processingRef.current = false;
-      setBusy(false);
-      drainQueue(); // pick up anything a player sent while this turn ran
-    }
+    await submitDmTurn(spokenText, undefined, 'you');
   }
 
   /** Wraps up whatever campaign/session is currently active: if anything
@@ -5152,6 +5193,16 @@ export function DMConsolePage() {
               </div>
             )}
 
+            {failedTurn && !busy && (
+              <button
+                onClick={retryFailedTurn}
+                className="mb-2 mx-auto flex items-center gap-1.5 text-xs text-amber-300 hover:text-amber-200 bg-amber-950/40 border border-amber-700/40 rounded-lg px-3 py-1.5"
+                title="Run the failed turn again without repeating yourself"
+              >
+                <RotateCcw size={12} />
+                Retry: "{failedTurn.text.length > 60 ? failedTurn.text.slice(0, 60) + '\u2026' : failedTurn.text}"
+              </button>
+            )}
             <div className="flex items-center justify-center gap-3">
               <Button
                 size="lg"
@@ -5186,6 +5237,25 @@ export function DMConsolePage() {
                 Replay
               </Button>
             </div>
+
+            {/* The mic's fallback. Submitting while a turn is running queues
+                behind it, exactly as the mic path does. */}
+            {activeCampaignId && (
+              <form
+                className="flex items-center gap-2 mt-3"
+                onSubmit={(e) => { e.preventDefault(); submitTypedTurn(); }}
+              >
+                <input
+                  value={typedTurn}
+                  onChange={(e) => setTypedTurn(e.target.value)}
+                  placeholder={busy ? 'Type to the DM (queues behind the current turn)\u2026' : 'Or type to the DM\u2026'}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-600"
+                />
+                <Button size="sm" variant="outline" type="submit" disabled={!typedTurn.trim()}>
+                  Send
+                </Button>
+              </form>
+            )}
           </Card>
 
           {/* Sidebar: party + (when active) battle map */}
