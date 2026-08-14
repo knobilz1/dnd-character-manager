@@ -26,12 +26,20 @@
 //! otherwise, so each one gets an explicit read-only mode, and the flag is not
 //! optional or caller-supplied — it is welded into every builder in this file:
 //!
-//! | engine | lockdown           | must never appear                              |
-//! |--------|--------------------|------------------------------------------------|
-//! | claude | `--tools ""`       | any tool allowlist                             |
-//! | codex  | `-s read-only`     | `workspace-write`, `danger-full-access`,       |
-//! |        |                    | `--dangerously-bypass-approvals-and-sandbox`   |
-//! | gemini | `--approval-mode plan` | `-y` / `--yolo`, `auto_edit`               |
+//! | engine | lockdown                   | must never appear                          |
+//! |--------|----------------------------|--------------------------------------------|
+//! | claude | `--tools ""`               | any tool allowlist                         |
+//! | codex  | `--sandbox read-only`      | `workspace-write`, `danger-full-access`,   |
+//! |        | `--ignore-user-config`     | `--dangerously-bypass-approvals-and-sandbox`, |
+//! |        |                            | `--dangerously-bypass-hook-trust`, `--add-dir` |
+//! | gemini | `--mode plan --sandbox`    | `-y` / `--yolo`, `accept-edits`,           |
+//! |        |                            | `--dangerously-skip-permissions`, `--add-dir` |
+//!
+//! That table is the summary; `lockdown_flags` and `forbidden_flags` below are the
+//! truth, and the test at the bottom checks the code against the second of them.
+//! Nothing checks the table — it said `--approval-mode plan` and `auto_edit` for a
+//! full release after the Gemini CLI was swapped for Antigravity, which is the
+//! failure mode a prose table has and a tested list does not.
 //!
 //! Codex additionally gets `--ignore-user-config`: a user's own
 //! `~/.codex/config.toml` can set a permissive `sandbox_mode`, and while a CLI
@@ -192,6 +200,15 @@ fn lockdown_flags(engine: CliEngine) -> Vec<String> {
 
 /// Flags that must never be generated for an engine, at all, by anything. Used
 /// by the tests as a tripwire; listed here so the reason is next to the rule.
+///
+/// `#[cfg(test)]` because the tripwire is the only caller and always was — without
+/// it every non-test build warns this is dead code, which is noise on a function
+/// that is doing its job. It is deliberately NOT also checked at spawn time: every
+/// argv that carries a prompt is built by the functions below and covered by that
+/// test, and the only hand-built arg lists in dm.rs are auth handshakes and
+/// `--version` probes, which have no sandbox to widen. If a future call site ever
+/// assembles prompt args itself, that changes and this should become a real guard.
+#[cfg(test)]
 pub(crate) fn forbidden_flags(engine: CliEngine) -> &'static [&'static str] {
     match engine {
         CliEngine::Claude => &[],
