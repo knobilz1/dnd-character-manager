@@ -19,8 +19,8 @@ import type { SlotLevel } from '../../types';
 import { parseDamageDice } from '../../utils/damageDice';
 import { rollMode } from '../../utils/rollMode';
 import { armorPenalty } from '../../utils/armorProficiency';
-import { isProficientWithWeapon } from '../../utils/weaponProficiency';
 import { ResourceCounter } from '../../components/ResourceCounter';
+import { weaponAttackLine } from '../../utils/weaponAttack';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -251,20 +251,13 @@ function WeaponAttacksSideModule() {
   const { triggerRoll } = useDiceStore();
   if (!character || !derived) return null;
 
-  const { mods, profBonus, attacksPerAction, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
+  const { mods, profBonus, attacksPerAction, martialArtsDie, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
   const armorPen = armorPenalty(character);
   const equippedWeapons = (character.inventory ?? []).filter(
     (item: any) => item.equipped && item.category === 'weapon',
   );
   if (equippedWeapons.length === 0) {
     return <p className="text-xs text-slate-500 italic">No weapons equipped.</p>;
-  }
-
-  function abilityModForWeapon(w: ReturnType<typeof lookupWeapon>) {
-    if (!w) return mods.str;
-    if (w.ability === 'finesse') return Math.max(mods.str, mods.dex);
-    if (w.ability === 'dex' || w.ranged) return mods.dex;
-    return mods.str;
   }
 
   return (
@@ -275,19 +268,23 @@ function WeaponAttacksSideModule() {
         </p>
       )}
       {equippedWeapons.map((item: any) => {
-        const w = lookupWeapon(item.name);
-        const abilityMod = abilityModForWeapon(w);
-        // The main Weapon Attacks panel gates this on real proficiency; this copy
-        // added the bonus to every weapon, so an unproficient one read too high.
-        const proficient = isProficientWithWeapon(character, item.name);
-        const toHit = abilityMod + (proficient ? profBonus : 0);
-        const dmgDice = w?.damageDice ?? '1d6';
+        // Shared with the main sheet panel (utils/weaponAttack.ts). This copy used to do
+        // its own arithmetic and drifted from it — that is how it spent months adding the
+        // proficiency bonus to weapons the character wasn't proficient with.
+        const atk = weaponAttackLine(character, item, { mods, profBonus, martialArtsDie });
+        const w = atk.weapon;
+        const abilityMod = atk.damageBonus;
+        const toHit = atk.toHit;
+        const dmgDice = atk.damageDice;
         const dmgLabel = damageLine(dmgDice, abilityMod);
         const dmg = parseDamageDice(dmgDice);
 
         return (
           <div key={item.id} className="bg-slate-900/60 rounded-lg p-2">
             <p className="text-xs font-semibold text-white mb-1.5 truncate">{item.name}</p>
+            {atk.notes.length > 0 && (
+              <p className="text-[9px] text-emerald-300/80 mb-1">{atk.notes.join(' · ')}</p>
+            )}
             <div className="flex gap-1.5">
               <button
                 onClick={() => triggerRoll(20, toHit, `${item.name} Attack`,

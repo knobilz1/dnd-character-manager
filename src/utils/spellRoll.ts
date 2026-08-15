@@ -77,6 +77,23 @@ const UNPARSEABLE = new Set([
   'arcane-vigor',
   // Healing equals twice the necrotic damage you just took; one roll can't say that.
   'life-transference',
+  // "2d8 + 1d6 damage" — two different dice in one roll, which SpellRoll (one count,
+  // one size) cannot express. The parser read the 2d8 and silently dropped the d6,
+  // which is precisely the under-roll this module exists to prevent.
+  'chaos-bolt',
+]);
+
+/** Spells whose real roll is a multiple of the dice written in their text.
+ *
+ *  Magic Missile's description describes ONE dart ("a dart deals 1d4 + 1 force damage"),
+ *  so the parser offered 1d4+1 for a spell that throws three of them — under-rolling by
+ *  two-thirds on one of the most-cast spells in the game. Each extra slot level adds a
+ *  dart, and darts all resolve at once, so the whole volley is a single honest roll of
+ *  Nd4+N. Kept as a tiny table rather than a regex: "three darts" is prose no dice
+ *  pattern should be asked to understand. */
+const MULTI_DART = new Map<string, { base: number; perSlotLevel: number }>([
+  ['magic-missile', { base: 3, perSlotLevel: 1 }],
+  ['magic-missile-2024', { base: 3, perSlotLevel: 1 }],
 ]);
 
 export interface SpellRoll {
@@ -167,6 +184,16 @@ export function spellRoll(spell: Spell, opts: SpellRollOpts): SpellRoll | null {
     } else if (extra > 0 && spell.atHigherLevels) {
       unscaled = true;
     }
+  }
+
+  // Volley spells: the text describes one projectile, the casting throws several, and
+  // both the dice and the per-dart flat bonus multiply.
+  const darts = MULTI_DART.get(spell.id);
+  if (darts) {
+    const total = darts.base + darts.perSlotLevel * Math.max(0, (opts.slotLevel ?? spell.level) - spell.level);
+    count *= total;
+    modifier *= total;
+    unscaled = false; // the ladder is known exactly, so nothing is being guessed at
   }
 
   return { dice: { count, sides }, modifier, kind, ...(unscaled ? { unscaled } : {}) };

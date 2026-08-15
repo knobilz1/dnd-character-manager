@@ -18,13 +18,18 @@ export interface WeaponData {
   category: 'simple' | 'martial' | 'unarmed';
   versatile?: string;    // damage dice when used two-handed
   ranged?: boolean;      // ranged weapons use DEX for the attack roll
+  /** PHB "Two-Handed" property — REQUIRES both hands, unlike `versatile` (which merely
+   *  allows it). Two rules need to tell those apart: Dueling only applies to a melee
+   *  weapon held in one hand, and a monk weapon is a simple melee weapon that is neither
+   *  two-handed nor heavy. Without this flag both had to guess by name. */
+  twoHanded?: boolean;
 }
 
 export const WEAPON_TABLE: WeaponData[] = [
   // Simple Melee
   { name: 'club', category: 'simple',          damageDice: '1d4',  damageType: 'bludgeoning', ability: 'str' },
   { name: 'dagger', category: 'simple',        damageDice: '1d4',  damageType: 'piercing',    ability: 'finesse' },
-  { name: 'greatclub', category: 'simple',     damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'greatclub', category: 'simple',     damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str', twoHanded: true },
   { name: 'handaxe', category: 'simple',       damageDice: '1d6',  damageType: 'slashing',    ability: 'str' },
   { name: 'javelin', category: 'simple',       damageDice: '1d6',  damageType: 'piercing',    ability: 'str' },
   { name: 'light hammer', category: 'simple',  damageDice: '1d4',  damageType: 'bludgeoning', ability: 'str' },
@@ -41,15 +46,15 @@ export const WEAPON_TABLE: WeaponData[] = [
   // Martial Melee
   { name: 'battleaxe', category: 'martial',     damageDice: '1d8',  damageType: 'slashing',    ability: 'str', versatile: '1d10' },
   { name: 'flail', category: 'martial',         damageDice: '1d8',  damageType: 'bludgeoning', ability: 'str' },
-  { name: 'glaive', category: 'martial',        damageDice: '1d10', damageType: 'slashing',    ability: 'str' },
-  { name: 'greataxe', category: 'martial',      damageDice: '1d12', damageType: 'slashing',    ability: 'str' },
-  { name: 'greatsword', category: 'martial',    damageDice: '2d6',  damageType: 'slashing',    ability: 'str' },
-  { name: 'halberd', category: 'martial',       damageDice: '1d10', damageType: 'slashing',    ability: 'str' },
-  { name: 'lance', category: 'martial',         damageDice: '1d12', damageType: 'piercing',    ability: 'str' },
+  { name: 'glaive', category: 'martial',        damageDice: '1d10', damageType: 'slashing',    ability: 'str', twoHanded: true },
+  { name: 'greataxe', category: 'martial',      damageDice: '1d12', damageType: 'slashing',    ability: 'str', twoHanded: true },
+  { name: 'greatsword', category: 'martial',    damageDice: '2d6',  damageType: 'slashing',    ability: 'str', twoHanded: true },
+  { name: 'halberd', category: 'martial',       damageDice: '1d10', damageType: 'slashing',    ability: 'str', twoHanded: true },
+  { name: 'lance', category: 'martial',         damageDice: '1d12', damageType: 'piercing',    ability: 'str', twoHanded: true },
   { name: 'longsword', category: 'martial',     damageDice: '1d8',  damageType: 'slashing',    ability: 'str', versatile: '1d10' },
-  { name: 'maul', category: 'martial',          damageDice: '2d6',  damageType: 'bludgeoning', ability: 'str' },
+  { name: 'maul', category: 'martial',          damageDice: '2d6',  damageType: 'bludgeoning', ability: 'str', twoHanded: true },
   { name: 'morningstar', category: 'martial',   damageDice: '1d8',  damageType: 'piercing',    ability: 'str' },
-  { name: 'pike', category: 'martial',          damageDice: '1d10', damageType: 'piercing',    ability: 'str' },
+  { name: 'pike', category: 'martial',          damageDice: '1d10', damageType: 'piercing',    ability: 'str', twoHanded: true },
   { name: 'rapier', category: 'martial',        damageDice: '1d8',  damageType: 'piercing',    ability: 'finesse' },
   { name: 'scimitar', category: 'martial',      damageDice: '1d6',  damageType: 'slashing',    ability: 'finesse' },
   { name: 'shortsword', category: 'martial',    damageDice: '1d6',  damageType: 'piercing',    ability: 'finesse' },
@@ -65,12 +70,26 @@ export const WEAPON_TABLE: WeaponData[] = [
   { name: 'net', category: 'martial',           damageDice: '—',    damageType: '—',           ability: 'dex', ranged: true },
 ];
 
-/** Returns the weapon entry whose name or alias appears in the given item name. */
+/** Returns the weapon entry whose name or alias appears in the given item name.
+ *
+ *  The LONGEST match wins, not the first one in the table: "greatclub" contains "club",
+ *  and since `club` is listed first a Greatclub was resolving to a club — 1d4 instead of
+ *  1d8, one-handed instead of two (found 2026-08-15 by the monk-weapon tests). Table
+ *  order should not decide a weapon's stats, and specificity is the rule that can't be
+ *  broken by adding an entry later. */
 export function lookupWeapon(itemName: string): WeaponData | undefined {
   const lower = itemName.toLowerCase();
-  return WEAPON_TABLE.find(w =>
-    lower.includes(w.name) || w.aliases?.some(a => lower.includes(a))
-  );
+  let best: WeaponData | undefined;
+  let bestLength = 0;
+  for (const w of WEAPON_TABLE) {
+    for (const key of [w.name, ...(w.aliases ?? [])]) {
+      if (key.length > bestLength && lower.includes(key)) {
+        best = w;
+        bestLength = key.length;
+      }
+    }
+  }
+  return best;
 }
 
 /** Roll a single die expression like "1d8", "2d6", or "1" (for flat 1 dmg). */

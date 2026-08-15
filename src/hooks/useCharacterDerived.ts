@@ -166,6 +166,17 @@ export function computeCharacterDerived(character: Character) {
     if (!equippedArmor && character.selectedFeats.includes('dragon-hide')) {
       ac = Math.max(ac, 13 + mods.dex);
     }
+    // Draconic Bloodline's scaly hide (PHB p.102): 13 + DEX unarmored. The subclass data
+    // modelled the hit-point half of Draconic Resilience (hpBonusPerLevel) but never the
+    // AC half, so a level-1 draconic sorcerer sat at 10 + DEX — three points light, all
+    // game. The 2024 rework (Draconic Sorcery) instead grants 10 + DEX + CHA.
+    if (!equippedArmor) {
+      const draconic = character.classes.find(
+        (cl) => cl.subclassId === 'draconic-bloodline' || cl.subclassId === 'draconic-bloodline-2024',
+      );
+      if (draconic?.subclassId === 'draconic-bloodline') ac = Math.max(ac, 13 + mods.dex);
+      if (draconic?.subclassId === 'draconic-bloodline-2024') ac = Math.max(ac, 10 + mods.dex + mods.cha);
+    }
     // Shield: +2 AC bonus regardless of armor (Monk loses Unarmored Defense above if shield equipped)
     if (equippedShield) ac += 2;
 

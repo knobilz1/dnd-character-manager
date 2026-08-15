@@ -84,9 +84,11 @@ describe('upcasting', () => {
     expect(at('mind-spike', 5, 4)!.dice).toEqual({ count: 5, sides: 8 });
   });
 
-  /** Extra rays, darts and bolts are not extra dice on one roll. Flagging is the
-   *  point: the caller must not present a base-level number as the final one. */
-  it.each(['scorching-ray', 'magic-missile', 'chain-lightning'])(
+  /** Extra rays and bolts are not extra dice on one roll. Flagging is the
+   *  point: the caller must not present a base-level number as the final one.
+   *  (Magic Missile used to be in this list; its ladder is now known exactly —
+   *  see the volley tests below.) */
+  it.each(['scorching-ray', 'chain-lightning'])(
     '%s reports that its upcast could not be read', (id) => {
       const sp = s(id);
       expect(spellRoll(sp, { charLevel: 9, slotLevel: sp.level + 1 })!.unscaled).toBe(true);
@@ -108,10 +110,25 @@ describe('the modifier the text asks for', () => {
     expect(at('spiritual-weapon', 5, 2, 3)).toMatchObject({ dice: { count: 1, sides: 8 }, modifier: 3, kind: 'damage' });
   });
 
-  /** Magic Missile's +1 is a flat bonus on the dart, not anybody's modifier —
-   *  a 20-Wisdom cleric must not turn it into +5. */
-  it('Magic Missile takes the flat +1 and nothing else', () => {
-    expect(at('magic-missile', 5, 1, 5)).toMatchObject({ dice: { count: 1, sides: 4 }, modifier: 1 });
+  /** Magic Missile's +1 is a flat bonus on each dart, not anybody's modifier —
+   *  a 20-Wisdom cleric must not turn it into +5. The spell throws THREE darts,
+   *  so a base casting is 3d4+3; the text describes one dart, and reading it
+   *  literally under-rolled the spell by two thirds. */
+  it('Magic Missile rolls the whole volley: three darts of 1d4+1', () => {
+    expect(at('magic-missile', 5, 1, 5)).toMatchObject({ dice: { count: 3, sides: 4 }, modifier: 3 });
+  });
+
+  it('Magic Missile gains a dart per slot level, and says so exactly', () => {
+    expect(at('magic-missile', 9, 2)).toMatchObject({ dice: { count: 4, sides: 4 }, modifier: 4 });
+    expect(at('magic-missile', 9, 5)).toMatchObject({ dice: { count: 7, sides: 4 }, modifier: 7 });
+    // The ladder is known, so this must NOT be flagged as unreadable any more.
+    expect(at('magic-missile', 9, 5)!.unscaled).toBeUndefined();
+  });
+
+  /** "2d8 + 1d6" is two different dice; one SpellRoll cannot say that, and reading
+   *  only the 2d8 silently dropped a die. Better to offer no button than a low number. */
+  it('Chaos Bolt offers no roll rather than a wrong one', () => {
+    expect(spellRoll(s('chaos-bolt'), { charLevel: 5 })).toBeNull();
   });
 
   it('Fireball adds no modifier however high the caster', () => {

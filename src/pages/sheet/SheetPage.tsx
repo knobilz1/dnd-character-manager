@@ -11,7 +11,6 @@ import { useCharacterStore } from '../../store/useCharacterStore';
 import { useCharacterDerived, casterClassOf } from '../../hooks/useCharacterDerived';
 import { resistancesOf } from '../../utils/damageResistance';
 import { isPreparedCaster as isPreparedCasterId, SKILL_ABILITY } from '../../data/mechanics';
-import { isProficientWithWeapon } from '../../utils/weaponProficiency';
 import { armorPenalty } from '../../utils/armorProficiency';
 import { Button, Tabs, Dialog, StatBox, SectionHeader, ThemeToggleButton } from '../../components/ui';
 import { cn } from '../../utils/cn';
@@ -47,6 +46,7 @@ import { rollMode } from '../../utils/rollMode';
 import { fileToPortraitDataUrl } from '../../utils/portrait';
 import { lookupWeapon, damageLine } from '../../data/weapons';
 import { ResourceCounter } from '../../components/ResourceCounter';
+import { weaponAttackLine } from '../../utils/weaponAttack';
 
 // Lazy-loaded so the three/R3F bundle is a separate chunk — only fetched when the
 // experimental 3D character viewport is enabled (Phase 0 spike).
@@ -1486,7 +1486,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
-function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; attacksPerAction: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
+function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, martialArtsDie, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; attacksPerAction: number; martialArtsDie: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
   const { triggerRoll } = useDiceStore();
 
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
@@ -1496,13 +1496,6 @@ function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, exha
   // and every weapon attack is Str or Dex. Derived here from `character` rather than threaded
   // in as a prop, so the panel cannot be rendered without it.
   const weaponArmorPen = armorPenalty(character);
-
-  function abilityModForWeapon(w: ReturnType<typeof lookupWeapon>) {
-    if (!w) return mods.str;
-    if (w.ability === 'finesse') return Math.max(mods.str, mods.dex);
-    if (w.ability === 'dex' || w.ranged) return mods.dex;
-    return mods.str;
-  }
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
@@ -1519,15 +1512,17 @@ function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, exha
       </div>
       <div className="space-y-2">
         {equippedWeapons.map((item: any) => {
-          const w = lookupWeapon(item.name);
-          const abilityMod = abilityModForWeapon(w);
-          // The proficiency bonus applies only if the character is actually proficient. This used
-          // to be unconditional, which made every character proficient with every weapon and left
-          // the whole class/race weapon-proficiency layer computing nothing.
-          const proficient = isProficientWithWeapon(character, item.name);
-          const toHit = abilityMod + (proficient ? profBonus : 0);
-          const dmgDice = w?.damageDice ?? '1d6';
-          const dmgType = w?.damageType ?? '—';
+          // One shared computation with the sidebar module (utils/weaponAttack.ts): ability
+          // choice incl. monk weapons, proficiency gating, fighting styles, magic +N, and the
+          // Martial Arts die. The two panels used to do this arithmetic separately and had
+          // drifted apart.
+          const atk = weaponAttackLine(character, item, { mods, profBonus, martialArtsDie });
+          const w = atk.weapon;
+          const proficient = atk.proficient;
+          const toHit = atk.toHit;
+          const dmgDice = atk.damageDice;
+          const dmgType = atk.damageType;
+          const abilityMod = atk.damageBonus;
           const dmgLabel = w ? damageLine(dmgDice, abilityMod) : `?d? + ${abilityMod >= 0 ? '+' : ''}${abilityMod}`;
           const dmg = parseDamageDice(dmgDice);
 
@@ -1549,6 +1544,11 @@ function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, exha
                   {w && <span className="text-[10px] text-slate-500 capitalize">{dmgType}</span>}
                 </div>
               </div>
+              {/* Why these numbers differ from the bare weapon — a silently larger bonus
+                  reads as a bug just as much as a silently smaller one. */}
+              {atk.notes.length > 0 && (
+                <p className="text-[10px] text-emerald-300/80 mb-1.5">{atk.notes.join(' · ')}</p>
+              )}
               <div className="flex items-center gap-2">
                 {/* Attack roll */}
                 <button
@@ -1868,7 +1868,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       )}
 
       {/* Weapon Attacks */}
-      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} attacksPerAction={attacksPerAction} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
+      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} attacksPerAction={attacksPerAction} martialArtsDie={martialArtsDie} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
 
       {/* Companions — a second creature, not a transformation. Renders nothing unless the
           character can have one or already does. */}
