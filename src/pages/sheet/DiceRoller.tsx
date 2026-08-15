@@ -238,6 +238,16 @@ const EXHAUSTION_REMINDER: Record<number, string> = {
   6: '☠ Dead (Exhaustion 6)',
 };
 
+/** The reminder for whichever edition this character plays under. The 2024 rules replaced
+ *  the staircase above with one flat penalty, so showing the 2014 text to a 2024 character
+ *  described a rule they aren't playing — and the penalty is already baked into the numbers
+ *  on the sheet, which is exactly what a player needs told. */
+function exhaustionReminder(level: number, uses2024: boolean): string {
+  if (!uses2024) return EXHAUSTION_REMINDER[level] ?? '';
+  if (level >= 6) return '☠ Dead (Exhaustion 6)';
+  return `−${2 * level} to all D20 Tests · Speed −${5 * level} ft (Exhaustion ${level})`;
+}
+
 /** Renders one settled roll as a text line for the DM — used by both the
  *  auto-send checkbox (labeled rolls only) and the manual "Send to DM" button
  *  (any roll). `label` absent means an unlabeled manual click; `modifier`
@@ -270,7 +280,7 @@ export function describeRollForDM(opts: {
 }
 
 // ── Main component ──────────────────────────────────────────────────────────
-export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionLevel?: number; characterName?: string }) {
+export function DiceRoller({ exhaustionLevel = 0, uses2024Exhaustion = false, characterName }: { exhaustionLevel?: number; uses2024Exhaustion?: boolean; characterName?: string }) {
   const [open, setOpen] = React.useState(false);
   const [mode, setMode] = React.useState<Mode>('normal');
   const [activeDie, setActiveDie] = React.useState<Die | null>(null);
@@ -741,11 +751,11 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
           )}
 
           {/* Exhaustion reminder — always visible when panel is open */}
-          {exhaustionLevel >= 1 && EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)] && (
+          {exhaustionLevel >= 1 && (
             <div className="mx-4 mb-1 px-2.5 py-1.5 rounded-lg bg-orange-950/60 border border-orange-800/60 flex items-start gap-1.5">
               <span className="text-orange-400 text-[11px] shrink-0 mt-px">⚠</span>
               <p className="text-[11px] text-orange-300 leading-tight">
-                {EXHAUSTION_REMINDER[Math.min(exhaustionLevel, 6)]}
+                {exhaustionReminder(Math.min(exhaustionLevel, 6), uses2024Exhaustion)}
               </p>
             </div>
           )}

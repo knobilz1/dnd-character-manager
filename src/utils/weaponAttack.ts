@@ -64,7 +64,14 @@ function dieSides(dice: string): number {
 export function weaponAttackLine(
   character: Character,
   item: Pick<InventoryItem, 'name'>,
-  ctx: { mods: Record<string, number>; profBonus: number; martialArtsDie: number },
+  ctx: {
+    mods: Record<string, number>;
+    profBonus: number;
+    martialArtsDie: number;
+    /** PHB 2024 exhaustion: a flat penalty on every D20 Test, which an attack roll is.
+     *  Zero for 2014 characters, who take disadvantage instead. */
+    d20Penalty?: number;
+  },
 ): WeaponAttackLine {
   const w = lookupWeapon(item.name);
   const { mods, profBonus, martialArtsDie } = ctx;
@@ -110,7 +117,7 @@ export function weaponAttackLine(
   return {
     weapon: w,
     proficient,
-    toHit: abilityMod + (proficient ? profBonus : 0) + magic + archery,
+    toHit: abilityMod + (proficient ? profBonus : 0) + magic + archery + (ctx.d20Penalty ?? 0),
     damageDice,
     versatileDice: w?.versatile,
     damageBonus: abilityMod + magic + dueling,

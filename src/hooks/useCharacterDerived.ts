@@ -116,6 +116,22 @@ export function computeCharacterDerived(character: Character) {
       cha: abilityMod(finalScores.cha ?? 10),
     };
 
+    const exhaustionLevel = character.exhaustionLevel ?? 0;
+    /**
+     * PHB 2024 replaced the exhaustion staircase with one rule: −2 on every D20 Test per
+     * level and −5 ft of Speed per level, dead at 6. It is a different mechanic, not a
+     * tuning change, so a 2024 character was being run under 2014's disadvantage ladder —
+     * harsher in some places (disadvantage on every check from level 1) and blank in
+     * others (no penalty at all to attacks until level 3).
+     *
+     * The penalty is folded into the DERIVED numbers (skills, saves, initiative, spell
+     * attack, and weapon attacks via weaponAttackLine) rather than pushed out to every
+     * roll button. That way the sheet displays the number you actually roll with, and no
+     * call site can forget to apply it.
+     */
+    const uses2024Exhaustion = (character.enabledBooks ?? []).includes('PHB2024');
+    const exhaustionD20Penalty = uses2024Exhaustion ? -2 * Math.min(exhaustionLevel, 6) : 0;
+
     // AC — check for equipped armor/shield from inventory first
     const equippedArmor = character.inventory.find(item => item.category === 'armor' && item.equipped);
     const equippedShield = character.inventory.find(item => item.category === 'shield' && item.equipped);
@@ -213,7 +229,7 @@ export function computeCharacterDerived(character: Character) {
     }
     const savingThrows: Record<AbilityKey, number> = {} as Record<AbilityKey, number>;
     for (const k of Object.keys(mods) as AbilityKey[]) {
-      savingThrows[k] = mods[k] + (savingThrowProficiencies.has(k) ? profBonus : 0);
+      savingThrows[k] = mods[k] + (savingThrowProficiencies.has(k) ? profBonus : 0) + exhaustionD20Penalty;
     }
     // Paladin Aura of Protection (lv.6): +CHA mod (min +1) to all saving throws
     if (paladinLevel >= 6) {
@@ -330,14 +346,14 @@ export function computeCharacterDerived(character: Character) {
       // Champion Remarkable Athlete (lv.7): ceil(prof/2) to non-proficient STR/DEX/CON checks
       const remarkableBonus = hasRemarkableAthlete && !skillProfs.has(skill as any) && (ability === 'str' || ability === 'dex' || ability === 'con')
         ? Math.ceil(profBonus / 2) : 0;
-      skills[skill] = base + prof + expertiseBonus + Math.max(jackOfAllTrades, remarkableBonus);
+      skills[skill] = base + prof + expertiseBonus + Math.max(jackOfAllTrades, remarkableBonus) + exhaustionD20Penalty;
     }
     const passivePerception    = 10 + (skills['Perception']    ?? 0) + featPassivePerceptionBonus;
     const passiveInsight       = 10 + (skills['Insight']       ?? 0);
     const passiveInvestigation = 10 + (skills['Investigation'] ?? 0) + featPassiveInvestigationBonus;
 
     // Initiative — Bard Jack of All Trades (lv.2+) adds half prof bonus
-    const initiative = mods.dex + featInitiativeBonus + (bardLevel >= 2 ? Math.floor(profBonus / 2) : 0);
+    const initiative = mods.dex + featInitiativeBonus + (bardLevel >= 2 ? Math.floor(profBonus / 2) : 0) + exhaustionD20Penalty;
 
     // A3 — features that grant ADVANTAGE. The dice layer has carried a mode end to end all along
     // (useDiceStore 'normal' | 'advantage' | 'disadvantage'); the gap was that only exhaustion ever
@@ -383,10 +399,12 @@ export function computeCharacterDerived(character: Character) {
       ? 10 : 0;
 
     // Speed (feat + class bonuses applied before exhaustion halving)
-    const exhaustionLevel = character.exhaustionLevel ?? 0;
     const _baseSpeed = (race?.speed ?? 30) + featSpeedBonus + monkSpeedBonus + barbFastMovement;
-    // Exhaustion halves or zeroes EVERY speed, not just walking (PHB p.291).
-    const exhaust = (v: number) => exhaustionLevel >= 5 ? 0 : exhaustionLevel >= 2 ? Math.floor(v / 2) : v;
+    // 2014 halves or zeroes EVERY speed, not just walking (PHB p.291); 2024 subtracts a
+    // flat 5 ft per level instead, which can also reach 0.
+    const exhaust = (v: number) => uses2024Exhaustion
+      ? Math.max(0, v - 5 * exhaustionLevel)
+      : exhaustionLevel >= 5 ? 0 : exhaustionLevel >= 2 ? Math.floor(v / 2) : v;
     const speed = exhaust(_baseSpeed);
     // Racial fly/swim/climb existed on the Race type but nothing set or read them, so
     // an Aarakocra sheet showed "30 ft" and nothing else. fly: 'walk' means "equal to
@@ -409,7 +427,7 @@ export function computeCharacterDerived(character: Character) {
     if (primaryEff?.ability) {
       spellcastingAbility = primaryEff.ability;
       spellSaveDC = 8 + profBonus + mods[spellcastingAbility];
-      spellAttackBonus = profBonus + mods[spellcastingAbility];
+      spellAttackBonus = profBonus + mods[spellcastingAbility] + exhaustionD20Penalty;
     }
 
     // Spell slot totals — counts each class's effective spellcasting type (from subclass if needed).
@@ -779,13 +797,14 @@ export function computeCharacterDerived(character: Character) {
     }
 
     // Exhaustion flags
-    const exhaustionDisadvChecks = exhaustionLevel >= 1; // disadvantage on ability checks / skills
+    // 2024 carries no disadvantage at any level — the flat penalty above is the whole rule.
+    const exhaustionDisadvChecks = !uses2024Exhaustion && exhaustionLevel >= 1;
     // Level 3 imposes disadvantage on attack rolls AND saving throws (PHB p.291).
     // Only the saves half existed, so an exhausted character rolled attacks straight
     // — the more visible half of the penalty, and the one that comes up every turn.
-    const exhaustionDisadvSaves  = exhaustionLevel >= 3; // disadvantage on saving throws
-    const exhaustionDisadvAttacks = exhaustionLevel >= 3; // disadvantage on attack rolls
-    const exhaustionHpMaxHalved  = exhaustionLevel >= 4; // HP maximum is halved
+    const exhaustionDisadvSaves  = !uses2024Exhaustion && exhaustionLevel >= 3;
+    const exhaustionDisadvAttacks = !uses2024Exhaustion && exhaustionLevel >= 3;
+    const exhaustionHpMaxHalved  = !uses2024Exhaustion && exhaustionLevel >= 4;
 
     // Conditions, which until now were labels the sheet displayed and nothing read.
     // Kept as the LIST of conditions responsible rather than a bare boolean, so the
@@ -880,6 +899,8 @@ export function computeCharacterDerived(character: Character) {
       casterClassDef,
       exhaustionLevel,
       exhaustionDisadvChecks,
+      exhaustionD20Penalty,
+      uses2024Exhaustion,
       exhaustionDisadvSaves,
       exhaustionDisadvAttacks,
       conditionDisadvAttacks,

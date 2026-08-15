@@ -251,7 +251,7 @@ function WeaponAttacksSideModule() {
   const { triggerRoll } = useDiceStore();
   if (!character || !derived) return null;
 
-  const { mods, profBonus, attacksPerAction, martialArtsDie, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
+  const { mods, profBonus, attacksPerAction, martialArtsDie, exhaustionD20Penalty, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
   const armorPen = armorPenalty(character);
   const equippedWeapons = (character.inventory ?? []).filter(
     (item: any) => item.equipped && item.category === 'weapon',
@@ -271,7 +271,7 @@ function WeaponAttacksSideModule() {
         // Shared with the main sheet panel (utils/weaponAttack.ts). This copy used to do
         // its own arithmetic and drifted from it — that is how it spent months adding the
         // proficiency bonus to weapons the character wasn't proficient with.
-        const atk = weaponAttackLine(character, item, { mods, profBonus, martialArtsDie });
+        const atk = weaponAttackLine(character, item, { mods, profBonus, martialArtsDie, d20Penalty: exhaustionD20Penalty });
         const w = atk.weapon;
         const abilityMod = atk.damageBonus;
         const toHit = atk.toHit;

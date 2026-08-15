@@ -256,7 +256,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, flySpeed, swimSpeed, climbSpeed, attacksPerAction, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks, conditionDisadvChecks, conditionDisadvDexSaves, conditionAutoFailStrDexSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, flySpeed, swimSpeed, climbSpeed, attacksPerAction, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks, conditionDisadvChecks, conditionDisadvDexSaves, conditionAutoFailStrDexSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC, exhaustionD20Penalty, uses2024Exhaustion } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -376,7 +376,7 @@ export function SheetPage() {
           >
             <History size={18} />
           </button>
-          <DiceRoller exhaustionLevel={exhaustionLevel} characterName={character.name} />
+          <DiceRoller exhaustionLevel={exhaustionLevel} uses2024Exhaustion={uses2024Exhaustion} characterName={character.name} />
           <SendToDmButton character={character} />
           <TalkToDMButton characterName={character.name} />
           <DmNarrationLog characterName={character.name} />
@@ -507,10 +507,16 @@ export function SheetPage() {
                 )}
               </button>
               {/* Speed */}
-              <div className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center', exhaustionLevel >= 2 ? 'border-orange-700/60' : 'border-slate-700')}
-                title={exhaustionLevel >= 5 ? 'Speed reduced to 0 (Exhaustion 5)' : exhaustionLevel >= 2 ? `Speed halved from ${baseSpeed} ft (Exhaustion 2)` : undefined}>
+              {/* The two editions reduce speed differently — 2024 takes 5 ft per level,
+                  2014 halves it from level 2 — so the warning has to say which applies. */}
+              <div className={cn('bg-slate-900 border rounded-lg py-2 px-1 text-center',
+                speed < baseSpeed ? 'border-orange-700/60' : 'border-slate-700')}
+                title={speed === baseSpeed ? undefined
+                  : uses2024Exhaustion ? `Speed reduced from ${baseSpeed} ft (−5 ft per Exhaustion level)`
+                  : exhaustionLevel >= 5 ? 'Speed reduced to 0 (Exhaustion 5)'
+                  : `Speed halved from ${baseSpeed} ft (Exhaustion 2)`}>
                 <p className="text-xs text-slate-400">Speed</p>
-                <p className={cn('font-bold', exhaustionLevel >= 2 ? 'text-orange-300' : 'text-white')}>{speed} ft</p>
+                <p className={cn('font-bold', speed < baseSpeed ? 'text-orange-300' : 'text-white')}>{speed} ft</p>
                 {(flySpeed > 0 || swimSpeed > 0 || climbSpeed > 0) && (
                   <p className="text-[10px] text-sky-300/90 leading-tight">
                     {[flySpeed > 0 ? `fly ${flySpeed}` : null, swimSpeed > 0 ? `swim ${swimSpeed}` : null, climbSpeed > 0 ? `climb ${climbSpeed}` : null].filter(Boolean).join(' · ')}
@@ -740,6 +746,7 @@ export function SheetPage() {
                 rageDamageBonus={rageDamageBonus}
                 kiSaveDC={kiSaveDC}
                 attacksPerAction={attacksPerAction}
+                exhaustionD20Penalty={exhaustionD20Penalty}
               />
             )}
             {tab === 'spells' && (
@@ -1486,7 +1493,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
-function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, martialArtsDie, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; attacksPerAction: number; martialArtsDie: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
+function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, martialArtsDie, exhaustionD20Penalty, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; attacksPerAction: number; martialArtsDie: number; exhaustionD20Penalty: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
   const { triggerRoll } = useDiceStore();
 
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
@@ -1516,7 +1523,7 @@ function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, mart
           // choice incl. monk weapons, proficiency gating, fighting styles, magic +N, and the
           // Martial Arts die. The two panels used to do this arithmetic separately and had
           // drifted apart.
-          const atk = weaponAttackLine(character, item, { mods, profBonus, martialArtsDie });
+          const atk = weaponAttackLine(character, item, { mods, profBonus, martialArtsDie, d20Penalty: exhaustionD20Penalty });
           const w = atk.weapon;
           const proficient = atk.proficient;
           const toHit = atk.toHit;
@@ -1723,7 +1730,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
   onOpenWildShapeModal, deactivateWildShape, damageWildShape, healWildShape,
   setPathOfBeastForm, setArmorerMode,
-  sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC, attacksPerAction }: any) {
+  sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC, attacksPerAction, exhaustionD20Penalty }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   /** Open a companion in its own window so it can sit beside the sheet while you run both.
@@ -1868,7 +1875,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       )}
 
       {/* Weapon Attacks */}
-      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} attacksPerAction={attacksPerAction} martialArtsDie={martialArtsDie} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
+      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} attacksPerAction={attacksPerAction} martialArtsDie={martialArtsDie} exhaustionD20Penalty={exhaustionD20Penalty} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
 
       {/* Companions — a second creature, not a transformation. Renders nothing unless the
           character can have one or already does. */}
