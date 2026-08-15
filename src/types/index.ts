@@ -279,6 +279,12 @@ export interface Background {
    *  and setting them here would hand a 2014 character a bonus the rules never gave them. */
   abilityScoreOptions?: AbilityKey[];
   flexibleAsi?: number[][];
+  /** PHB 2024 only: the Origin feat this background grants at level 1. It is NOT an ASI
+   *  pick — it comes free, on top of whatever feats the class earns — which is why it
+   *  lives here rather than being pushed into `selectedFeats`. Read it through
+   *  `effectiveFeatIds` (utils/effectiveFeats.ts); until that existed the feat was only
+   *  ever prose in `feature.description` and granted nothing at all. */
+  originFeatId?: string;
   skillProficiencies: [SkillName, SkillName];
   toolProficiencies: string[];
   languages: number;

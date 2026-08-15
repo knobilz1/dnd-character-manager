@@ -1,10 +1,10 @@
 import { ALL_RACES } from '../data/races';
-import { ALL_CLASSES, baseClassId } from '../data/classes';
+import { ALL_CLASSES } from '../data/classes';
 import { ALL_SUBCLASSES } from '../data/subclasses';
 import { ALL_BACKGROUNDS } from '../data/backgrounds';
 import { ALL_SPELLS } from '../data/spells';
 import {
-  cantripsKnownFor, spellsKnownFor, maxPreparedSpellsFor, computeMaxSpellLevel, ASI_LEVELS,
+  cantripsKnownFor, spellsKnownFor, maxPreparedSpellsFor, computeMaxSpellLevel, asiSlotsAt,
 } from '../data/mechanics';
 import { bookEnabled } from './bookEnabled';
 import { chosenAsi } from './racialAsi';
@@ -145,7 +145,7 @@ export function rollRandomCharacter(
   // Ability Score Improvements owed by this level. Spent as +2 ability points rather than feats:
   // both are legal, but points are always available while a feat can fail its prerequisites, and
   // a roll that silently skips them hands back a level-12 character with level-1 ability scores.
-  const asiSlots = (ASI_LEVELS[baseClassId(cls.id)] ?? []).filter(l => l <= level).length;
+  const asiSlots = asiSlotsAt(cls.id, level);
   const asiSlotsSpent = spendAsiPoints(baseAbilityScores, cls.primaryAbility ?? [], asiSlots,
     race, racialAbilityChoice);
 

@@ -10,6 +10,7 @@ import {
   FULL_CASTER_SLOTS, HALF_CASTER_SLOTS, ARTIFICER_SLOTS, THIRD_CASTER_SLOTS, PACT_MAGIC_TABLE,
   warlockInvocationsKnown, sorcererMetamagicKnown, battleMasterManeuversKnown, artificerInfusionsKnown,
 } from '../../data/mechanics';
+import { effectiveFeatIds } from '../../utils/effectiveFeats';
 import { ALL_FEATS, getEligibleFeats } from '../../data/feats';
 import { ALL_FIGHTING_STYLES, fightingStylesAllowed } from '../../data/fightingStyles';
 import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
@@ -143,7 +144,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const subHPBonusPerLevel =
     getSubclass(primary?.subclassId ?? pendingSubclass ?? '')?.hpBonusPerLevel ?? 0;
   const raceHPBonusPerLevel = getRace(character.raceId)?.hpBonusPerLevel ?? 0;
-  const existingFeatHPBonusPerLevel = (character.selectedFeats ?? []).reduce((sum, fid) => {
+  const existingFeatHPBonusPerLevel = effectiveFeatIds(character).reduce((sum, fid) => {
     const feat = ALL_FEATS.find(f => f.id === fid);
     return sum + (feat?.hpBonusPerLevel ?? 0);
   }, 0);

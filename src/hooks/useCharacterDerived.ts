@@ -16,6 +16,7 @@ import { ARMOR_STATS } from '../data/items';
 import { chosenAsi } from '../utils/racialAsi';
 import { conditionsCausing } from '../data/conditionEffects';
 import { armorPenalty } from '../utils/armorProficiency';
+import { effectiveFeatIds } from '../utils/effectiveFeats';
 
 // Eldritch Knight and Arcane Trickster get spellcasting via subclass.
 // Look up the effective spellcasting type for a class+subclass combo.
@@ -82,7 +83,11 @@ export function computeCharacterDerived(character: Character) {
     for (const [key, val] of Object.entries(chosenAsi(bgDef, character.backgroundAbilityChoice))) {
       finalScores[key as AbilityKey] = (finalScores[key as AbilityKey] ?? 10) + (val ?? 0);
     }
-    for (const featId of character.selectedFeats ?? []) {
+    // Every feat that actually applies: ASI picks PLUS the PHB 2024 background's free
+    // Origin feat, which used to exist only as prose and therefore granted nothing.
+    // `selectedFeats` still means "bought with an ASI" — the creator budgets against it.
+    const featIds = effectiveFeatIds(character);
+    for (const featId of featIds) {
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (feat?.abilityScoreIncrease) {
         for (const [key, val] of Object.entries(feat.abilityScoreIncrease)) {
@@ -127,8 +132,8 @@ export function computeCharacterDerived(character: Character) {
         if (
           stats.armorType === 'medium' &&
           effectiveDexCap === 2 &&
-          (character.selectedFeats.includes('medium-armor-master')
-            || character.selectedFeats.includes('medium-armor-master-2024')) &&
+          (featIds.includes('medium-armor-master')
+            || featIds.includes('medium-armor-master-2024')) &&
           (finalScores.dex ?? 10) >= 16
         ) {
           effectiveDexCap = 3;
@@ -163,7 +168,7 @@ export function computeCharacterDerived(character: Character) {
       }
     }
     // Dragon Hide feat (XGtE): AC = 13 + DEX when unarmored — take the better of this and the class formula
-    if (!equippedArmor && character.selectedFeats.includes('dragon-hide')) {
+    if (!equippedArmor && featIds.includes('dragon-hide')) {
       ac = Math.max(ac, 13 + mods.dex);
     }
     // Draconic Bloodline's scaly hide (PHB p.102): 13 + DEX unarmored. The subclass data
@@ -194,7 +199,7 @@ export function computeCharacterDerived(character: Character) {
     if (primarySaveDef) primarySaveDef.savingThrows.forEach(s => savingThrowProficiencies.add(s));
     // Feat-granted saving throw proficiency (e.g. Resilient: chosen ability)
     const featChoices = character.featChoices ?? {};
-    for (const featId of (character.selectedFeats ?? [])) {
+    for (const featId of featIds) {
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (feat?.grantsSaveForChosenAbility && featChoices[featId]) {
         savingThrowProficiencies.add(featChoices[featId] as AbilityKey);
@@ -221,7 +226,7 @@ export function computeCharacterDerived(character: Character) {
     let featSpeedBonus = 0;
     let featPassivePerceptionBonus = 0;
     let featPassiveInvestigationBonus = 0;
-    for (const featId of character.selectedFeats ?? []) {
+    for (const featId of featIds) {
       const feat = ALL_FEATS.find(f => f.id === featId);
       if (!feat) continue;
       featInitiativeBonus             += feat.initiativeBonus             ?? 0;
@@ -290,7 +295,7 @@ export function computeCharacterDerived(character: Character) {
     // Feat-granted expertise. Its own slots and its own storage, because `expertiseSkills` is
     // sized by Rogue/Bard level in the creator — a feat's expertise put in there would either be
     // truncated or silently inflate the class allowance.
-    const featExpertiseOwed = (character.selectedFeats ?? [])
+    const featExpertiseOwed = featIds
       .reduce((n, id) => n + (ALL_FEATS.find(f => f.id === id)?.grantsExpertise ?? 0), 0);
     const featExpertise = (character.selectedFeatExpertise ?? []).slice(0, featExpertiseOwed);
 
@@ -483,7 +488,7 @@ export function computeCharacterDerived(character: Character) {
       // as a choice. They use `grantsTools` rather than `grantsProficiency` because anything the
       // grammar can't parse falls through to `fixedTools`, so an armour or weapon entry mixed in
       // here would print on the sheet as a tool proficiency.
-      ...(character.selectedFeats ?? []).flatMap(id => ALL_FEATS.find(f => f.id === id)?.grantsTools ?? []),
+      ...featIds.flatMap(id => ALL_FEATS.find(f => f.id === id)?.grantsTools ?? []),
     ];
     const chosenTools = character.selectedToolProficiencies ?? {};
     // One entry per grant, so each keeps its own allowed categories.
@@ -511,7 +516,7 @@ export function computeCharacterDerived(character: Character) {
       racialLanguagePicks(race?.languages)
       + (bgDef?.languages ?? 0)
       // Linguist's three languages were prose: the feat had no field and nothing counted them.
-      + (character.selectedFeats ?? []).reduce((n, id) => n + (ALL_FEATS.find(f => f.id === id)?.grantsLanguages ?? 0), 0)
+      + featIds.reduce((n, id) => n + (ALL_FEATS.find(f => f.id === id)?.grantsLanguages ?? 0), 0)
       + character.classes.reduce((n, cl) => n + (cl.subclassId ? getSubclassOptions(cl.subclassId)
           .filter(g => g.grants === 'language' && cl.level >= Math.min(...Object.keys(g.picksByLevel).map(Number)))
           .reduce((m, g) => m + picksAllowed(g, cl.level), 0) : 0), 0);
@@ -554,7 +559,7 @@ export function computeCharacterDerived(character: Character) {
     // the race entry's `max` is only a level-1 seed.
     if (character.raceId === 'giff') resourceMaxOverrides['astral_spark'] = profBonus;
 
-    const feats = new Set(character.selectedFeats ?? []);
+    const feats = new Set(featIds);
     for (const [featId, key] of [
       ['lucky-2024',                   'luck_points'],
       ['chef',                         'chef_treats'],

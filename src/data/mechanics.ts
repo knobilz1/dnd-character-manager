@@ -1,4 +1,6 @@
 import type { SlotLevel, SkillName } from '../types';
+// classes/index.ts imports only types, so this cannot cycle back into mechanics.
+import { baseClassId } from './classes';
 
 // Full caster spell slots (Wizard, Sorcerer, Bard, Cleric, Druid)
 export const FULL_CASTER_SLOTS: Record<number, number[]> = {
@@ -131,6 +133,13 @@ export const PROFICIENCY_BONUS: Record<number, number> = {
   17: 6, 18: 6, 19: 6, 20: 6,
 };
 
+/** Levels at which a class gets an Ability Score Improvement (and so may take a feat).
+ *
+ *  Keyed by BASE class id only — the PHB 2024 classes keep the same ladder, so they are
+ *  resolved through `asiLevelsFor` rather than duplicated here. Index this map directly
+ *  at your peril: `ASI_LEVELS['fighter-2024']` is undefined, which is exactly how the
+ *  creator's Feats step came to tell every 2024 character they had no ASI slots, at any
+ *  level, and the draft sanitizer came to strip their feats back out. */
 export const ASI_LEVELS: Record<string, number[]> = {
   barbarian:  [4, 8, 12, 16, 19],
   bard:       [4, 8, 12, 16, 19],
@@ -146,6 +155,17 @@ export const ASI_LEVELS: Record<string, number[]> = {
   wizard:     [4, 8, 12, 16, 19],
   artificer:  [4, 8, 12, 16, 19],
 };
+
+/** The ASI ladder for any class id, either edition. Always use this instead of indexing
+ *  ASI_LEVELS: it collapses `fighter-2024` to `fighter` the same way `classLevel` does. */
+export function asiLevelsFor(classId: string): number[] {
+  return ASI_LEVELS[classId] ?? ASI_LEVELS[baseClassId(classId)] ?? [];
+}
+
+/** How many feats/ASIs a single class entry has earned by its level. */
+export function asiSlotsAt(classId: string, level: number): number {
+  return asiLevelsFor(classId).filter((l) => l <= level).length;
+}
 
 export const POINT_BUY_COSTS: Record<number, number> = {
   8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9,

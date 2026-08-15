@@ -13,6 +13,7 @@ import { chosenAsi } from '../utils/racialAsi';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 import { applyResistance } from '../utils/damageResistance';
 import { canAttune } from '../utils/attunement';
+import { effectiveFeatIds } from '../utils/effectiveFeats';
 
 /**
  * Resource maxima that scale off an ability modifier or proficiency bonus.
@@ -273,7 +274,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     }
 
     // Insert feat-granted resources (e.g. Lucky feat: 3 luck points).
-    for (const featId of (c.selectedFeats ?? [])) {
+    for (const featId of effectiveFeatIds(c)) {
       const feat = ALL_FEATS.find(f => f.id === featId);
       for (const fr of (feat?.grantedResources ?? [])) {
         if (!resources.some(r => r.key === fr.key)) {
@@ -980,7 +981,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       const bardLevel = classLevel(s.character.classes, 'bard');
       if (bardLevel >= 5) shortRestKeys.add('bardic_inspiration');
       // Feat-granted short-rest resources
-      for (const featId of (s.character.selectedFeats ?? [])) {
+      for (const featId of effectiveFeatIds(s.character)) {
         const feat = ALL_FEATS.find(f => f.id === featId);
         for (const fr of (feat?.grantedResources ?? [])) {
           if (fr.rechargeOn === 'short') shortRestKeys.add(fr.key);

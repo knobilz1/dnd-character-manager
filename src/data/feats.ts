@@ -4,6 +4,7 @@ import { getClass } from './classes';
 import { getSubclass } from './subclasses';
 import { getRace } from './races';
 import { getBackground } from './backgrounds';
+import { effectiveFeatIds } from '../utils/effectiveFeats';
 import { bookEnabled } from '../utils/bookEnabled';
 import { chosenAsi } from '../utils/racialAsi';
 import { SKILL_NAMES } from './mechanics';
@@ -812,7 +813,7 @@ export interface FeatSpell {
  */
 export function featGrantedSpells(character: Character): FeatSpell[] {
   const out: FeatSpell[] = [];
-  for (const featId of character.selectedFeats ?? []) {
+  for (const featId of effectiveFeatIds(character)) {
     const feat = ALL_FEATS.find(f => f.id === featId);
     if (!feat) continue;
     for (const gs of feat.grantedSpells ?? []) {

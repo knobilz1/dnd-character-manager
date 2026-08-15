@@ -3,7 +3,7 @@ import { getClass } from '../data/classes';
 import { getSubclass } from '../data/subclasses';
 import { getSpell } from '../data/spells';
 import {
-  ASI_LEVELS,
+  asiSlotsAt,
   warlockInvocationsKnown,
   sorcererMetamagicKnown,
   battleMasterManeuversKnown,
@@ -140,7 +140,7 @@ export function sanitizeCreatorDraft<T extends Draft>(draft: T): T {
   // feat that no longer fits — an orphaned Resilient choice or Magic Initiate
   // spell list would resurface the moment the feat was re-taken.
   if (draft.selectedFeats?.length) {
-    const slots = (ASI_LEVELS[cl.classId] ?? []).filter((l) => l <= level).length;
+    const slots = asiSlotsAt(cl.classId, level);
     if (draft.selectedFeats.length > slots) {
       const keptFeats = draft.selectedFeats.slice(0, slots);
       out.selectedFeats = keptFeats;

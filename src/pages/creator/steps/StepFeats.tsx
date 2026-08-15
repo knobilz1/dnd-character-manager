@@ -4,7 +4,7 @@ import { ALL_FEATS, OPTION_LABELS, featPickGroups, featSpellChoices, spellPickOp
 import { ProficiencyPicker } from '../../../components/ProficiencyPicker';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
-import { ASI_LEVELS, PROFICIENCY_BONUS, SKILL_NAMES, totalCharacterLevel } from '../../../data/mechanics';
+import { asiLevelsFor, PROFICIENCY_BONUS, SKILL_NAMES, totalCharacterLevel } from '../../../data/mechanics';
 import { getClass } from '../../../data/classes';
 import { getRace } from '../../../data/races';
 import { getBackground } from '../../../data/backgrounds';
@@ -25,7 +25,10 @@ export function StepFeats() {
   const primaryClass = draft.classes?.[0];
   const level = primaryClass?.level ?? 1;
   const classId = primaryClass?.classId ?? '';
-  const asiLevels = ASI_LEVELS[classId] ?? [];
+  // asiLevelsFor, never ASI_LEVELS[classId]: the map is keyed by base class, so indexing
+  // it with a 2024 id gave every PHB 2024 character zero slots and this step told them
+  // they had no ASI yet — at level 20, with a straight face.
+  const asiLevels = asiLevelsFor(classId);
   const asiCount = asiLevels.filter(l => l <= level).length;
 
   const available = ALL_FEATS.filter(f => bookEnabled(f, draft.enabledBooks));

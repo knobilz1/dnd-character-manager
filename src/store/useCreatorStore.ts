@@ -11,6 +11,7 @@ import { computeAlwaysPreparedIds, syncAlwaysPrepared } from '../utils/alwaysPre
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 import { chosenAsi } from '../utils/racialAsi';
 import { sanitizeCreatorDraft } from '../utils/sanitizeCreatorDraft';
+import { effectiveFeatIds } from '../utils/effectiveFeats';
 
 
 
@@ -197,7 +198,9 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
     const primarySub = primaryClass.subclassId ? getSubclass(primaryClass.subclassId) : undefined;
     const subHPBonusPerLevel = primarySub?.hpBonusPerLevel ?? 0;
     const raceHPBonusPerLevel = race?.hpBonusPerLevel ?? 0;
-    const featHPBonusPerLevel = (draft.selectedFeats ?? []).reduce((sum, fid) => {
+    // effectiveFeatIds: a 2024 background grants a free Origin feat, and Tough from the
+    // Farmer background has to count toward hit points like any other.
+    const featHPBonusPerLevel = effectiveFeatIds(draft).reduce((sum, fid) => {
       const feat = ALL_FEATS.find(f => f.id === fid);
       return sum + (feat?.hpBonusPerLevel ?? 0);
     }, 0);
