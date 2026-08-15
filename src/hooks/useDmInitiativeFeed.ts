@@ -34,7 +34,12 @@ export function useDmInitiativeFeed(): BroadcastInitiative | null {
     const poll = async () => {
       try {
         const { version, initiative } = await fetchBroadcastInitiative(versionRef.current, dmIp);
-        if (cancelled || version === versionRef.current || initiative === undefined) return;
+        if (cancelled) return;
+        // DM app restarted — their version counter is behind ours, so every poll from here
+        // would be answered with a bare `{version}` and the turn order would freeze. See
+        // the same guard in useDmMapFeed.
+        if (version < versionRef.current) { versionRef.current = 0; return; }
+        if (version === versionRef.current || initiative === undefined) return;
         versionRef.current = version;
         setOrder(initiative);
         // Combat ended — drop this device's rolled number along with the order.

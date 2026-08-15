@@ -33,8 +33,19 @@ export function useDmNarrationFeed(characterName?: string): NarrationEntry[] {
     let cancelled = false;
     const poll = async () => {
       try {
-        const { entries: fresh, proxyFor, yourSheetUpdatedAt } = await fetchNarrationSince(sinceRef.current, dmIp, characterName);
+        const { entries: fresh, latest, proxyFor, yourSheetUpdatedAt } = await fetchNarrationSince(sinceRef.current, dmIp, characterName);
         if (cancelled) return;
+        // The DM restarted their app: sequence numbers begin again at 1, so the DM's
+        // high-water mark is now BEHIND our cursor. Without this the player's device
+        // silently waited for seq 38 that would never come and missed the rest of the
+        // night. The transcript is cleared with the cursor because the new log reuses
+        // those seq numbers (they are React keys) — scrollback from before the crash is
+        // the cheap thing to lose; every line after it is not.
+        if (latest < sinceRef.current) {
+          sinceRef.current = 0;
+          setEntries([]);
+          return;
+        }
         // Whether the DM's copy of THIS character is newer than the one on
         // this device — the returning-from-a-missed-session case. Just a
         // number; the sheet decides whether to offer the pull.

@@ -64,6 +64,12 @@ export function TableCameraButton({ characterName }: { characterName: string }) 
         // First sighting just records where the counter is, so a request made
         // before we were even listening doesn't fire a surprise photo.
         if (servedRef.current === null) { servedRef.current = requestSeq; return; }
+        // The DM's request counter restarts at 0 with their app. Ours only moves forward,
+        // so after a restart `requestSeq > servedRef` was never true again and this device
+        // ignored every photo request for the rest of the night while the DM waited.
+        // Re-baseline instead: the same "don't fire on a request we didn't witness" rule
+        // the first-sighting branch above applies.
+        if (requestSeq < servedRef.current) { servedRef.current = requestSeq; return; }
         const isMine = !!h && h.toLowerCase() === characterName.trim().toLowerCase();
         if (isMine && requestSeq > servedRef.current && !busyRef.current) {
           servedRef.current = requestSeq;

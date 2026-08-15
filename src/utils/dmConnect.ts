@@ -38,6 +38,18 @@ function dmError(status: number): Error {
     : new Error(`DM responded ${status}`);
 }
 
+/** Prefer the DM's own words to a bare status code.
+ *
+ *  Every refusal this listener sends carries `{"ok":false,"error":"…"}` written for a
+ *  player to read — "Ellara is the table controller right now", "The DM has the console
+ *  closed". Throwing on the status alone turned all of them into "DM responded 409",
+ *  which tells the player nothing and made those messages dead code (found 2026-08-15;
+ *  sendTablePhoto was the one path that did this correctly). */
+async function dmFailure(res: { status: number; json: () => Promise<unknown> }): Promise<Error> {
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ? new Error(body.error) : dmError(res.status);
+}
+
 /** Normalize a user-entered address into a bare base URL (no trailing path).
  *  Accepts "192.168.1.5", "192.168.1.5:7777", or "http://host:7777". */
 export function dmBaseUrl(ip: string): string {
@@ -81,7 +93,7 @@ export async function sendTalkToDM(text: string, characterName: string, ip: stri
     body: JSON.stringify({ name: characterName, text }),
     connectTimeout: 5000,
   });
-  if (!res.ok) throw dmError(res.status);
+  if (!res.ok) throw await dmFailure(res);
   const data = (await res.json().catch(() => null)) as { reply?: string | null } | null;
   return data?.reply ?? null;
 }
@@ -274,7 +286,7 @@ export async function sendTableControl(
     body: JSON.stringify({ name, action, ...extra }),
     connectTimeout: 5000,
   });
-  if (!res.ok) throw dmError(res.status);
+  if (!res.ok) throw await dmFailure(res);
   const j = (await res.json()) as { ok?: boolean; error?: string | null };
   if (!j.ok) throw new Error(j.error ?? "The DM's console refused the button press.");
 }
@@ -306,10 +318,7 @@ export async function sendTablePhoto(name: string, photo: string, ip: string): P
     body: JSON.stringify({ name, photo }),
     connectTimeout: 15000, // a photo is a far bigger body than a line of talk
   });
-  if (!res.ok) {
-    const msg = await res.json().catch(() => ({}));
-    throw new Error((msg as { error?: string }).error ?? `DM responded ${res.status}`);
-  }
+  if (!res.ok) throw await dmFailure(res);
 }
 
 /** Send several characters; returns counts (and which ids actually succeeded,

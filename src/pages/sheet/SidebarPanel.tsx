@@ -20,6 +20,7 @@ import { parseDamageDice } from '../../utils/damageDice';
 import { rollMode } from '../../utils/rollMode';
 import { armorPenalty } from '../../utils/armorProficiency';
 import { isProficientWithWeapon } from '../../utils/weaponProficiency';
+import { ResourceCounter } from '../../components/ResourceCounter';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -418,8 +419,6 @@ function ClassResourcesSideModule() {
     <div className="space-y-2.5">
       {resources.map((r: any) => {
         const displayMax = resourceMaxOverrides?.[r.key] ?? r.max;
-        const cappedMax = Math.min(displayMax === 99 ? 20 : displayMax, 20);
-        const cappedCurrent = Math.min(r.current, cappedMax);
         return (
           <div key={r.key}>
             <div className="flex items-center justify-between mb-1">
@@ -432,27 +431,14 @@ function ClassResourcesSideModule() {
                 Reset
               </button>
             </div>
-            <div className="flex gap-1 flex-wrap">
-              {Array.from({ length: cappedMax }).map((_, i) => {
-                const avail = i < cappedCurrent;
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setResource(r.key, avail ? cappedCurrent - 1 : cappedCurrent + 1)}
-                    title={avail ? 'Use one' : 'Restore one'}
-                    className={cn(
-                      'w-4 h-4 rounded-full border-2 transition-all',
-                      avail
-                        ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
-                        : 'border-slate-600 hover:border-slate-400',
-                    )}
-                  />
-                );
-              })}
-              {displayMax === 99 && (
-                <span className="text-xs text-slate-400 self-center ml-1">{r.current}/∞</span>
-              )}
-            </div>
+            {/* Shared with the main sheet: this module used to write back the
+                20-clamped value, so spending 1 of a paladin's 45 Lay on Hands
+                points silently set the pool to 19. */}
+            <ResourceCounter
+              current={r.current}
+              max={displayMax}
+              onChange={(next) => setResource(r.key, next)}
+            />
           </div>
         );
       })}

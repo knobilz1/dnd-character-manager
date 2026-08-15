@@ -1906,6 +1906,11 @@ export function DMConsolePage() {
       // to be pushed back each launch — see party_listener.rs PIN_REQUIRED.
       .then(() => invoke('set_party_pin_required', { required: dmPinRequired }))
       .catch((e) => setError(`Couldn't start the LAN listener: ${e}`));
+    // Tell the listener someone is actually home. The four routes that emit into the
+    // listeners below (talk, sheet push, table photo, controller press) refuse with a
+    // 409 while this is false — before this existed, stepping off the console for a
+    // minute meant every player action was accepted and dropped. See CONSOLE_LISTENING.
+    invoke('set_console_listening', { listening: true }).catch(() => {});
     invoke<string | null>('local_lan_ip').then(setLanIp).catch(() => setLanIp(null));
     warmupSTT().then(() => setSttReady(true)).catch((e) => setError(`Speech recognition failed to load: ${e.message || e}`));
     invoke<CampaignMeta[]>('list_campaigns').then(setCampaigns).catch((e) => setError(`Couldn't load campaigns: ${e}`));
@@ -1923,6 +1928,9 @@ export function DMConsolePage() {
       .finally(() => {
         invoke('warmup_tts').catch((e) => console.warn('TTS warmup failed (will retry on first use):', e));
       });
+    // The listener outlives this page, so leaving it has to be announced — otherwise
+    // players keep getting cheerful acks for actions no listener will ever receive.
+    return () => { invoke('set_console_listening', { listening: false }).catch(() => {}); };
   }, []);
 
   // F5 voice engine: probe the GPU (gates the enable control), check whether the

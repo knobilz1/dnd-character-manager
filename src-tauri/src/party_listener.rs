@@ -44,6 +44,18 @@ struct NarrationLog {
     next_seq: u64,
 }
 
+/// The highest seq this log has ever issued — the client's "am I up to date?" answer.
+///
+/// Pure and separate because the empty case is load-bearing: this used to fall back to
+/// echoing the caller's own `since`, which made a DM who had just restarted (empty log,
+/// counter back to 1) indistinguishable from "nothing new". A player device sitting at
+/// seq 37 was told it was still at 37 and waited all night for a line numbered 38 that
+/// would never exist. Reporting the real mark lets the client see it went backwards and
+/// re-baseline (see useDmNarrationFeed).
+fn narration_latest(log: &NarrationLog) -> u64 {
+    log.entries.back().map(|e| e.seq).unwrap_or(log.next_seq - 1)
+}
+
 /// Every line of narration the DM has spoken this run (bounded, oldest
 /// dropped first) — see the "Let every connected player see the DM's own
 /// narration" section below for why this exists: previously only the one
@@ -100,6 +112,33 @@ static PIN_REQUIRED: AtomicBool = AtomicBool::new(true);
 fn pin_required() -> bool {
     PIN_REQUIRED.load(Ordering::Relaxed)
 }
+
+/// Whether the DM Console page is mounted and actually listening for the events
+/// this listener emits.
+///
+/// The listener binds for the whole app run, but everything it does with a
+/// player's action is `app.emit(...)` into a React listener that lives and dies
+/// with the console ROUTE. So a DM who stepped over to the home screen to look
+/// something up left the app answering `200 {"ok":true}` to a table full of
+/// players whose lines, sheet pushes, photos and controller presses were being
+/// dropped on the floor — `/talk` even sat on the connection for the full
+/// two-minute reply timeout before cheerfully reporting success.
+///
+/// Defaults to false and resets every app start, same stance as TABLE_PHOTOS and
+/// REMOTE_CONTROL: an unsynced listener refuses rather than pretends. The console
+/// sets it true on mount and false on unmount.
+static CONSOLE_LISTENING: AtomicBool = AtomicBool::new(false);
+
+fn console_listening() -> bool {
+    CONSOLE_LISTENING.load(Ordering::Relaxed)
+}
+
+/// What the four console-dependent routes answer when nothing is listening.
+/// 409 (not 503): the listener is healthy, the request just can't be honoured in
+/// this state — and it keeps the "unreachable DM" paths in the clients, which are
+/// about connection failures, distinct from "reachable but nobody's home".
+const CONSOLE_AWAY_BODY: &str =
+    "{\"ok\":false,\"error\":\"The DM has the console closed right now — nothing was received. Ask them to open the DM Console.\"}";
 
 /// The join PIN for this run, generated once when the listener binds and shown
 /// in the DM Console for the DM to read out.
@@ -597,7 +636,7 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         }
         let log = narration_log().lock().unwrap();
         let entries = entries_since(&log.entries, since);
-        let latest = log.entries.back().map(|e| e.seq).unwrap_or(since);
+        let latest = narration_latest(&log);
         drop(log);
         // proxyFor rides along on a poll that already exists rather than
         // getting its own loop — it's a handful of bytes. The heavy part (the
@@ -719,6 +758,11 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
     let body_str = String::from_utf8_lossy(&body);
 
     if request_line.starts_with("POST /character") {
+        // Nobody is holding the party roster — accepting would drop the sheet silently
+        // and leave the DM running an out-of-date copy all night.
+        if !console_listening() {
+            return write_response(&mut stream, 409, CONSOLE_AWAY_BODY, "application/json");
+        }
         let parsed: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(v) => v,
             Err(e) => {
@@ -749,15 +793,19 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         }
 
         let _ = app.emit("dm-party-character", character.clone());
-        return write_response(
-            &mut stream,
-            200,
-            &format!("{{\"ok\":true,\"name\":\"{name}\"}}"),
-            "application/json",
-        );
+        // serde, not format! — a character called O'Brien "the Bold" (or any name with a
+        // backslash or newline) hand-built invalid JSON that the client failed to parse.
+        let body = serde_json::json!({ "ok": true, "name": name }).to_string();
+        return write_response(&mut stream, 200, &body, "application/json");
     }
 
     if request_line.starts_with("POST /talk") {
+        // Refuse BEFORE the 120s wait below: with no console listening there is nothing
+        // that could ever call respond_to_player_turn, so the player's device would sit
+        // with its mic disabled for two minutes and then be told the line was sent.
+        if !console_listening() {
+            return write_response(&mut stream, 409, CONSOLE_AWAY_BODY, "application/json");
+        }
         let parsed: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(v) => v,
             Err(e) => {
@@ -876,6 +924,11 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         if action == "roll_call_mark" && member.is_empty() {
             return write_response(&mut stream, 400, "{\"ok\":false,\"error\":\"who is being marked?\"}", "application/json");
         }
+        // Before the holder check too: a legitimate holder pressing "End battle" at a
+        // closed console got a cheerful "Done." for a button nothing was wired to.
+        if !console_listening() {
+            return write_response(&mut stream, 409, CONSOLE_AWAY_BODY, "application/json");
+        }
         // Checked before the holder check, same order and same reason as
         // /table-photo: a holder from before the DM switched off deserves the
         // true reason, not a misleading "claim it first".
@@ -905,6 +958,11 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         // the holder may send, so the DM can't be fed two different boards at
         // once. The DM Console picks this up, runs the board read, and shows the
         // usual confirm panel — a photo from a player is never applied blind.
+        // With the console closed there is no confirm panel to reach, and the
+        // player's device said "Sent — the DM will confirm" for a dropped photo.
+        if !console_listening() {
+            return write_response(&mut stream, 409, CONSOLE_AWAY_BODY, "application/json");
+        }
         let parsed: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(v) => v,
             Err(e) => {
@@ -1035,6 +1093,14 @@ pub fn start_party_listener(app: AppHandle, port: u16) -> Result<u16, String> {
 
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
+            // Every connection gets a deadline before it gets a thread. Without this a
+            // socket that connects and then says nothing — a hostile LAN device, or just
+            // a player's phone going to sleep mid-request — parked one OS thread of ours
+            // forever, since the header read blocks with no timeout and happens BEFORE
+            // the PIN gate. 10s is far longer than any real request on a LAN and far
+            // shorter than a game night.
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
             let app2 = app.clone();
             std::thread::spawn(move || handle_conn(stream, &app2));
         }
@@ -1064,6 +1130,14 @@ pub fn party_listener_pin() -> Option<String> {
 #[tauri::command]
 pub fn set_party_pin_required(required: bool) {
     PIN_REQUIRED.store(required, Ordering::Relaxed);
+}
+
+/// Told by the DM Console when it mounts (true) and unmounts (false), so the
+/// routes that only mean something while it is listening can refuse honestly
+/// instead of emitting into nothing. See CONSOLE_LISTENING.
+#[tauri::command]
+pub fn set_console_listening(listening: bool) {
+    CONSOLE_LISTENING.store(listening, Ordering::Relaxed);
 }
 
 /// Whether the gate is currently enforced, so the console can show the truth
@@ -1259,6 +1333,63 @@ mod tests {
         ] {
             assert!(!is_reachability_probe(line), "{line} must require the PIN");
         }
+    }
+
+    /// The restart case this exists for: a fresh log must report 0, NOT the caller's
+    /// cursor, so a player device that was at seq 37 can tell the DM restarted.
+    #[test]
+    fn an_empty_narration_log_reports_zero_not_the_callers_cursor() {
+        let fresh = NarrationLog { entries: std::collections::VecDeque::new(), next_seq: 1 };
+        assert_eq!(narration_latest(&fresh), 0, "a restarted DM must look restarted");
+
+        let mut log = NarrationLog { entries: std::collections::VecDeque::new(), next_seq: 1 };
+        append_narration(&mut log, "The door groans open.".to_string());
+        append_narration(&mut log, "Something moves inside.".to_string());
+        assert_eq!(narration_latest(&log), 2, "with entries it is the newest seq");
+    }
+
+    /// The console-away gate defaults CLOSED. The listener binds for the whole app run
+    /// but the events it emits are only meaningful while the console page is mounted, so
+    /// an app that has never opened the console must not accept player actions.
+    #[test]
+    fn nothing_is_accepted_until_the_console_says_it_is_listening() {
+        // Fresh process state: no console has mounted, so the flag is still its default.
+        assert!(
+            !CONSOLE_LISTENING.load(Ordering::Relaxed) || console_listening(),
+            "the flag and its reader must agree"
+        );
+        let original = console_listening();
+        set_console_listening(false);
+        assert!(!console_listening(), "with no console mounted, routes must refuse");
+        set_console_listening(true);
+        assert!(console_listening(), "mounting the console must open the routes");
+        set_console_listening(original);
+    }
+
+    /// The refusal a player reads has to name the situation and the fix. A bare status
+    /// code sent them hunting for a network problem that didn't exist.
+    #[test]
+    fn the_console_away_refusal_explains_itself() {
+        let parsed: serde_json::Value = serde_json::from_str(CONSOLE_AWAY_BODY)
+            .expect("the refusal body must be valid JSON — clients parse it");
+        assert_eq!(parsed.get("ok").and_then(serde_json::Value::as_bool), Some(false));
+        let msg = parsed.get("error").and_then(serde_json::Value::as_str).unwrap_or("");
+        assert!(msg.contains("console"), "should name what is closed: {msg}");
+        assert!(
+            msg.contains("nothing was received"),
+            "the player must learn their action did NOT land: {msg}"
+        );
+    }
+
+    /// A name with a quote or a backslash used to be pasted straight into a hand-built
+    /// JSON string, producing a body the client could not parse.
+    #[test]
+    fn a_character_name_with_quotes_still_makes_valid_json() {
+        let name = r#"O'Brien "the Bold" \ Ruiner"#;
+        let body = serde_json::json!({ "ok": true, "name": name }).to_string();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).expect("response must be parseable");
+        assert_eq!(parsed.get("name").and_then(serde_json::Value::as_str), Some(name));
     }
 
     #[test]

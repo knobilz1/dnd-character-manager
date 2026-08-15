@@ -46,6 +46,7 @@ import { parseDamageDice } from '../../utils/damageDice';
 import { rollMode } from '../../utils/rollMode';
 import { fileToPortraitDataUrl } from '../../utils/portrait';
 import { lookupWeapon, damageLine } from '../../data/weapons';
+import { ResourceCounter } from '../../components/ResourceCounter';
 
 // Lazy-loaded so the three/R3F bundle is a separate chunk — only fetched when the
 // experimental 3D character viewport is enabled (Phase 0 spike).
@@ -108,71 +109,9 @@ function getResourceDie(character: any, key: string): number | undefined {
   return undefined;
 }
 
-/** Above this many uses, a row of dots stops being readable (and stops fitting), so
- *  the counter switches to a numeric stepper. Everything at or below it keeps the
- *  familiar pips — Rages, Ki, Channel Divinity, Sorcery Points and the rest are all
- *  20 or fewer at level 20, so this changes nothing for them. */
-const PIP_LIMIT = 20;
-
-/** Shared counter for a resource card.
- *
- *  This exists because the two call sites had drifted apart: both clamped the pip row
- *  to 20, but the inactive one also computed the NEXT value from that clamped number.
- *  A level-20 paladin has 100 Lay on Hands points; spending one set the pool to 19,
- *  destroying 80 points silently. The rule the component enforces is that the display
- *  may be summarised, but the value written back is always derived from `current`. */
-/** PHB p.173: if circumstances grant both advantage and disadvantage, you have neither, however
- *  many of each apply. Returned as the dice layer's mode so both callers stay honest. */
-
-function ResourceCounter({ current, max, onChange }: {
-  current: number; max: number; onChange: (next: number) => void;
-}) {
-  // 99 is the 'unlimited' sentinel (e.g. Archdruid's Wild Shape). There is nothing to
-  // spend, so there is nothing to count — the old UI showed "99 / ∞" beside 20 pips,
-  // which read as though 99 were a real remaining total.
-  if (max === 99) {
-    return <p className="text-sm text-slate-300">∞ — no limit</p>;
-  }
-  if (max > PIP_LIMIT) {
-    return (
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => onChange(Math.max(0, current - 1))}
-          disabled={current <= 0}
-          className="w-6 h-6 rounded border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors leading-none"
-          title="Use one"
-        >−</button>
-        <span className="text-sm font-medium text-white tabular-nums">{current} / {max}</span>
-        <button
-          onClick={() => onChange(Math.min(max, current + 1))}
-          disabled={current >= max}
-          className="w-6 h-6 rounded border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors leading-none"
-          title="Restore one"
-        >+</button>
-      </div>
-    );
-  }
-  return (
-    <div className="flex gap-1.5 flex-wrap">
-      {Array.from({ length: max }).map((_, i) => {
-        const available = i < current;
-        return (
-          <button
-            key={i}
-            onClick={() => onChange(available ? current - 1 : current + 1)}
-            className={cn(
-              'w-5 h-5 rounded-full border-2 transition-all',
-              available
-                ? 'border-blue-400 bg-blue-400/30 hover:bg-blue-400/50'
-                : 'border-slate-600 bg-transparent hover:border-slate-400',
-            )}
-            title={available ? 'Use one' : 'Restore one'}
-          />
-        );
-      })}
-    </div>
-  );
-}
+// ResourceCounter moved to components/ResourceCounter.tsx — the sidebar had its own
+// hand-rolled copy that still wrote back the clamped value (the 100→19 Lay on Hands
+// bug this component was written to fix), so it now lives where both can import it.
 
 // Exhaustion is tracked separately via exhaustionLevel; it has its own +/- UI
 // and a dedicated button in the Add Condition dialog, so it's omitted here to
@@ -235,6 +174,8 @@ export function SheetPage() {
   const [levelUpOpen, setLevelUpOpen] = React.useState(false);
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  /** An edit is waiting inside the 1s auto-save debounce — the unmount effect flushes it. */
+  const pendingSave = React.useRef(false);
   const [printError, setPrintError] = React.useState<string | null>(null);
   const [wildShapeModalOpen, setWildShapeModalOpen] = React.useState(false);
   const portraitInputRef = React.useRef<HTMLInputElement>(null);
@@ -272,9 +213,16 @@ export function SheetPage() {
   // Auto-save
   React.useEffect(() => {
     if (!character) return;
-    const t = setTimeout(() => { save(); setSaved(true); setTimeout(() => setSaved(false), 1500); }, 1000);
+    const t = setTimeout(() => { save(); setSaved(true); setTimeout(() => setSaved(false), 1500); pendingSave.current = false; }, 1000);
+    pendingSave.current = true;
     return () => clearTimeout(t);
   }, [character]);
+
+  // The debounce above only ever CLEARED its timer on unmount, so an edit made within a
+  // second of leaving the sheet died with the component — take 8 damage, hit back, and the
+  // damage was never written to the library. Flush it instead. (useDmPushSync has always
+  // done this for its own pushes; the sheet's own save was the one that didn't.)
+  React.useEffect(() => () => { if (pendingSave.current) save(); }, []);
 
   const isRaging = 'rage' in activeEffects;
 
@@ -1797,7 +1745,13 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
   // ── Death-save die ──────────────────────────────────────────────────────
   const { triggerRoll: dsTrigger, lastResult } = useDiceStore();
-  const seenDeathNonce = React.useRef<number>(-1);
+  /** Seeded from the store, NOT -1. `lastResult` outlives this component — the dice store is
+   *  app-wide — but a plain -1 ref is reborn on every mount, and this tab is conditionally
+   *  rendered. So flipping to Spells and back re-applied the last death save (two flips could
+   *  kill a stable character), and opening a different character applied the previous one's
+   *  roll to them. Starting at the nonce already in the store means "only rolls made while I
+   *  am mounted count", which is what the dedup was always for. */
+  const seenDeathNonce = React.useRef<number>(useDiceStore.getState().lastResult?.nonce ?? -1);
 
   // ── Initiative ──────────────────────────────────────────────────────────
   /** The sheet has always been able to ROLL initiative — the stat is clickable — but the result
@@ -1816,7 +1770,10 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   const dmIp = useSettingsStore((st) => st.dmIp);
   const dmConnected = useDmConnection();
   const turnOrder = useDmInitiativeFeed();
-  const seenInitNonce = React.useRef<number>(-1);
+  // Same remount hazard as seenDeathNonce above: re-entering the combat tab replayed the
+  // last initiative roll, which also re-sent "X rolled N for initiative" to the DM as a
+  // duplicate live turn.
+  const seenInitNonce = React.useRef<number>(useDiceStore.getState().lastResult?.nonce ?? -1);
 
   React.useEffect(() => {
     if (!lastResult || lastResult.label !== 'Initiative') return;

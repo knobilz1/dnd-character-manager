@@ -852,7 +852,18 @@ fn slugify(name: &str) -> String {
 /// Directory for a given campaign id. Used by dm.rs as the `claude` CLI's
 /// working directory so CLAUDE.md auto-loads as the DM's persona + memory.
 pub fn campaign_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
-    Ok(campaigns_root(app)?.join(id))
+    campaign_dir_at(&campaigns_root(app)?, id)
+}
+
+/// The guarded join, split out from the AppHandle so it can actually be tested.
+///
+/// This is the helper the id-taking commands reach for (notes, memory, the DM's
+/// working directory), and it used to join the id raw — `campaign_path_at` had the
+/// traversal check, this one didn't, and `save_campaign_notes` is a WRITE. Ids come
+/// from the webview, so they are untrusted; both paths now share one validator.
+pub(crate) fn campaign_dir_at(root: &Path, id: &str) -> Result<PathBuf, String> {
+    validate_campaign_id(id)?;
+    Ok(root.join(id))
 }
 
 // ── Pure, directly-testable logic (no AppHandle, no subprocess) ─────────────
@@ -947,11 +958,23 @@ fn create_campaign_at(root: &Path, intake: &CampaignIntake) -> Result<CampaignMe
 /// Resolves only an immediate child of `root`. These ids cross the IPC trust
 /// boundary and bulk deletion is irreversible, so validate the entire batch
 /// before touching even the first campaign.
-fn campaign_path_at(root: &Path, id: &str) -> Result<PathBuf, String> {
+/// A campaign id must be exactly one ordinary path component — no separators, no
+/// `..`, no drive prefix, not empty. These ids arrive from the webview, so they are
+/// untrusted input that gets joined onto a filesystem root.
+///
+/// Shared by `campaign_path_at` and `campaign_dir` so the two cannot disagree: for a
+/// long time only the former checked, and every notes/memory command went through the
+/// latter (found 2026-08-15).
+pub(crate) fn validate_campaign_id(id: &str) -> Result<(), String> {
     let mut parts = Path::new(id).components();
     if id.is_empty() || !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some() {
         return Err(format!("Invalid campaign id \"{id}\"."));
     }
+    Ok(())
+}
+
+fn campaign_path_at(root: &Path, id: &str) -> Result<PathBuf, String> {
+    validate_campaign_id(id)?;
     let path = root.join(id);
     if !path.is_dir() {
         return Err(format!("No campaign found with id \"{id}\"."));
@@ -13292,6 +13315,45 @@ Tactics:
         let (restored, _) = import_campaign_at(&root.0, &backup).unwrap();
         assert!(!restored.archived);
         assert!(!root.0.join(restored.id).join(CAMPAIGN_ARCHIVED_MARKER).exists(), "a restored backup must return to the visible list");
+    }
+
+    /// Campaign ids arrive from the webview, so they are untrusted input joined onto a
+    /// filesystem root. `campaign_path_at` had always checked; `campaign_dir` — the
+    /// helper the notes and memory commands actually use — did not, so a crafted id
+    /// escaped the campaigns tree (with save_campaign_notes as a WRITE). Both now defer
+    /// to this one validator, which is what keeps them from drifting apart again.
+    #[test]
+    fn a_campaign_id_must_be_a_single_ordinary_path_component() {
+        for good in ["alpha-quest", "Curse of Strahd", "campaign_2026"] {
+            assert!(validate_campaign_id(good).is_ok(), "{good} is a legitimate id");
+        }
+        for bad in [
+            "",
+            "..",
+            "../outside",
+            "..\\..\\Users\\nabil\\Desktop",
+            "nested/child",
+            "nested\\child",
+            "/absolute",
+            "C:\\Windows",
+        ] {
+            let err = validate_campaign_id(bad).unwrap_err();
+            assert!(err.contains("Invalid campaign id"), "{bad:?} must be refused, got {err}");
+        }
+    }
+
+    /// The guard has to be wired into the helper the commands actually call, not just
+    /// exist next to it — that gap was the whole bug. Every refused id must also fail
+    /// to produce a path, and an accepted one must stay inside the campaigns root.
+    #[test]
+    fn campaign_dir_refuses_to_build_a_path_outside_the_campaigns_root() {
+        let root = Path::new("C:\\campaigns");
+        for bad in ["..", "../outside", "..\\..\\Users\\nabil\\Desktop", "nested/child", "/absolute"] {
+            assert!(campaign_dir_at(root, bad).is_err(), "{bad:?} must not resolve to a path");
+        }
+        let good = campaign_dir_at(root, "curse-of-strahd").unwrap();
+        assert!(good.starts_with(root), "a legitimate id must stay under the root");
+        assert!(good.ends_with("curse-of-strahd"));
     }
 
     #[test]

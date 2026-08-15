@@ -17,6 +17,26 @@ import {
 import { useLibraryStore } from './useLibraryStore';
 import { useSnapshotStore } from './useSnapshotStore';
 
+/**
+ * Did Google actually reject our refresh token, or did we simply fail to ask?
+ *
+ * Only the first justifies deleting it from the OS keychain — that is destructive and
+ * unrecoverable without a full re-consent. Startup used to treat EVERY failure as
+ * revocation, so opening the app with no network (a plane, a LAN-only game night, a
+ * flaky DNS moment) permanently threw away working credentials.
+ *
+ * Matches the strings oauth.rs actually produces (see get_fresh_access_token /
+ * do_token_refresh): a 4xx from Google's token endpoint or a missing keychain entry
+ * means gone; a transport error, a 5xx, or a malformed body means "ask again later".
+ */
+export function isTokenRejected(message: string): boolean {
+  if (message.includes('no-token')) return true;          // never connected / entry deleted
+  if (message.includes('invalid_grant')) return true;     // revoked or expired past recovery
+  // "Token refresh failed: {code} {body}" — a status came back, so Google answered us.
+  const status = message.match(/Token refresh failed:\s*(\d{3})/);
+  return status ? Number(status[1]) < 500 : false;
+}
+
 interface DriveState {
   // ── Persisted ──────────────────────────────────────────────────────────────
   isConnected: boolean;
@@ -277,11 +297,18 @@ export const usesDriveStore = create<DriveState>()(
 
           // Silent startup merge (pushToDrive handles merge automatically).
           await get().pushToDrive();
-        } catch {
-          // "no-token" → never connected; any other error → token was revoked.
-          // In both cases: ensure the UI shows disconnected and the keychain is clean.
+        } catch (e) {
+          // Show disconnected for this session either way — but only DESTROY the keychain
+          // token when Google actually rejected it. The old code cleared on any failure,
+          // so launching the app on a plane (or any transient DNS/socket error) silently
+          // deleted a perfectly valid refresh token and forced a full re-consent.
+          // Rust's shapes: "no-token" (never connected), "Token refresh failed: {code} {body}"
+          // (HTTP status — only 4xx/invalid_grant means revoked), "Token refresh error: {e}"
+          // (transport, i.e. offline), "JSON error: …".
           set({ isConnected: false, userEmail: '', _tokens: null });
-          await invoke<void>('clear_google_token').catch(() => {});
+          if (isTokenRejected(String(e))) {
+            await invoke<void>('clear_google_token').catch(() => {});
+          }
         }
       },
     }),

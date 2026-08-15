@@ -30,8 +30,14 @@ export function useDmMapFeed(): BroadcastMap | null {
     const poll = async () => {
       try {
         const { version, map: fresh } = await fetchBroadcastMap(versionRef.current, dmIp);
+        if (cancelled) return;
+        // A LOWER version than ours means the DM's app restarted (their counter is back
+        // near 0). Our cursor only moves forward, so the DM would answer every future
+        // poll with a bare `{version}` and this device would show the pre-restart map for
+        // the rest of the session. Rewinding to 0 makes the next poll ask for everything.
+        if (version < versionRef.current) { versionRef.current = 0; return; }
         // Unchanged since our last version → the DM omits the payload; nothing to do.
-        if (cancelled || version === versionRef.current || fresh === undefined) return;
+        if (version === versionRef.current || fresh === undefined) return;
         versionRef.current = version;
         setMap(fresh); // an object (new shared map) or null (DM stopped sharing)
       } catch {
