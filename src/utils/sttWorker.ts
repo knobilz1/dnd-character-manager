@@ -13,7 +13,19 @@
  * Protocol: { id, type: 'warmup' | 'transcribe', samples? } in,
  *           { id, ok: true, text } | { id, ok: false, error } out.
  */
-import { pipeline } from '@huggingface/transformers';
+import { env, pipeline } from '@huggingface/transformers';
+import ortWasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
+import ortMjsUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
+
+// Inside a worker, transformers.js defaults wasmPaths to the jsdelivr CDN (its
+// own relative-URL resolution doesn't survive worker bundling), which made
+// first-run speech setup depend on a CDN the packaged app never otherwise
+// contacts. Point it at the copy Vite already ships — the exact asyncify pair
+// its non-Safari branch would have fetched, same pinned ort version. Must run
+// before pipeline(): the CDN default only applies while wasmPaths is unset.
+if (env.backends.onnx.wasm) {
+  env.backends.onnx.wasm.wasmPaths = { mjs: ortMjsUrl, wasm: ortWasmUrl };
+}
 
 type Transcriber = (input: Float32Array) => Promise<{ text: string } | { text: string }[]>;
 let transcriberPromise: Promise<Transcriber> | null = null;
