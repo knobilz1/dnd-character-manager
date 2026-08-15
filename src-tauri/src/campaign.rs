@@ -887,7 +887,13 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| format!("Invalid file path: {}", path.display()))?;
-    let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
+    // Unique per call, not a fixed "{name}.tmp": two writers targeting the same file (two
+    // fact-appends landing together) shared one temp path, so one could rename a file the
+    // other was still writing. The pid+counter pair is enough — the rename is atomic, so
+    // whichever finishes last wins cleanly instead of both corrupting one temp file.
+    static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nonce = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = path.with_file_name(format!("{file_name}.{}.{nonce}.tmp", std::process::id()));
     fs::write(&tmp_path, content).map_err(|e| e.to_string())?;
     fs::rename(&tmp_path, path).map_err(|e| e.to_string())
 }

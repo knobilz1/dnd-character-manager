@@ -601,7 +601,18 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         const cap = isCantrip ? limits.cantrips
           : limits.spellbook != null ? limits.spellbook
           : limits.known;
-        if (cap != null && cap > 0) {
+        // The caps handed in are the PRIMARY casting class's. On a multiclass caster they
+        // are the wrong ceiling for a second class's spell — a sorcerer 3 / cleric 2 was
+        // silently refused legal cleric spells once the sorcerer's known-count was full.
+        // Refusing a legal spell is worse than allowing an extra one, and the creator and
+        // level-up dialog both enforce the real per-class budgets, so this defers to them.
+        const multiclassCaster = s.character.classes.filter((cl) => {
+          const def = getClass(cl.classId);
+          if (def && def.spellcastingType !== 'none') return true;
+          const sub = cl.subclassId ? getSubclass(cl.subclassId) : undefined;
+          return !!sub?.spellcastingType && sub.spellcastingType !== 'none';
+        }).length > 1;
+        if (cap != null && cap > 0 && !multiclassCaster) {
           const held = s.character.spellbook.filter((sp) => {
             if (sp.isAlwaysPrepared) return false;   // granted by subclass/race, never counted
             const sp2 = getSpell(sp.spellId);
@@ -836,9 +847,13 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // Hoist race/racial lookup so we can use racialCon in the CON-mod delta check below.
       const race = getRace(s.character.raceId);
       const racialBonuses = chosenAsi(race, s.character.racialAbilityChoice);
-      const racialCon = (racialBonuses as Partial<Record<AbilityKey, number>>).con ?? 0;
       // Old CON modifier (before this ASI) — used to detect a modifier increase.
-      const oldConMod = Math.floor(((s.character.baseAbilityScores.con ?? 10) + racialCon - 10) / 2);
+      // Asked of the derive rather than recomputed from base + racial: the sheet's CON is
+      // base + racial + BACKGROUND (2024 puts the increase there) + any feat's fixed
+      // increase, capped at 20/24. Doing the short version here meant taking Durable
+      // (a flat +1 CON) granted no retroactive hit points at all, and a 2024 character
+      // whose background raised CON could land on the wrong side of the parity edge.
+      const oldConMod = computeCharacterDerived(s.character).mods.con;
 
       let baseAbilityScores = { ...s.character.baseAbilityScores };
       let selectedFeats = [...(s.character.selectedFeats ?? [])];
@@ -876,7 +891,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       // point maximum increases by 1 for each level you have attained."
       // hpGained (calculated in LevelUpDialog) used the old CON mod, so we need
       // to patch both the retroactive levels AND the current level's HP grant.
-      const newConMod = Math.floor(((baseAbilityScores.con ?? 10) + racialCon - 10) / 2);
+      // Same question, same answerer — now including the feat just taken.
+      const newConMod = computeCharacterDerived({
+        ...s.character, classes, baseAbilityScores, selectedFeats,
+      }).mods.con;
       const conModDelta = newConMod - oldConMod;
       if (conModDelta > 0) {
         const newTotalLevel = classes.reduce((sum, cl) => sum + cl.level, 0);

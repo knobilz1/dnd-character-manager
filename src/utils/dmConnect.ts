@@ -13,7 +13,6 @@
  * party_listener.rs's `session_pin`.
  */
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
-import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import type { Character } from '../types';
 
@@ -98,10 +97,15 @@ export async function sendTalkToDM(text: string, characterName: string, ip: stri
   return data?.reply ?? null;
 }
 
-/** POST one character (with its snapshot history) to the DM bot. Throws on failure. */
+/** POST one character to the DM bot. Throws on failure.
+ *
+ *  Deliberately does NOT ship the snapshot history any more: the listener only ever read
+ *  `character` and dropped the rest, so every HP tick was re-uploading up to 30 full copies
+ *  of the sheet — each with its data-URL portrait, around 2MB — to be thrown away, on a
+ *  2-second debounce, over game-night WiFi. If the console ever wants history, it should
+ *  ask for it once rather than ride along on every edit. */
 export async function sendCharacterToDM(character: Character, ip: string): Promise<void> {
-  const snapshots = useSnapshotStore.getState().snapshotsFor(character.id);
-  const payload = { tavernSheet: true, version: 1, character, snapshots };
+  const payload = { tavernSheet: true, version: 1, character };
   const res = await tauriFetch(dmUrl(ip), {
     method: 'POST',
     headers: dmHeaders({ 'Content-Type': 'application/json' }),

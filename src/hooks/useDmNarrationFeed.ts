@@ -31,7 +31,13 @@ export function useDmNarrationFeed(characterName?: string): NarrationEntry[] {
     if (!dmIp.trim()) return;
 
     let cancelled = false;
+    // One poll at a time. `syncBorrowed` below can await a multi-megabyte sheet fetch, which
+    // on bad WiFi outlasts the 3s interval — two polls then ran with the same `since` and
+    // appended the same lines twice (duplicate React keys included).
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const { entries: fresh, latest, proxyFor, yourSheetUpdatedAt } = await fetchNarrationSince(sinceRef.current, dmIp, characterName);
         if (cancelled) return;
@@ -62,6 +68,10 @@ export function useDmNarrationFeed(characterName?: string): NarrationEntry[] {
       } catch {
         // Unreachable this tick — next poll just tries again from the same
         // `since`, same tolerant shape as useDmConnection's own polling.
+      } finally {
+        // In a finally because the body returns early in several places; missing one
+        // would wedge the feed permanently.
+        inFlight = false;
       }
     };
     poll();

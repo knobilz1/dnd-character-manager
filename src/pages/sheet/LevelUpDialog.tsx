@@ -496,11 +496,19 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   // Split in two on purpose. The confirm gate needs to know whether any spell is *available* to
   // pick, and the search box and level dropdown are presentation-only — gating on the filtered
   // list would mean typing into the search box could unlock the Confirm button.
+  // Magical Secrets (PHB p.54): at bard 10/14/18 — and College of Lore 6 — the two spells
+  // learned come "from any class". The dialog filtered to the bard list anyway and then
+  // required the picks to confirm, so it actively forced the wrong choice at the only
+  // levels the feature exists for.
+  const isMagicalSecretsLevel =
+    baseClassId(classId) === 'bard' &&
+    ([10, 14, 18].includes(newLevel) || (sub?.id?.startsWith('college-of-lore') && newLevel === 6));
+
   const availableSpellsUnfiltered = ALL_SPELLS.filter(s =>
     s.level > 0 &&
     s.level <= effectiveMaxSpellLevel &&
     bookEnabled(s, enabledBooks) &&
-    s.classes.includes(spellListClassId) &&
+    (isMagicalSecretsLevel || s.classes.includes(spellListClassId)) &&
     (!schoolRestriction || schoolRestriction.includes(s.school)) &&
     !spellbookIds.has(s.id) &&
     !pendingSpells.includes(s.id)

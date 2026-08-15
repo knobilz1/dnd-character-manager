@@ -265,7 +265,32 @@ pub async fn start_oauth_server(app: AppHandle) -> Result<String, String> {
 
     // Spawn a thread to handle the callback, do the token exchange, and emit the result.
     std::thread::spawn(move || {
-        match listener.accept() {
+        // A sign-in the user abandons (closes the browser tab, clicks Connect twice) used to
+        // leave this thread blocked in accept() and this loopback port bound for the rest of
+        // the app's life. Poll with a deadline instead — five minutes is longer than any real
+        // consent screen and the port comes back either way.
+        const CONNECT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
+        let accepted = {
+            let started = std::time::Instant::now();
+            let polling = listener.set_nonblocking(true).is_ok();
+            loop {
+                match listener.accept() {
+                    Err(ref e) if polling && e.kind() == std::io::ErrorKind::WouldBlock => {
+                        if started.elapsed() > CONNECT_DEADLINE {
+                            break Err(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "no callback within the sign-in window",
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    }
+                    other => break other,
+                }
+            }
+        };
+        // Back to blocking for the request read below.
+        let _ = listener.set_nonblocking(false);
+        match accepted {
             Err(e) => {
                 let _ = app.emit("oauth-error", format!("Listener error: {e}"));
                 return;

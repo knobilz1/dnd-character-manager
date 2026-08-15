@@ -9,8 +9,8 @@ Published as `knobilz1`.
 **This file is auto-loaded by Codex.** Claude Code reads `CLAUDE.md`; `agy`
 (Gemini/Antigravity) reads neither — see §7, it's measured, not assumed.
 
-**State:** v0.26.0 (2026-08-13), `main` clean, 542 Rust tests (+23 `#[ignore]`d
-real-data harnesses) and 31 frontend tests, all feature branches merged. The
+**State:** v0.29.0 released, `main` ahead of it with the 2026-08-15 review fixes.
+552 Rust tests (+23 `#[ignore]`d real-data harnesses) and 338 frontend tests. The
 updater endpoint serves 6 signed platforms. There are now TWO workflows —
 `check.yml` (typecheck + both test suites, every push/PR) and `release.yml`
 (tags only). **Releasing now requires creating the release object by hand first
@@ -23,7 +23,7 @@ Contents: §1 rules · §2 setup/build/test · §3 GitHub Actions · §4 repo ma
 ### Start here
 
 **This file is a map, not a substitute for the source.** It tells you where to
-look and what will bite; it cannot stand in for 28k lines of Rust. Before
+look and what will bite; it cannot stand in for 33k lines of Rust. Before
 changing anything:
 
 1. Read §1 (rules) and the relevant task row in §4.
@@ -89,7 +89,7 @@ npm run tauri dev            # desktop app (add the CDP env var — see §8)
 npm run dev                  # frontend only in a browser; no Tauri IPC, most DM features dead
 npx tsc -b --force           # the ONLY typecheck that works here
 npm run build                # production frontend build
-cd src-tauri && cargo test --lib          # 488 tests
+cd src-tauri && cargo test --lib          # 552 tests
 ```
 
 ### Reading the code
@@ -101,7 +101,7 @@ current. Read the module doc before the code, and read the `///` on any function
 you're about to change — a lot of them record a measurement or a past bug, and
 several say explicitly "if X is ever added, this is the function to revisit".
 
-Tests are inline `#[cfg(test)] mod tests` at the bottom of each file (265 in
+Tests are inline `#[cfg(test)] mod tests` at the bottom of each file (312 in
 `campaign.rs` alone).
 
 **`#[ignore]`d tests are real-data harnesses, not dead tests.** They hit the live
@@ -263,19 +263,20 @@ Two consequences worth holding onto:
 
 ## 4. Repo map
 
-### Backend — `src-tauri/src/` (~28k lines, 105 Tauri commands)
+### Backend — `src-tauri/src/` (~33k lines, 131 Tauri commands)
 
 | File | Lines | What |
 |---|---|---|
-| `campaign.rs` | 13k | Campaigns, memory files, module import/chapters, session plans, **battle-map generation + tile resolution**. 52 commands. The big one. |
-| `tile_library.rs` | 4.9k | The 183k-tile catalog: indexing, shortlisting, keyword/biome ranking, `SYNONYMS` |
+| `campaign.rs` | 16k | Campaigns, memory files, module import/chapters, session plans, **battle-map generation + tile resolution**. 68 commands. The big one. |
+| `tile_library.rs` | 5.3k | The 183k-tile catalog: indexing, shortlisting, keyword/biome ranking, `SYNONYMS` |
 | `dm.rs` | 3.0k | Live DM turns, CLI spawning, sign-in, vision. **Only file with platform arms.** |
 | `tts.rs` | 2.2k | Kokoro (default) + F5 (opt-in HD) voices, voice catalog |
 | `local_llm.rs` | 1.8k | Ingestion routing, cross-model critique, local-LLM path |
 | `pack_profile.rs` | 973 | Per-biome tile-pack profile: which queries a biome rolls for floor/liquid |
 | `cli_provider.rs` | 806 | **PURE** per-engine argv building, well tested — start here for the engine layer |
-| `party_listener.rs` | 801 | LAN `:7777` channel: players push turns/photos, pull narration |
-| `oauth.rs` | 326 | Google Drive PKCE loopback |
+| `party_listener.rs` | 1.7k | LAN `:7777` channel: players push turns/photos, pull narration |
+| `oauth.rs` | 438 | Google Drive PKCE loopback |
+| `background_gen.rs` | 334 | Player-authored background text generation |
 
 ### Frontend — `src/`
 
@@ -290,7 +291,7 @@ Two consequences worth holding onto:
   (`tavern-sheet-settings`), `useCharacterStore`, `useCampaignStore`,
   `usePartyStore`, `useDiceStore`, `useDriveStore`, `useLibraryStore`,
   `useThemeStore`, `useSidebarStore`, `useSnapshotStore`, `useCreatorStore`
-- `data/` — 27 files of 5e rules content (classes, races, feats, spells, items,
+- `data/` — 40 files of 5e rules content (classes, races, feats, spells, items,
   backgrounds, invocations, infusions, subclass tips…), incl. PHB 2014 **and**
   2024 editions gated by `BookId`
 - `utils/` — `battleMapRender.ts` (deterministic spec→PNG/PDF), `dmActions.ts`

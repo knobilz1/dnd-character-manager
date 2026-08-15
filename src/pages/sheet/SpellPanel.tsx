@@ -15,6 +15,7 @@ import { getSubclass } from '../../data/subclasses';
 import { getRace } from '../../data/races';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import { casterClassOf } from '../../hooks/useCharacterDerived';
+import { castingForSpell } from '../../utils/perSpellCasting';
 import { canRitualCast } from '../../utils/ritualCasting';
 import { useCharacterStore } from '../../store/useCharacterStore';
 import { useDiceStore } from '../../store/useDiceStore';
@@ -293,7 +294,20 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                 )}
               </div>
               <div className="divide-y divide-slate-700/50">
-                {entries.sort((a,b) => a.spell.name.localeCompare(b.spell.name)).map(({ spell, prepared, alwaysPrepared }) => (
+                {entries.sort((a,b) => a.spell.name.localeCompare(b.spell.name)).map(({ spell, prepared, alwaysPrepared }) => {
+                  // Per spell, not per character: on a cleric/wizard the wizard spells must
+                  // roll off Intelligence. Falls back to the character-wide numbers when no
+                  // class claims the spell, so single-class sheets are unchanged.
+                  const casting = castingForSpell(character, spell, {
+                    mods: derived?.mods ?? {},
+                    profBonus,
+                    fallback: {
+                      ability: derived?.spellcastingAbility ?? 'int',
+                      saveDC: derived?.spellSaveDC ?? 0,
+                      attackBonus: derived?.spellAttackBonus ?? 0,
+                    },
+                  });
+                  return (
                   <div key={spell.id} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-750 group">
                     {/* Prepared toggle — only for prepared casters, not cantrips */}
                     {lvl > 0 && isPreparedCaster && (
@@ -324,13 +338,22 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                         {spell.concentration && <span className="text-xs text-amber-400 bg-amber-900/30 px-1 rounded">C</span>}
                         {spell.ritual && <span className="text-xs text-blue-400 bg-blue-900/30 px-1 rounded">R</span>}
                       </div>
-                      <p className="text-xs text-slate-500">{spell.castingTime} · {spell.range} · {spell.school}</p>
+                      <p className="text-xs text-slate-500">
+                        {spell.castingTime} · {spell.range} · {spell.school}
+                        {/* Only worth saying on a multiclass caster, where this spell's DC
+                            differs from the one in the header. */}
+                        {casting.saveDC !== (derived?.spellSaveDC ?? 0) && (
+                          <span className="text-indigo-300/80" title={`Cast as a ${getClass(casting.classId)?.name ?? casting.classId} spell — ${casting.ability.toUpperCase()} based`}>
+                            {' · '}DC {casting.saveDC} ({casting.ability.toUpperCase()})
+                          </span>
+                        )}
+                      </p>
                     </div>
 
                     <SpellRollButtons
                       spell={spell}
-                      attackBonus={derived?.spellAttackBonus ?? 0}
-                      spellMod={spellMod}
+                      attackBonus={casting.attackBonus}
+                      spellMod={derived?.mods?.[casting.ability] ?? spellMod}
                       slotLevel={castAtLevel[spell.id]}
                       {...rollCtx}
                     />
@@ -408,7 +431,8 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
                       <X size={14} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );

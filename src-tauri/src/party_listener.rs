@@ -76,6 +76,14 @@ fn narration_log() -> &'static Mutex<NarrationLog> {
 /// device never hangs forever if the DM Console is closed mid-turn.
 const TALK_REPLY_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Ceiling on one spoken line to the DM. Generous for a paragraph of speech, far below the
+/// 16MiB body cap that used to be the only limit on text going into a paid LLM turn.
+const MAX_TALK_BYTES: usize = 4 * 1024;
+
+/// How many player turns may be waiting on the DM at once. Beyond this the listener says
+/// "try again in a moment" instead of parking another thread for two minutes.
+const MAX_PENDING_TALKS: usize = 8;
+
 /// Hard ceiling on a request body, checked BEFORE the buffer is allocated.
 /// `Content-Length` is attacker-supplied and this listener answers anything
 /// that can reach the port, so allocating straight from it let a single
@@ -625,7 +633,15 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         let mut your_sheet_updated_at: Option<i64> = None;
         if let Some(name) = who.as_deref().filter(|n| !n.trim().is_empty()) {
             let key = name_key(name);
-            presence().lock().unwrap().insert(key.clone(), std::time::Instant::now());
+            {
+                // Prune while we are here, through the same helper the read paths use.
+                // Pruning previously happened ONLY on GET /control and present_players, so
+                // a DM who opened neither left this map growing one entry per distinct name
+                // any device ever polled with.
+                let mut p = presence().lock().unwrap();
+                fresh_presence(&mut p);
+                p.insert(key.clone(), std::time::Instant::now());
+            }
             proxy_for = proxy_assignments().lock().unwrap().get(&key).cloned().unwrap_or_default();
             your_sheet_updated_at = shared_characters()
                 .lock()
@@ -820,6 +836,28 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
 
         let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let text = parsed.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // A spoken line, not a payload. Only emptiness was checked, so anything up to the
+        // 16MiB body cap went straight into the DM's engine queue as a real (billed) turn
+        // — a loop of them could burn a subscription for the rest of the night. The longest
+        // thing anyone says at a table is a paragraph.
+        if text.len() > MAX_TALK_BYTES {
+            return write_response(
+                &mut stream,
+                413,
+                "{\"ok\":false,\"error\":\"That message is too long to send to the DM.\"}",
+                "application/json",
+            );
+        }
+        // One player device can have a handful of turns in flight; a flood is refused with a
+        // retry-able status rather than queued. Counted before inserting this one.
+        if pending_talk_replies().lock().unwrap().len() >= MAX_PENDING_TALKS {
+            return write_response(
+                &mut stream,
+                429,
+                "{\"ok\":false,\"error\":\"The DM is still working through the last few messages — try again in a moment.\"}",
+                "application/json",
+            );
+        }
         if text.trim().is_empty() {
             return write_response(
                 &mut stream,
@@ -1237,10 +1275,17 @@ pub fn set_proxy_assignments(assignments: HashMap<String, Vec<String>>) {
     *current = assignments.into_iter().map(|(k, v)| (name_key(&k), v)).collect();
 }
 
-/// The sheets the DM is lending out tonight, keyed by character name. This is
-/// the access control for `GET /character` — only what's pushed here can be
-/// fetched — so push exactly the loaned characters and nothing else. Replaces
-/// the whole map; an empty one closes the door again.
+/// The sheets `GET /character` may serve tonight, keyed by character name. This map IS the
+/// access control for that route — only what is pushed here can be fetched — and it is
+/// replaced wholesale, so an empty one closes the door again.
+///
+/// What the console actually pushes is the WHOLE party, not just the loaned sheets: an
+/// absent player's owner needs to pull their character back afterwards, and the roll-call
+/// proxy flow needs any sheet reachable on demand (see publishSharedCharacters). The
+/// practical consequence, stated plainly because the old comment here claimed the opposite:
+/// anyone who knows tonight's PIN can fetch any party member's full sheet by name. That is
+/// the accepted trade for a table on one home network — the PIN is the boundary — but it is
+/// a trade, not an accident.
 #[tauri::command]
 pub fn set_shared_characters(characters: Vec<serde_json::Value>) {
     let mut current = shared_characters().lock().unwrap();

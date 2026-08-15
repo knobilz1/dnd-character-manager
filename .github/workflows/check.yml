@@ -17,8 +17,15 @@ on:
     tags-ignore: ['v*'] # a tag push is a release; release.yml owns that
   pull_request:
 
+# A newer push supersedes the one before it — no value in finishing a check for a
+# commit that is already history.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +40,7 @@ jobs:
       - run: npm test
 
   rust:
+    timeout-minutes: 30
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

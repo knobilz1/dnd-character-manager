@@ -5,8 +5,17 @@ on:
     tags:
       - 'v*'
 
+# One release at a time per tag. A rollback (delete the release, retag, push) can
+# otherwise leave two runs uploading to the same tag, and job 2 could then pair run A's
+# signature with run B's binary in latest.json — every updater would fail signature
+# verification, which is worse than the missing-latest.json failure of v0.23.2.
+# No cancel-in-progress: a half-cancelled release upload is its own mess.
+concurrency:
+  group: release-${{ github.ref }}
+
 jobs:
   build:
+    timeout-minutes: 45
     permissions:
       contents: write
     strategy:
@@ -31,6 +40,9 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 24
+          # check.yml has always cached; the release legs did three uncached installs
+          # per release, in the one workflow where registry flake costs the most.
+          cache: npm
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
