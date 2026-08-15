@@ -503,6 +503,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'VGM',
     size: 'Medium',
     speed: 30,
+    climb: 20,
     abilityScoreIncreases: { dex: 2, cha: 1 },
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light.' },
@@ -666,6 +667,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'MMoM',
     size: 'Medium',
     speed: 30,
+    fly: 'walk',
     abilityScoreIncreases: {},
     flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
@@ -806,6 +808,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'MMoM',
     size: 'Small',
     speed: 30,
+    fly: 'walk',
     abilityScoreIncreases: {},
     flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
@@ -1765,6 +1768,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'SCoC',
     size: 'Medium',
     speed: 30,
+    fly: 'walk',
     abilityScoreIncreases: {},
     flexibleAsi: [[2, 1], [1, 1, 1]],
     traits: [
@@ -2465,6 +2469,7 @@ export const ALL_RACES: Race[] = [
     sourceBook: 'SCAG',
     size: 'Medium',
     speed: 30,
+    fly: 30,
     abilityScoreIncreases: { int: 1, cha: 2 },
     traits: [
       { name: 'Darkvision', description: 'You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.' },

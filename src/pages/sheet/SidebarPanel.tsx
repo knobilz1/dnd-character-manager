@@ -250,7 +250,7 @@ function WeaponAttacksSideModule() {
   const { triggerRoll } = useDiceStore();
   if (!character || !derived) return null;
 
-  const { mods, profBonus, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
+  const { mods, profBonus, attacksPerAction, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks } = derived;
   const armorPen = armorPenalty(character);
   const equippedWeapons = (character.inventory ?? []).filter(
     (item: any) => item.equipped && item.category === 'weapon',
@@ -268,6 +268,11 @@ function WeaponAttacksSideModule() {
 
   return (
     <div className="space-y-2">
+      {attacksPerAction > 1 && (
+        <p className="text-[10px] text-amber-300/90" title="Extra Attack — how many attacks one Attack action gives you">
+          {attacksPerAction} attacks per Attack action
+        </p>
+      )}
       {equippedWeapons.map((item: any) => {
         const w = lookupWeapon(item.name);
         const abilityMod = abilityModForWeapon(w);

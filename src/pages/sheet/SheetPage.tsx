@@ -308,7 +308,7 @@ export function SheetPage() {
     return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
   }
 
-  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks, conditionDisadvChecks, conditionDisadvDexSaves, conditionAutoFailStrDexSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
+  const { finalScores, mods, profBonus, ac, initiative, speed, baseSpeed, flySpeed, swimSpeed, climbSpeed, attacksPerAction, savingThrows, savingThrowProficiencies, skills, allSkillProficiencies, expertiseSkills, passivePerception, passiveInsight, passiveInvestigation, spellSaveDC, spellAttackBonus, slotTotals, totalLevel, exhaustionLevel, exhaustionDisadvChecks, exhaustionDisadvSaves, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks, conditionDisadvChecks, conditionDisadvDexSaves, conditionAutoFailStrDexSaves, advantage, advantageNotes, armorPen, resourceMaxOverrides, sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC } = derived;
 
   const race = getRace(character.raceId);
   const primaryClass = character.classes[0];
@@ -563,6 +563,11 @@ export function SheetPage() {
                 title={exhaustionLevel >= 5 ? 'Speed reduced to 0 (Exhaustion 5)' : exhaustionLevel >= 2 ? `Speed halved from ${baseSpeed} ft (Exhaustion 2)` : undefined}>
                 <p className="text-xs text-slate-400">Speed</p>
                 <p className={cn('font-bold', exhaustionLevel >= 2 ? 'text-orange-300' : 'text-white')}>{speed} ft</p>
+                {(flySpeed > 0 || swimSpeed > 0 || climbSpeed > 0) && (
+                  <p className="text-[10px] text-sky-300/90 leading-tight">
+                    {[flySpeed > 0 ? `fly ${flySpeed}` : null, swimSpeed > 0 ? `swim ${swimSpeed}` : null, climbSpeed > 0 ? `climb ${climbSpeed}` : null].filter(Boolean).join(' · ')}
+                  </p>
+                )}
               </div>
               {/* Prof */}
               <div className="bg-slate-900 border border-slate-700 rounded-lg py-2 px-1 text-center">
@@ -786,6 +791,7 @@ export function SheetPage() {
                 martialArtsDie={martialArtsDie}
                 rageDamageBonus={rageDamageBonus}
                 kiSaveDC={kiSaveDC}
+                attacksPerAction={attacksPerAction}
               />
             )}
             {tab === 'spells' && (
@@ -1532,7 +1538,7 @@ function CombatAbilitiesPanel({ character, spellSaveDC, spellAttackBonus,
 }
 
 // ── Weapon Attacks Panel ────────────────────────────────────────────────────
-function WeaponAttacksPanel({ character, mods, profBonus, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
+function WeaponAttacksPanel({ character, mods, profBonus, attacksPerAction, exhaustionDisadvAttacks, conditionDisadvAttacks, conditionAdvAttacks }: { character: any; mods: any; profBonus: number; attacksPerAction: number; exhaustionDisadvAttacks: boolean; conditionDisadvAttacks: string[]; conditionAdvAttacks: string[] }) {
   const { triggerRoll } = useDiceStore();
 
   const equippedWeapons = (character.inventory ?? []).filter((item: any) => item.equipped && item.category === 'weapon');
@@ -1554,7 +1560,14 @@ function WeaponAttacksPanel({ character, mods, profBonus, exhaustionDisadvAttack
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">
         <SectionHeader className="mb-0">Weapon Attacks</SectionHeader>
-        <PinButton moduleId="weapon-attacks" />
+        <div className="flex items-center gap-2">
+          {attacksPerAction > 1 && (
+            <span className="text-[10px] text-amber-300/90" title="Extra Attack — how many attacks one Attack action gives you">
+              {attacksPerAction} attacks per Attack action
+            </span>
+          )}
+          <PinButton moduleId="weapon-attacks" />
+        </div>
       </div>
       <div className="space-y-2">
         {equippedWeapons.map((item: any) => {
@@ -1762,7 +1775,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
   hasAlternateForm, isDruid, druidLevel, isPathOfBeast, isArmorer,
   onOpenWildShapeModal, deactivateWildShape, damageWildShape, healWildShape,
   setPathOfBeastForm, setArmorerMode,
-  sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC }: any) {
+  sneakAttackDice, martialArtsDie, rageDamageBonus, kiSaveDC, attacksPerAction }: any) {
   const [expandedCondition, setExpandedCondition] = React.useState<string | null>(null);
 
   /** Open a companion in its own window so it can sit beside the sheet while you run both.
@@ -1898,7 +1911,7 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
       )}
 
       {/* Weapon Attacks */}
-      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
+      <WeaponAttacksPanel character={character} mods={mods} profBonus={profBonus} attacksPerAction={attacksPerAction} exhaustionDisadvAttacks={exhaustionDisadvAttacks} conditionDisadvAttacks={conditionDisadvAttacks} conditionAdvAttacks={conditionAdvAttacks} />
 
       {/* Companions — a second creature, not a transformation. Renders nothing unless the
           character can have one or already does. */}

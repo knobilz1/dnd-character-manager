@@ -80,7 +80,11 @@ export interface Race {
   size: 'Tiny' | 'Small' | 'Medium' | 'Large';
   speed: number;
   swim?: number;
-  fly?: number;
+  /** 'walk' = "flying speed equal to your walking speed" — tracks walk bonuses
+   *  (a monk Aarakocra flies at monk speed) and, for every such race, the trait
+   *  also forbids flying in medium/heavy armor. A number is a flat speed with
+   *  no armor clause (SCAG Winged Tiefling). */
+  fly?: number | 'walk';
   climb?: number;
   abilityScoreIncreases: Partial<Record<AbilityKey, number>>;
   /** The race's ability increase is chosen by the player rather than fixed, so

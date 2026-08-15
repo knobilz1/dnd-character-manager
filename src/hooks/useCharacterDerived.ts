@@ -369,9 +369,19 @@ export function computeCharacterDerived(character: Character) {
     // Speed (feat + class bonuses applied before exhaustion halving)
     const exhaustionLevel = character.exhaustionLevel ?? 0;
     const _baseSpeed = (race?.speed ?? 30) + featSpeedBonus + monkSpeedBonus + barbFastMovement;
-    const speed = exhaustionLevel >= 5 ? 0
-      : exhaustionLevel >= 2 ? Math.floor(_baseSpeed / 2)
-      : _baseSpeed;
+    // Exhaustion halves or zeroes EVERY speed, not just walking (PHB p.291).
+    const exhaust = (v: number) => exhaustionLevel >= 5 ? 0 : exhaustionLevel >= 2 ? Math.floor(v / 2) : v;
+    const speed = exhaust(_baseSpeed);
+    // Racial fly/swim/climb existed on the Race type but nothing set or read them, so
+    // an Aarakocra sheet showed "30 ft" and nothing else. fly: 'walk' means "equal to
+    // your walking speed" — it tracks walk bonuses, and every such Flight trait also
+    // forbids flying in medium/heavy armor, so the armor check keys off 'walk' (the
+    // Winged Tiefling's flat 30 has no armor clause).
+    const wornType = equippedArmor ? ARMOR_STATS[equippedArmor.name]?.armorType : undefined;
+    const wingsBound = race?.fly === 'walk' && (wornType === 'medium' || wornType === 'heavy');
+    const flySpeed = race?.fly == null || wingsBound ? 0 : exhaust(race.fly === 'walk' ? _baseSpeed : race.fly);
+    const swimSpeed = race?.swim ? exhaust(race.swim) : 0;
+    const climbSpeed = race?.climb ? exhaust(race.climb) : 0;
 
     // Spellcasting (incl. third-caster subclasses Eldritch Knight / Arcane Trickster).
     const primaryEff = casterClassLevel
@@ -774,6 +784,31 @@ export function computeCharacterDerived(character: Character) {
     // is distinct from spellSaveDC (which is 0 for a pure monk).
     const kiSaveDC = monkLevel > 0 ? 8 + profBonus + mods.wis : 0;
 
+    // Extra Attack existed only as feature text — the sheet never said a level-5
+    // fighter swings twice. Read it off the features the character actually has at
+    // their level, so subclass grants (Bladesinging 6, College of Valor 6) and the
+    // fighter 11/20 ladder come along without a table here. Both editions' names are
+    // in the data: "Extra Attack (3/4 attacks)" (2014), "Two/Three Extra Attacks" (2024).
+    let attacksPerAction = 1;
+    for (const cl of character.classes) {
+      const feats = [
+        ...(getClass(cl.classId)?.features ?? []),
+        ...(cl.subclassId ? getSubclass(cl.subclassId)?.features ?? [] : []),
+      ];
+      for (const f of feats) {
+        if (f.level > cl.level) continue;
+        const isEA = f.name.startsWith('Extra Attack');
+        const n = (isEA && f.name.includes('(4')) || f.name.startsWith('Three Extra Attacks') ? 4
+          : (isEA && f.name.includes('(3')) || f.name.startsWith('Two Extra Attacks') ? 3
+          : isEA ? 2 : 0;
+        if (n > attacksPerAction) attacksPerAction = n;
+      }
+    }
+    // The Pact of the Blade warlock's Extra Attack is the Thirsting Blade invocation.
+    if ((character.classOptions?.invocations ?? []).includes('thirsting-blade')) {
+      attacksPerAction = Math.max(attacksPerAction, 2);
+    }
+
     return {
       finalScores,
       mods,
@@ -782,6 +817,10 @@ export function computeCharacterDerived(character: Character) {
       initiative,
       speed,
       baseSpeed,
+      flySpeed,
+      swimSpeed,
+      climbSpeed,
+      attacksPerAction,
       savingThrows,
       savingThrowProficiencies,
       skills,
