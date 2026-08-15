@@ -507,7 +507,9 @@ const MAGIC_ITEMS: ItemTemplate[] = [
   { name: "Necklace of Adaptation", category: 'magic', weight: 0, description: 'Breathe in any environment and advantage on saves against harmful gases. Uncommon. Requires attunement.' },
   { name: 'Necklace of Fireballs', category: 'magic', weight: 0, description: '3–9 beads, each can be thrown up to 60 ft. to deal 4d6 fire in 20-ft. radius (DC 15 Dex save for half). Rare.' },
   { name: "Necklace of Prayer Beads", category: 'magic', weight: 0, description: '1d4+2 beads each containing spells (bless, cure wounds, aid, etc.). Rare. Requires attunement.' },
-  { name: 'Nine Lives Stealer', category: 'magic', weight: 3, description: '+2 to attack and damage rolls. 1d8+1 charges. On a critical hit against a creature with fewer than 100 HP: it must succeed on a DC 15 Con save or be slain (expends 1 charge). Constructs and undead immune. Very rare. Requires attunement.' },
+  // maxCharges 9 = the DMG maximum of 1d8+1, and deliberately no `recharge`: this sword
+  // never regains charges, so the tracker counts down to a permanently empty weapon.
+  { name: 'Nine Lives Stealer', category: 'magic', weight: 3, maxCharges: 9, description: '+2 to attack and damage rolls. 1d8+1 charges. On a critical hit against a creature with fewer than 100 HP: it must succeed on a DC 15 Con save or be slain (expends 1 charge). Constructs and undead immune. Very rare. Requires attunement.' },
   { name: "Oathbow", category: 'magic', weight: 2, description: 'Whisper "Swift defeat to my enemies" when nocking an arrow. Sworn enemy: advantage, +3d6, ignore cover. Very rare. Requires attunement.' },
   { name: 'Oil of Etherealness', category: 'consumable', weight: 0.5, description: 'Applied to self. For 1 hour, enter ethereal plane at will (as etherealness spell). Rare.' },
   { name: 'Oil of Sharpness', category: 'consumable', weight: 0.5, description: 'Applied to weapon. +3 to attack and damage for 1 hour. Very rare.' },

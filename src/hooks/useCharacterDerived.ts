@@ -450,7 +450,13 @@ export function computeCharacterDerived(character: Character) {
       if (cantripsKnown === 0 && casterClassLevel?.subclassId) {
         const sub = getSubclass(casterClassLevel.subclassId);
         if (sub?.spellcastingType === 'third') {
-          cantripsKnown = casterLevel >= 10 ? 3 : casterLevel >= 3 ? 2 : 0;
+          // The subclass's OWN ladder, not a hardcoded copy of the Eldritch Knight's.
+          // An Arcane Trickster knows 3 cantrips at level 3, not 2 — the creator offered
+          // the third correctly and then the sheet reported "Cantrips: 3/2" in red and
+          // refused the swap. sanitizeCreatorDraft has always read this array; the sheet
+          // is the copy that drifted.
+          cantripsKnown = sub.cantripsKnownByClassLevel?.[Math.min(casterLevel, 20) - 1]
+            ?? (casterLevel >= 10 ? 3 : casterLevel >= 3 ? 2 : 0);
         }
       }
 
@@ -469,7 +475,12 @@ export function computeCharacterDerived(character: Character) {
       if (spellsKnown === null && casterClassLevel?.subclassId) {
         const sub = getSubclass(casterClassLevel.subclassId);
         if (sub?.spellcastingType === 'third') {
-          spellsKnown = spellsKnownFor(sub.spellListClassId ?? casterClassDef.id, casterLevel) || null;
+          // spellListClassId is 'wizard', which has no SPELLS_KNOWN entry (wizards use a
+          // spellbook), so this asked the wrong table and got null — i.e. "no limit", and
+          // an Eldritch Knight could learn unlimited spells on the sheet. The subclass
+          // carries its own 3-at-3rd-to-13-at-20th ladder; use that.
+          spellsKnown = (sub.spellsKnownByClassLevel?.[Math.min(casterLevel, 20) - 1]
+            ?? spellsKnownFor(sub.spellListClassId ?? casterClassDef.id, casterLevel)) || null;
         }
       }
       if (['wizard', 'wizard-2024'].includes(casterClassDef.id)) {

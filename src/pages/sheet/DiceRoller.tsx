@@ -407,7 +407,7 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
     // advantage, so a multi-die request always takes the summing path rather
     // than silently losing all but one of its dice to rollTwo.
     if (reqMode !== 'normal' && count === 1) {
-      rollTwo(req.die as Die, reqMode);
+      rollTwo(req.die as Die, reqMode, true);
     } else {
       rollWithSides(req.die as Die, count);
     }
@@ -521,8 +521,13 @@ export function DiceRoller({ exhaustionLevel = 0, characterName }: { exhaustionL
     rollWithSides(sides);
   }
 
-  function rollTwo(sides: Die, modeOverride?: Mode) {
-    if (rolling) return;
+  /** `external` marks a roll triggered from a sheet button rather than this panel's own
+   *  dice grid. Those buttons are not disabled during the ~3.5s animation, and the pending
+   *  request has already been consumed by the time we get here — so bailing out on
+   *  `rolling` silently ate the second of two quick attacks (Extra Attack, a rogue's
+   *  bonus-action dagger). rollWithSides has always restarted instead; this now matches it. */
+  function rollTwo(sides: Die, modeOverride?: Mode, external = false) {
+    if (rolling && !external) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     setActiveDie(sides);
     setActiveCount(1); // adv/dis is always a single die taken twice

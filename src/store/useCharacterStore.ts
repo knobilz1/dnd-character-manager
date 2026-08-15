@@ -757,6 +757,12 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
       })();
       const allRds = [...(classDef?.resources ?? []), ...(subDef?.resources ?? [])];
       const newLevel = classes.find(c => c.classId === classId)!.level;
+      // Race resources belong in this rebuild too, and are keyed on TOTAL character level
+      // rather than this class's — a Shifter going 4→5 kept the old Shifting maximum until
+      // the sheet was next reopened, which hid the bug by fixing it. (load() has always
+      // handled both; this is the copy that only knew about classes.)
+      const raceRds = getRace(s.character.raceId)?.resources ?? [];
+      const newTotalLevelForResources = classes.reduce((sum, cl) => sum + cl.level, 0);
       const oldResources = new Map(s.character.resources.map(r => [r.key, r] as const));
       const resources = [...s.character.resources];
 
@@ -779,6 +785,20 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
           }
         } else if (normalisedMax > 0) {
           // New resource unlocked at this level.
+          resources.push({ key: rd.key, current: normalisedMax, max: normalisedMax });
+        }
+      }
+
+      // Race resources, on the total-level ladder.
+      for (const rd of raceRds) {
+        if (levelUpOverrides[rd.key] != null) continue;
+        const max = rd.maxPerLevel[newTotalLevelForResources] ?? 0;
+        const normalisedMax = max === 'unlimited' ? 99 : max;
+        const existing = oldResources.get(rd.key);
+        const idx = resources.findIndex(r => r.key === rd.key);
+        if (existing && idx >= 0) {
+          resources[idx] = { ...existing, max: normalisedMax, current: Math.min(existing.current + Math.max(0, normalisedMax - existing.max), normalisedMax) };
+        } else if (normalisedMax > 0) {
           resources.push({ key: rd.key, current: normalisedMax, max: normalisedMax });
         }
       }
@@ -863,6 +883,18 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
         const retroHP = conModDelta * newTotalLevel;
         newMaxHP += retroHP;
         newCurrentHP = Math.min(newMaxHP, newCurrentHP + retroHP);
+      }
+
+      // Resources granted by a feat — including the one just taken this level-up, which is
+      // why it sits down here, after `selectedFeats` is resolved rather than up with the
+      // class resources. 2014 Lucky's 3 luck points and Martial Adept's superiority die
+      // never appeared until the sheet was next reloaded.
+      for (const featId of effectiveFeatIds({ ...s.character, selectedFeats })) {
+        const feat = ALL_FEATS.find(f => f.id === featId);
+        for (const fr of (feat?.grantedResources ?? [])) {
+          if (resources.some(r => r.key === fr.key)) continue;
+          resources.push({ key: fr.key, current: fr.max, max: fr.max });
+        }
       }
 
       // Sync always-prepared spells for newly unlocked subclass spell tables.

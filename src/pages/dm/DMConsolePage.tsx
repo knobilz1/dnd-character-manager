@@ -1171,6 +1171,14 @@ export function DMConsolePage() {
   // default for planning; the DM turns it OFF to print/export a clean map. The
   // flag flows into both the preview render and the PNG/PDF export.
   const [showZones, setShowZones] = React.useState(true);
+  /** renderFloors below is also reached from the mount-once `dm-player-turn` listener (a
+   *  makeMap card arriving mid-session), and that closure froze `showZones` at its mount
+   *  value of true — so a DM who had switched deployment zones off still got them drawn on
+   *  any map the DM itself produced. A ref refreshed every render is the fix used
+   *  throughout this page; it can't be the `live` bundle because that is declared ~200
+   *  lines below this function. */
+  const showZonesRef = React.useRef(showZones);
+  showZonesRef.current = showZones;
   // Multi-story: rebuild a card's per-floor previews from its spec. Ground
   // first; a single-floor map yields one floor whose png === the old single
   // png (byte-identical), so existing maps are unchanged. `prev` carries the
@@ -1178,7 +1186,7 @@ export function DMConsolePage() {
   // none, so ground starts revealed and upper floors hidden — Phase 5 gates
   // the LAN player broadcast on these flags.
   const renderFloors = (spec: string, floorArt: MapCard['floorArt'], prev?: MapCard['floors']): MapCard['floors'] =>
-    battleMapFloorsToPngs(spec, 64, floorArt, showZones).map((f, i) => ({
+    battleMapFloorsToPngs(spec, 64, floorArt, showZonesRef.current).map((f, i) => ({
       name: f.name,
       png: f.png,
       revealed: prev?.find((p) => p.name === f.name)?.revealed ?? i === 0,
@@ -2453,7 +2461,12 @@ export function DMConsolePage() {
       lastDmNarrationRef.current = narration;
       const displayNarration = stripSpeakerTagsForDisplay(narration);
       setTurns((t) => [...t, { who: 'dm', text: displayNarration }]);
-      setWarning(parseWarnings.length ? parseWarnings.join(' ') : null);
+      // Only ever ADD. Passing null here cleared every undismissed warning in the list,
+      // so a clean turn — including one a remote player triggered while the DM was looking
+      // at the table — silently wiped "the chapter switch didn't take" or "the table screen
+      // is out of date" before anyone read it. Dismissal is the player's job, not the
+      // next turn's side effect.
+      if (parseWarnings.length) setWarning(parseWarnings.join(' '));
       // Lets every connected player device catch up on what the DM said —
       // not just whoever's own /talk request happened to carry the reply
       // back (see party_listener.rs's narration_log). Fire-and-forget: a
@@ -2469,8 +2482,9 @@ export function DMConsolePage() {
       if (actions) {
         const { updated, warnings } = applyDmActions(live.current.party, actions);
         updated.forEach((c, i) => { if (c !== live.current.party[i]) upsert(c); });
-        const allWarnings = [...parseWarnings, ...warnings];
-        if (allWarnings.length) setWarning(allWarnings.join(' '));
+        // Just the apply-side warnings: the parse ones were posted above, and folding them
+        // in again produced a second, differently-worded notice saying the same thing.
+        if (warnings.length) setWarning(warnings.join(' '));
 
         const campaignId = live.current.campaignId;
         if (campaignId && actions.remember?.length) {
