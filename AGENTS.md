@@ -113,10 +113,24 @@ catalog, real campaigns, or live models, and are driven by env vars. Run with
 | `classify_biome_over_the_real_map_corpus` | `MAP_FILTER`, `MAP_CORPUS` | Which biome real map specs classify as |
 | `vocabulary_misses_over_the_real_map_corpus` | `MAP_CORPUS` | Words the maps use that the catalog has never heard of — the single cheapest source of tile bugs |
 | `rank_snapshot_over_the_real_catalog` | `TILE_CORPUS`, `TILE_SNAPSHOT`, `TILE_SCENES`, `TILE_CATEGORY`, `TILE_DEPTH` | Before/after ranking diffs. **Sweep any ranking change through this before believing it.** |
+| `field_decision_over_the_real_catalog` | `TILE_CORPUS`, `TILE_SCENES` | What a `T`/`^` field glyph resolves to, label by label |
 | `deployment_standability_over_the_real_maps` | `MAP_CORPUS` | Are deployment cells actually stand-on-able |
 | `chapterize_a_real_module`, `measure_candidate_heading_lines` | `HEADING_SCAN_PDF` | Module import against a real PDF |
 | `local_ingestion_end_to_end` | `LOCAL_INGEST_URL`, `LOCAL_INGEST_MODEL` | The local-LLM path |
 | `*_end_to_end` (chapterize, lore, digest, plan) | — | Live model calls; slow and costly |
+
+**`TILE_CORPUS` means two different formats**, and the two harnesses that read it will not tell
+each other apart: `rank_snapshot` wants `<WxH><TAB><label>` rows, `field_decision` wants
+`<glyph><TAB><label>`. Committed examples of each, seeded with the labels whose past
+misresolutions the ranking comments cite (the wine rack, the flesh pillar, the bone die):
+
+```bash
+TILE_CORPUS=scripts/tile-corpus.rank.example.tsv TILE_SNAPSHOT=/tmp/before.txt cargo test --lib rank_snapshot_over_the_real_catalog -- --ignored --nocapture
+```
+
+Some labels there resolve to `(none)` on purpose — `rank_snapshot` ranks the raw label, while
+production falls back to a canonical noun when the label doesn't name its own object, so
+"Collapsed masonry" is empty here and still resolves to rubble on a real map.
 
 ---
 

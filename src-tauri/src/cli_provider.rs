@@ -198,6 +198,20 @@ fn lockdown_flags(engine: CliEngine) -> Vec<String> {
     }
 }
 
+/// Reasoning effort, filtered to the levels the engines actually define.
+///
+/// This is part of the lockdown, not tidiness. Codex takes effort as
+/// `-c model_reasoning_effort="{e}"` — a TOML **config override** — and
+/// `--ignore-user-config` does not cover `-c`, so an unexpected string here is
+/// pointed straight at the one mechanism that can widen a sandbox. The value
+/// arrives from the frontend through `ask_dm_engine`'s `effort: Option<String>`;
+/// the TypeScript side types it `'low' | 'medium'`, and TypeScript types do not
+/// survive an IPC boundary. Anything unrecognised is dropped rather than passed
+/// on, which costs nothing: the engines all have a default.
+fn sane_effort(effort: Option<&str>) -> Option<&str> {
+    effort.filter(|e| matches!(*e, "low" | "medium" | "high" | "xhigh"))
+}
+
 /// Flags that must never be generated for an engine, at all, by anything. Used
 /// by the tests as a tripwire; listed here so the reason is next to the rule.
 ///
@@ -258,6 +272,7 @@ pub struct Invocation {
 /// A stateless one-shot completion — the ingestion/memory workload. No session,
 /// no continuity, tools off. `expect_json` is a hint some engines can enforce.
 pub fn oneshot_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>, last_message_file: &str) -> Invocation {
+    let effort = sane_effort(effort);
     match engine {
         CliEngine::Claude => {
             let mut args: Vec<String> = vec!["-p".into(), "--output-format".into(), "json".into()];
@@ -319,6 +334,7 @@ pub fn turn_args(
     engine: CliEngine, session_id: Option<&str>, model: Option<&str>, effort: Option<&str>,
     streaming: bool, last_message_file: &str,
 ) -> Invocation {
+    let effort = sane_effort(effort);
     match engine {
         CliEngine::Claude => {
             let mut args: Vec<String> = vec!["-p".into(), "--output-format".into()];
@@ -402,6 +418,7 @@ pub fn turn_args(
 /// each engine decide, which means the data URL has to be spilled to a temp file
 /// for the two that want one.
 pub fn vision_args(engine: CliEngine, model: Option<&str>, effort: Option<&str>, image_paths: &[String], last_message_file: &str) -> Invocation {
+    let effort = sane_effort(effort);
     match engine {
         CliEngine::Claude => {
             let mut args: Vec<String> = vec![
@@ -595,6 +612,37 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// Codex takes effort as a TOML CONFIG OVERRIDE (`-c model_reasoning_effort=…`),
+    /// and `--ignore-user-config` does not cover `-c` — so an unrecognised effort
+    /// string is aimed at the one mechanism that can widen a sandbox. It arrives
+    /// from the frontend as a plain `Option<String>`; the TypeScript union that
+    /// describes it does not survive the IPC boundary.
+    #[test]
+    fn a_junk_effort_never_reaches_a_config_override() {
+        let attack = "high\"\nsandbox_mode=\"danger-full-access";
+        for engine in [CliEngine::Claude, CliEngine::Codex, CliEngine::Gemini] {
+            for (what, inv) in [
+                ("oneshot", oneshot_args(engine, None, Some(attack), "o.txt")),
+                ("turn", turn_args(engine, None, None, Some(attack), false, "o.txt")),
+                ("vision", vision_args(engine, None, Some(attack), &[], "o.txt")),
+            ] {
+                assert!(
+                    !inv.args.iter().any(|a| a.contains("danger-full-access") || a.contains("sandbox_mode")),
+                    "{engine:?}/{what} passed a junk effort through: {:?}", inv.args
+                );
+            }
+        }
+        // The real levels still get through, or this test would pass by breaking
+        // the feature.
+        for e in ["low", "medium", "high", "xhigh"] {
+            let args = oneshot_args(CliEngine::Codex, None, Some(e), "o.txt").args;
+            assert!(
+                args.iter().any(|a| a == &format!("model_reasoning_effort=\"{e}\"")),
+                "{e} should survive: {args:?}"
+            );
         }
     }
 

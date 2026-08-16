@@ -4409,8 +4409,13 @@ mod tests {
         let profile: PackProfile = serde_json::from_str(&std::fs::read_to_string(dir.join("pack_profile.json")).unwrap()).unwrap();
         let idf = compute_idf(&man.entries);
         let scene = std::env::var("TILE_SCENES").unwrap_or_else(|_| "forest".into());
-        for line in std::fs::read_to_string(std::env::var("TILE_CORPUS").unwrap()).unwrap().lines().filter(|l| !l.trim().is_empty()) {
-            let (glyph, label) = line.split_once('\t').unwrap();
+        let corpus_path = std::env::var("TILE_CORPUS")
+            .expect("set TILE_CORPUS to a file of `<glyph>\\t<label>` rows — see scripts/tile-corpus.field.example.tsv");
+        let corpus = std::fs::read_to_string(&corpus_path)
+            .unwrap_or_else(|e| panic!("TILE_CORPUS={corpus_path}: {e}"));
+        for line in corpus.lines().filter(|l| !l.trim().is_empty()) {
+            let (glyph, label) = line.split_once('\t')
+                .unwrap_or_else(|| panic!("this harness wants `<glyph>\\t<label>` rows; got {line:?}"));
             let noun = if glyph == "^" { "rubble" } else { "tree" };
             let (fw, fh) = if glyph == "^" { (2, 2) } else { (3, 3) };
             let cat = modal_category(&man.entries, &profile, noun);
@@ -4470,7 +4475,13 @@ mod tests {
         let man: TileLibraryManifest = serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
         let profile: PackProfile = serde_json::from_str(&std::fs::read_to_string(dir.join("pack_profile.json")).unwrap()).unwrap();
         let idf = compute_idf(&man.entries);
-        let corpus = std::fs::read_to_string(std::env::var("TILE_CORPUS").unwrap()).unwrap();
+        // NOTE the row format differs from `field_decision_over_the_real_catalog`, which reads
+        // the same variable expecting `<glyph>\\t<label>`. Handing either harness the other's
+        // file used to panic on a bare unwrap with nothing said about why.
+        let corpus_path = std::env::var("TILE_CORPUS")
+            .expect("set TILE_CORPUS to a file of `<WxH>\\t<label>` rows — see scripts/tile-corpus.rank.example.tsv");
+        let corpus = std::fs::read_to_string(&corpus_path)
+            .unwrap_or_else(|e| panic!("TILE_CORPUS={corpus_path}: {e}"));
         // Optional single-category restriction, mirroring `shortlist_in_category`.
         let only = std::env::var("TILE_CATEGORY").ok();
         let man = TileLibraryManifest {
@@ -4483,8 +4494,10 @@ mod tests {
 
         let mut out = String::new();
         for line in corpus.lines().filter(|l| !l.trim().is_empty()) {
-            let (size, label) = line.split_once('\t').unwrap();
-            let (w, h) = size.split_once('x').unwrap();
+            let (size, label) = line.split_once('\t')
+                .unwrap_or_else(|| panic!("this harness wants `<WxH>\\t<label>` rows; got {line:?}"));
+            let (w, h) = size.split_once('x')
+                .unwrap_or_else(|| panic!("row must start with a footprint like `2x2`; got {size:?}"));
             let (w, h) = (w.parse().unwrap(), h.parse().unwrap());
             let mut tokens = tokenize_query(label);
             promote_identity_head(&man.entries, &mut tokens); // mirror shortlist_impl
@@ -4500,7 +4513,10 @@ mod tests {
                 out.push_str(&format!("{label} [{w}x{h}] @{scene} -> {}\n", if names.is_empty() { "(none)".into() } else { names.join(" | ") }));
             }
         }
-        std::fs::write(std::env::var("TILE_SNAPSHOT").unwrap(), &out).unwrap();
+        let snapshot_path = std::env::var("TILE_SNAPSHOT")
+            .expect("set TILE_SNAPSHOT to the file this run writes its ranking to — diff two of them");
+        std::fs::write(&snapshot_path, &out)
+            .unwrap_or_else(|e| panic!("TILE_SNAPSHOT={snapshot_path}: {e}"));
         println!("{} lines written", out.lines().count());
     }
 
