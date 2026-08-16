@@ -608,7 +608,7 @@ fn subscription_ingest_options<'a>(
 /// path if that engine fails, because a second opinion is an improvement, not a
 /// dependency: losing the reviewer should degrade quality, never lose the work.
 pub fn ask_ingest_once_on(
-    engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>, expect_json: bool,
+    engine: crate::cli_provider::CliEngine, prompt: String, claude_model: Option<&str>,
     effort: Option<&str>,
 ) -> Result<String, String> {
     match ask_subscription_ingest_once(engine, &prompt, claude_model, effort) {
@@ -623,9 +623,24 @@ pub fn ask_ingest_once_on(
             );
             Ok(text)
         }
+        // Deliberately NO failover here, though every other ingestion path has
+        // one. A failed reviewer used to fall back to `ask_ingest_once`, which
+        // routes to the configured primary — the engine that WROTE the draft. So
+        // a lapsed agy token or a rate-limited Codex silently turned the second
+        // opinion into self-review, and `ask_ingest_critique` then filed the
+        // notes under the reviewer's name. Two failed reviewers produced two
+        // notes from one engine, presented as the independent agreement the
+        // author is told to weigh most heavily.
+        //
+        // The critique loop's own `Err(_) => continue` arm is the right answer
+        // and was unreachable while this fallback existed: skip this reviewer,
+        // keep whoever else is up, and say so.
         Err(e) => {
-            crate::maplog::log("CROSS-CHECK fell back to the primary engine", &e);
-            ask_ingest_once(prompt, claude_model, expect_json)
+            crate::maplog::log(
+                "CROSS-CHECK reviewer unavailable",
+                &format!("{}: {e} — skipping this reviewer, NOT substituting the draft's author", engine.label()),
+            );
+            Err(e)
         }
     }
 }
@@ -946,6 +961,36 @@ fn build_patch_prompt(draft: &str, findings: &str) -> String {
 /// objective finish line thrashes.
 const MAX_REVIEW_ROUNDS: usize = 2;
 
+/// What a reviewer's reply actually was.
+///
+/// `Silent` and `Clean` used to be one branch logged as "had no findings", which
+/// is the §10 lesson (silence that could mean agreed, returned nothing, or never
+/// ran) reappearing a level above where it was fixed. They are not the same
+/// event: an engine can answer with nothing at all and still exit successfully —
+/// agy returns `"status":"SUCCESS"` with an empty response when its tools are
+/// auto-denied headless — and reading that as "reviewed it, found nothing wrong"
+/// credits a pass that never happened.
+#[derive(Debug, PartialEq)]
+enum ReviewOutcome {
+    /// Real notes to hand the author.
+    Findings,
+    /// The reviewer read it and said it is fine.
+    Clean,
+    /// The reviewer produced no text. Not a verdict.
+    Silent,
+}
+
+fn classify_review(reply: &str) -> ReviewOutcome {
+    let r = reply.trim();
+    if r.is_empty() {
+        ReviewOutcome::Silent
+    } else if r.contains("NO-FINDINGS") {
+        ReviewOutcome::Clean
+    } else {
+        ReviewOutcome::Findings
+    }
+}
+
 /// Fraction of the draft's length a revision must retain to be trusted.
 ///
 /// The measured failure sat at 60% (3546 chars -> 2141), so 0.65 catches it with
@@ -1055,7 +1100,6 @@ pub fn ask_ingest_critique(
                 *reviewer,
                 format!("{}{FINDINGS_ONLY_OVERRIDE}\n\n{lens}", with_document(&prompt, &current, round)),
                 claude_model,
-                false,
                 // "high" is common to all three engines' scales. Claude also has
                 // xhigh/max, but a review is a bounded read of one document, not
                 // open-ended exploration.
@@ -1069,12 +1113,25 @@ pub fn ask_ingest_critique(
                     continue;
                 }
             };
-            if found.is_empty() || found.contains("NO-FINDINGS") {
-                crate::maplog::log(
-                    "CROSS-CHECK found nothing",
-                    &format!("round {} — {} ({lens_name}) had no findings", round + 1, reviewer.label()),
-                );
-                continue;
+            match classify_review(&found) {
+                ReviewOutcome::Silent => {
+                    crate::maplog::log(
+                        "CROSS-CHECK returned nothing",
+                        &format!(
+                            "round {} — {} ({lens_name}) answered with no text at all. That is a reviewer that did not run, not a clean bill of health.",
+                            round + 1, reviewer.label()
+                        ),
+                    );
+                    continue;
+                }
+                ReviewOutcome::Clean => {
+                    crate::maplog::log(
+                        "CROSS-CHECK found nothing",
+                        &format!("round {} — {} ({lens_name}) read it and reported no findings", round + 1, reviewer.label()),
+                    );
+                    continue;
+                }
+                ReviewOutcome::Findings => {}
             }
             crate::maplog::log(
                 "CROSS-CHECK findings",
@@ -1270,6 +1327,23 @@ pub fn end_local_dm_session(session_id: String) {
 mod tests {
     use super::*;
 
+    /// Every test that touches `ingest_config` takes this first.
+    ///
+    /// There is ONE process-global ingest config and cargo runs tests in
+    /// parallel, so a test that flips `use_local` on and back off is visible to
+    /// any other test reading the config in between. Measured 2026-08-16: the
+    /// reviewer test asserted `[Codex, Gemini]`, got `[]`, and passed when run
+    /// alone — `ingestion_reviewers()` returns empty while `use_local` is set,
+    /// and the local-config test had it set at that moment. The suite had been
+    /// green by scheduling luck; adding an unrelated test reshuffled it.
+    static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A panicking test poisons the mutex. Recovering the guard keeps one
+    /// failure from cascading into every other config test as a lock error.
+    fn lock_config() -> std::sync::MutexGuard<'static, ()> {
+        CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn codex_ingestion_always_uses_xhigh_and_never_a_claude_model_name() {
         use crate::cli_provider::CliEngine;
@@ -1376,6 +1450,22 @@ mod tests {
         assert!(refused[1].contains("empty `find`"), "{:?}", refused);
     }
 
+    /// A reviewer that said nothing and a reviewer that said "nothing is wrong"
+    /// are different events, and collapsing them is how the cross-check looked
+    /// healthy for days while every leg returned empty (§10). agy in particular
+    /// exits SUCCESS with no text when its tools are auto-denied headless.
+    #[test]
+    fn an_empty_reply_is_not_a_clean_bill_of_health() {
+        assert_eq!(classify_review(""), ReviewOutcome::Silent);
+        assert_eq!(classify_review("   \n  "), ReviewOutcome::Silent);
+        assert_eq!(classify_review("NO-FINDINGS"), ReviewOutcome::Clean);
+        assert_eq!(classify_review("  NO-FINDINGS  \n"), ReviewOutcome::Clean);
+        assert_eq!(
+            classify_review("1. The tavern is described as both derelict and busy."),
+            ReviewOutcome::Findings
+        );
+    }
+
     /// Two rounds, and only two. An open loop on a document with no objective
     /// finish line thrashes; one round misses the follow-on problems that the
     /// first round's own answers create.
@@ -1430,6 +1520,7 @@ mod tests {
     #[test]
     fn every_ticked_reviewer_is_kept_except_the_one_that_wrote_the_draft() {
         use crate::cli_provider::CliEngine;
+        let _guard = lock_config();
 
         set_ingestion_engine("claude".into(), Some(vec!["codex".into(), "gemini".into()]));
         assert_eq!(ingestion_reviewers(), vec![CliEngine::Codex, CliEngine::Gemini]);
@@ -1780,8 +1871,11 @@ mod tests {
 
     #[test]
     fn ask_ingest_once_errors_clearly_when_local_selected_but_unconfigured() {
-        // The one test that mutates the process-global ingest config; sets it
+        // Mutates the process-global ingest config, so it takes CONFIG_LOCK: while
+        // `use_local` is on here, `ingestion_reviewers()` returns empty everywhere,
+        // which used to fail the reviewer test at random. Sets the config
         // explicitly (never relies on the default) and restores it after.
+        let _guard = lock_config();
         set_ingestion_provider(true, "  ".into(), "".into());
         let err = ask_ingest_once("prompt".into(), Some("opus"), false).unwrap_err();
         assert!(err.to_lowercase().contains("isn't configured"), "got: {err}");
