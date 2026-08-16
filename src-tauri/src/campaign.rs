@@ -8790,6 +8790,31 @@ fn parse_chapterize_reply(reply: &str) -> Result<ChapterizeReply, String> {
 ///
 /// `ends_at` bounds the LAST chapter, which otherwise runs to the end of the
 /// document and drags every trailing appendix into it.
+/// Is this "chapter" only the book pointing at a different chapter?
+///
+/// Big adventures repeat their own table of contents inside a gazetteer: Curse
+/// of Strahd's chapter 2 walks areas A–Z, and a dozen of those entries are one
+/// line — `N. TOWN OF VALLAKI` / "Chapter 5 describes the town of Vallaki." The
+/// heading detector can't tell that from a real section, so the 2026-08-16
+/// import produced 103 chapters for a 15-chapter book, 12 of them signposts
+/// duplicating the chapter they point at, one of them 66 bytes.
+///
+/// Both conditions are required, because either alone is wrong: a short section
+/// can be real (Death House's "The Mists" is 516 bytes of actual scene), and a
+/// long one can mention another chapter in passing. A pointer is short AND its
+/// body opens by naming the chapter that holds the content.
+fn is_cross_reference_stub(body: &str) -> bool {
+    // Drop the heading line; what's left is the body the DM would be handed.
+    let text = body.split_once('\n').map_or("", |(_, rest)| rest).trim();
+    if text.chars().count() > 300 {
+        return false;
+    }
+    text.trim_start_matches(|c: char| !c.is_alphabetic())
+        .strip_prefix("Chapter ")
+        .or_else(|| text.strip_prefix("chapter "))
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+}
+
 fn split_by_headings(text: &str, candidates: &[(usize, &str)], headings: &[ChapterHeading], ends_at: Option<usize>) -> Vec<(String, String, String)> {
     let mut positions: Vec<(usize, &ChapterHeading)> = vec![];
     for h in headings {
@@ -9607,7 +9632,31 @@ fn chapterize_and_import_module_at(root: &Path, id: &str, raw_text: &str, on_pro
     // Resolve the narrative end through the SAME numbered skeleton the
     // chapters came from, so a line number means one thing everywhere.
     let narrative_end = parsed.narrative_ends_at_line.and_then(|n| n.checked_sub(1)).and_then(|i| candidates.get(i)).map(|(off, _)| *off);
-    let chapters = split_by_headings(raw_text, &candidates, &parsed.chapters, narrative_end);
+    // A section listed BOTH as narrative and as reference belongs to reference:
+    // the model flagged it as look-up material, and the reference split runs to
+    // the end of the document while the narrative one stops at whatever came
+    // next. Curse of Strahd shipped appendices C–F twice for want of this —
+    // Appendix C byte-identical in both lists, and Appendix D as a 958-byte
+    // stub advanceable in the narrative alongside its real 88K reference copy.
+    let reference_lines: std::collections::HashSet<usize> =
+        parsed.reference_sections.iter().map(|r| r.line).collect();
+    let narrative_headings: Vec<ChapterHeading> = parsed
+        .chapters
+        .iter()
+        .filter(|c| !reference_lines.contains(&c.line))
+        .cloned()
+        .collect();
+    let chapters: Vec<(String, String, String)> =
+        split_by_headings(raw_text, &candidates, &narrative_headings, narrative_end)
+            .into_iter()
+            // The book's own cross-references are not chapters. See
+            // `is_cross_reference_stub` — the chapter they point at is already
+            // in this list, with the actual content.
+            .filter(|(_, _, body)| !is_cross_reference_stub(body))
+            .collect();
+    if chapters.is_empty() {
+        return Err("Chapterizing found no narrative chapters in this document.".into());
+    }
     let module_title = if parsed.module_title.trim().is_empty() {
         chapters[0].0.clone()
     } else {
@@ -14957,6 +15006,67 @@ A HEADING LINE
         let zeroed = split_by_headings(text, &cands, &[heading("Zero", 0, "Bad.")], None);
         assert_eq!(zeroed.len(), 1);
         assert_eq!(zeroed[0].2, text, "nothing usable means the whole document, not a panic");
+    }
+
+    /// A section the model lists in BOTH `chapters` and `reference_sections`
+    /// used to be written twice: once advanceable, once tagged reference. Curse
+    /// of Strahd shipped appendices C–F that way — Appendix C byte-identical at
+    /// both #77 and #100, and Appendix D as a 958-byte narrative stub beside its
+    /// real 88K reference copy, because the narrative slice stopped at whatever
+    /// heading came next while the reference one ran to the end.
+    #[test]
+    fn a_section_listed_as_both_narrative_and_reference_is_only_reference() {
+        let text = "CHAPTER 1\nThe adventure begins.\nAPPENDIX C: TREASURES\nThe Sunsword.\nMore treasure text.\n";
+        let cands = skeleton(text);
+        let titles: Vec<&str> = cands.iter().map(|(_, l)| *l).collect();
+        let ch1 = titles.iter().position(|l| *l == "CHAPTER 1").unwrap() + 1;
+        let appendix_line = titles.iter().position(|l| *l == "APPENDIX C: TREASURES").unwrap() + 1;
+
+        let heading = |line: usize, title: &str| ChapterHeading {
+            title: title.into(), line, summary: String::new(),
+        };
+        // The model named the appendix in both lists — the case that duplicated.
+        let listed_chapters = vec![heading(ch1, "Chapter 1"), heading(appendix_line, "Appendix C")];
+        let reference = vec![heading(appendix_line, "Appendix C")];
+
+        let reference_lines: std::collections::HashSet<usize> = reference.iter().map(|r| r.line).collect();
+        let narrative: Vec<ChapterHeading> = listed_chapters
+            .into_iter().filter(|c| !reference_lines.contains(&c.line)).collect();
+
+        assert_eq!(narrative.len(), 1, "the appendix must not stay advanceable");
+        assert_eq!(narrative[0].line, ch1);
+        // And the reference split still keeps it, running to the end of the doc.
+        let refs = split_by_headings(text, &cands, &reference, None);
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0].2.contains("More treasure text"), "reference copy must run to the end: {:?}", refs[0].2);
+    }
+
+    /// Verbatim from the Curse of Strahd import, 2026-08-16. Chapter 2's
+    /// gazetteer walks areas A–Z and a dozen entries are one line pointing at
+    /// the chapter that holds the content — so the import produced 103 chapters
+    /// for a 15-chapter book, twelve of them signposts duplicating a real
+    /// chapter, the smallest 66 bytes.
+    #[test]
+    fn a_chapter_that_only_points_at_another_chapter_is_not_a_chapter() {
+        // Real bodies, exactly as they were written to disk.
+        for stub in [
+            "N. Town OF VALLAKI\n\nChapter 5 describes the town of Vallaki.\n",
+            "O, OLD BONEGRINDER\n\nChapter 6 details Old Bonegrinder, a decrepit windmill\noccupied by hags.\n",
+            "E. VILLAGE OF BAROVIA.\nChapter 3 describes the village of Barovia and the\ngloomy folk who reside there,\n",
+            "U. RUINS OF BEREZ\n\nChapter 10 describes the ruins of Berez, a riverside village that is now home to the hag Baba Lysaga.\n\nChapter 11 details Van Richten's Tower, a dilapidated\nstructure that originally belonged to the wizard Khazan.\n",
+        ] {
+            assert!(is_cross_reference_stub(stub), "should have been dropped:\n{stub}");
+        }
+
+        // …and the near misses that must survive. Both were in the same import.
+        // "The Mists" is 516 bytes of real Death House scene that happens to
+        // cite chapter 2; the crossroads is a full signpost encounter.
+        let mists = "THE MISTS\nCharacters who remain outside the house can see the\nmists close in around them, swallowing up the rest of\nthe village. As more buildings disappear into the mists,\nthe characters are left with little choice but to seek refuge in the house. The mists stop short of entering the\nhouse but engulf anyone outside (see chapter 2, \"The\nLands of Barovia.\" for information on the mists' effect).\n";
+        assert!(!is_cross_reference_stub(mists), "a real scene that cites a chapter must survive");
+        let crossroads = format!("R. RAVEN RIVER CROSSROADS\n{}", "Always check for a random encounter whenever the characters reach area R. ".repeat(8));
+        assert!(!is_cross_reference_stub(&crossroads), "a long section must survive");
+        // A heading with no body at all is not a pointer either — leave it be.
+        assert!(!is_cross_reference_stub("SOME HEADING\n"));
     }
 
     /// The last chapter used to run to the end of the document, so every
