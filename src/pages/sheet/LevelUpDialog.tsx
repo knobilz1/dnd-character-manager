@@ -11,7 +11,7 @@ import {
   warlockInvocationsKnown, sorcererMetamagicKnown, battleMasterManeuversKnown, artificerInfusionsKnown,
 } from '../../data/mechanics';
 import { effectiveFeatIds } from '../../utils/effectiveFeats';
-import { ALL_FEATS, getEligibleFeats } from '../../data/feats';
+import { ALL_FEATS, formatFeatPrerequisite, getEligibleFeats } from '../../data/feats';
 import { ALL_FIGHTING_STYLES, fightingStylesAllowed } from '../../data/fightingStyles';
 import { SubclassOptionsPicker } from '../creator/steps/SubclassOptionsPicker';
 import { getSubclassOptions, picksAllowed } from '../../data/subclassOptions';
@@ -308,9 +308,14 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
   const newFeatRetroactive = selectedFeat
     ? (ALL_FEATS.find(f => f.id === selectedFeat)?.hpRetroactiveBonusPerPastLevel ?? 0) * (derived?.totalLevel ?? 1)
     : 0;
+  // Flat one-time grant from the feat picked this level-up (Boon of Fortitude: +40). Feats already
+  // held are baked into the stored maximum, so only the new one is added here.
+  const newFeatFlatHP = selectedFeat
+    ? (ALL_FEATS.find(f => f.id === selectedFeat)?.hpBonus ?? 0)
+    : 0;
   const hpGained = method === 'roll'
-    ? Math.max(1, (rollResult ?? 0) + conMod) + totalHPBonusPerLevel + newFeatHPBonus + newFeatRetroactive
-    : averagePerLevel + newFeatHPBonus + newFeatRetroactive;
+    ? Math.max(1, (rollResult ?? 0) + conMod) + totalHPBonusPerLevel + newFeatHPBonus + newFeatRetroactive + newFeatFlatHP
+    : averagePerLevel + newFeatHPBonus + newFeatRetroactive + newFeatFlatHP;
 
   // Effective scores (base + racial + feat bonuses) for display and cap-checking
   const race = getRace(character.raceId);
@@ -331,8 +336,11 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
     setASIIncreases(prev => ({ ...prev, [key]: newVal === 0 ? 0 : newVal }));
   }
 
+  // The level being GAINED, not the current one: a feat picked here is picked at the new level, and
+  // every PHB 2024 General feat requires level 4+. Passing the stale total hid all 43 of them at the
+  // level-4 ASI — the first one a character ever gets.
   const eligibleFeats = React.useMemo(
-    () => getEligibleFeats(character, character.enabledBooks),
+    () => getEligibleFeats(character, character.enabledBooks, character.classes.reduce((s, c) => s + c.level, 0) + 1),
     [character]
   );
   const filteredFeats = eligibleFeats.filter(f =>
@@ -1039,7 +1047,7 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                                 <p className="font-bold text-white text-sm mb-1">{feat.name}</p>
                                 {prereq && (
                                   <p className="text-xs text-yellow-400 mb-2">
-                                    Requires: {prereq.other ?? prereq.race ?? (prereq.spellcasting ? 'Spellcasting' : prereq.ability ? Object.entries(prereq.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') : prereq.proficiency ?? '')}
+                                    Requires: {formatFeatPrerequisite(prereq)}
                                   </p>
                                 )}
                                 <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{feat.description}</p>
@@ -1064,15 +1072,9 @@ export function LevelUpDialog({ open, onClose, character, onConfirm }: LevelUpDi
                                 </Badge>
                               </div>
                             </div>
-                            {prereq && (prereq.ability || prereq.spellcasting || prereq.proficiency || prereq.race || prereq.other) && (
+                            {prereq && (prereq.ability || prereq.abilityAny || prereq.spellcasting || prereq.proficiency || prereq.race || prereq.other) && (
                               <p className="text-xs text-yellow-400 mb-1">
-                                Req: {
-                                  prereq.other ? prereq.other :
-                                  prereq.race ? `${prereq.race} race` :
-                                  prereq.spellcasting ? 'Spellcasting' :
-                                  prereq.ability ? Object.entries(prereq.ability).map(([k, v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
-                                  prereq.proficiency ?? ''
-                                }
+                                Req: {formatFeatPrerequisite(prereq)}
                               </p>
                             )}
                             <p className="text-xs text-slate-400 line-clamp-2">{feat.description.split('\n')[0]}</p>

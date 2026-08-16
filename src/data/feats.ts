@@ -1,4 +1,4 @@
-import type { Feat, Character, AbilityKey, BookId, Spell } from '../types';
+import type { Feat, FeatPrerequisite, Character, AbilityKey, BookId, Spell } from '../types';
 import { PHB2024_FEATS } from './feats-phb2024';
 import { getClass } from './classes';
 import { getSubclass } from './subclasses';
@@ -696,9 +696,16 @@ function checkMartialWeaponProficiency(character: Character): boolean {
 }
 
 /** Returns feats the character is eligible to choose (book-filtered, prereqs met, not already taken). */
-export function getEligibleFeats(character: Character, enabledBooks: BookId[]): Feat[] {
+/**
+ * @param atTotalLevel Evaluate level prerequisites at this total level instead of the character's
+ *   current one. The level-up dialog must pass the level being GAINED: a feat taken with the
+ *   level-4 ASI is taken *at* level 4, but the character object still says 3 while the dialog is
+ *   open. Without it, every PHB 2024 General feat (`minLevel: 4`) vanished from the first ASI that
+ *   grants one, and Epic Boons (`minLevel: 19`) were unreachable at 19 entirely.
+ */
+export function getEligibleFeats(character: Character, enabledBooks: BookId[], atTotalLevel?: number): Feat[] {
   const alreadyTaken = new Set(character.selectedFeats ?? []);
-  const totalLevel = character.classes.reduce((s, c) => s + c.level, 0);
+  const totalLevel = atTotalLevel ?? character.classes.reduce((s, c) => s + c.level, 0);
 
   const race = getRace(character.raceId);
   const racialBonuses = chosenAsi(race, character.racialAbilityChoice);
@@ -739,6 +746,15 @@ export function getEligibleFeats(character: Character, enabledBooks: BookId[]): 
       for (const [k, min] of Object.entries(prereq.ability)) {
         if (effectiveScore(k as AbilityKey) < (min as number)) return false;
       }
+    }
+    // "Strength or Dexterity 13+" — ANY one of them qualifies. Ten PHB 2024 feats read this way and
+    // were stored as a single ability, so this filter denied Athlete, Sentinel, Grappler, Charger,
+    // Dual Wielder and Polearm Master to every Dex-based character, Inspiring Leader to a Charisma
+    // bard, Observant to a Wisdom cleric, Speedy to a Constitution build, and Ritual Caster to
+    // anyone whose casting stat wasn't Intelligence.
+    if (prereq.abilityAny) {
+      const entries = Object.entries(prereq.abilityAny);
+      if (entries.length && !entries.some(([k, min]) => effectiveScore(k as AbilityKey) >= (min as number))) return false;
     }
     if (prereq.spellcasting && !canCast) return false;
     if (prereq.proficiency) {
@@ -796,6 +812,29 @@ export function resolvedFeatPicks(character: Character): string[] {
 }
 
 /** A feat-granted spell, whether it was fixed in the data or chosen by the player. */
+/**
+ * The one-line "Requires: …" a feat shows.
+ *
+ * Five copies of this ternary had drifted apart — three showed the level requirement, two didn't,
+ * and none of them knew about `abilityAny`, so every 2024 "Strength or Dexterity 13+" feat read as
+ * a flat Strength requirement. Nothing enforces prerequisites; this string IS the rule as far as
+ * the player is concerned, which is exactly why it has to be right.
+ */
+export function formatFeatPrerequisite(prereq?: FeatPrerequisite): string {
+  if (!prereq) return '';
+  const scores = (set: Partial<Record<AbilityKey, number>>, join: string) =>
+    Object.entries(set).map(([k, v]) => `${k.toUpperCase()} ${v}+`).join(join);
+  const parts: string[] = [];
+  if (prereq.abilityAny) parts.push(scores(prereq.abilityAny, ' or '));
+  if (prereq.ability) parts.push(scores(prereq.ability, ', '));
+  if (prereq.spellcasting) parts.push('Spellcasting');
+  if (prereq.proficiency) parts.push(prereq.proficiency);
+  if (prereq.race) parts.push(`${prereq.race} race`);
+  if (prereq.other) parts.push(prereq.other);
+  if (prereq.minLevel) parts.push(`level ${prereq.minLevel}`);
+  return parts.join(', ');
+}
+
 export interface FeatSpell {
   featId: string;
   featName: string;
@@ -816,12 +855,24 @@ export function featGrantedSpells(character: Character): FeatSpell[] {
   for (const featId of effectiveFeatIds(character)) {
     const feat = ALL_FEATS.find(f => f.id === featId);
     if (!feat) continue;
+    // "Your spellcasting ability for it is the ability you increased with this feat" — Fey-Touched,
+    // Shadow-Touched, Telekinetic, Telepathic, Magic Initiate and Ritual Caster all say it. The
+    // ability in the data is only the default; the player's actual pick governs, otherwise a wizard
+    // who took Fey-Touched for +1 Int rolled its spells at Charisma (the declared default), which
+    // the spell panel turns straight into an attack bonus and a spell modifier.
+    //
+    // Only swaps when BOTH abilities are ones the feat itself offers, so a feat that raises Str or
+    // Dex while granting a Wisdom spell keeps the ability its spell actually uses.
+    const picked = character.featChoices?.[featId];
+    const usable = picked && feat.abilityScoreChoice?.includes(picked) ? picked : undefined;
+    const resolve = (declared: AbilityKey): AbilityKey =>
+      usable && feat.abilityScoreChoice?.includes(declared) ? usable : declared;
     for (const gs of feat.grantedSpells ?? []) {
-      out.push({ featId, featName: feat.name, ...gs });
+      out.push({ featId, featName: feat.name, ...gs, ability: resolve(gs.ability) });
     }
     for (const grant of feat.grantsSpellPicks ?? []) {
       for (const spellId of character.selectedFeatSpells?.[`${featId}:${grant.key}`] ?? []) {
-        out.push({ featId, featName: feat.name, spellId, recharge: grant.recharge, ability: grant.ability });
+        out.push({ featId, featName: feat.name, spellId, recharge: grant.recharge, ability: resolve(grant.ability) });
       }
     }
   }

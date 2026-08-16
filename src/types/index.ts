@@ -312,7 +312,12 @@ export interface BackgroundCustom {
 
 export interface FeatPrerequisite {
   minLevel?: number;
+  /** ALL of these scores are required (2014 feats that name one ability). */
   ability?: Partial<Record<AbilityKey, number>>;
+  /** ANY ONE of these scores satisfies it — PHB 2024 writes ten feats as "Strength or Dexterity
+   *  13+". Squeezing those into `ability` above dropped the alternative silently, so the sheet
+   *  told a Dex-based rogue that Athlete and Sentinel need Strength. */
+  abilityAny?: Partial<Record<AbilityKey, number>>;
   spellcasting?: boolean;
   proficiency?: string;
   race?: string;
@@ -397,6 +402,9 @@ export interface Feat {
    *  (e.g. Tough: +2×currentLevel immediately). Applied only in LevelUpDialog at the
    *  moment the feat is picked; the creator store handles it via hpBonusPerLevel×level. */
   hpRetroactiveBonusPerPastLevel?: number;
+  /** One-time flat HP-maximum bonus, independent of level (Boon of Fortitude: +40). Applied once
+   *  when the feat is taken — not per level, which is `hpBonusPerLevel` above. */
+  hpBonus?: number;
   /** Flat bonus added to initiative (e.g. Alert: +5). */
   initiativeBonus?: number;
   /** Flat bonus added to walking speed in feet (e.g. Mobile: +10, Squat Nimbleness: +5). */

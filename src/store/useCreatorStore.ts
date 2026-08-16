@@ -205,9 +205,14 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       return sum + (feat?.hpBonusPerLevel ?? 0);
     }, 0);
     const totalHPBonusPerLevel = subHPBonusPerLevel + raceHPBonusPerLevel + featHPBonusPerLevel;
+    // Flat, one-time HP grants that don't scale with level (Boon of Fortitude: +40).
+    const featFlatHP = effectiveFeatIds(draft).reduce((sum, fid) => {
+      const feat = ALL_FEATS.find(f => f.id === fid);
+      return sum + (feat?.hpBonus ?? 0);
+    }, 0);
     const lvl1HP = Math.max(1, hitDie + conMod) + totalHPBonusPerLevel;
     const perLevelHP = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod) + totalHPBonusPerLevel;
-    const maxHP = lvl1HP + (level - 1) * perLevelHP;
+    const maxHP = lvl1HP + (level - 1) * perLevelHP + featFlatHP;
 
     // Compute pact magic if warlock
     let pactMagic = undefined;

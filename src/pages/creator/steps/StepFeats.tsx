@@ -1,6 +1,6 @@
 import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
-import { ALL_FEATS, OPTION_LABELS, featPickGroups, featSpellChoices, spellPickOptions } from '../../../data/feats';
+import { ALL_FEATS, OPTION_LABELS, featPickGroups, featSpellChoices, formatFeatPrerequisite, spellPickOptions } from '../../../data/feats';
 import { ProficiencyPicker } from '../../../components/ProficiencyPicker';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
@@ -110,7 +110,7 @@ export function StepFeats() {
                   <p className="font-bold text-white text-sm mb-1">{feat.name}</p>
                   {prereq && (
                     <p className="text-xs text-yellow-400 mb-2">
-                      Requires: {prereq.other ?? prereq.race ?? (prereq.spellcasting ? 'Spellcasting' : prereq.ability ? Object.entries(prereq.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') : prereq.proficiency ?? '')}
+                      Requires: {formatFeatPrerequisite(prereq)}
                     </p>
                   )}
                   <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line">{feat.description}</p>
@@ -138,11 +138,7 @@ export function StepFeats() {
               {feat.prerequisite && (
                 <p className="text-xs text-yellow-400 mb-1">
                   Requires: {
-                    feat.prerequisite.other ? `${feat.prerequisite.other}${feat.prerequisite.minLevel ? `, level ${feat.prerequisite.minLevel}` : ''}` :
-                    feat.prerequisite.minLevel ? `Level ${feat.prerequisite.minLevel}` :
-                    feat.prerequisite.spellcasting ? 'Spellcasting' :
-                    feat.prerequisite.ability ? Object.entries(feat.prerequisite.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
-                    feat.prerequisite.proficiency ?? ''
+                    formatFeatPrerequisite(feat.prerequisite)
                   }
                 </p>
               )}
@@ -274,11 +270,7 @@ export function StepFeats() {
               <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3 mb-4">
                 <p className="text-xs font-bold text-yellow-300 mb-1">Prerequisite</p>
                 <p className="text-xs text-yellow-200">
-                  {detailFeat.prerequisite.other ? `${detailFeat.prerequisite.other}${detailFeat.prerequisite.minLevel ? `, level ${detailFeat.prerequisite.minLevel}` : ''}` :
-                   detailFeat.prerequisite.minLevel ? `Level ${detailFeat.prerequisite.minLevel}` :
-                   detailFeat.prerequisite.spellcasting ? 'Spellcasting ability' :
-                   detailFeat.prerequisite.ability ? Object.entries(detailFeat.prerequisite.ability).map(([k,v]) => `${k.toUpperCase()} ${v}+`).join(', ') :
-                   detailFeat.prerequisite.proficiency ?? ''}
+                  {formatFeatPrerequisite(detailFeat.prerequisite)}
                 </p>
               </div>
             )}
