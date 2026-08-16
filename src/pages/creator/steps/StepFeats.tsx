@@ -1,6 +1,6 @@
 import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
-import { ALL_FEATS, OPTION_LABELS, featPickGroups, featSpellChoices, formatFeatPrerequisite, spellPickOptions } from '../../../data/feats';
+import { ALL_FEATS, OPTION_LABELS, featPickGroups, featSpellChoices, formatFeatPrerequisite, getEligibleFeats, spellPickOptions } from '../../../data/feats';
 import { ProficiencyPicker } from '../../../components/ProficiencyPicker';
 import { Badge, Dialog, HoverCard } from '../../../components/ui';
 import { cn } from '../../../utils/cn';
@@ -31,7 +31,6 @@ export function StepFeats() {
   const asiLevels = asiLevelsFor(classId);
   const asiCount = asiLevels.filter(l => l <= level).length;
 
-  const available = ALL_FEATS.filter(f => bookEnabled(f, draft.enabledBooks));
   const selected = new Set(draft.selectedFeats ?? []);
   const featChoices: Record<string, AbilityKey> = (draft.featChoices as Record<string, AbilityKey>) ?? {};
 
@@ -40,6 +39,23 @@ export function StepFeats() {
   const raceDef = draft.raceId ? getRace(draft.raceId) : null;
   const racialASI = chosenAsi(raceDef ?? undefined, draft.racialAbilityChoice);
   const effectiveScore = (key: AbilityKey) => (baseScores[key] ?? 10) + (racialASI[key] ?? 0);
+
+  // The same gate the level-up dialog applies. This step used to filter on enabled books alone, so
+  // the creator handed out Epic Boons at level 4 and Athlete to a Strength 8 build while the level-up
+  // dialog refused both — one rule per entry point is one rule too many.
+  //
+  // Selected feats are kept regardless: getEligibleFeats drops what the character already holds, and
+  // dropping them here would hide a picked feat behind its own selection with no way to un-pick it.
+  // A feat whose prerequisite stopped being met (an ability edited on a later visit) stays for the
+  // same reason.
+  const eligibleIds = new Set(
+    getEligibleFeats(
+      { ...draft, classes: draft.classes ?? [], baseAbilityScores: baseScores } as Character,
+      draft.enabledBooks ?? [],
+    ).map(f => f.id),
+  );
+  const available = ALL_FEATS.filter(f =>
+    bookEnabled(f, draft.enabledBooks) && (eligibleIds.has(f.id) || selected.has(f.id)));
 
   const profBonus = PROFICIENCY_BONUS[Math.min(totalCharacterLevel(draft.classes ?? []), 20)] ?? 2;
   const featExpertiseOwed = (draft.selectedFeats ?? [])
