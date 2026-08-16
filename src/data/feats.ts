@@ -29,6 +29,9 @@ export const ALL_FEATS: Feat[] = [
     id: 'athlete',
     name: 'Athlete',
     sourceBook: 'PHB',
+    // PHB p.165: "Prerequisite: Strength or Dexterity 13 or higher". It was recorded as no
+    // prerequisite at all, so the card claimed the feat was open to anyone.
+    prerequisite: { abilityAny: { str: 13, dex: 13 } },
     description: 'You have undergone extensive physical training to gain the following benefits:\n• Increase your Strength or Dexterity score by 1, to a maximum of 20.\n• When you are prone, standing up uses only 5 feet of your movement.\n• Climbing doesn\'t halve your speed.\n• You can make a running long jump or a running high jump after moving only 5 feet on foot.',
     abilityScoreChoice: ['str', 'dex'],
   },
@@ -216,7 +219,9 @@ export const ALL_FEATS: Feat[] = [
     id: 'ritual-caster',
     name: 'Ritual Caster',
     sourceBook: 'PHB',
-    prerequisite: { other: 'Intelligence or Wisdom 13 or higher' },
+    // `other` is free text and deliberately unenforceable, so this read like a requirement while
+    // gating nothing. Structured now that alternatives can be expressed.
+    prerequisite: { abilityAny: { int: 13, wis: 13 } },
     description: 'You have learned a number of spells that you can cast as rituals. These spells are written in a ritual book, which you must have in hand while casting one of them. When you choose this feat, you acquire a ritual book holding two 1st-level spells of your choice. Choose one of the following classes: bard, cleric, druid, sorcerer, warlock, or wizard. You must choose your spells from that class\'s spell list, and the spells you choose must have the ritual tag.',
     grantsSpellPicks: [
       { key: 'rituals', label: 'Two 1st-level ritual spells from one class list', count: 2, level: 1, classIds: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], ritualOnly: true, recharge: 'cantrip', ability: 'int' },
@@ -410,7 +415,9 @@ export const ALL_FEATS: Feat[] = [
     id: 'medium-armor-master',
     name: 'Medium Armor Master',
     sourceBook: 'PHB',
-    prerequisite: { other: 'Proficiency with medium armor' },
+    // Was free-text `other`, which nothing enforces — its twin Heavily Armored used the real
+    // `proficiency` key for the same requirement.
+    prerequisite: { proficiency: 'Medium Armor' },
     description: 'You have practiced moving in medium armor to gain the following benefits:\n• Wearing medium armor doesn\'t impose disadvantage on your Dexterity (Stealth) checks.\n• When you wear medium armor, you can add 3, rather than 2, to your AC if you have a Dexterity of 16 or higher.',
   },
   {

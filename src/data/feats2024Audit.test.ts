@@ -120,6 +120,29 @@ describe('prerequisite text', () => {
   });
 });
 
+describe('2014 feats whose prerequisites were missing or unenforceable', () => {
+  it('Athlete (2014) requires Str or Dex 13 — it had no prerequisite at all', () => {
+    const weak = char({
+      classes: [{ classId: 'fighter', level: 8 }],
+      baseAbilityScores: { str: 10, dex: 10, con: 14, int: 12, wis: 12, cha: 10 },
+    });
+    expect(getEligibleFeats(weak, ['PHB']).map(f => f.id)).not.toContain('athlete');
+    const strong = char({
+      classes: [{ classId: 'fighter', level: 8 }],
+      baseAbilityScores: { str: 10, dex: 14, con: 14, int: 12, wis: 12, cha: 10 },
+    });
+    expect(getEligibleFeats(strong, ['PHB']).map(f => f.id)).toContain('athlete');
+  });
+
+  it('Ritual Caster (2014) gates on Int or Wis 13, not free text', () => {
+    const dull = char({
+      classes: [{ classId: 'fighter', level: 8 }],
+      baseAbilityScores: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+    });
+    expect(getEligibleFeats(dull, ['PHB']).map(f => f.id)).not.toContain('ritual-caster');
+  });
+});
+
 describe('Boon of Fortitude', () => {
   it('carries its flat +40 HP as data, not just prose', () => {
     expect(PHB2024_FEATS.find(f => f.id === 'boon-of-fortitude')?.hpBonus).toBe(40);
