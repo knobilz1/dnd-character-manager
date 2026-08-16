@@ -51,6 +51,10 @@ export const PHB2024_FEATS: Feat[] = [
     name: 'Magic Initiate',
     sourceBook: 'PHB2024',
     description: 'Origin feat. Choose one spell list (Cleric, Druid, or Wizard — same list for all).\n• Learn 2 cantrips from that list.\n• Learn 1 level 1 spell from that list: it is always prepared; cast without a slot once per Long Rest (can also use spell slots).\n• Spellcasting ability: Intelligence, Wisdom, or Charisma (chosen at feat).\n• Repeatable: each time you take it, choose a different spell list.',
+    // The feat grants no ability increase, so the choice can't ride on `abilityScoreChoice` — the
+    // creator would turn it into a real +1. `wis` below is only the fallback for a character who
+    // never picks; the sheet's Feat-Granted Spells picker is what sets it.
+    spellAbilityChoice: ['int', 'wis', 'cha'],
     grantsSpellPicks: [
       { key: 'cantrips', label: 'Two cantrips from one list', count: 2, level: 0, classIds: ['cleric', 'druid', 'wizard'], recharge: 'cantrip', ability: 'wis' },
       { key: 'spell', label: 'One level 1 spell from that list', count: 1, level: 1, classIds: ['cleric', 'druid', 'wizard'], recharge: 'long', ability: 'wis' },

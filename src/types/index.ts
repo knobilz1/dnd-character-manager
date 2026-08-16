@@ -421,6 +421,17 @@ export interface Feat {
   grantsSaveForChosenAbility?: boolean;
   /** Spells granted by this feat with their use-tracking metadata. */
   grantedSpells?: Array<{ spellId: string; recharge: 'cantrip' | 'long' | 'short'; ability: AbilityKey }>;
+  /**
+   * Abilities the player may NAME as the spellcasting ability for this feat's spells, for feats
+   * that offer the choice without granting a score increase — Magic Initiate 2024 is the case:
+   * "Intelligence, Wisdom, or Charisma is your spellcasting ability for the spells in this feat."
+   *
+   * Separate from `abilityScoreChoice` on purpose. That one is an ability *increase*: the creator
+   * applies `featChoices[featId]` as +1 to the base score, so storing a spell-ability preference
+   * there would silently hand out a point. This is stored in `character.featSpellAbility` instead,
+   * and where a feat does grant an increase the spell simply follows it (Fey-Touched and friends).
+   */
+  spellAbilityChoice?: AbilityKey[];
   /** Trackable resources granted by this feat (e.g. Lucky: 3 luck points). */
   grantedResources?: Array<{ key: string; name: string; max: number; rechargeOn: 'short' | 'long' }>;
 }
@@ -810,6 +821,10 @@ export interface Character {
   /** Player's pick when the race offers a choice of innate-spell ability. Unset falls back to
    *  the ability on each InnateSpell. See `Race.innateSpellAbilityChoice`. */
   innateSpellAbility?: AbilityKey;
+  /** Player's pick, per feat, when a feat lets them name the spellcasting ability for its spells
+   *  without granting a score increase. See `Feat.spellAbilityChoice`. Deliberately NOT
+   *  `featChoices`, which the creator applies as an actual +1. */
+  featSpellAbility?: Record<string, AbilityKey>;
   /** Chosen racial ability increases, for races with `flexibleAsi`. Read through
    *  `chosenAsi()` — never read `race.abilityScoreIncreases` directly, or a flexible race
    *  silently contributes nothing. */

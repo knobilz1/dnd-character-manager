@@ -3,7 +3,7 @@ import { Plus, Sparkles, X, Zap } from 'lucide-react';
 import { ALL_SPELLS, getSpell } from '../../data/spells';
 import { summonSpecFor } from '../../data/summonOptions';
 import { SummonPicker } from '../../components/SummonPicker';
-import { featGrantedSpells, featSpellChoices, spellPickOptions } from '../../data/feats';
+import { ALL_FEATS, featGrantedSpells, featSpellChoices, spellPickOptions } from '../../data/feats';
 import { ProficiencyPicker } from '../../components/ProficiencyPicker';
 import { Dialog, Badge, Button } from '../../components/ui';
 import { cn } from '../../utils/cn';
@@ -41,6 +41,7 @@ interface SpellPanelProps {
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
   setInnateSpellAbility: (ability: AbilityKey) => void;
+  setFeatSpellAbility: (featId: string, ability: AbilityKey) => void;
 }
 
 // The prepared-caster identity is derived from mechanics.ts, not restated here — the hardcoded
@@ -110,7 +111,7 @@ function SpellRollButtons({ spell, charLevel, attackBonus, spellMod, slotLevel, 
   );
 }
 
-export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell, setInnateSpellAbility }: SpellPanelProps) {
+export function SpellPanel({ character, derived, toggleSpellPrepared, startConcentration, endConcentration, addSpellToBook, removeSpellFromBook, useSpellSlot, usePactSlot, useInnateSpell, useFeatSpell, setInnateSpellAbility, setFeatSpellAbility }: SpellPanelProps) {
   const [detailSpell, setDetailSpell] = React.useState<Spell | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -563,10 +564,31 @@ export function SpellPanel({ character, derived, toggleSpellPrepared, startConce
         // here exactly as Fey Touched's Misty Step does.
         const featSpells = featGrantedSpells(character);
         if (!featSpells.length) return null;
+        // Feats that let the player NAME the spellcasting ability (Magic Initiate 2024) get a
+        // picker here for the same reason the racial one lives on the sheet: a feat can be taken
+        // in the creator or at level-up, and this one control reaches both — plus every character
+        // already saved before the choice existed.
+        const abilityPickers = [...new Set(featSpells.map(f => f.featId))]
+          .map(id => ALL_FEATS.find(f => f.id === id))
+          .filter((f): f is NonNullable<typeof f> => !!f?.spellAbilityChoice?.length);
         return (
           <div className="bg-slate-800 border border-amber-700/40 rounded-xl overflow-hidden">
-            <div className="px-4 py-2 bg-slate-750 border-b border-slate-700 flex items-center gap-2">
+            <div className="px-4 py-2 bg-slate-750 border-b border-slate-700 flex items-center gap-2 flex-wrap">
               <h3 className="font-bold text-amber-300 text-sm">Feat-Granted Spells</h3>
+              {abilityPickers.map(feat => (
+                <label key={feat.id} className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
+                  {feat.name} ability
+                  <select
+                    className="bg-slate-900 border border-slate-600 rounded px-1.5 py-0.5 text-white"
+                    value={character.featSpellAbility?.[feat.id] ?? feat.grantsSpellPicks?.[0]?.ability ?? 'wis'}
+                    onChange={e => setFeatSpellAbility(feat.id, e.target.value as AbilityKey)}
+                  >
+                    {feat.spellAbilityChoice!.map(a => (
+                      <option key={a} value={a}>{a.toUpperCase()}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
             </div>
             <div className="divide-y divide-slate-700/50">
               {featSpells.map(({ featId, featName, spellId, recharge, ability }) => {

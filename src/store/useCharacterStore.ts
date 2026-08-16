@@ -125,6 +125,7 @@ interface CharacterState {
   useInnateSpell: (spellId: string) => void;
   useFeatSpell: (featId: string, spellId: string) => void;
   setInnateSpellAbility: (ability: AbilityKey) => void;
+  setFeatSpellAbility: (featId: string, ability: AbilityKey) => void;
   setRacialAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
@@ -1306,6 +1307,11 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setInnateSpellAbility: (ability) =>
     set((s) => s.character ? { character: { ...s.character, innateSpellAbility: ability } } : s),
+
+  setFeatSpellAbility: (featId, ability) =>
+    set((s) => s.character
+      ? { character: { ...s.character, featSpellAbility: { ...(s.character.featSpellAbility ?? {}), [featId]: ability } } }
+      : s),
 
   setRacialAbilityChoice: (v) =>
     set((s) => s.character ? { character: { ...s.character, racialAbilityChoice: v } } : s),

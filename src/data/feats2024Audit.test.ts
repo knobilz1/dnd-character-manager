@@ -43,15 +43,39 @@ describe('feat-granted spells use the ability the player raised', () => {
     expect(featGrantedSpells(cleric).find(s => s.spellId === 'detect-magic')?.ability).toBe('wis');
   });
 
-  it('Magic Initiate keeps its declared ability — its Int/Wis/Cha choice is not modelled', () => {
-    // The 2024 feat lets you name the ability, but it grants no score increase, so there is no
-    // `abilityScoreChoice` for a picker to write to and nothing records the decision. Documented
-    // in audit-coverage-gaps rather than faked with an ability bump the feat doesn't give.
+  it('Magic Initiate uses the ability the player named on the sheet', () => {
+    // The feat grants no score increase, so the choice can't ride on featChoices — the creator
+    // would turn that into a real +1. It has its own store.
+    const c = char({
+      selectedFeats: ['magic-initiate-2024'],
+      selectedFeatSpells: { 'magic-initiate-2024:spell': ['bless'] },
+      featSpellAbility: { 'magic-initiate-2024': 'int' },
+    });
+    expect(featGrantedSpells(c).find(s => s.spellId === 'bless')?.ability).toBe('int');
+  });
+
+  it('Magic Initiate falls back to its declared ability when nothing was named', () => {
     const c = char({
       selectedFeats: ['magic-initiate-2024'],
       selectedFeatSpells: { 'magic-initiate-2024:spell': ['bless'] },
     });
     expect(featGrantedSpells(c).find(s => s.spellId === 'bless')?.ability).toBe('wis');
+  });
+
+  it('ignores a named ability the feat does not offer', () => {
+    const c = char({
+      selectedFeats: ['magic-initiate-2024'],
+      selectedFeatSpells: { 'magic-initiate-2024:spell': ['bless'] },
+      featSpellAbility: { 'magic-initiate-2024': 'str' },
+    });
+    expect(featGrantedSpells(c).find(s => s.spellId === 'bless')?.ability).toBe('wis');
+  });
+
+  it('no feat declares both an ability increase and a named spell ability', () => {
+    // The two are stored in different places on the character and would fight over one spell's
+    // ability if a feat ever carried both. Nothing does today; this is the guard.
+    const both = PHB2024_FEATS.filter(f => f.abilityScoreChoice?.length && f.spellAbilityChoice?.length);
+    expect(both.map(f => f.id)).toEqual([]);
   });
 
   it('does not swap an ability the feat never offered', () => {

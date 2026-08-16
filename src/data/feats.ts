@@ -872,8 +872,11 @@ export function featGrantedSpells(character: Character): FeatSpell[] {
     // Dex while granting a Wisdom spell keeps the ability its spell actually uses.
     const picked = character.featChoices?.[featId];
     const usable = picked && feat.abilityScoreChoice?.includes(picked) ? picked : undefined;
+    // A feat that offers the ability without an increase (Magic Initiate) stores it separately.
+    const named = character.featSpellAbility?.[featId];
+    const usableNamed = named && feat.spellAbilityChoice?.includes(named) ? named : undefined;
     const resolve = (declared: AbilityKey): AbilityKey =>
-      usable && feat.abilityScoreChoice?.includes(declared) ? usable : declared;
+      usableNamed ?? (usable && feat.abilityScoreChoice?.includes(declared) ? usable : declared);
     for (const gs of feat.grantedSpells ?? []) {
       out.push({ featId, featName: feat.name, ...gs, ability: resolve(gs.ability) });
     }
