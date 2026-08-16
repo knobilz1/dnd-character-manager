@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { featGrantedSpells, getEligibleFeats, formatFeatPrerequisite } from './feats';
 import { PHB2024_FEATS } from './feats-phb2024';
+import { PHB2024_BACKGROUNDS } from './backgrounds-phb2024';
 import type { Character } from '../types';
 
 /**
@@ -164,6 +165,34 @@ describe('2014 feats whose prerequisites were missing or unenforceable', () => {
       baseAbilityScores: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
     });
     expect(getEligibleFeats(dull, ['PHB']).map(f => f.id)).not.toContain('ritual-caster');
+  });
+});
+
+describe('2024 background starting equipment (PHB 2024 pp.177-185, option A)', () => {
+  const bg = (id: string) => PHB2024_BACKGROUNDS.find(b => b.id === id)!;
+  const gold = (id: string) => bg(id).equipment.find(e => /gp$/i.test(e));
+
+  it.each([
+    ['acolyte-2024', '8 gp'], ['artisan-2024', '32 gp'], ['guide-2024', '3 gp'],
+    ['hermit-2024', '16 gp'], ['sage-2024', '8 gp'], ['sailor-2024', '20 gp'],
+    ['entertainer-2024', '11 gp'], ['guard-2024', '12 gp'], ['merchant-2024', '22 gp'],
+    ['criminal-2024', '16 gp'],
+  ])('%s starts with %s', (id, gp) => {
+    // StepEquipment turns this string into real starting money, so a wrong number is a wrong
+    // purse. All ten of these were wrong before the PDF was checked.
+    expect(gold(id)).toBe(gp);
+  });
+
+  it('carries the full kit, not a 2014-shaped guess', () => {
+    expect(bg('guide-2024').equipment).toContain('Tent');
+    expect(bg('acolyte-2024').equipment).toContain('Robe');
+    expect(bg('farmer-2024').equipment).toContain('Iron Pot');
+  });
+
+  it('no background still references items the 2024 book does not have', () => {
+    const ghosts = ['Priest\'s Pack', 'Dark Common Clothes with Hood', 'Military Uniform', 'Uniform'];
+    const found = PHB2024_BACKGROUNDS.flatMap(b => b.equipment).filter(e => ghosts.includes(e));
+    expect(found).toEqual([]);
   });
 });
 

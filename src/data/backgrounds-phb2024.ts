@@ -4,6 +4,16 @@ import type { Background } from '../types';
  * PHB 2024 Backgrounds
  * Each grants: ability score increases (+2/+1 or +1/+1/+1 chosen at character creation),
  * an Origin feat, 2 skill proficiencies, 1 tool proficiency, and starting equipment.
+ *
+ * `equipment` is option (A) of the book's "Choose A or B" entry, verbatim from PHB 2024
+ * pp.177–185 — the specific kit plus its own gold. **Option (B) is a flat 50 GP for all
+ * sixteen and has no UI yet**; the class step models an equipment-or-gold choice
+ * (`equipmentTakeGold`) but backgrounds are a flat string list, so (A) is what a character
+ * gets. These lists were previously a 2014-shaped guess: Priest's Pack and Dark Common
+ * Clothes with Hood aren't in the 2024 book at all, every kit was missing items, and ten of
+ * the sixteen carried the wrong gold — StepEquipment turns the `N gp` entry into real
+ * starting money, so a Guide began play with 15 GP instead of 3 and a Hermit with 5 instead
+ * of 16.
  */
 export const PHB2024_BACKGROUNDS: Background[] = [
   {
@@ -15,7 +25,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Insight', 'Religion'],
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 0,
-    equipment: ['Holy Symbol', "Priest's Pack", '10 gp'],
+    equipment: ["Calligrapher's Supplies", 'Book (prayers)', 'Holy Symbol', 'Parchment (10 sheets)', 'Robe', '8 gp'],
     originFeatId: 'magic-initiate-2024',
     feature: { name: 'Magic Initiate (Cleric)', description: '2024 Acolyte. Feat: Magic Initiate (Cleric). Ability Scores: +2/+1 to Intelligence, Wisdom, Charisma (or +1 each). You have spent your life in the service of a temple to a specific god or pantheon of gods.' },
     personalityTraits: ['I idolize a particular hero of my faith and constantly refer to that person\'s deeds and example.', 'I see omens in every event and action. The gods try to speak to us, we just need to listen.', 'Nothing can shake my optimistic attitude.', 'I am tolerant of other faiths and respect the worship of other gods.'],
@@ -32,7 +42,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Investigation', 'Persuasion'],
     toolProficiencies: ["Artisan's Tools (choice)"],
     languages: 0,
-    equipment: ["Artisan's Tools (choice)", "Traveler's Clothes", '15 gp'],
+    equipment: ["Artisan's Tools (choice)", '2 Pouches', "Traveler's Clothes", '32 gp'],
     originFeatId: 'crafter-2024',
     feature: { name: 'Crafter', description: '2024 Artisan. Feat: Crafter. Ability Scores: +2/+1 to Strength, Dexterity, Intelligence (or +1 each). You are a skilled artisan.' },
     personalityTraits: ['I believe that anything worth doing is worth doing right.', 'I\'m always picking things up, absently fiddling with them, and sometimes accidentally breaking them.', 'I\'m full of witty aphorisms and have a proverb for every occasion.', 'I\'m rude to people who lack my commitment to hard work and fair play.'],
@@ -49,7 +59,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Deception', 'Sleight of Hand'],
     toolProficiencies: ['Forgery Kit'],
     languages: 0,
-    equipment: ['Forgery Kit', 'Fine Clothes', '15 gp'],
+    equipment: ['Forgery Kit', 'Costume', 'Fine Clothes', '15 gp'],
     originFeatId: 'skilled-2024',
     feature: { name: 'Skilled', description: '2024 Charlatan. Feat: Skilled. Ability Scores: +2/+1 to Dexterity, Constitution, Charisma (or +1 each). You have always had a talent for making people believe what you want them to.' },
     personalityTraits: ['I fall in and out of love easily and am always pursuing someone.', 'I have a joke for every occasion, especially occasions where humor is inappropriate.', 'Flattery is my preferred trick for getting what I want.', 'I\'m a born gambler who can\'t resist taking a risk for a potential payoff.'],
@@ -66,7 +76,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Sleight of Hand', 'Stealth'],
     toolProficiencies: ["Thieves' Tools"],
     languages: 0,
-    equipment: ["Thieves' Tools", 'Dark Common Clothes with Hood', '15 gp'],
+    equipment: ['2 Daggers', "Thieves' Tools", 'Crowbar', '2 Pouches', "Traveler's Clothes", '16 gp'],
     originFeatId: 'alert-2024',
     feature: { name: 'Alert', description: '2024 Criminal. Feat: Alert. Ability Scores: +2/+1 to Dexterity, Constitution, Intelligence (or +1 each). You have a history of breaking the law.' },
     personalityTraits: ['I always have a plan for what to do when things go wrong.', 'I am always calm, no matter what the situation.', 'The first thing I do in a new place is note the locations of everything valuable.', 'I would rather make a new friend than a new enemy.'],
@@ -83,7 +93,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Acrobatics', 'Performance'],
     toolProficiencies: ['Musical Instrument (choice)'],
     languages: 0,
-    equipment: ['Musical Instrument', 'Costume', '15 gp'],
+    equipment: ['Musical Instrument (choice)', '2 Costumes', 'Mirror', 'Perfume', "Traveler's Clothes", '11 gp'],
     originFeatId: 'musician-2024',
     feature: { name: 'Musician', description: '2024 Entertainer. Feat: Musician. Ability Scores: +2/+1 to Strength, Dexterity, Charisma (or +1 each). You thrive in front of an audience.' },
     personalityTraits: ['I know a story relevant to almost every situation.', 'Whenever I come to a new place, I collect local rumors and spread gossip.', 'I\'m a hopeless romantic, always searching for that "special someone."', 'Nobody stays angry at me or around me for long, since I can defuse any tension.'],
@@ -100,7 +110,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Animal Handling', 'Nature'],
     toolProficiencies: ["Carpenter's Tools"],
     languages: 0,
-    equipment: ["Carpenter's Tools", 'Traveler\'s Clothes', '30 gp'],
+    equipment: ['Sickle', "Carpenter's Tools", "Healer's Kit", 'Iron Pot', 'Shovel', "Traveler's Clothes", '30 gp'],
     originFeatId: 'tough-2024',
     feature: { name: 'Tough', description: '2024 Farmer. Feat: Tough. Ability Scores: +2/+1 to Strength, Constitution, Wisdom (or +1 each). You grew up close to the land, working fields and tending animals.' },
     personalityTraits: ['I judge people by their actions, not their words.', 'If someone is in trouble, I\'m always ready to lend help.', 'When I set my mind to something, I follow through no matter what.', 'I have a strong sense of fair play and always try to find the most equitable solution.'],
@@ -117,7 +127,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Athletics', 'Perception'],
     toolProficiencies: ['Gaming Set (choice)'],
     languages: 0,
-    equipment: ['Gaming Set (choice)', 'Uniform', '10 gp'],
+    equipment: ['Spear', 'Light Crossbow', '20 Bolts', 'Gaming Set (choice)', 'Hooded Lantern', 'Manacles', 'Quiver', "Traveler's Clothes", '12 gp'],
     originFeatId: 'alert-2024',
     feature: { name: 'Alert', description: '2024 Guard. Feat: Alert. Ability Scores: +2/+1 to Strength, Intelligence, Wisdom (or +1 each). You served as a guard, patrol member, or soldier of the watch.' },
     personalityTraits: ['I\'m always polite and respectful.', 'I have a strong sense of fair play and always try to find the most equitable solution.', 'I am slow to trust, but fiercely loyal once I do.', 'I don\'t like to draw attention to myself.'],
@@ -134,7 +144,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Stealth', 'Survival'],
     toolProficiencies: ["Cartographer's Tools"],
     languages: 0,
-    equipment: ["Cartographer's Tools", 'Traveler\'s Clothes', '15 gp'],
+    equipment: ['Shortbow', '20 Arrows', "Cartographer's Tools", 'Bedroll', 'Quiver', 'Tent', "Traveler's Clothes", '3 gp'],
     originFeatId: 'magic-initiate-2024',
     feature: { name: 'Magic Initiate (Druid)', description: '2024 Guide. Feat: Magic Initiate (Druid). Ability Scores: +2/+1 to Dexterity, Constitution, Wisdom (or +1 each). You grew up in the wilderness, learning to navigate and survive.' },
     personalityTraits: ['I\'m always picking up lore and ancient history.', 'I have a lesson for every occasion, drawn from observing nature.', 'I feel far more comfortable around animals than people.', 'I was, in fact, raised by wolves.'],
@@ -151,7 +161,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Medicine', 'Religion'],
     toolProficiencies: ['Herbalism Kit'],
     languages: 0,
-    equipment: ['Herbalism Kit', 'Common Clothes', '5 gp'],
+    equipment: ['Quarterstaff', 'Herbalism Kit', 'Bedroll', 'Book (philosophy)', 'Lamp', 'Oil (3 flasks)', "Traveler's Clothes", '16 gp'],
     originFeatId: 'healer-2024',
     feature: { name: 'Healer', description: '2024 Hermit. Feat: Healer. Ability Scores: +2/+1 to Constitution, Wisdom, Charisma (or +1 each). You lived in seclusion, whether in a vast wilderness or in an enclosed monastery.' },
     personalityTraits: ['I\'ve been isolated for so long that I rarely speak, preferring gestures and expressions.', 'I am utterly serene, even in the face of disaster.', 'The leader of my community had something wise to say on every topic, and I am eager to share that wisdom.', 'I feel tremendous empathy for all who suffer.'],
@@ -168,7 +178,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Animal Handling', 'Persuasion'],
     toolProficiencies: ["Navigator's Tools"],
     languages: 0,
-    equipment: ["Navigator's Tools", 'Fine Clothes', '25 gp'],
+    equipment: ["Navigator's Tools", '2 Pouches', "Traveler's Clothes", '22 gp'],
     originFeatId: 'lucky-2024',
     feature: { name: 'Lucky', description: '2024 Merchant. Feat: Lucky. Ability Scores: +2/+1 to Constitution, Intelligence, Charisma (or +1 each). You traveled among various towns, peddling your goods.' },
     personalityTraits: ['I believe that anything worth doing is worth doing right.', 'I\'m always picking up lore and history, especially about trade routes and distant places.', 'I\'m a hopeless romantic, always searching for that "special someone."', 'I\'m tactful and good at reading people.'],
@@ -185,7 +195,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['History', 'Persuasion'],
     toolProficiencies: ['Gaming Set (choice)'],
     languages: 0,
-    equipment: ['Gaming Set (choice)', 'Fine Clothes', '29 gp'],
+    equipment: ['Gaming Set (choice)', 'Fine Clothes', 'Perfume', '29 gp'],
     originFeatId: 'skilled-2024',
     feature: { name: 'Skilled', description: '2024 Noble. Feat: Skilled. Ability Scores: +2/+1 to Strength, Intelligence, Charisma (or +1 each). You understand wealth, power, and privilege.' },
     personalityTraits: ['My eloquent flattery makes everyone feel like the most important person in the world.', 'The common folk love me for my kindness and generosity.', 'No one could doubt by looking at my regal bearing that I am cut above the masses.', 'I take great pains to always look my best and follow the latest fashions.'],
@@ -202,7 +212,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Arcana', 'History'],
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 0,
-    equipment: ["Calligrapher's Supplies", 'Common Clothes', '5 gp'],
+    equipment: ['Quarterstaff', "Calligrapher's Supplies", 'Book (history)', 'Parchment (8 sheets)', 'Robe', '8 gp'],
     originFeatId: 'magic-initiate-2024',
     feature: { name: 'Magic Initiate (Wizard)', description: '2024 Sage. Feat: Magic Initiate (Wizard). Ability Scores: +2/+1 to Constitution, Intelligence, Wisdom (or +1 each). You spent years learning the lore of the multiverse.' },
     personalityTraits: ['I use polysyllabic words that convey the impression of great erudition.', 'I\'ve read every book in the world\'s greatest libraries—or so I like to boast.', 'I\'m used to helping out those who aren\'t as smart as I am.', 'I speak slowly when talking to idiots.'],
@@ -219,7 +229,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Acrobatics', 'Perception'],
     toolProficiencies: ["Navigator's Tools"],
     languages: 0,
-    equipment: ["Navigator's Tools", "Traveler's Clothes", '10 gp'],
+    equipment: ['Dagger', "Navigator's Tools", 'Rope', "Traveler's Clothes", '20 gp'],
     originFeatId: 'tavern-brawler-2024',
     feature: { name: 'Tavern Brawler', description: '2024 Sailor. Feat: Tavern Brawler. Ability Scores: +2/+1 to Strength, Dexterity, Wisdom (or +1 each). You sailed on a seagoing vessel for years.' },
     personalityTraits: ['My friends know they can rely on me, no matter what.', 'I work hard so that I can play hard when the work is done.', 'I enjoy sailing into new ports and making new friends over a flagon of ale.', 'I stretch the truth for the sake of a good story.'],
@@ -236,7 +246,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Investigation', 'Perception'],
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 0,
-    equipment: ["Calligrapher's Supplies", 'Fine Clothes', '23 gp'],
+    equipment: ["Calligrapher's Supplies", 'Fine Clothes', 'Lamp', 'Oil (3 flasks)', 'Parchment (12 sheets)', '23 gp'],
     originFeatId: 'skilled-2024',
     feature: { name: 'Skilled', description: '2024 Scribe. Feat: Skilled. Ability Scores: +2/+1 to Dexterity, Intelligence, Wisdom (or +1 each). You have spent much of your life copying documents and collecting information.' },
     personalityTraits: ['I believe that anything worth doing is worth doing right.', 'I use polysyllabic words that convey the impression of great erudition.', 'I always want to know how things work and what makes people tick.', 'I notice too many details and can be easily distracted by them.'],
@@ -253,7 +263,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Athletics', 'Intimidation'],
     toolProficiencies: ['Gaming Set (choice)'],
     languages: 0,
-    equipment: ['Gaming Set (choice)', 'Military Uniform', '14 gp'],
+    equipment: ['Spear', 'Shortbow', '20 Arrows', 'Gaming Set (choice)', "Healer's Kit", 'Quiver', "Traveler's Clothes", '14 gp'],
     originFeatId: 'savage-attacker-2024',
     feature: { name: 'Savage Attacker', description: '2024 Soldier. Feat: Savage Attacker. Ability Scores: +2/+1 to Strength, Dexterity, Constitution (or +1 each). War has been your life for as long as you care to remember.' },
     personalityTraits: ['I\'m always polite and respectful.', 'I\'m haunted by memories of war. I wake up screaming.', 'I\'ve lost too many friends, and I\'m slow to make new ones.', 'I am slow to trust, but fiercely loyal once I do.'],
@@ -270,7 +280,7 @@ export const PHB2024_BACKGROUNDS: Background[] = [
     skillProficiencies: ['Insight', 'Stealth'],
     toolProficiencies: ["Thieves' Tools"],
     languages: 0,
-    equipment: ["Thieves' Tools", 'Common Clothes', '16 gp'],
+    equipment: ['2 Daggers', "Thieves' Tools", 'Gaming Set (any)', 'Bedroll', '2 Pouches', "Traveler's Clothes", '16 gp'],
     originFeatId: 'lucky-2024',
     feature: { name: 'Lucky', description: '2024 Wayfarer. Feat: Lucky. Ability Scores: +2/+1 to Dexterity, Wisdom, Charisma (or +1 each). You grew up on the streets, surviving by your wits.' },
     personalityTraits: ['I always have a plan for when things go wrong.', 'I prefer to befriend people who might be useful to me.', 'I have a "tell" that reveals when I\'m lying.', 'I\'m quick to assume the worst of people.'],

@@ -96,7 +96,12 @@ export function StepEquipment() {
         if (goldMatch) {
           bgGP += parseInt(goldMatch[1], 10);
         } else {
-          pushItem(eqStr.trim(), 1, undefined, undefined, 'background');
+          // "20 Arrows" is twenty arrows, not one item called "20 Arrows". The 2024 background
+          // kits list counts inline, so the leading number becomes the quantity and the weight
+          // and encumbrance follow from it.
+          const counted = eqStr.trim().match(/^(\d+)\s+(.+)$/);
+          pushItem(counted ? counted[2] : eqStr.trim(), counted ? parseInt(counted[1], 10) : 1,
+            undefined, undefined, 'background');
         }
       }
     }
