@@ -22,6 +22,23 @@ import { useSettingsStore } from '../store/useSettingsStore';
  * dialog may be closing underneath.
  */
 
+/**
+ * Engines already confirmed ready, for the life of the process.
+ *
+ * `runTurn` calls the gate on EVERY turn, and the probe is not free: Codex
+ * spawns `codex login status`, and Gemini's is a real model call costing about
+ * five seconds — see `auth_probe_args`. Paying that per turn would put a
+ * measurable pause into every exchange at a live table to re-answer a question
+ * that had already been answered.
+ *
+ * Cached: every outcome that means PROCEED — confirmed-ready, and check-failed
+ * (see the catch below). A definitive "not ready" is NOT cached, because that
+ * one raises the prompt and the user is about to go fix it; re-checking after
+ * they do is the whole point. Cleared whenever the connection panel closes, so
+ * a fresh sign-in is noticed without waiting for a restart.
+ */
+const confirmed = new Set<string>();
+
 type GateState = {
   /** Set while the "no AI helper" question is up. */
   asking: boolean;
@@ -41,7 +58,14 @@ export const useModelGate = create<GateState>((set) => ({
   intent: null,
   ask: (intent) => set({ asking: true, intent }),
   openConnect: () => set({ asking: false, connecting: true }),
-  close: () => set({ asking: false, connecting: false, intent: null }),
+  close: () => {
+    // Anyone who just had the panel open may have signed in, installed
+    // something, or switched engines — none of which the cached answer knows
+    // about. Forgetting it costs one probe and makes the cache self-healing;
+    // keeping it would mean a fresh sign-in went unnoticed until restart.
+    confirmed.clear();
+    set({ asking: false, connecting: false, intent: null });
+  },
 }));
 
 /**
@@ -52,21 +76,6 @@ export const useModelGate = create<GateState>((set) => ({
  * asleep is a different problem from never having connected anything, and this
  * gate is about the latter.
  */
-/**
- * Engines already confirmed ready, for the life of the process.
- *
- * `runTurn` calls the gate on EVERY turn, and the probe is not free: Codex
- * spawns `codex login status`, and Gemini's is a real model call costing about
- * five seconds — see `auth_probe_args`. Paying that per turn would put a
- * measurable pause into every exchange at a live table to re-answer a question
- * that had already been answered.
- *
- * Only the POSITIVE is cached, exactly as `GEMINI_CONFIRMED` does in dm.rs: a
- * "no" must stay re-checkable or signing in mid-session would never be noticed.
- * A token that expires later surfaces as the turn's own error, which is a much
- * better failure than making every turn pay for the check.
- */
-const confirmed = new Set<string>();
 
 export async function aiHelperReady(): Promise<boolean> {
   const { dmProvider, localLlmBaseUrl, localLlmModel } = useSettingsStore.getState();
@@ -82,6 +91,12 @@ export async function aiHelperReady(): Promise<boolean> {
     // The check itself failed, which is NOT proof there's no helper — see
     // EngineAccounts. Let the action proceed and fail with its own real error
     // rather than accusing the user of not having set something up.
+    //
+    // Cached like a success, because the decision is the same — proceed — and
+    // an uncached one would re-probe on EVERY turn on exactly the machine whose
+    // probe is already broken: the worst possible place to spend five seconds
+    // and a Gemini generation over and over to reach the same answer.
+    confirmed.add(dmProvider);
     return true;
   }
 }
