@@ -27,7 +27,9 @@ import { Button, Dialog } from './ui';
  */
 
 type EngineId = 'claude' | 'codex' | 'gemini';
-type State = { installed: boolean; signedIn: boolean };
+/** `error` is set when the CHECK itself failed — which is not the same as the
+ *  engine being missing, and must never be rendered as "not installed". */
+type State = { installed: boolean; signedIn: boolean; error?: string };
 
 const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string; consoleLogin?: boolean }> = [
   {
@@ -90,10 +92,14 @@ export function EngineAccounts() {
         try {
           const [installed, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: e.id });
           next[e.id] = { installed, signedIn };
-        } catch {
-          // A probe that can't even run means "not installed" for display
-          // purposes; the row's Install action is still the right next step.
-          next[e.id] = { installed: false, signedIn: false };
+        } catch (err) {
+          // NOT the same thing as "not installed", and saying so cost a user an
+          // evening: Claude was installed, on PATH, and working in a terminal
+          // while this panel insisted it was missing. `engine_auth_state`
+          // hardcodes installed=true for Claude, so reaching here at all means
+          // the CHECK failed — the app has no idea whether it's installed, and
+          // the honest answer is to say the check failed and show why.
+          next[e.id] = { installed: false, signedIn: false, error: String(err) };
         }
       }),
     );
@@ -296,7 +302,9 @@ export function EngineAccounts() {
                       <Check size={11} /> signed in
                     </span>
                   )}
-                  {s && !s.installed && <span className="text-[11px] text-slate-500">not installed</span>}
+                  {s?.error
+                    ? <span className="text-[11px] text-rose-400">couldn&rsquo;t check</span>
+                    : s && !s.installed && <span className="text-[11px] text-slate-500">not installed</span>}
                   {s?.installed && !s.signedIn && <span className="text-[11px] text-amber-400">not signed in</span>}
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">{e.plan} — {e.blurb}</p>

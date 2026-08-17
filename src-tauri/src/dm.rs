@@ -282,22 +282,78 @@ fn resolve_claude_exe() -> Option<std::path::PathBuf> {
     // launched directly (see claude_command), sidestepping cmd.exe's quoting
     // rules entirely — those rules were the actual cause of the
     // '"C:\...\claude.exe" is not recognized' failure.
-    let mut dirs: Vec<String> = augmented_path().split(';').map(str::to_string).collect();
-    if let Ok(profile) = std::env::var("USERPROFILE") {
-        dirs.push(format!("{profile}\\.local\\bin"));
+    if let Some(p) = claude_override_path() {
+        return Some(p);
     }
-    for dir in &dirs {
-        if dir.is_empty() {
-            continue;
-        }
-        for name in ["claude.exe", "claude.cmd"] {
-            let candidate = std::path::Path::new(dir).join(name);
+    for dir in claude_search_dirs() {
+        // `.bat` belongs here: `claude_command` has always known how to run one
+        // (its `is_batch` arm names it) and `resolve_engine_exe` finds one for
+        // Codex and Gemini — only Claude's own resolver couldn't return it, so a
+        // .bat shim was invisible for the one engine that matters most.
+        for name in ["claude.exe", "claude.cmd", "claude.bat"] {
+            let candidate = std::path::Path::new(&dir).join(name);
             if candidate.is_file() {
                 return Some(candidate);
             }
         }
     }
-    None
+    // Last resort: ask Windows itself. `where.exe` honours PATHEXT, so it finds
+    // spellings this list doesn't enumerate. It shares our PATH, so it cannot
+    // rescue a stale one — that is what the explicit directories above and the
+    // manual override are for — but it costs one subprocess on a path that was
+    // about to fail anyway.
+    where_exe("claude")
+}
+
+/// A path the user pointed us at by hand, when everything else failed. The
+/// escape hatch: no amount of guessing at install locations beats being told.
+#[cfg(windows)]
+fn claude_override_path() -> Option<std::path::PathBuf> {
+    let raw = std::env::var("TAVERN_CLAUDE_PATH").ok()?;
+    let p = std::path::PathBuf::from(raw.trim());
+    p.is_file().then_some(p)
+}
+
+/// Every directory worth looking in, in order. Split out from the scan so the
+/// error message can name them — "not installed" is a lie the user cannot debug,
+/// and this list is what they actually need to see.
+#[cfg(windows)]
+fn claude_search_dirs() -> Vec<String> {
+    let mut dirs: Vec<String> = augmented_path().split(';').map(str::to_string).collect();
+    // Locations a GUI process's PATH routinely predates, because each installer
+    // writes the USER PATH registry key and a running process never re-reads it.
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        dirs.push(format!("{profile}\\.local\\bin")); // native installer
+        dirs.push(format!("{profile}\\.claude\\local")); // npm-local install
+        dirs.push(format!("{profile}\\scoop\\shims"));
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        dirs.push(format!("{local}\\Programs\\claude"));
+        dirs.push(format!("{local}\\Microsoft\\WindowsApps")); // winget shims
+    }
+    dirs.retain(|d| !d.trim().is_empty());
+    dirs
+}
+
+/// Windows' own resolver, for the extensions and locations we didn't think of.
+#[cfg(windows)]
+fn where_exe(stem: &str) -> Option<std::path::PathBuf> {
+    use std::os::windows::process::CommandExt;
+    let out = Command::new("where.exe")
+        .arg(stem)
+        .env("PATH", augmented_path())
+        .creation_flags(0x08000000)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(std::path::PathBuf::from)
+        .find(|p| p.is_file())
 }
 
 /// Builds a `Command` that runs the resolved `claude` with the given args,
@@ -390,9 +446,28 @@ fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Resu
 /// until an inserted function landed between its attribute and its `fn` and
 /// quietly took the attribute with it.) Nothing local catches this: cargo on
 /// this machine only ever compiles the Windows arm.
+/// A GUI app launched from Finder or the Dock inherits a MINIMAL PATH —
+/// `/usr/bin:/bin:/usr/sbin:/sbin` — not the one the user's shell builds from
+/// their profile. Every place a CLI actually installs is therefore invisible
+/// unless named here, which is the same stale-PATH problem the Windows arm
+/// solves by listing install directories.
 #[cfg(not(windows))]
 fn augmented_path() -> String {
-    std::env::var("PATH").unwrap_or_default()
+    let mut path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let extras = [
+        format!("{home}/.local/bin"),      // Claude Code's native installer
+        format!("{home}/.claude/local"),   // npm-local install
+        "/opt/homebrew/bin".to_string(),   // Homebrew, Apple silicon
+        "/usr/local/bin".to_string(),      // Homebrew (Intel) and npm's default prefix
+        format!("{home}/.npm-global/bin"), // a common custom npm prefix
+    ];
+    for dir in extras {
+        if std::path::Path::new(&dir).is_dir() && !path.split(':').any(|p| p == dir) {
+            path = if path.is_empty() { dir } else { format!("{path}:{dir}") };
+        }
+    }
+    path
 }
 
 #[cfg(not(windows))]
@@ -400,14 +475,41 @@ fn resolve_npm_exe() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from("npm"))
 }
 
+/// Resolves to an ABSOLUTE path where it can, same as the Windows arm.
+///
+/// This used to hand back the bare stem unconditionally — never checking that
+/// anything existed — so `Some(...)` meant "an engine name", not "an installed
+/// engine", and the spawn failed later with a bare NotFound. Searching
+/// `augmented_path` (which now includes the directories a Dock-launched app
+/// can't see) means a real answer, and `None` when there genuinely isn't one.
 #[cfg(not(windows))]
 fn resolve_engine_exe(engine: crate::cli_provider::CliEngine) -> Option<std::path::PathBuf> {
-    Some(std::path::PathBuf::from(engine.binary_stems()[0]))
+    if let Ok(raw) = std::env::var("TAVERN_CLAUDE_PATH") {
+        let p = std::path::PathBuf::from(raw.trim());
+        if engine == crate::cli_provider::CliEngine::Claude && p.is_file() {
+            return Some(p);
+        }
+    }
+    for dir in augmented_path().split(':').filter(|d| !d.is_empty()) {
+        for stem in engine.binary_stems() {
+            let candidate = std::path::Path::new(dir).join(stem);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(not(windows))]
 fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Result<Command, String> {
-    let mut c = Command::new(engine.binary_stems()[0]);
+    // Absolute path when we found one, bare stem otherwise: a PATH we failed to
+    // search is still better than refusing to try.
+    let mut c = match resolve_engine_exe(engine) {
+        Some(p) => Command::new(p),
+        None => Command::new(engine.binary_stems()[0]),
+    };
+    c.env("PATH", augmented_path());
     c.args(args);
     Ok(c)
 }
@@ -453,10 +555,26 @@ fn claude_command(args: &[&str]) -> Result<Command, String> {
 /// very different messaging (an install command + link vs. a login prompt).
 const CLAUDE_NOT_INSTALLED_MARKER: &str = "CLAUDE_NOT_INSTALLED";
 
+/// Says where it looked, not just that it failed.
+///
+/// "Claude Code CLI isn't installed" is a claim the app is often wrong about and
+/// the user can never check: the CLI is installed, it is on their PATH in a
+/// terminal, and a GUI process started before the installer wrote that PATH
+/// entry simply cannot see it. Reported 2026-08-16 from a second machine on
+/// v0.31.1, where the app insisted Claude was missing while `where claude`
+/// found it. Listing the directories turns an argument into a diagnosis.
 fn claude_not_installed_error() -> String {
-    format!(
-        "{CLAUDE_NOT_INSTALLED_MARKER}: Claude Code CLI isn't installed (or couldn't be found) on this computer."
-    )
+    #[cfg(windows)]
+    let looked = format!(
+        "\n\nLooked for claude.exe, claude.cmd and claude.bat in:\n  {}\n\nIf it lives somewhere else, set TAVERN_CLAUDE_PATH to the full path of the executable and restart. If it IS in one of those folders, the app was started before that folder reached its PATH — restarting Tavern Sheet is usually enough.",
+        claude_search_dirs().join("\n  ")
+    );
+    #[cfg(not(windows))]
+    let looked = format!(
+        "\n\nLooked for `claude` on PATH:\n  {}\n\nA GUI app launched from Finder or the Dock gets a minimal PATH and never sees ~/.local/bin, Homebrew or npm's global prefix. Set TAVERN_CLAUDE_PATH to the full path of the executable if so.",
+        augmented_path()
+    );
+    format!("{CLAUDE_NOT_INSTALLED_MARKER}: Claude Code CLI isn't installed (or couldn't be found) on this computer.{looked}")
 }
 
 /// Same idea as CLAUDE_NOT_INSTALLED_MARKER, for the one prerequisite
