@@ -51,17 +51,18 @@ const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string; 
     // Deliberately says "Gemini", not "Antigravity". Gemini is the MODEL doing
     // the work; Antigravity is just the CLI client Google replaced it with in
     // June 2026. Naming the client would only confuse someone choosing an LLM.
-    blurb: 'Runs on Google Antigravity (Gemini models). Opens a sign-in window — the app waits and detects when you\'re done.',
-    consoleLogin: true,
-    // MEASURED 2026-07-24, do not rebuild the in-app flow without reading this.
-    // agy's "paste the authorization code here" prompt is read from a real
-    // TERMINAL, not from piped stdin: the captured log shows the prompt printed
-    // and then nothing at all — no accept, no reject — for a code written down
-    // its stdin. Its other route is an HTTPS loopback listener speaking an
-    // undocumented protocol with Google's own callback page. Making Sign in work
-    // in-app therefore needs a pseudo-console (ConPTY), which is a dependency
-    // and a chunk of Windows plumbing, not a tweak. Credentials land in the
-    // Windows keyring, so the terminal sign-in is genuinely ONE TIME.
+    blurb: "Uses your Google account. Sign-in opens Google's page in your browser.",
+    // NO consoleLogin: Gemini uses the same paste-a-code dialog as everyone
+    // else. It didn't always — agy reads the code from a real TERMINAL and
+    // ignores piped stdin (measured 2026-07-24), so this row used to launch a
+    // black console window instead. The answer to that measurement was built in
+    // dm.rs (`begin_login_via_pty`: a pseudo-console, agy's ESC[6n query
+    // answered, the code typed as `code\r`), and `begin_engine_login` has
+    // routed Gemini through it ever since — but this flag kept sending users
+    // to the console window anyway, where the flow kept breaking. The paste
+    // dialog is also the UI that fits agy's hard 60-second window: browser
+    // opened the moment the URL exists, clipboard watched, code auto-submitted
+    // (Google's codes are exactly the `4/…` shape the watcher matches).
   },
 ];
 
