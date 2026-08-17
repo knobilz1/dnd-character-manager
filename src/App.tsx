@@ -19,6 +19,7 @@ import { DeepSeaOverlay } from './components/DeepSeaOverlay';
 import { FireworksOverlay } from './components/FireworksOverlay';
 import { EidOverlay } from './components/EidOverlay';
 import { ErrorBoundary, AppCrashFallback } from './components/ErrorBoundary';
+import { ModelGate } from './components/ModelGate';
 
 export default function App() {
   const updater = useAppUpdater();
@@ -33,6 +34,10 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      {/* One instance, app-level: any page can raise the "no AI helper" prompt
+          without owning a dialog, and the page that asks is often mid-flow with
+          its own dialog closing underneath. */}
+      <ModelGate />
       {theme === 'christmas' && <SnowOverlay />}
       {theme === 'halloween' && <HauntOverlay />}
       {theme === 'deepsea' && <DeepSeaOverlay />}

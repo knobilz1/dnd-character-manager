@@ -1,4 +1,5 @@
 import React from 'react';
+import { requireAi } from '../../../components/ModelGate';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { Dices } from 'lucide-react';
@@ -80,6 +81,9 @@ export function RandomCharacterButton() {
   }, [books]);
 
   async function roll() {
+    // The roll itself is local, but it writes the character a backstory — so ask
+    // before the dialog commits to "Rolling…" rather than after.
+    if (!(await requireAi('roll a character with a backstory'))) return;
     setError(null);
     setBusy('Rolling…');
     try {

@@ -20,7 +20,7 @@ import { useSnapshotStore } from '../store/useSnapshotStore';
 import { useThemeStore } from '../store/useThemeStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { sendCharacterToDM, sendAllToDM } from '../utils/dmConnect';
-import { ModelConnectionSettings } from '../components/ModelConnection';
+import { useModelGate } from '../components/ModelGate';
 
 /** Open a borrowed character in its own window, so a player running two
  *  characters can see both at once instead of tabbing between them mid-combat.
@@ -70,7 +70,6 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   // useSettingsStore. Keeps the header from accumulating a loose toggle
   // button per setting as more get added.
   const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [connectModelOpen, setConnectModelOpen] = React.useState(false);
   // Deliberately NOT nested inside settingsOpen's Dialog — that Dialog
   // unmounts its whole subtree on close, and the button that opens this
   // lives inside it (see DriveSyncButton's doc comment for the bug that
@@ -475,16 +474,6 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
         {dmStatus && <p className="text-sm text-slate-300">{dmStatus}</p>}
       </Dialog>
 
-      <Dialog open={connectModelOpen} onClose={() => setConnectModelOpen(false)} title="Connect a Model">
-        <p className="text-xs text-slate-400 mb-3">
-          Global for this device — switchable any time, including mid-campaign. A local model needs its own reliability tradeoffs in mind: HP/condition changes are still applied automatically, but skipped or clamped entries show up as a warning under the transcript instead of silently vanishing.
-        </p>
-        <ModelConnectionSettings />
-        <div className="flex justify-end mt-4">
-          <Button onClick={() => setConnectModelOpen(false)}>Done</Button>
-        </div>
-      </Dialog>
-
       {/* Settings dialog — every persisted app-wide setting except theme */}
       <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings">
         {/* Connecting an AI is not a DM-only concern and shouldn't have lived
@@ -494,7 +483,7 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
             not a copy, or the two drift the first time either grows an option. */}
         <div className="mb-4">
           <button
-            onClick={() => { setSettingsOpen(false); setConnectModelOpen(true); }}
+            onClick={() => { setSettingsOpen(false); useModelGate.getState().openConnect(); }}
             className="w-full flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2.5 text-left hover:border-emerald-600 transition-colors"
           >
             <span>

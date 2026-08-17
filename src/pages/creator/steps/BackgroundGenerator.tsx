@@ -1,4 +1,5 @@
 import React from 'react';
+import { requireAi } from '../../../components/ModelGate';
 import { invoke } from '@tauri-apps/api/core';
 import { Sparkles } from 'lucide-react';
 import { Button, Dialog } from '../../../components/ui';
@@ -73,6 +74,9 @@ export function BackgroundGenerator({
    *  have already typed — they can hit it, dislike the result, and press Edit answers to find
    *  their own words still there. */
   async function generate(override?: Brief) {
+    // Ask BEFORE the spinner. Without this the first thing a new user saw was a
+    // wait, then an error naming a CLI they have never heard of.
+    if (!(await requireAi('write a backstory'))) return;
     setBusy(true);
     setError(null);
     try {

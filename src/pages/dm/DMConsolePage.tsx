@@ -26,6 +26,7 @@ import { disputedCells } from '../../utils/boardCrossCheck';
 import { battleMapToPngDataUrl, battleMapFloorsToPngs, battleMapToPdfBytes, parseBattleMapFloors, parseCellRefToken, floorStairLinks, preloadBattleTileSprites, preloadResolvedTileArt, setActiveTileStyle, type MapTileArt, type MapTerrain, type FloorStairLink } from '../../utils/battleMapRender';
 import { listTableCameras, captureTableFrame, coarsePhotoWarning, type TableCamera } from '../../utils/tableCamera';
 import { ModelConnectionSettings } from '../../components/ModelConnection';
+import { requireAi } from '../../components/ModelGate';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
 import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
@@ -919,6 +920,12 @@ export function DMConsolePage() {
   }
 
   async function ensureClaudeConnected(): Promise<boolean> {
+    // Only Claude has an in-app connect flow, so everything below is
+    // Claude-specific — which made this gate demand a CLAUDE sign-in even when
+    // the work was about to run on Codex, Gemini or a local server. The engine
+    // that actually answers ingestion is `ingestionProvider`; when it is not
+    // Claude, ask the generic gate about THAT engine instead.
+    if (ingestionProvider !== 'claude') return requireAi('set up this campaign');
     setClaudeNotInstalled(false);
     setNodeNotInstalled(false);
     try {
