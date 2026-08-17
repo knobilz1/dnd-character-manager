@@ -172,7 +172,7 @@ export function EngineAccounts() {
       await refresh();
       const engine = ENGINES.find((x) => x.id === id);
       if (engine?.consoleLogin) await consoleSignIn(id);
-      else await openPasteDialog(id);
+      else await openPasteDialog(id, false);
       return;
 
     } catch (e) {
@@ -242,7 +242,7 @@ export function EngineAccounts() {
     }
   }
 
-  async function openPasteDialog(id: EngineId) {
+  async function openPasteDialog(id: EngineId, allowInstall = true) {
     setPasteOpen(id);
     setError(null);
     setCode('');
@@ -268,7 +268,18 @@ export function EngineAccounts() {
         setError("Couldn't start the sign-in — no URL came back. Try again.");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // The CLI isn't there, and the dialog was already open promising a code
+      // that can never come — the stuck "preparing…" screen. Do what the error
+      // text promises: install it, then reopen this dialog. `allowInstall`
+      // stops a second failure from looping back into another install; that
+      // one shows the detailed searched-these-directories message instead.
+      if (allowInstall && msg.includes('CLAUDE_NOT_INSTALLED')) {
+        setPasteOpen(null);
+        await connect(id, true);
+        return;
+      }
+      setError(msg);
     }
   }
 
@@ -380,7 +391,7 @@ export function EngineAccounts() {
                 <span className="text-slate-500">preparing…</span>
               )}
             </li>
-            <li>Google shows you a code. Hit <span className="text-slate-300">Copy to Clipboard</span>.</li>
+            <li>The sign-in page shows you a code — copy it.</li>
             <li>That's it — come back here and it signs itself in.</li>
           </ol>
 
@@ -389,7 +400,7 @@ export function EngineAccounts() {
             value={code}
             onChange={(ev) => setCode(ev.target.value)}
             rows={3}
-            placeholder="Paste the code here (starts with 4/)"
+            placeholder="Paste the code here"
             className="w-full px-2 py-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-200 font-mono break-all"
           />
 
@@ -419,7 +430,7 @@ export function EngineAccounts() {
             </Button>
             <span className="text-[11px] text-slate-500">
               {busy
-                ? 'Waiting for Google to confirm…'
+                ? 'Finishing sign-in…'
                 : code.trim()
                   ? `${code.replace(/\s+/g, '').length} characters — press Sign in`
                   : 'Approve in the browser, then press Copy on Google\'s page — be quick, the sign-in expires after about a minute.'}

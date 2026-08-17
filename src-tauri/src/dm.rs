@@ -518,6 +518,15 @@ fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Resu
 /// isn't installed lands in the "offer to install it" branch rather than the
 /// "you're not logged in" one — those need completely different messaging.
 fn engine_not_installed_error(engine: crate::cli_provider::CliEngine) -> String {
+    // Claude gets the detailed message — the one that lists every directory
+    // searched and names TAVERN_CLAUDE_PATH. The generic line below reached the
+    // sign-in dialog on a machine where Claude WAS installed, and gave the user
+    // nothing to act on: the screenshot that prompted this showed it pinned
+    // under "preparing…" with no way forward. Every path that fails to resolve
+    // Claude now explains itself the same way.
+    if engine == crate::cli_provider::CliEngine::Claude {
+        return claude_not_installed_error();
+    }
     format!(
         "{CLAUDE_NOT_INSTALLED_MARKER}: {} isn't installed yet. Tavern Sheet can install it for you.",
         engine.label()
@@ -2884,6 +2893,23 @@ pub async fn warmup_dm_session(app: AppHandle, campaign_id: String) -> Result<()
 
 #[cfg(test)]
 mod tests {
+    /// The sign-in dialog showed "Claude Code isn't installed yet" with nothing
+    /// to act on, on a machine where it WAS installed — the generic engine error
+    /// didn't carry the diagnosis. For Claude it must be the detailed message:
+    /// every directory searched, and the TAVERN_CLAUDE_PATH escape hatch.
+    #[test]
+    fn claude_resolution_failures_explain_where_they_looked() {
+        let msg = super::engine_not_installed_error(crate::cli_provider::CliEngine::Claude);
+        assert!(msg.contains("TAVERN_CLAUDE_PATH"), "{msg}");
+        assert!(msg.contains("Looked for"), "{msg}");
+        // The frontend keys on this marker to pick the install-offer branch.
+        assert!(msg.starts_with("CLAUDE_NOT_INSTALLED"), "{msg}");
+        // Other engines keep the short line — their installs are one npm command
+        // with no second install location to diagnose.
+        let codex = super::engine_not_installed_error(crate::cli_provider::CliEngine::Codex);
+        assert!(codex.contains("Codex") && !codex.contains("Looked for"), "{codex}");
+    }
+
     use super::*;
 
     /// A 40K `agy --print <text>` fails to spawn outright, so the campaign brief
