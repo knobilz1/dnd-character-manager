@@ -594,8 +594,11 @@ fn claude_not_installed_error() -> String {
 const NODE_NOT_INSTALLED_MARKER: &str = "NODE_NOT_INSTALLED";
 
 fn node_not_installed_error() -> String {
+    // Only Codex still installs exclusively through npm — Claude has a native
+    // installer (tried first, above) and Antigravity ships its own script. If
+    // this message ever names Claude again, the native-first order regressed.
     format!(
-        "{NODE_NOT_INSTALLED_MARKER}: Node.js isn't installed on this computer, which `npm` (and so Claude Code) needs. Install it from nodejs.org, then try again."
+        "{NODE_NOT_INSTALLED_MARKER}: Codex installs through npm, which needs Node.js. Install Node from nodejs.org, then try again."
     )
 }
 
@@ -614,10 +617,62 @@ fn node_not_installed_error() -> String {
 #[tauri::command]
 pub async fn install_claude_cli() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
+        // Claude Code's own standalone installer FIRST — it bundles its runtime
+        // and needs no Node/npm at all. Telling a D&D player to go install
+        // Node.js from nodejs.org because WE preferred the npm route was this
+        // app exporting its own plumbing as the user's problem (Nabil's words
+        // were less polite, and he was right). The resolver has always known
+        // this installer exists: `%USERPROFILE%\.local\bin` is searched
+        // precisely because that is where it puts claude.exe.
+        //
+        // npm stays as the FALLBACK for machines where the download fails
+        // (offline, proxy, script policy) but Node happens to exist. Only when
+        // both routes are closed does the error mention Node — as one of two
+        // options, never as a prerequisite.
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            let npm_path = resolve_npm_exe().ok_or_else(node_not_installed_error)?;
+            let native = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "irm https://claude.ai/install.ps1 | iex",
+                ])
+                .creation_flags(0x08000000)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
+            match &native {
+                Ok(out) => {
+                    write_claude_debug_log(
+                        "install_claude_cli",
+                        &augmented_path(),
+                        Some(out),
+                        "claude.ai/install.ps1 (native installer)",
+                    );
+                    // Exit code alone is not proof — verify the binary landed
+                    // where the resolver can see it.
+                    if out.status.success() && resolve_claude_exe().is_some() {
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    crate::maplog::log("CLAUDE NATIVE INSTALL failed to spawn", &e.to_string());
+                }
+            }
+            // Fallback: npm, if this machine has it.
+            let Some(npm_path) = resolve_npm_exe() else {
+                let native_err = match &native {
+                    Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                    Err(e) => e.to_string(),
+                };
+                return Err(format!(
+                    "Couldn't install Claude Code automatically. Its installer couldn't be downloaded from claude.ai ({native_err}) — check your internet connection and try again. (Installing Node.js from nodejs.org and retrying also works, but shouldn't be necessary.)"
+                ));
+            };
             let out = Command::new("cmd")
                 .arg("/C")
                 .arg(&npm_path)
@@ -635,7 +690,7 @@ pub async fn install_claude_cli() -> Result<(), String> {
                 "install_claude_cli",
                 &augmented_path(),
                 Some(&out),
-                "npm install -g @anthropic-ai/claude-code",
+                "npm install -g @anthropic-ai/claude-code (fallback)",
             );
             if !out.status.success() {
                 return Err(format!(
@@ -650,7 +705,26 @@ pub async fn install_claude_cli() -> Result<(), String> {
         }
         #[cfg(not(windows))]
         {
-            Err("Automatic install is only wired up for Windows right now — run `npm install -g @anthropic-ai/claude-code` yourself.".to_string())
+            // Same native-first shape: claude.ai/install.sh bundles its runtime.
+            let native = Command::new("sh")
+                .arg("-c")
+                .arg("curl -fsSL https://claude.ai/install.sh | bash")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
+            if let Ok(out) = &native {
+                if out.status.success() && resolve_engine_exe(crate::cli_provider::CliEngine::Claude).is_some() {
+                    return Ok(());
+                }
+            }
+            let native_err = match &native {
+                Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                Err(e) => e.to_string(),
+            };
+            Err(format!(
+                "Couldn't install Claude Code automatically ({native_err}) — check your internet connection and try again."
+            ))
         }
     })
     .await

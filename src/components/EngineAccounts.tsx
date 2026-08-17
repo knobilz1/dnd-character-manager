@@ -177,10 +177,13 @@ export function EngineAccounts() {
 
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // The one thing the app genuinely can't fix for the user.
+      // Only Codex can still land here: it installs exclusively through npm.
+      // Claude uses its own standalone installer (no Node), and Gemini ships
+      // its own script — sending anyone else to nodejs.org was the app
+      // exporting its plumbing as the user's problem.
       setError(
         msg.includes('NODE_NOT_INSTALLED')
-          ? "Node.js isn't installed, which these CLIs need. Install it from nodejs.org, then try again."
+          ? 'Codex installs through npm, which needs Node.js — install it from nodejs.org, then try again. (Claude and Gemini don’t need Node.)'
           : msg,
       );
     } finally {
