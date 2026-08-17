@@ -52,13 +52,31 @@ export const useModelGate = create<GateState>((set) => ({
  * asleep is a different problem from never having connected anything, and this
  * gate is about the latter.
  */
+/**
+ * Engines already confirmed ready, for the life of the process.
+ *
+ * `runTurn` calls the gate on EVERY turn, and the probe is not free: Codex
+ * spawns `codex login status`, and Gemini's is a real model call costing about
+ * five seconds — see `auth_probe_args`. Paying that per turn would put a
+ * measurable pause into every exchange at a live table to re-answer a question
+ * that had already been answered.
+ *
+ * Only the POSITIVE is cached, exactly as `GEMINI_CONFIRMED` does in dm.rs: a
+ * "no" must stay re-checkable or signing in mid-session would never be noticed.
+ * A token that expires later surfaces as the turn's own error, which is a much
+ * better failure than making every turn pay for the check.
+ */
+const confirmed = new Set<string>();
+
 export async function aiHelperReady(): Promise<boolean> {
   const { dmProvider, localLlmBaseUrl, localLlmModel } = useSettingsStore.getState();
   if (dmProvider === 'local') {
     return localLlmBaseUrl.trim().length > 0 && localLlmModel.trim().length > 0;
   }
+  if (confirmed.has(dmProvider)) return true;
   try {
     const [installed, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: dmProvider });
+    if (installed && signedIn) confirmed.add(dmProvider);
     return installed && signedIn;
   } catch {
     // The check itself failed, which is NOT proof there's no helper — see

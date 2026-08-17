@@ -2320,6 +2320,10 @@ export function DMConsolePage() {
    *  and reported via `setError`/the returned `error` field, so callers
    *  (drainQueue in particular) can always inspect the outcome. */
   async function runTurn(spokenText: string, speaker: string | undefined, who: string, isReconnectRetry = false): Promise<TurnResult> {
+    // The live turn is the one place this must not surprise anyone mid-session:
+    // without a helper the DM simply never answers, and at a table that reads as
+    // the app hanging. Checked before the turn is even recorded.
+    if (!(await requireAi('run the DM'))) return { narration: null, interrupted: false, error: 'No AI helper connected.' };
     // Any new attempt supersedes a stored failure — a Retry chip offering to
     // re-run something older than the conversation would be worse than none.
     setFailedTurn(null);
@@ -2964,6 +2968,9 @@ export function DMConsolePage() {
    *  switching the active campaign without closing out the old one first
    *  would make the very next turn error out. */
   async function wrapUpCurrentSession() {
+    // The digest is a model call — ask before the session is closed out,
+    // not after the transcript has already been handed over.
+    if (!(await requireAi('write up this session'))) return;
     const campaignId = live.current.campaignId;
     if (campaignId && turns.length > 0) {
       setBusy(true);
@@ -3434,6 +3441,9 @@ export function DMConsolePage() {
    *  modules list and the newly-active module's chapter list. */
   async function handleImportModuleForExisting() {
     if (!activeCampaignId) return;
+    // Before the file picker, not after: a module import is the longest
+    // model-backed job in the app and the worst one to fail at the end of.
+    if (!(await requireAi('import an adventure module'))) return;
     setModuleBusy('Reading file…');
     try {
       const picked = await pickAndExtractModuleFile();
@@ -4243,6 +4253,8 @@ export function DMConsolePage() {
    *  surface doesn't matter. Nothing is applied here: the result opens a confirm
    *  panel first (see applyBoardRead). */
   async function readTheBoard(card: MapCard) {
+    // A vision call. Asking here also spares the user a photo they can't use.
+    if (!(await requireAi('read the table from a photo'))) return;
     if (tableCameraSource === 'off') return; // the button is hidden; this is the belt to its braces
     // Multi-story maps read one floor at a time; the ground floor is the one
     // the minis are standing on unless/until we add a floor picker.
@@ -4796,6 +4808,7 @@ export function DMConsolePage() {
    *  one-shot establish_campaign_lore that only ever runs at creation. */
   async function handleUpdateLore() {
     if (!activeCampaignId) return;
+    if (!(await requireAi('update this campaign\u2019s lore'))) return;
     const addition = [loreAddition.trim(), pendingLoreUpdateFile?.text].filter(Boolean).join('\n\n');
     if (!addition) return;
     setModuleBusy('Folding new material into your campaign lore…');
