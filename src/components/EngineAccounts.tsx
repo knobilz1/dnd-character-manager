@@ -85,6 +85,18 @@ export function EngineAccounts() {
   const [secondsLeft, setSecondsLeft] = React.useState(0);
   const pasteOpenRef = React.useRef<EngineId | null>(null);
   pasteOpenRef.current = pasteOpen;
+  /** Amber, not red: "the window expired and a fresh one is already open" is
+   *  the flow working, and painting it as an error taught the user to give up. */
+  const [notice, setNotice] = React.useState<string | null>(null);
+  /** agy's auth window is 60 seconds from ITS spawn — which is when this dialog
+   *  opens, not when the user reaches the browser. A first-time Google consent
+   *  (account picker, permissions page) routinely outlives it, and a code from
+   *  an expired run is PKCE-dead: nothing pasted after that point can ever
+   *  work. So expiry triggers an automatic fresh start — new run, new URL,
+   *  browser reopened — and Google's second pass is warm, so the code page
+   *  appears in seconds. Budgeted, so a walked-away-from dialog doesn't spawn
+   *  agy forever. */
+  const autoRestarts = React.useRef(0);
 
   /** Each row lands as its own answer arrives — never gathered behind a
    *  Promise.all. The all-at-once version held EVERY row's buttons hostage to
@@ -124,6 +136,26 @@ export function EngineAccounts() {
     const t = setTimeout(() => setSecondsLeft((n) => n - 1), 1000);
     return () => clearTimeout(t);
   }, [secondsLeft]);
+
+  // The moment the window lapses, the old run's code can never be redeemed —
+  // restart while the user is still mid-consent so the page they land on next
+  // is one whose code still works.
+  React.useEffect(() => {
+    if (secondsLeft !== 0 || !pasteOpen || busy) return;
+    // secondsLeft BEGINS at 0 — only a run whose URL arrived (which sets the
+    // 60s clock) can expire. Without this, the dialog restarted itself the
+    // moment it opened, before the first sign-in had even produced a URL.
+    if (!loginUrl) return;
+    if (code.trim()) return; // a code is in flight or typed; submit decides
+    if (autoRestarts.current >= 4) {
+      setNotice('That sign-in window expired. Press Start over when you\u2019re ready \u2014 the browser will reopen.');
+      return;
+    }
+    autoRestarts.current += 1;
+    setNotice('That window expired \u2014 opened a fresh sign-in page. Use the NEWEST page\u2019s code; older ones can\u2019t work.');
+    void openPasteDialog(pasteOpen, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft, pasteOpen, busy, code, loginUrl]);
 
   /** Watch the clipboard while a sign-in is waiting, and fill the box the moment
    *  the user hits "Copy to Clipboard" on Google's page.
@@ -211,9 +243,31 @@ export function EngineAccounts() {
       await refresh();
       setCodeFor(null);
       setCode('');
-      if (!ok) setError("That code wasn't accepted. Start the sign-in again for a fresh one — they expire quickly.");
+      if (ok) {
+        // This function owns the dialog's fate. The caller used to close it
+        // with `if (!error) setPasteOpen(null)` — a STALE closure where error
+        // is null from render time — so the dialog closed on failure too,
+        // clobbering the fresh sign-in the expiry handler had just opened.
+        setPasteOpen(null);
+        setNotice(null);
+      } else {
+        setError("That code wasn't accepted. Start the sign-in again for a fresh one — they expire quickly.");
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // "The pipe is being closed" is agy having timed out UNDER the user's
+      // code — their consent simply took longer than the window. Not their
+      // fault, and not a dead end: start fresh, reopen the browser, and their
+      // warm Google session hands over the next code in seconds.
+      if (/already ended|pipe is being closed/i.test(msg) && autoRestarts.current < 4 && pasteOpenRef.current) {
+        autoRestarts.current += 1;
+        setNotice('That code\u2019s window had already expired \u2014 opened a fresh page. Copy the NEW code it shows.');
+        setBusy(null);
+        setStep('');
+        void openPasteDialog(pasteOpenRef.current, false);
+        return;
+      }
+      setError(msg);
     } finally {
       setBusy(null);
       setStep('');
@@ -260,6 +314,12 @@ export function EngineAccounts() {
     setError(null);
     setCode('');
     setLoginUrl('');
+    if (allowInstall) {
+      // A person pressing Sign in / Start over resets the restart budget; the
+      // automatic path passes allowInstall=false and keeps spending its own.
+      autoRestarts.current = 0;
+      setNotice(null);
+    }
     // ALWAYS start a fresh sign-in. Never reuse a URL from an earlier attempt.
     //
     // The authorization code is PKCE-bound to the exact CLI run that produced
@@ -408,10 +468,18 @@ export function EngineAccounts() {
             <li>That's it — come back here and it signs itself in.</li>
           </ol>
 
+          {notice && <p className="text-xs text-amber-400">{notice}</p>}
           <textarea
             autoFocus
             value={code}
             onChange={(ev) => setCode(ev.target.value)}
+            onPaste={(ev) => {
+              // Replace, never append. The auto-filled box plus a manual
+              // Ctrl+V produced the same code twice back to back — 146
+              // characters that no engine would ever accept.
+              ev.preventDefault();
+              setCode(ev.clipboardData.getData('text').replace(/\s+/g, ''));
+            }}
             rows={3}
             placeholder="Paste the code here"
             className="w-full px-2 py-2 rounded bg-slate-950 border border-slate-700 text-xs text-slate-200 font-mono break-all"
@@ -433,10 +501,12 @@ export function EngineAccounts() {
                 const id = pasteOpen!;
                 // Whitespace is expected, not exceptional: the page wraps the
                 // code across two lines, so copying it often brings a newline.
-                const cleaned = code.replace(/\s+/g, '');
+                let cleaned = code.replace(/\s+/g, '');
+                // Collapse an accidentally doubled code to its first copy.
+                const second = cleaned.indexOf('4/', 2);
+                if (cleaned.startsWith('4/') && second > 0) cleaned = cleaned.slice(0, second);
                 setCode(cleaned);
                 await submitCode(id, cleaned);
-                if (!error) setPasteOpen(null);
               }}
             >
               {busy ? 'Checking…' : 'Sign in'}
