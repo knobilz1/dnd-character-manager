@@ -84,9 +84,22 @@ export async function aiHelperReady(): Promise<boolean> {
   }
   if (confirmed.has(dmProvider)) return true;
   try {
-    const [installed, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: dmProvider });
-    if (installed && signedIn) confirmed.add(dmProvider);
-    return installed && signedIn;
+    // deep:false, always. A deep check on Gemini is a REAL agy spawn, which on
+    // a signed-out machine opens Google's page by itself — a gate that pops a
+    // browser while asking "do you have a helper?" answers its own question
+    // wrongly and rudely.
+    const [installed, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: dmProvider, deep: false });
+    if (!installed) return false;
+    if (signedIn) {
+      confirmed.add(dmProvider);
+      return true;
+    }
+    // Gemini's quick check cannot DISPROVE a sign-in (that takes the real
+    // probe): unconfirmed-but-installed is unknown, and unknown proceeds —
+    // same rule as a check that errors. A genuinely signed-out agy fails the
+    // turn itself with its own words, which the failover path already reads.
+    // Claude and Codex have cheap, definitive checks, so their "no" is real.
+    return dmProvider === 'gemini';
   } catch {
     // The check itself failed, which is NOT proof there's no helper — see
     // EngineAccounts. Let the action proceed and fail with its own real error

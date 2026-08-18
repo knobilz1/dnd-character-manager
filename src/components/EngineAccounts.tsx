@@ -86,13 +86,23 @@ export function EngineAccounts() {
   const pasteOpenRef = React.useRef<EngineId | null>(null);
   pasteOpenRef.current = pasteOpen;
 
-  const refresh = React.useCallback(async () => {
-    const next: Partial<Record<EngineId, State>> = {};
+  /** Each row lands as its own answer arrives — never gathered behind a
+   *  Promise.all. The all-at-once version held EVERY row's buttons hostage to
+   *  the slowest check, which on one real machine was agy blocking toward its
+   *  60-second auth window: the panel sat with no Sign in buttons at all,
+   *  which read as the whole feature having vanished.
+   *
+   *  `deep` reaches the backend as-is: mounts pass false, so checking status
+   *  can never itself spawn a model call (that spawn is also what popped
+   *  Google's sign-in page unasked). The ↻ button passes true — an explicit
+   *  click may spend a real probe to turn a signed-in Gemini's row green. */
+  const refresh = React.useCallback(async (deep = false) => {
+    setLoading(true);
     await Promise.all(
       ENGINES.map(async (e) => {
         try {
-          const [installed, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: e.id });
-          next[e.id] = { installed, signedIn };
+          const [installed, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: e.id, deep });
+          setState((prev) => ({ ...prev, [e.id]: { installed, signedIn } }));
         } catch (err) {
           // NOT the same thing as "not installed", and saying so cost a user an
           // evening: Claude was installed, on PATH, and working in a terminal
@@ -100,11 +110,10 @@ export function EngineAccounts() {
           // hardcodes installed=true for Claude, so reaching here at all means
           // the CHECK failed — the app has no idea whether it's installed, and
           // the honest answer is to say the check failed and show why.
-          next[e.id] = { installed: false, signedIn: false, error: String(err) };
+          setState((prev) => ({ ...prev, [e.id]: { installed: false, signedIn: false, error: String(err) } }));
         }
       }),
     );
-    setState(next);
     setLoading(false);
   }, []);
 
@@ -230,7 +239,7 @@ export function EngineAccounts() {
       setStep('Sign-in window opened — follow the steps, this updates itself.');
       for (let i = 0; i < 150; i++) {   // ~5 minutes, unhurried on purpose
         await new Promise((r) => { setTimeout(r, 2000); });
-        const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id });
+        const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id, deep: true });
         if (signedIn) {
           await refresh();
           setConsoleFor(null);
@@ -292,7 +301,7 @@ export function EngineAccounts() {
       <div className="flex items-center justify-between mb-1">
         <label className="block text-xs text-slate-400">Accounts</label>
         <button
-          onClick={() => { setLoading(true); void refresh(); }}
+          onClick={() => void refresh(true)}
           className="text-slate-500 hover:text-slate-300"
           title="Re-check which engines are installed and signed in"
         >

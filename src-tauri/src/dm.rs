@@ -1870,7 +1870,7 @@ pub async fn submit_login_code(engine: String, code: String) -> Result<bool, Str
     // exactly that and stop caring about the rest of the process's life.
     for _ in 0..24 {
         tokio::time::sleep(Duration::from_millis(1500)).await;
-        if engine_auth_state(setting.clone()).await?.1 {
+        if engine_auth_state(setting.clone(), Some(true)).await?.1 {
             if let Some(done) = pending_login().lock().unwrap().take() {
                 end_login(done); // its remaining work is of no interest
             }
@@ -2671,14 +2671,32 @@ pub(crate) fn run_engine_oneshot(
 ///
 /// Deliberately never errors on "not installed" — a settings panel showing the
 /// state of three engines wants three answers, not one exception.
+///
+/// `deep` controls whether Gemini may be probed with a REAL model call. agy has
+/// no status subcommand — the only honest signed-in check is running a tiny
+/// prompt (see auth_probe_args). That was fine when this command belonged to
+/// the sign-in poller; it stopped being fine when the Accounts panel called it
+/// on every mount, because on a signed-out machine that spawn prints Google's
+/// OAuth banner, opens the browser itself, and blocks toward agy's 60-second
+/// auth window. Reported 2026-08-17 as "opening settings just launches google
+/// sign in" — with every Sign in button missing while the panel waited behind
+/// the block. A mount (`deep=false`, the default) may only use free evidence:
+/// the process-cached confirmation, or the binary's absence. Unconfirmed-but-
+/// installed reports as signed-out, which renders the Sign in button — the
+/// correct call to action either way. `deep=true` stays for the moments a real
+/// answer is worth a real call: the sign-in poller, and the panel's ↻ button.
 #[tauri::command]
-pub async fn engine_auth_state(engine: String) -> Result<(bool, bool), String> {
+pub async fn engine_auth_state(engine: String, deep: Option<bool>) -> Result<(bool, bool), String> {
     let engine = crate::cli_provider::CliEngine::from_setting(&engine);
+    let deep = deep.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
         use crate::cli_provider::CliEngine;
         if engine == CliEngine::Claude {
             // Reuse the existing, proven check rather than a second opinion.
             return (true, claude_logged_in().unwrap_or(false));
+        }
+        if engine == CliEngine::Gemini && !deep && !GEMINI_CONFIRMED.load(Ordering::Relaxed) {
+            return (resolve_engine_exe(engine).is_some(), false);
         }
         // Gemini's probe is a real model call (~5s), and this command runs every
         // time the Accounts panel mounts. Once it has said yes, believe it for
@@ -2880,7 +2898,7 @@ pub async fn connect_engine(engine: String) -> Result<bool, String> {
     // Closing the window is also a "successful" exit, so the exit code proves
     // nothing — re-check through the same path the settings panel uses, so
     // "connected" means one thing everywhere.
-    Ok(engine_auth_state(setting).await?.1)
+    Ok(engine_auth_state(setting, Some(true)).await?.1)
 }
 
 /// Runs `claude auth login --claudeai` in a REAL, VISIBLE console window —
