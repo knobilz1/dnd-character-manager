@@ -394,6 +394,10 @@ fn resolve_engine_exe(engine: crate::cli_provider::CliEngine) -> Option<std::pat
     // location, handled the same way: look there explicitly.
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         dirs.push(format!("{local}\\agy\\bin"));
+        // Codex's official installer (install.ps1 on its GitHub release) lands
+        // codex.exe here and registers it on the USER PATH - which this
+        // already-running GUI process can't see, same story as agy above.
+        dirs.push(format!("{local}\\Programs\\OpenAI\\Codex\\bin"));
     }
     for dir in dirs.iter().filter(|d| !d.is_empty()) {
         for stem in engine.binary_stems() {
@@ -503,12 +507,14 @@ fn resolve_engine_exe(engine: crate::cli_provider::CliEngine) -> Option<std::pat
 
 #[cfg(not(windows))]
 fn engine_command(engine: crate::cli_provider::CliEngine, args: &[&str]) -> Result<Command, String> {
-    // Absolute path when we found one, bare stem otherwise: a PATH we failed to
-    // search is still better than refusing to try.
-    let mut c = match resolve_engine_exe(engine) {
-        Some(p) => Command::new(p),
-        None => Command::new(engine.binary_stems()[0]),
-    };
+    // No bare-stem fallback: augmented_path is already the widest net this
+    // app can cast, and a stem the search missed just ENOENTs at exec — as a
+    // raw OS error instead of the not-installed marker the frontend's
+    // install-and-retry rescue keys on. Failing honestly here is what makes
+    // the rescue reachable at all off Windows.
+    let mut c = Command::new(
+        resolve_engine_exe(engine).ok_or_else(|| engine_not_installed_error(engine))?,
+    );
     c.env("PATH", augmented_path());
     c.args(args);
     Ok(c)
@@ -564,6 +570,23 @@ fn claude_command(args: &[&str]) -> Result<Command, String> {
 /// very different messaging (an install command + link vs. a login prompt).
 const CLAUDE_NOT_INSTALLED_MARKER: &str = "CLAUDE_NOT_INSTALLED";
 
+/// The non-Windows twin of `claude_command` above. A Dock/Finder-launched app
+/// gets the minimal system PATH, so a bare `Command::new("claude")` ENOENTs
+/// even when Claude is right there in ~/.local/bin — and the failure surfaced
+/// as a raw "No such file or directory (os error 2)" dead end (reported live
+/// from a Mac, 2026-08-18) instead of the CLAUDE_NOT_INSTALLED marker that
+/// makes the frontend install it and retry. Resolve through augmented_path,
+/// and fail with the marker like the Windows arm always has.
+#[cfg(not(windows))]
+fn claude_command(args: &[&str]) -> Result<Command, String> {
+    let path = resolve_engine_exe(crate::cli_provider::CliEngine::Claude)
+        .ok_or_else(claude_not_installed_error)?;
+    let mut c = Command::new(path);
+    c.args(args);
+    c.env("PATH", augmented_path());
+    Ok(c)
+}
+
 /// Says where it looked, not just that it failed.
 ///
 /// "Claude Code CLI isn't installed" is a claim the app is often wrong about and
@@ -598,7 +621,7 @@ fn node_not_installed_error() -> String {
     // installer (tried first, above) and Antigravity ships its own script. If
     // this message ever names Claude again, the native-first order regressed.
     format!(
-        "{NODE_NOT_INSTALLED_MARKER}: Codex installs through npm, which needs Node.js. Install Node from nodejs.org, then try again."
+        "{NODE_NOT_INSTALLED_MARKER}: this install route needs npm, which isn't on this machine. It shouldn't be reachable \u{2014} every engine installs Node-free now \u{2014} so restart Tavern Sheet and try again."
     )
 }
 
@@ -610,10 +633,8 @@ fn node_not_installed_error() -> String {
 /// fix). Hidden console (CREATE_NO_WINDOW) since this app owns showing
 /// progress/errors in its own UI, not a flashing console window — unlike
 /// connect_claude's login flow, there's no interactive browser step here to
-/// show. Only remaining hard requirement is Node.js/npm itself, which this
-/// app can't reasonably vendor (a full Node runtime is a much bigger bundling
-/// commitment than one npm package) — that one case still asks the user to
-/// install something themselves, everything else does not.
+/// show. The native installer means Node is never a prerequisite; npm is
+/// only a silent fallback, and no error tells the user to install anything.
 #[tauri::command]
 pub async fn install_claude_cli() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
@@ -670,7 +691,7 @@ pub async fn install_claude_cli() -> Result<(), String> {
                     Err(e) => e.to_string(),
                 };
                 return Err(format!(
-                    "Couldn't install Claude Code automatically. Its installer couldn't be downloaded from claude.ai ({native_err}) — check your internet connection and try again. (Installing Node.js from nodejs.org and retrying also works, but shouldn't be necessary.)"
+                    "Couldn't install Claude Code automatically. Its installer couldn't be downloaded from claude.ai ({native_err}) — check your internet connection and try again."
                 ));
             };
             let out = Command::new("cmd")
@@ -749,9 +770,8 @@ fn spawn_claude(args: &[String], prompt: &str, cwd: Option<PathBuf>) -> Result<s
     };
     #[cfg(not(windows))]
     let mut cmd = {
-        let mut c = Command::new("claude");
-        c.args(args);
-        c
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        claude_command(&arg_refs)?
     };
 
     if let Some(dir) = cwd {
@@ -1110,11 +1130,7 @@ fn claude_logged_in() -> Result<bool, String> {
         c
     };
     #[cfg(not(windows))]
-    let mut cmd = {
-        let mut c = Command::new("claude");
-        c.arg("auth").arg("status");
-        c
-    };
+    let mut cmd = claude_command(&["auth", "status"])?;
 
     let out = cmd
         .stdin(Stdio::null())
@@ -2616,14 +2632,110 @@ mod cmdkey_parse_tests {
     }
 }
 
-/// Installs any engine's CLI with one click — the same `npm install -g` the
-/// Claude installer does, with the same hidden console and the same Node.js
-/// prerequisite (the only thing the app still can't do for the user).
+/// Codex's official standalone installer — install.ps1/install.sh straight off
+/// its GitHub release, SHA256-verified by the script itself. It lands
+/// codex.exe in %LOCALAPPDATA%\Programs\OpenAI\Codex\bin (searched
+/// explicitly by resolve_engine_exe, because the USER PATH the installer
+/// registers is invisible to an already-running GUI app) and `~/.local/bin`
+/// off Windows (already searched). CODEX_NON_INTERACTIVE=1 makes its prompts
+/// take their safe defaults instead of hanging a hidden console. npm is the
+/// silent fallback; no path ever tells the user to install Node.
+async fn install_codex_cli() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        let engine = crate::cli_provider::CliEngine::Codex;
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let native = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "$env:CODEX_NON_INTERACTIVE='1'; irm https://github.com/openai/codex/releases/latest/download/install.ps1 | iex",
+                ])
+                .creation_flags(0x08000000)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
+            match &native {
+                Ok(out) => {
+                    // Exit code alone is not proof — verify the binary landed
+                    // where the resolver can actually see it.
+                    if out.status.success() && resolve_engine_exe(engine).is_some() {
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    crate::maplog::log("CODEX NATIVE INSTALL failed to spawn", &e.to_string());
+                }
+            }
+            if let Some(npm_path) = resolve_npm_exe() {
+                let out = Command::new("cmd")
+                    .arg("/C")
+                    .arg(&npm_path)
+                    .arg("install")
+                    .arg("-g")
+                    .arg("@openai/codex")
+                    .env("PATH", augmented_path())
+                    .creation_flags(0x08000000)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .map_err(|e| format!("Couldn't run `npm install`: {e}"))?;
+                if out.status.success() && resolve_engine_exe(engine).is_some() {
+                    return Ok(());
+                }
+            }
+            let native_err = match &native {
+                Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                Err(e) => e.to_string(),
+            };
+            Err(format!(
+                "Couldn't install Codex automatically. Its installer couldn't be downloaded from github.com/openai/codex ({native_err}) — check your internet connection and try again."
+            ))
+        }
+        #[cfg(not(windows))]
+        {
+            let native = Command::new("sh")
+                .arg("-c")
+                .arg("curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | CODEX_NON_INTERACTIVE=1 bash")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
+            if let Ok(out) = &native {
+                if out.status.success() && resolve_engine_exe(engine).is_some() {
+                    return Ok(());
+                }
+            }
+            let native_err = match &native {
+                Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                Err(e) => e.to_string(),
+            };
+            Err(format!(
+                "Couldn't install Codex automatically ({native_err}) — check your internet connection and try again."
+            ))
+        }
+    })
+    .await
+    .map_err(|e| format!("Install task failed: {e}"))?
+}
+
+/// Installs any engine's CLI with one click. Every engine has a native,
+/// Node-free route: Claude and Codex ship official standalone installers,
+/// Antigravity ships its own script. npm survives only as a silent fallback —
+/// the app NEVER tells a user to go install Node (or anything else) themselves.
 #[tauri::command]
 pub async fn install_engine_cli(engine: String) -> Result<(), String> {
     let engine = crate::cli_provider::CliEngine::from_setting(&engine);
     if engine == crate::cli_provider::CliEngine::Claude {
         return install_claude_cli().await;
+    }
+    if engine == crate::cli_provider::CliEngine::Codex {
+        return install_codex_cli().await;
     }
     if engine == crate::cli_provider::CliEngine::Gemini {
         // Antigravity is not on npm — it ships an installer script that places
@@ -2774,19 +2886,9 @@ pub async fn connect_engine(engine: String) -> Result<bool, String> {
 #[tauri::command]
 pub async fn connect_claude() -> Result<bool, String> {
     tokio::task::spawn_blocking(|| {
-        #[cfg(windows)]
         let path_used = augmented_path();
-        #[cfg(not(windows))]
-        let path_used = std::env::var("PATH").unwrap_or_default();
 
-        #[cfg(windows)]
         let mut cmd = claude_command(&["auth", "login", "--claudeai"])?;
-        #[cfg(not(windows))]
-        let mut cmd = {
-            let mut c = Command::new("claude");
-            c.arg("auth").arg("login").arg("--claudeai");
-            c
-        };
         let status = cmd.status().map_err(|e| {
             write_claude_debug_log("connect_claude: spawn failed", &path_used, None, &e.to_string());
             format!("Couldn't start `claude auth login`: {e}")

@@ -858,7 +858,6 @@ export function DMConsolePage() {
   // remaining case that genuinely needs the user to go do something outside
   // the app, since bundling a full Node runtime is a much bigger commitment
   // than shelling out to npm.
-  const [nodeNotInstalled, setNodeNotInstalled] = React.useState(false);
   const [installing, setInstalling] = React.useState(false);
   const pendingConnectResolveRef = React.useRef<((connected: boolean) => void) | null>(null);
 
@@ -867,12 +866,7 @@ export function DMConsolePage() {
     return message.includes('CLAUDE_NOT_INSTALLED');
   }
 
-  function isNodeNotInstalledError(e: unknown): boolean {
-    const message = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
-    return message.includes('NODE_NOT_INSTALLED');
-  }
-
-  /** Broader than isClaudeNotInstalledError/isNodeNotInstalledError — catches
+  /** Broader than isClaudeNotInstalledError — catches
    *  every shape of "the `claude` process itself never got a chance to work"
    *  failure (see dm.rs's spawn_claude/run_claude/run_claude_streaming):
    *  couldn't spawn it at all, died before/while we wrote its prompt (the
@@ -890,7 +884,6 @@ export function DMConsolePage() {
     const message = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
     return (
       message.includes('CLAUDE_NOT_INSTALLED') ||
-      message.includes('NODE_NOT_INSTALLED') ||
       message.includes("Couldn't start Claude Code") ||
       message.includes('failed writing prompt') ||
       message.includes('pipe has been ended')
@@ -909,11 +902,7 @@ export function DMConsolePage() {
       setClaudeNotInstalled(false);
       await handleConnectClaude();
     } catch (e) {
-      if (isNodeNotInstalledError(e)) {
-        setNodeNotInstalled(true);
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setInstalling(false);
     }
@@ -927,7 +916,6 @@ export function DMConsolePage() {
     // Claude, ask the generic gate about THAT engine instead.
     if (ingestionProvider !== 'claude') return requireAi('set up this campaign');
     setClaudeNotInstalled(false);
-    setNodeNotInstalled(false);
     try {
       if (await invoke<boolean>('check_claude_auth')) return true;
     } catch (e) {
@@ -6873,25 +6861,9 @@ export function DMConsolePage() {
       <Dialog
         open={connectPromptOpen}
         onClose={handleCancelConnectClaude}
-        title={
-          nodeNotInstalled
-            ? "Node.js needed first"
-            : claudeNotInstalled
-              ? "Claude Code isn't installed"
-              : "Claude isn't connected"
-        }
+        title={claudeNotInstalled ? "Claude Code isn't installed" : "Claude isn't connected"}
       >
-        {nodeNotInstalled ? (
-          <>
-            <p className="text-sm text-slate-300 mb-4">
-              Installing Claude Code needs Node.js, which isn't on this computer. Install it from{' '}
-              <span className="text-emerald-400">nodejs.org</span>, then come back and try again.
-            </p>
-            <div className="flex justify-end">
-              <Button variant="outline" onClick={handleCancelConnectClaude}>Close</Button>
-            </div>
-          </>
-        ) : claudeNotInstalled ? (
+        {claudeNotInstalled ? (
           <>
             <p className="text-sm text-slate-300 mb-4">
               The DM Console needs the Claude Code CLI installed on this computer, and it couldn't be found. Install it now?

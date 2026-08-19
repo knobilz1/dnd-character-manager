@@ -146,16 +146,11 @@ export function EngineAccounts() {
       return;
 
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Only Codex can still land here: it installs exclusively through npm.
-      // Claude uses its own standalone installer (no Node), and Gemini ships
-      // its own script — sending anyone else to nodejs.org was the app
-      // exporting its plumbing as the user's problem.
-      setError(
-        msg.includes('NODE_NOT_INSTALLED')
-          ? 'Codex installs through npm, which needs Node.js — install it from nodejs.org, then try again. (Claude and Gemini don’t need Node.)'
-          : msg,
-      );
+      // Every engine installs itself Node-free now (Claude and Codex via
+      // their official standalone installers, Gemini via its own script), so
+      // the backend's message is always the honest one — never translated
+      // into "go install Node.js" homework.
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
       setStep('');
