@@ -50,6 +50,7 @@ pub fn run() {
       dm::begin_engine_login,
       dm::submit_login_code,
       dm::launch_engine_login_console,
+      dm::gemini_cred_present,
       dm::login_in_app,
       dm::take_captured_login_code,
       dm::cancel_dm_turn,

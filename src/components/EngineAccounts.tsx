@@ -18,12 +18,16 @@ import { Button, Dialog } from './ui';
  *   installed, no auth-> Sign in   (opens the vendor's own browser flow)
  *   signed in         -> a quiet tick, nothing to do
  *
- * Sign-in involves NO terminal. The CLI runs windowless with piped stdio, the
- * app reads the OAuth URL out of its output and opens the browser, and when the
- * vendor falls back to "paste the authorization code" that code goes into a text
- * field here and straight down the CLI's stdin. It is passed through, never
- * stored. Auth is then re-checked rather than trusting an exit code — a
- * cancelled flow exits cleanly too.
+ * Claude and Codex sign in with NO terminal: the CLI runs windowless with
+ * piped stdio, the app reads the OAuth URL out of its output and opens the
+ * browser, and a pasted code goes straight down the CLI's stdin — passed
+ * through, never stored. Gemini is the deliberate exception: agy gets a real
+ * console window running its own patient interactive flow, and the app
+ * watches the OS credential store for the sign-in to land. Every in-app
+ * Gemini route died the same death — agy's --print sign-in is a countdown
+ * from ITS spawn that reached real users as ~7 usable seconds. Auth is then
+ * re-checked rather than trusting an exit code — a cancelled flow exits
+ * cleanly too.
  */
 
 type EngineId = 'claude' | 'codex' | 'gemini';
@@ -52,17 +56,16 @@ const ENGINES: Array<{ id: EngineId; name: string; plan: string; blurb: string; 
     // the work; Antigravity is just the CLI client Google replaced it with in
     // June 2026. Naming the client would only confuse someone choosing an LLM.
     blurb: "Uses your Google account. Sign-in opens Google's page in your browser.",
-    // NO consoleLogin: Gemini uses the same paste-a-code dialog as everyone
-    // else. It didn't always — agy reads the code from a real TERMINAL and
-    // ignores piped stdin (measured 2026-07-24), so this row used to launch a
-    // black console window instead. The answer to that measurement was built in
-    // dm.rs (`begin_login_via_pty`: a pseudo-console, agy's ESC[6n query
-    // answered, the code typed as `code\r`), and `begin_engine_login` has
-    // routed Gemini through it ever since — but this flag kept sending users
-    // to the console window anyway, where the flow kept breaking. The paste
-    // dialog is also the UI that fits agy's hard 60-second window: browser
-    // opened the moment the URL exists, clipboard watched, code auto-submitted
-    // (Google's codes are exactly the `4/…` shape the watcher matches).
+    // consoleLogin is LOAD-BEARING and its removal is banned. The paste-code
+    // route (v0.31.5–0.31.7) rode agy's --print sign-in, whose auth window
+    // counts down from agy's SPAWN — it reached real users as ~5–7 usable
+    // seconds, which no human beats, and agy self-updates so no measured
+    // window number stays true. The console window runs agy's own interactive
+    // flow, which waits patiently — the flow that worked all July. The row
+    // turns green by watching the OS credential store (gemini_cred_present),
+    // never by probing agy on a timer: a signed-out agy spawn opens Google's
+    // sign-in page in the browser all by itself.
+    consoleLogin: true,
   },
 ];
 
@@ -79,24 +82,6 @@ export function EngineAccounts() {
   const [code, setCode] = React.useState('');
   const [pasteOpen, setPasteOpen] = React.useState<EngineId | null>(null);
   const [consoleFor, setConsoleFor] = React.useState<EngineId | null>(null);
-  /** Seconds left in the CLI's own auth window. agy waits 60s and then EXITS,
-   *  taking its terminal with it — a code pasted after that fails with "the
-   *  pipe is being closed", which is a dead process, not a broken pipe. */
-  const [secondsLeft, setSecondsLeft] = React.useState(0);
-  const pasteOpenRef = React.useRef<EngineId | null>(null);
-  pasteOpenRef.current = pasteOpen;
-  /** Amber, not red: "the window expired and a fresh one is already open" is
-   *  the flow working, and painting it as an error taught the user to give up. */
-  const [notice, setNotice] = React.useState<string | null>(null);
-  /** agy's auth window is 60 seconds from ITS spawn — which is when this dialog
-   *  opens, not when the user reaches the browser. A first-time Google consent
-   *  (account picker, permissions page) routinely outlives it, and a code from
-   *  an expired run is PKCE-dead: nothing pasted after that point can ever
-   *  work. So expiry triggers an automatic fresh start — new run, new URL,
-   *  browser reopened — and Google's second pass is warm, so the code page
-   *  appears in seconds. Budgeted, so a walked-away-from dialog doesn't spawn
-   *  agy forever. */
-  const autoRestarts = React.useRef(0);
 
   /** Each row lands as its own answer arrives — never gathered behind a
    *  Promise.all. The all-at-once version held EVERY row's buttons hostage to
@@ -130,63 +115,6 @@ export function EngineAccounts() {
   }, []);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
-
-  React.useEffect(() => {
-    if (secondsLeft <= 0) return;
-    const t = setTimeout(() => setSecondsLeft((n) => n - 1), 1000);
-    return () => clearTimeout(t);
-  }, [secondsLeft]);
-
-  // The moment the window lapses, the old run's code can never be redeemed —
-  // restart while the user is still mid-consent so the page they land on next
-  // is one whose code still works.
-  React.useEffect(() => {
-    if (secondsLeft !== 0 || !pasteOpen || busy) return;
-    // secondsLeft BEGINS at 0 — only a run whose URL arrived (which sets the
-    // 60s clock) can expire. Without this, the dialog restarted itself the
-    // moment it opened, before the first sign-in had even produced a URL.
-    if (!loginUrl) return;
-    if (code.trim()) return; // a code is in flight or typed; submit decides
-    if (autoRestarts.current >= 4) {
-      setNotice('That sign-in window expired. Press Start over when you\u2019re ready \u2014 the browser will reopen.');
-      return;
-    }
-    autoRestarts.current += 1;
-    setNotice('That window expired \u2014 opened a fresh sign-in page. Use the NEWEST page\u2019s code; older ones can\u2019t work.');
-    void openPasteDialog(pasteOpen, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [secondsLeft, pasteOpen, busy, code, loginUrl]);
-
-  /** Watch the clipboard while a sign-in is waiting, and fill the box the moment
-   *  the user hits "Copy to Clipboard" on Google's page.
-   *
-   *  Worth the oddity because the window is only 60 SECONDS and every removed
-   *  step is a real chunk of it: without this the user copies, switches back,
-   *  clicks the field, pastes, then clicks Sign in. Matches only the Google
-   *  authorization-code shape, so nothing else on the clipboard is ever read
-   *  into the app, and it only runs while this dialog is open. */
-  React.useEffect(() => {
-    if (!pasteOpen || secondsLeft <= 0 || code.trim()) return;
-    let stop = false;
-    const tick = async () => {
-      if (stop) return;
-      try {
-        const text = (await navigator.clipboard.readText()).trim();
-        if (/^4\/[A-Za-z0-9_\-.]{20,}$/.test(text.replace(/\s+/g, ''))) {
-          const clean = text.replace(/\s+/g, '');
-          setCode(clean);
-          // Submit immediately rather than waiting for a click. The CLI's
-          // window is 60s from when it started, and by the time a code is on
-          // the clipboard most of that is gone — a click is not free.
-          void submitCode(pasteOpen, clean);
-          return;
-        }
-      } catch { /* no clipboard permission — the paste box still works */ }
-      if (!stop) setTimeout(() => void tick(), 700);
-    };
-    void tick();
-    return () => { stop = true; };
-  }, [pasteOpen, secondsLeft, code]);
 
   /** Install (if needed) then sign in, as one motion — the same "don't make
    *  them come back and click a second button" flow the Claude path uses.
@@ -249,25 +177,11 @@ export function EngineAccounts() {
         // is null from render time — so the dialog closed on failure too,
         // clobbering the fresh sign-in the expiry handler had just opened.
         setPasteOpen(null);
-        setNotice(null);
       } else {
         setError("That code wasn't accepted. Start the sign-in again for a fresh one — they expire quickly.");
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // "The pipe is being closed" is agy having timed out UNDER the user's
-      // code — their consent simply took longer than the window. Not their
-      // fault, and not a dead end: start fresh, reopen the browser, and their
-      // warm Google session hands over the next code in seconds.
-      if (/already ended|pipe is being closed/i.test(msg) && autoRestarts.current < 4 && pasteOpenRef.current) {
-        autoRestarts.current += 1;
-        setNotice('That code\u2019s window had already expired \u2014 opened a fresh page. Copy the NEW code it shows.');
-        setBusy(null);
-        setStep('');
-        void openPasteDialog(pasteOpenRef.current, false);
-        return;
-      }
-      setError(msg);
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
       setStep('');
@@ -293,6 +207,15 @@ export function EngineAccounts() {
       setStep('Sign-in window opened — follow the steps, this updates itself.');
       for (let i = 0; i < 150; i++) {   // ~5 minutes, unhurried on purpose
         await new Promise((r) => { setTimeout(r, 2000); });
+        // Watch the OS credential store, not agy. Probing a signed-out agy on
+        // a timer spawns processes that each open Google's sign-in page in
+        // the browser BY THEMSELVES — that was the "opening settings launches
+        // Google" bug. The credential appearing is the sign the user finished;
+        // only then is one real probe spent turning the row green, and by then
+        // it's quiet because agy IS signed in. If the cheap check can't run on
+        // this platform, fall back to one real probe every ~30s, not never.
+        const present = await invoke<boolean>('gemini_cred_present').catch(() => i % 15 === 14);
+        if (!present) continue;
         const [, signedIn] = await invoke<[boolean, boolean]>('engine_auth_state', { engine: id, deep: true });
         if (signedIn) {
           await refresh();
@@ -314,12 +237,6 @@ export function EngineAccounts() {
     setError(null);
     setCode('');
     setLoginUrl('');
-    if (allowInstall) {
-      // A person pressing Sign in / Start over resets the restart budget; the
-      // automatic path passes allowInstall=false and keeps spending its own.
-      autoRestarts.current = 0;
-      setNotice(null);
-    }
     // ALWAYS start a fresh sign-in. Never reuse a URL from an earlier attempt.
     //
     // The authorization code is PKCE-bound to the exact CLI run that produced
@@ -332,10 +249,8 @@ export function EngineAccounts() {
       const url = await invoke<string | null>('begin_engine_login', { engine: id });
       if (url) {
         setLoginUrl(url);
-        setSecondsLeft(60);
-        // Straight to the browser. The CLI's 60s window starts when IT starts,
-        // not when the user finishes reading, so waiting for a second click
-        // spent most of the budget before the flow even began.
+        // Straight to the browser — authorization codes expire, so don't
+        // spend their lifetime waiting for a second click.
         try { await openUrl(url); } catch { /* the button below still works */ }
       } else {
         setError("Couldn't start the sign-in — no URL came back. Try again.");
@@ -465,10 +380,9 @@ export function EngineAccounts() {
               )}
             </li>
             <li>The sign-in page shows you a code — copy it.</li>
-            <li>That's it — come back here and it signs itself in.</li>
+            <li>Come back here and paste it below.</li>
           </ol>
 
-          {notice && <p className="text-xs text-amber-400">{notice}</p>}
           <textarea
             autoFocus
             value={code}
@@ -501,10 +415,7 @@ export function EngineAccounts() {
                 const id = pasteOpen!;
                 // Whitespace is expected, not exceptional: the page wraps the
                 // code across two lines, so copying it often brings a newline.
-                let cleaned = code.replace(/\s+/g, '');
-                // Collapse an accidentally doubled code to its first copy.
-                const second = cleaned.indexOf('4/', 2);
-                if (cleaned.startsWith('4/') && second > 0) cleaned = cleaned.slice(0, second);
+                const cleaned = code.replace(/\s+/g, '');
                 setCode(cleaned);
                 await submitCode(id, cleaned);
               }}
@@ -516,7 +427,7 @@ export function EngineAccounts() {
                 ? 'Finishing sign-in…'
                 : code.trim()
                   ? `${code.replace(/\s+/g, '').length} characters — press Sign in`
-                  : 'Approve in the browser, then press Copy on Google\'s page — be quick, the sign-in expires after about a minute.'}
+                  : 'Approve in the browser, then paste the code it gives you.'}
             </span>
           </div>
           {error && (
