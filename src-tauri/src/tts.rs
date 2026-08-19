@@ -1023,7 +1023,20 @@ fn f5_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
 /// pieces — interpreter, worker script, reference clips — aren't all present).
 /// `None` is the ordinary "F5 not downloaded yet" state, which callers treat as
 /// a graceful Kokoro fallback, never an error.
+/// Whether `dir` holds the complete PACKAGED runtime layout — every piece
+/// build-f5-runtime.ps1 puts in the shipped archive, vocoder included.
+/// Factored out of resolve_f5_runtime so the completeness rule is testable.
+fn packaged_f5_runtime_complete(dir: &Path) -> bool {
+    dir.join("python.exe").exists()
+        && dir.join("f5_cli.py").exists()
+        && dir.join("refs").is_dir()
+        && dir.join("model").join("model.safetensors").exists()
+        && dir.join("model").join("vocab.txt").exists()
+        && dir.join("vocoder").is_dir()
+}
+
 fn resolve_f5_runtime(app: &AppHandle) -> Option<F5Runtime> {
+    let dev_override = std::env::var("F5_RUNTIME_DIR").map(|d| !d.is_empty()).unwrap_or(false);
     let dir = f5_runtime_dir(app)?;
     let python = match std::env::var("F5_PYTHON") {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
@@ -1034,11 +1047,46 @@ fn resolve_f5_runtime(app: &AppHandle) -> Option<F5Runtime> {
     if !python.exists() || !script.exists() || !refs_dir.is_dir() {
         return None;
     }
+    // At the DEFAULT app-data location, only the packaged archive ever
+    // installs — and it always bundles ckpt + vocab + vocoder. A dir there
+    // missing any of them is a dev leftover or a torn install, and calling it
+    // "installed" is how a 7 GB July dev venv (no vocoder/) made "Enable HD
+    // voices" flip the engine with NO download while every line kept coming
+    // out of Kokoro. Not-installed here means the real download runs instead.
+    // The lenient read survives only under the F5_RUNTIME_DIR override, whose
+    // whole documented purpose is hand-assembled/stripped dev runtimes.
+    if !dev_override && !packaged_f5_runtime_complete(&dir) {
+        return None;
+    }
     let model_dir = dir.join("model");
     let ckpt = Some(model_dir.join("model.safetensors")).filter(|p| p.exists());
     let vocab = Some(model_dir.join("vocab.txt")).filter(|p| p.exists());
     let vocoder = Some(dir.join("vocoder")).filter(|p| p.is_dir());
     Some(F5Runtime { python, script, refs_dir, ckpt, vocab, vocoder })
+}
+
+#[cfg(test)]
+mod f5_runtime_completeness_tests {
+    use super::packaged_f5_runtime_complete;
+
+    #[test]
+    fn a_dev_leftover_without_vocoder_reads_as_not_installed() {
+        let dir = std::env::temp_dir().join(format!("f5-complete-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // The live leftover's shape: interpreter + worker + refs + model, no
+        // vocab, no vocoder — enough to fool the old check.
+        std::fs::create_dir_all(dir.join("refs")).unwrap();
+        std::fs::create_dir_all(dir.join("model")).unwrap();
+        std::fs::write(dir.join("python.exe"), b"x").unwrap();
+        std::fs::write(dir.join("f5_cli.py"), b"x").unwrap();
+        std::fs::write(dir.join("model").join("model.safetensors"), b"x").unwrap();
+        assert!(!packaged_f5_runtime_complete(&dir));
+        // Completing the packaged layout flips it.
+        std::fs::write(dir.join("model").join("vocab.txt"), b"x").unwrap();
+        std::fs::create_dir_all(dir.join("vocoder")).unwrap();
+        assert!(packaged_f5_runtime_complete(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Pure: maps a stored NPC voice id to the catalog id whose reference clip F5
@@ -1514,6 +1562,18 @@ pub async fn install_f5_runtime(app: AppHandle) -> Result<(), String> {
         // app-data/f5-runtime/, exactly where resolve_f5_runtime looks.
         let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&app_data).map_err(|e| format!("couldn't create app-data dir: {e}"))?;
+
+        // Whatever sits at the default location right now is NOT a working
+        // runtime (the resolve check above just said so). Extracting the
+        // archive OVER it would merge packaged files into leftover ones and
+        // produce a runtime nobody built — wipe it so the install lands clean.
+        // Regenerable by definition: this dir only ever holds what this very
+        // function downloads (or dev debris, which is exactly what must go).
+        let default_dir = app_data.join("f5-runtime");
+        if default_dir.exists() {
+            std::fs::remove_dir_all(&default_dir)
+                .map_err(|e| format!("couldn't clear the old F5 runtime at {}: {e}", default_dir.display()))?;
+        }
         let zip_path = app_data.join("f5-runtime.zip.part");
 
         let base_url = f5_runtime_base_url();
