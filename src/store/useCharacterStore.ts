@@ -130,6 +130,7 @@ interface CharacterState {
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
   setSelectedLanguages: (v: string[]) => void;
+  setRaceOption: (key: string, value: string) => void;
   setSelectedToolProficiencies: (v: Record<string, string[]>) => void;
   setSelectedFeatPicks: (v: Record<string, string[]>) => void;
   setSelectedFeatExpertise: (v: string[]) => void;
@@ -1324,6 +1325,10 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
 
   setSelectedLanguages: (v) =>
     set((s) => s.character ? { character: { ...s.character, selectedLanguages: v } } : s),
+  setRaceOption: (key, value) =>
+    set((s) => s.character
+      ? { character: { ...s.character, raceOptions: { ...(s.character.raceOptions ?? {}), [key]: value } } }
+      : s),
 
   setSelectedFeatPicks: (v) =>
     set((s) => s.character ? { character: { ...s.character, selectedFeatPicks: v } } : s),

@@ -781,6 +781,10 @@ export interface Character {
    *  choice"), which used to be printed on the sheet as though it were a language — see
    *  data/languages.ts. */
   selectedLanguages?: string[];
+  /** Racial trait choices — Draconic Ancestry, Fiendish Legacy, Giant Ancestry and kin —
+   *  keyed by the option-group key in data/raceOptions.ts. These decisions lived only in
+   *  trait prose before: nothing recorded them and the auto-generator skipped them. */
+  raceOptions?: Record<string, string>;
   /** Tool proficiencies the player CHOSE, keyed by the grant string that offered them
    *  ("Three musical instruments of your choice"). Keyed rather than flat so a bard's three
    *  instrument picks cannot be spent on artisan's tools — see data/tools.ts. */

@@ -8,6 +8,8 @@ import {
 } from '../data/mechanics';
 import { bookEnabled } from './bookEnabled';
 import { chosenAsi } from './racialAsi';
+import { raceOptionGroups } from '../data/raceOptions';
+import { LANGUAGES, fixedLanguages, racialLanguagePicks } from '../data/languages';
 import type { AbilityKey, BookId, Race, SkillName } from '../types';
 
 /**
@@ -19,9 +21,11 @@ import type { AbilityKey, BookId, Race, SkillName } from '../types';
  * grants two, a cleric with no domain, a wizard with an empty spellbook — which nobody notices
  * until session one.
  *
- * It picks everything the RULES require and nothing they don't. Equipment and languages keep
- * their defaults; the creator's own steps remain the place to fiddle. What comes out is meant to
- * be playable as-is, not merely non-empty.
+ * It picks everything the RULES require and nothing they don't — including racial trait choices
+ * (Draconic Ancestry and kin) and the language picks the race and background owe, which used to
+ * arrive unmade and greet the player as amber "choose one" demands on a supposedly finished
+ * sheet. Equipment keeps its defaults; the creator's own steps remain the place to fiddle. What
+ * comes out is meant to be playable as-is, not merely non-empty.
  */
 
 /** The PHB's standard array, best-first. */
@@ -39,6 +43,13 @@ export interface RandomCharacter {
   selectedSkillProficiencies: SkillName[];
   spellbook: { spellId: string; isPrepared: boolean }[];
   racialAbilityChoice?: Record<string, number>;
+  /** Racial trait choices (Draconic Ancestry and kin) — one per group the race owes at this
+   *  level. A "make one for me" that hands back a dragonborn with no ancestry hands back a
+   *  character with no breath damage type and no resistance: incomplete, not random. */
+  raceOptions: Record<string, string>;
+  /** The language picks the race and background owe, chosen so the sheet doesn't greet an
+   *  auto-generated character with an amber "choose 2 languages" demand. */
+  selectedLanguages: string[];
   /** How many ASI slots were spent as +2 ability points, for the caller to explain. */
   asiSlotsSpent: number;
 }
@@ -149,6 +160,22 @@ export function rollRandomCharacter(
   const asiSlotsSpent = spendAsiPoints(baseAbilityScores, cls.primaryAbility ?? [], asiSlots,
     race, racialAbilityChoice);
 
+  // Racial trait choices, one per group the race owes at this level. Simic's 5th-level
+  // enhancement may not repeat its 1st-level pick — groups declare that, the roll honours it.
+  const raceOptions: Record<string, string> = {};
+  for (const g of raceOptionGroups(race.id, level)) {
+    const taken = g.excludesKey ? raceOptions[g.excludesKey] : undefined;
+    const opts = g.options.filter(o => o.value !== taken);
+    if (opts.length) raceOptions[g.key] = pick(opts, rand).value;
+  }
+
+  // Owed language picks (race placeholders + the background's count), drawn from the same list
+  // the sheet's picker offers, minus what the race already speaks.
+  const languagesOwed = racialLanguagePicks(race.languages) + (background.languages ?? 0);
+  const known = new Set(fixedLanguages(race.languages));
+  const selectedLanguages = shuffled(LANGUAGES.filter(l => !known.has(l)), rand)
+    .slice(0, languagesOwed);
+
   return {
     raceId: race.id,
     classId: cls.id,
@@ -159,6 +186,8 @@ export function rollRandomCharacter(
     selectedSkillProficiencies,
     spellbook: rollSpells(cls.id, subclass?.id, books, baseAbilityScores, rand, level),
     racialAbilityChoice,
+    raceOptions,
+    selectedLanguages,
     asiSlotsSpent,
   };
 }

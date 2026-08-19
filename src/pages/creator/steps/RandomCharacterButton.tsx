@@ -149,6 +149,8 @@ export function RandomCharacterButton() {
         selectedSkillProficiencies: r.selectedSkillProficiencies,
         spellbook: r.spellbook.map(s => ({ ...s, isAlwaysPrepared: false })),
         ...(r.racialAbilityChoice ? { racialAbilityChoice: r.racialAbilityChoice } : {}),
+        raceOptions: r.raceOptions,
+        selectedLanguages: r.selectedLanguages,
         name: story.name?.trim() || `${raceName} ${className}`,
         alignment: story.alignment?.trim() || 'True Neutral',
         backgroundCustom: {

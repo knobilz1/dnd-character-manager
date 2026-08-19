@@ -4,6 +4,8 @@ import { LanguagePicker } from '../../components/LanguagePicker';
 import { ProficiencyPicker } from '../../components/ProficiencyPicker';
 import { useCharacterDerived } from '../../hooks/useCharacterDerived';
 import { getSubclassOptions } from '../../data/subclassOptions';
+import { raceOptionGroups } from '../../data/raceOptions';
+import { resistancesOf } from '../../utils/damageResistance';
 import { Search, ChevronUp, ChevronDown, X, Plus, Pencil, Trash2, Check } from 'lucide-react';
 import { SectionHeader, HoverCard } from '../../components/ui';
 import { cn } from '../../utils/cn';
@@ -31,7 +33,7 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
   setBackgroundAbilityChoice: (v: Partial<Record<AbilityKey, number>>) => void;
   setSubclassOptions: (v: Record<string, string[]>) => void;
 }) {
-  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages, setSelectedToolProficiencies, setSelectedFeatPicks, setSelectedFeatExpertise } = useCharacterStore();
+  const { setExperiencePoints, setCampaignName, updateBackgroundCustom, addJournalEntry, updateJournalEntry, deleteJournalEntry, setSelectedLanguages, setSelectedToolProficiencies, setSelectedFeatPicks, setSelectedFeatExpertise, setRaceOption } = useCharacterStore();
   const derived = useCharacterDerived(character);
   const languages: string[] = derived?.languages ?? [];
   const languagesOwed: number = derived?.languagesOwed ?? 0;
@@ -191,6 +193,32 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
                 <p className="text-xs text-slate-400 leading-relaxed">{trait.description}</p>
               </div>
             ))}
+            {/* Racial trait choices — Draconic Ancestry and kin. These lived only in trait
+                prose: nothing recorded the pick, so a dragonborn had no ancestry, no breath
+                damage type, and no resistance. Unchosen groups get the amber border the other
+                owed-choice pickers use. */}
+            {raceOptionGroups(character.raceId, totalCharacterLevel(character.classes)).map(g => {
+              const picked = character.raceOptions?.[g.key];
+              const excluded = g.excludesKey ? character.raceOptions?.[g.excludesKey] : undefined;
+              const opts = g.options.filter(o => o.value !== excluded);
+              return (
+                <div key={g.key} className={cn('bg-slate-900 rounded-lg p-3', !picked && 'border border-amber-700/40')}>
+                  <p className="text-xs font-bold text-white mb-1">{g.label}</p>
+                  <select
+                    value={picked ?? ''}
+                    onChange={e => setRaceOption(g.key, e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+                  >
+                    <option value="" disabled>Choose…</option>
+                    {opts.map(o => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}{o.note ? ` — ${o.note}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
             {/* Darkvision was stored on 74 races and read ONLY by the creator's race badge, so it
                 never reached the sheet, the print sheet or the PDF — the number you actually want
                 mid-dungeon was the one place it wasn't. */}
@@ -260,10 +288,13 @@ export function TraitsPanel({ character, setNotes, setRacialAbilityChoice, setBa
                 compact
               />
             )}
-            {(race.resistances?.length ?? 0) > 0 && (
+            {/* The DERIVED list, not the race record's raw field — a dragonborn's resistance
+                only exists once the ancestry above is chosen, and subclass resistance picks
+                belong here just as much. */}
+            {resistancesOf(character).length > 0 && (
               <div className="bg-slate-900 rounded-lg p-3">
                 <p className="text-xs font-bold text-white mb-1">Damage Resistances</p>
-                <p className="text-xs text-slate-400 capitalize">{race.resistances!.join(', ')}</p>
+                <p className="text-xs text-slate-400 capitalize">{resistancesOf(character).join(', ')}</p>
               </div>
             )}
           </div>

@@ -1,6 +1,7 @@
 import type { Character, DamageType } from '../types';
 import { getRace } from '../data/races';
 import { getSubclassOptions } from '../data/subclassOptions';
+import { raceOptionResistances } from '../data/raceOptions';
 
 /**
  * Resistance halving, for the one path that can apply it: damage that arrives WITH a type.
@@ -20,6 +21,9 @@ import { getSubclassOptions } from '../data/subclassOptions';
  */
 export function resistancesOf(character: Character): DamageType[] {
   const out = new Set<DamageType>(getRace(character.raceId)?.resistances ?? []);
+  // Racial trait choices — a dragonborn's ancestry, a 2024 tiefling's legacy. The race record
+  // itself can't carry these (the type depends on the pick), so they arrive via raceOptions.
+  for (const r of raceOptionResistances(character.raceId, character.raceOptions)) out.add(r);
   // Subclass choices that grant a resistance — currently the 2024 Draconic Sorcerer's Elemental
   // Affinity, which picks one of five damage types at 6th level. Gated on the class's own level,
   // so a 3rd-level sorcerer who picked early doesn't resist anything yet.

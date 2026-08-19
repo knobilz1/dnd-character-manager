@@ -317,6 +317,7 @@ export const useCreatorStore = create<WizardState>((set, get) => ({
       // data loss the moment one is added. Copied through explicitly rather than spreading the
       // draft, because half these fields are re-derived above and a spread would undo that.
       selectedLanguages: draft.selectedLanguages ?? [],
+      raceOptions: draft.raceOptions ?? {},
       selectedToolProficiencies: draft.selectedToolProficiencies ?? {},
       selectedFeatPicks: draft.selectedFeatPicks ?? {},
       selectedFeatExpertise: draft.selectedFeatExpertise ?? [],
