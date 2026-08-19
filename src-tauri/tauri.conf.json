@@ -1,4 +1,4 @@
-﻿{
+{
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Tavern Sheet",
   "version": "0.31.8",
