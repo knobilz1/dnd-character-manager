@@ -66,8 +66,13 @@ function byLongestName<T extends { id: string; name: string }>(xs: T[]): T[] {
 
 export function parseCharacterWish(text: string, books: BookId[]): CharacterWish {
   const wish: CharacterWish = { ignored: [], text: text.trim() };
-  const lower = ` ${text.toLowerCase().replace(/[^a-z0-9\- ]+/g, ' ')} `;
-  const has = (word: string) => lower.includes(` ${word.toLowerCase()} `);
+  // Hyphens become spaces on BOTH sides of every comparison. Nobody types the
+  // hyphen in "Half-Orc" — and with it load-bearing, "half orc fighter" failed
+  // the exact-name pass, had no parent-race fallback (Half-Orc has no
+  // subraces), and rolled a random race: the player asked for a half-orc and
+  // watched a dragonborn come out. One character, silently ignored.
+  const lower = ` ${text.toLowerCase().replace(/[^a-z0-9\- ]+/g, ' ').replace(/-/g, ' ')} `;
+  const has = (word: string) => lower.includes(` ${word.toLowerCase().replace(/-/g, ' ')} `);
 
   // ── class ────────────────────────────────────────────────────────────────
   const classes = ALL_CLASSES.filter(c => bookEnabled(c, books));
@@ -105,7 +110,7 @@ export function parseCharacterWish(text: string, books: BookId[]): CharacterWish
     }
     // Longest parent id first, so "half-elf" is never swallowed by "elf".
     for (const parentId of [...byParent.keys()].sort((a, b) => b.length - a.length)) {
-      if (!has(parentId.replace(/-/g, ' ')) && !has(parentId)) continue;
+      if (!has(parentId)) continue;
       const kids = byParent.get(parentId)!;
       wish.raceIds = kids.map(k => k.id);
       // Title-case the id for display; there is no record to read a name from.
