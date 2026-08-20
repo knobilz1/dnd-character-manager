@@ -3,17 +3,18 @@ import { ScrollText, VolumeX } from 'lucide-react';
 import { useDmConnection } from '../hooks/useDmConnection';
 import { useDmNarrationFeed } from '../hooks/useDmNarrationFeed';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { sendInterruptToDM } from '../utils/dmConnect';
+import { sendInterruptToDM, sendTalkToDM } from '../utils/dmConnect';
 import { cn } from '../utils/cn';
+import { Button } from './ui';
 
 /**
- * DmNarrationLog — a small always-present transcript of what the DM has
- * said, fed by useDmNarrationFeed's poll of party_listener.rs's narration
- * log. Companion to TalkToDMButton: that button only ever showed a reply on
- * the one device that sent a line; this shows every DM turn to every
- * connected player, whether or not they were the one talking. Unread lines
- * (arrived since the panel was last opened) badge the icon, same idea as an
- * unread-messages counter.
+ * DmNarrationLog ("DM Chat") — a small always-present transcript of what the
+ * DM has said, fed by useDmNarrationFeed's poll of party_listener.rs's
+ * narration log. Companion to TalkToDMButton: that button only ever showed a
+ * reply on the one device that sent a line; this shows every DM turn to
+ * every connected player, whether or not they were the one talking. Unread
+ * lines (arrived since the panel was last opened) badge the icon, same idea
+ * as an unread-messages counter.
  *
  * `characterName` rides along on the poll this component already runs, which
  * is how the DM's roll call learns that this player's sheet is open on the
@@ -28,6 +29,16 @@ import { cn } from '../utils/cn';
  * this is literally the panel showing what the DM has been saying — the
  * natural place to reach for "stop" is right next to hearing it happen. Sits
  * next to the toggle so it's reachable without opening the log first.
+ *
+ * And a typed fallback for talking to the DM — reported live: a player's mic
+ * failed mid-session and, with no other way to speak for their character,
+ * they had to sit the rest of it out. Deliberately NOT added to
+ * TalkToDMButton itself: that button's whole point is that talking to the DM
+ * is ALWAYS one click, and a text box bolted onto it would compromise that
+ * for everyone to cover a failure mode most people never hit. This panel is
+ * the right home instead — it already shows every line the DM says, so the
+ * reply to a typed line just appears in the same feed a typed message goes
+ * into, no separate "here's what they said back" plumbing needed.
  */
 export function DmNarrationLog({ characterName }: { characterName?: string }) {
   const connected = useDmConnection();
@@ -36,6 +47,8 @@ export function DmNarrationLog({ characterName }: { characterName?: string }) {
   const [open, setOpen] = React.useState(false);
   const [lastSeenSeq, setLastSeenSeq] = React.useState(0);
   const [interrupting, setInterrupting] = React.useState(false);
+  const [message, setMessage] = React.useState('');
+  const [sending, setSending] = React.useState(false);
   const listRef = React.useRef<HTMLDivElement>(null);
 
   /** Fire-and-forget by design (see sendInterruptToDM) — `interrupting` only
@@ -50,6 +63,28 @@ export function DmNarrationLog({ characterName }: { characterName?: string }) {
       // Nothing useful to show for this — see sendInterruptToDM's doc comment.
     } finally {
       setInterrupting(false);
+    }
+  }
+
+  /** The same blocking sendTalkToDM every spoken line already uses (see
+   *  TalkToDMButton) — this is a second way to PRODUCE the text, not a
+   *  different path once it exists. Doesn't surface the reply itself; the
+   *  narration feed above will show it within a poll or two, the same way
+   *  it shows a spoken line's reply to everyone else at the table. */
+  async function handleSendMessage(ev: React.FormEvent) {
+    ev.preventDefault();
+    const text = message.trim();
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      await sendTalkToDM(text, characterName ?? 'A player', dmIp);
+      setMessage('');
+    } catch {
+      // The line is still sitting in the box, unsent — leaving it there
+      // (rather than clearing on failure) is what lets the player just hit
+      // Send again instead of retyping it.
+    } finally {
+      setSending(false);
     }
   }
 
@@ -77,7 +112,7 @@ export function DmNarrationLog({ characterName }: { characterName?: string }) {
       </button>
       <button
         onClick={() => setOpen((o) => !o)}
-        title="What the DM has said"
+        title="DM Chat — what the DM has said, and a place to type to them"
         className="relative p-1.5 rounded text-slate-500 hover:text-emerald-400 transition-colors"
       >
         <ScrollText size={18} />
@@ -90,7 +125,7 @@ export function DmNarrationLog({ characterName }: { characterName?: string }) {
       {open && (
         <div className="absolute right-0 top-8 z-50 w-80 rounded bg-slate-800 border border-slate-700 shadow-lg flex flex-col">
           <div className="px-2 py-1.5 border-b border-slate-700 text-[10px] uppercase tracking-wide text-slate-500 flex items-center justify-between">
-            <span>What the DM said</span>
+            <span>DM Chat</span>
             <button className="text-slate-500 hover:text-white" onClick={() => setOpen(false)}>✕</button>
           </div>
           <div ref={listRef} className="max-h-64 overflow-y-auto p-2 flex flex-col gap-2">
@@ -104,6 +139,21 @@ export function DmNarrationLog({ characterName }: { characterName?: string }) {
               ))
             )}
           </div>
+          {/* Fallback for when the mic button isn't an option — a dead mic used to mean
+              sitting the rest of the night out. Not meant to replace Talk to the DM; that
+              stays one click, always. */}
+          <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 p-2 border-t border-slate-700">
+            <input
+              value={message}
+              onChange={(ev) => setMessage(ev.target.value)}
+              disabled={!connected || sending}
+              placeholder={connected ? 'Type to the DM…' : 'Not connected'}
+              className="flex-1 min-w-0 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-600 disabled:opacity-50"
+            />
+            <Button size="sm" type="submit" disabled={!connected || !message.trim() || sending}>
+              {sending ? '…' : 'Send'}
+            </Button>
+          </form>
         </div>
       )}
     </div>
