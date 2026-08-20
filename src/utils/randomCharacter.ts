@@ -8,6 +8,7 @@ import {
 } from '../data/mechanics';
 import { bookEnabled } from './bookEnabled';
 import { chosenAsi } from './racialAsi';
+import { getClassStartingEquipment } from '../data/startingEquipment';
 import { raceOptionGroups } from '../data/raceOptions';
 import { LANGUAGES, fixedLanguages, racialLanguagePicks } from '../data/languages';
 import type { AbilityKey, BookId, Race, SkillName } from '../types';
@@ -50,6 +51,10 @@ export interface RandomCharacter {
   /** The language picks the race and background owe, chosen so the sheet doesn't greet an
    *  auto-generated character with an amber "choose 2 languages" demand. */
   selectedLanguages: string[];
+  /** One picked option per class starting-equipment choice slot — the caller feeds these to
+   *  buildStartingLoadout. Generated characters used to skip the Equipment step entirely and
+   *  walk out with an empty pack and 0 gp. */
+  equipmentChoices: Record<number, number>;
   /** How many ASI slots were spent as +2 ability points, for the caller to explain. */
   asiSlotsSpent: number;
 }
@@ -169,6 +174,13 @@ export function rollRandomCharacter(
     if (opts.length) raceOptions[g.key] = pick(opts, rand).value;
   }
 
+  // One random option per class equipment choice slot, so the loadout builder has a complete
+  // set of answers — same as a player clicking through the Equipment step.
+  const equipmentChoices: Record<number, number> = {};
+  (getClassStartingEquipment(cls.id)?.choices ?? []).forEach((choice, idx) => {
+    equipmentChoices[idx] = Math.floor(rand() * choice.options.length);
+  });
+
   // Owed language picks (race placeholders + the background's count), drawn from the same list
   // the sheet's picker offers, minus what the race already speaks.
   const languagesOwed = racialLanguagePicks(race.languages) + (background.languages ?? 0);
@@ -188,6 +200,7 @@ export function rollRandomCharacter(
     racialAbilityChoice,
     raceOptions,
     selectedLanguages,
+    equipmentChoices,
     asiSlotsSpent,
   };
 }

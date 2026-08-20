@@ -2,15 +2,10 @@ import React from 'react';
 import { useCreatorStore } from '../../../store/useCreatorStore';
 import { getClassStartingEquipment } from '../../../data/startingEquipment';
 import { getBackground } from '../../../data/backgrounds';
-import { getItemByName, getPackContents } from '../../../data/items';
+import { getPackContents } from '../../../data/items';
+import { buildStartingLoadout } from '../../../utils/startingLoadout';
 import { cn } from '../../../utils/cn';
-import type { InventoryItem, ItemCategory } from '../../../types';
-
-function newId(): string {
-  return (typeof crypto !== 'undefined' && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
+import type { ItemCategory } from '../../../types';
 
 const CATEGORY_BADGE: Record<ItemCategory, string> = {
   weapon: 'bg-red-900/30 text-red-300 border-red-700/40',
@@ -36,93 +31,28 @@ export function StepEquipment() {
   const takeGold = !!draft.equipmentTakeGold;
   const [expandedPack, setExpandedPack] = React.useState<string | null>(null);
 
-  // Rebuild inventory whenever choices, takeGold, class, or background change.
+  // Rebuild inventory whenever choices, takeGold, class, or background change. The builder
+  // itself is shared with the random-character roll (utils/startingLoadout.ts) — it lived
+  // inline here once, which is why generated characters used to arrive with 0 gp.
   React.useEffect(() => {
-    const items: InventoryItem[] = [];
-
-    function pushItem(name: string, quantity: number, category: string | undefined, weight: number | undefined, source: 'class' | 'background') {
-      const contents = getPackContents(name);
-      if (contents) {
-        for (const entry of contents) {
-          const tpl = getItemByName(entry.name);
-          items.push({
-            id: newId(),
-            name: entry.name,
-            quantity: entry.quantity,
-            category: tpl?.category ?? 'gear',
-            weight: tpl?.weight,
-            description: tpl?.description,
-            source,
-          });
-        }
-      } else {
-        const template = getItemByName(name);
-        items.push({
-          id: newId(),
-          name,
-          quantity,
-          category: (category ?? template?.category ?? 'other') as ItemCategory,
-          weight: weight ?? template?.weight,
-          description: template?.description,
-          source,
-        });
-      }
-    }
-
-    // Coin bundled into the chosen package (PHB 2024 packages read "... + 15 gp"). Distinct from
-    // the 2014 either/or `startingGold`, which the takeGold branch below handles.
-    let classGP = 0;
-    if (classEq && !takeGold) {
-      for (const f of classEq.fixed) {
-        pushItem(f.name, f.quantity ?? 1, f.category, f.weight, 'class');
-      }
-      classEq.choices.forEach((choice, idx) => {
-        const optIdx = choices[idx];
-        if (optIdx == null) return;
-        const opt = choice.options[optIdx];
-        if (!opt) return;
-        for (const it of opt.items) {
-          pushItem(it.name, it.quantity ?? 1, it.category, it.weight, 'class');
-        }
-        classGP += opt.gold ?? 0;
-      });
-    }
-
-    // Background equipment (always — bg equipment is a flat list of strings)
-    let bgGP = 0;
-    if (bg) {
-      for (const eqStr of bg.equipment) {
-        const goldMatch = eqStr.trim().match(/^(\d+)\s*gp$/i);
-        if (goldMatch) {
-          bgGP += parseInt(goldMatch[1], 10);
-        } else {
-          // "20 Arrows" is twenty arrows, not one item called "20 Arrows". The 2024 background
-          // kits list counts inline, so the leading number becomes the quantity and the weight
-          // and encumbrance follow from it.
-          const counted = eqStr.trim().match(/^(\d+)\s+(.+)$/);
-          pushItem(counted ? counted[2] : eqStr.trim(), counted ? parseInt(counted[1], 10) : 1,
-            undefined, undefined, 'background');
-        }
-      }
-    }
+    const loadout = buildStartingLoadout(primaryClass?.classId, draft.backgroundId, choices, takeGold);
 
     // Avoid loop: only write if items genuinely differ from the current draft inventory.
     const current = draft.inventory ?? [];
-    const sameLen = current.length === items.length;
+    const sameLen = current.length === loadout.inventory.length;
     const sameItems = sameLen && current.every((c, i) =>
-      c.name === items[i].name &&
-      c.quantity === items[i].quantity &&
-      c.source === items[i].source
+      c.name === loadout.inventory[i].name &&
+      c.quantity === loadout.inventory[i].quantity &&
+      c.source === loadout.inventory[i].source
     );
     if (!sameItems) {
-      updateDraft({ inventory: items });
+      updateDraft({ inventory: loadout.inventory });
     }
 
     // Route background gold into currencies rather than leaving it as an inventory item.
     const currentGP = draft.currencies?.gp ?? 0;
-    const totalGP = bgGP + classGP;
-    if (currentGP !== totalGP) {
-      updateDraft({ currencies: { cp: 0, sp: 0, ep: 0, gp: totalGP, pp: 0 } });
+    if (currentGP !== loadout.gp) {
+      updateDraft({ currencies: { cp: 0, sp: 0, ep: 0, gp: loadout.gp, pp: 0 } });
     }
   }, [primaryClass?.classId, draft.backgroundId, JSON.stringify(choices), takeGold]);
 

@@ -10,6 +10,7 @@ import { getRace } from '../../../data/races';
 import { getClass, ALL_CLASSES } from '../../../data/classes';
 import { ALL_BACKGROUNDS } from '../../../data/backgrounds';
 import { rollRandomCharacter, selectableRaces } from '../../../utils/randomCharacter';
+import { buildStartingLoadout } from '../../../utils/startingLoadout';
 import { parseCharacterWish } from '../../../utils/parseCharacterWish';
 import { bookEnabled } from '../../../utils/bookEnabled';
 import { BOOKS } from '../../../data/books';
@@ -103,6 +104,7 @@ export function RandomCharacterButton() {
       const raceName = getRace(r.raceId)?.name ?? '';
       const className = getClass(r.classId)?.name ?? '';
       const backgroundName = ALL_BACKGROUNDS.find(b => b.id === r.backgroundId)?.name ?? '';
+      const loadout = buildStartingLoadout(r.classId, r.backgroundId, r.equipmentChoices, false);
 
       // The fiction. An empty brief is the "Surprise me" path the background generator already
       // takes, which is the right request when the player asked for a stranger. When they DID
@@ -151,6 +153,12 @@ export function RandomCharacterButton() {
         ...(r.racialAbilityChoice ? { racialAbilityChoice: r.racialAbilityChoice } : {}),
         raceOptions: r.raceOptions,
         selectedLanguages: r.selectedLanguages,
+        // The Equipment step's own builder, fed the rolled choices — a generated character
+        // gets the same pack and coin a player clicking through the step would.
+        equipmentChoices: r.equipmentChoices,
+        equipmentTakeGold: false,
+        inventory: loadout.inventory,
+        currencies: { cp: 0, sp: 0, ep: 0, gp: loadout.gp, pp: 0 },
         name: story.name?.trim() || `${raceName} ${className}`,
         alignment: story.alignment?.trim() || 'True Neutral',
         backgroundCustom: {
