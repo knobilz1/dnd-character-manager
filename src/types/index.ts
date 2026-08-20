@@ -152,6 +152,11 @@ export interface ClassResourceDefinition {
   /** Human-readable recharge rule, shown in place of "Recharges on X rest". Only meaningful
    *  for `rechargeOn: 'special'`. */
   rechargeNote?: string;
+  /** The word for one point of this resource when spending it isn't a "use" — Lay on Hands
+   *  is a POOL of hit points spent in any amounts, and five pips at level 1 read as
+   *  "5 usages" (reported live). A unit forces the numeric stepper (pips imply discrete
+   *  uses) and relabels the card as a pool. */
+  unit?: string;
   maxPerLevel: Record<number, number | 'unlimited'>;
   /** Maps class level to die size for resources with a scaling die (e.g. Bardic Inspiration d6→d12).
    *  Sparse — the last entry at or below the current level applies. */

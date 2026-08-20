@@ -12,7 +12,7 @@ import { useCharacterDerived, casterClassOf } from '../../hooks/useCharacterDeri
 import { useDiceStore } from '../../store/useDiceStore';
 import { cn } from '../../utils/cn';
 import { lookupWeapon, damageLine } from '../../data/weapons';
-import { getClass } from '../../data/classes';
+import { getClass, resourceUnitFor } from '../../data/classes';
 import { getSpell } from '../../data/spells';
 import { isPreparedCaster as isPreparedCasterId } from '../../data/mechanics';
 import type { SlotLevel } from '../../types';
@@ -435,6 +435,7 @@ function ClassResourcesSideModule() {
               current={r.current}
               max={displayMax}
               onChange={(next) => setResource(r.key, next)}
+              unit={resourceUnitFor(r.key)}
             />
           </div>
         );

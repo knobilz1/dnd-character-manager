@@ -338,6 +338,7 @@ export const ALL_CLASSES: DClass[] = [
       {
         name: 'Lay on Hands',
         key: 'lay_on_hands',
+        unit: 'HP',
         rechargeOn: 'long',
         maxPerLevel: { 1:5,2:10,3:15,4:20,5:25,6:30,7:35,8:40,9:45,10:50,11:55,12:60,13:65,14:70,15:75,16:80,17:85,18:90,19:95,20:100 },
       },
@@ -654,6 +655,18 @@ export const ALL_CLASSES: DClass[] = [
 
 export function getClass(id: string): DClass | undefined {
   return ALL_CLASSES.find(c => c.id === id);
+}
+
+/** The unit word for a resource that is a POOL rather than discrete uses — 'HP' for Lay on
+ *  Hands, undefined for everything counted in uses. Keyed lookup so display code (sheet card,
+ *  sidebar module) doesn't need the class definition in scope. Scans class resources only;
+ *  extend to subclasses if a subclass ever defines a pool. */
+export function resourceUnitFor(key: string): string | undefined {
+  for (const c of ALL_CLASSES) {
+    const hit = c.resources?.find(r => r.key === key && r.unit);
+    if (hit) return hit.unit;
+  }
+  return undefined;
 }
 
 /** Collapse a PHB 2024 class id ('monk-2024') to its 2014 equivalent ('monk').

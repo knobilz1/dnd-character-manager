@@ -19,8 +19,12 @@ const PIP_LIMIT = 20;
  *  still wrote back the clamped value (found again 2026-08-15). One component, every
  *  call site — a future resource UI cannot reintroduce the bug by copying the markup.
  */
-export function ResourceCounter({ current, max, onChange }: {
+export function ResourceCounter({ current, max, onChange, unit }: {
   current: number; max: number; onChange: (next: number) => void;
+  /** Set for POOL resources (Lay on Hands = 'HP'): forces the numeric stepper — a
+   *  level-1 paladin's pool of 5 hit points rendered as five pips read as "5 usages",
+   *  which is the wrong rule wearing a convincing costume. */
+  unit?: string;
 }) {
   // 99 is the 'unlimited' sentinel (e.g. Archdruid's Wild Shape). There is nothing to
   // spend, so there is nothing to count — the old UI showed "99 / ∞" beside 20 pips,
@@ -28,21 +32,21 @@ export function ResourceCounter({ current, max, onChange }: {
   if (max === 99) {
     return <p className="text-sm text-slate-300">∞ — no limit</p>;
   }
-  if (max > PIP_LIMIT) {
+  if (unit || max > PIP_LIMIT) {
     return (
       <div className="flex items-center gap-2">
         <button
           onClick={() => onChange(Math.max(0, current - 1))}
           disabled={current <= 0}
           className="w-6 h-6 rounded border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors leading-none"
-          title="Use one"
+          title={unit ? `Spend 1 ${unit}` : 'Use one'}
         >−</button>
-        <span className="text-sm font-medium text-white tabular-nums">{current} / {max}</span>
+        <span className="text-sm font-medium text-white tabular-nums">{current} / {max}{unit ? ` ${unit}` : ''}</span>
         <button
           onClick={() => onChange(Math.min(max, current + 1))}
           disabled={current >= max}
           className="w-6 h-6 rounded border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 transition-colors leading-none"
-          title="Restore one"
+          title={unit ? `Restore 1 ${unit}` : 'Restore one'}
         >+</button>
       </div>
     );

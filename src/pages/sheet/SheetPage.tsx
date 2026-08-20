@@ -37,7 +37,7 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useDmConnection } from '../../hooks/useDmConnection';
 import { useDmInitiativeFeed } from '../../hooks/useDmInitiativeFeed';
 import { sendTalkToDM } from '../../utils/dmConnect';
-import { getClass, baseClassId } from '../../data/classes';
+import { getClass, baseClassId, resourceUnitFor } from '../../data/classes';
 import { getSubclass } from '../../data/subclasses';
 import { getSpell } from '../../data/spells';
 import { useDiceStore } from '../../store/useDiceStore';
@@ -2506,12 +2506,15 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
 
                     {/* Counter row */}
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs text-slate-400 shrink-0">{resourceDef?.name ?? r.key} uses remaining</p>
+                      <p className="text-xs text-slate-400 shrink-0">
+                        {resourceDef?.name ?? r.key} {resourceUnitFor(r.key) ? 'pool remaining' : 'uses remaining'}
+                      </p>
                       <div className="flex justify-end">
                         <ResourceCounter
                           current={r.current}
                           max={displayMax}
                           onChange={(n) => setResource(r.key, n)}
+                          unit={resourceUnitFor(r.key)}
                         />
                       </div>
                     </div>
@@ -2566,11 +2569,13 @@ function CombatTab({ character, round, setRound, hpPercent, hpInput, setHpInput,
                     </div>
                   </div>
                   {/* Filled = available, empty = used. Switches to a numeric stepper
-                      above PIP_LIMIT, and for the 'unlimited' (99) sentinel. */}
+                      above PIP_LIMIT, for pool resources (Lay on Hands is HP, not uses),
+                      and for the 'unlimited' (99) sentinel. */}
                   <ResourceCounter
                     current={r.current}
                     max={displayMax}
                     onChange={(n) => setResource(r.key, n)}
+                    unit={resourceUnitFor(r.key)}
                   />
 
                   {/* ── Ki ability buttons (Monk) ─────────────────────── */}

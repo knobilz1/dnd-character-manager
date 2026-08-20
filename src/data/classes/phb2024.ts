@@ -330,7 +330,7 @@ export const PHB2024_CLASSES: DClass[] = [
     spellcastingType: 'half',
     spellcastingAbility: 'cha',
     resources: [
-      { name: 'Lay on Hands', key: 'lay_on_hands', rechargeOn: 'long', maxPerLevel: {1:5,2:10,3:15,4:20,5:25,6:30,7:35,8:40,9:45,10:50,11:55,12:60,13:65,14:70,15:75,16:80,17:85,18:90,19:95,20:100} },
+      { name: 'Lay on Hands', key: 'lay_on_hands', unit: 'HP', rechargeOn: 'long', maxPerLevel: {1:5,2:10,3:15,4:20,5:25,6:30,7:35,8:40,9:45,10:50,11:55,12:60,13:65,14:70,15:75,16:80,17:85,18:90,19:95,20:100} },
       { name: 'Channel Divinity', key: 'channel_divinity', rechargeOn: 'short', maxPerLevel: {1:0,2:0,3:2,4:2,5:2,6:2,7:2,8:2,9:2,10:2,11:3,12:3,13:3,14:3,15:3,16:3,17:3,18:3,19:3,20:3} },
     ],
     subclassLabel: 'Sacred Oath',
