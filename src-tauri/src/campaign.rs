@@ -9922,6 +9922,59 @@ pub fn append_session_recap(app: AppHandle, id: String, date: String, recap: Str
 }
 
 /// Opus map-reduce digest of a session's verbatim transcript — see
+/// Campaign ids currently mid-digest. The backend's OWN guarantee that a
+/// second `digest_session` for the SAME campaign can never run concurrently
+/// with the first — checked and reserved BEFORE the first Opus call, not
+/// merely a courtesy left to the frontend.
+///
+/// This closes a real incident, not a hypothetical: a still-live campaign
+/// took three concurrent wrap-ups from one confused round of clicking (the
+/// toolbar's End Session, then the close guard's own End Session, landing
+/// while the first was still running — the frontend had no re-entrancy guard
+/// at the time, since fixed at the call site in DMConsolePage.tsx). Each of
+/// the three ran its own full Opus map-reduce over the same transcript and
+/// wrote its own recap and its own entity extraction pass — three redundant
+/// session recaps, and two of the three digests each independently extracted
+/// the same faction as a "new" entity under a slightly different name
+/// ("Fogreach Elders" vs "Elders of Fogreach"), landing as two genuinely
+/// duplicated NPCs with two different assigned voices.
+///
+/// The frontend fix (wrapUpCurrentSession joining an in-flight call instead
+/// of starting a second one) is the primary defense and should mean this
+/// guard is never actually hit. It exists anyway because that guard lives
+/// only in one running app process's memory — a future caller this file's
+/// author hasn't imagined (a dev-tools console call, a hot-reloaded stale
+/// closure, a bug not yet written) could still reach this command twice for
+/// the same campaign, and the backend should refuse that outright rather
+/// than trust every future caller to have remembered not to.
+fn digesting_campaigns() -> &'static std::sync::Mutex<HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(HashSet::new()))
+}
+
+/// Reserves this campaign's digest slot, or refuses if it's already held.
+/// Pure enough to unit-test directly, unlike the async command it guards.
+fn try_claim_digest_slot(id: &str) -> bool {
+    digesting_campaigns().lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string())
+}
+
+fn release_digest_slot(id: &str) {
+    digesting_campaigns().lock().unwrap_or_else(|p| p.into_inner()).remove(id);
+}
+
+/// RAII release, so the slot comes free no matter how `digest_session`
+/// exits — success, an `Err` from digest_session_at, or the spawn_blocking
+/// task itself panicking. A slot that leaked on error would leave the NEXT,
+/// entirely legitimate End Session for that campaign permanently refused
+/// until the app restarts — a worse failure than the one this guards
+/// against.
+struct DigestSlot(String);
+impl Drop for DigestSlot {
+    fn drop(&mut self) {
+        release_digest_slot(&self.0);
+    }
+}
+
 /// digest_session_at. Called once at session end (DMConsolePage's
 /// wrapUpCurrentSession) with the full transcript of everything said this
 /// sitting. Async + spawn_blocking since it makes real (potentially several,
@@ -9930,6 +9983,10 @@ pub fn append_session_recap(app: AppHandle, id: String, date: String, recap: Str
 /// reuse it for the short MEMORY.md recap without a second call.
 #[tauri::command]
 pub async fn digest_session(app: AppHandle, id: String, date: String, transcript: String) -> Result<String, String> {
+    if !try_claim_digest_slot(&id) {
+        return Err("A session digest is already running for this campaign — give it a moment to finish.".into());
+    }
+    let _slot = DigestSlot(id.clone());
     tokio::task::spawn_blocking(move || {
         let root = campaigns_root(&app)?;
         digest_session_at(&root, &id, &date, &transcript)
@@ -15342,6 +15399,53 @@ A new sourcebook chapter introduces the Ashfen Concord, a coalition of three swa
 
         let backup = fs::read_to_string(lore_path.with_file_name("campaign_lore.md.bak")).unwrap();
         assert!(backup.contains("Elowen"), "the pre-merge doc must have been backed up before overwriting");
+    }
+
+    /// The exact shape of the incident this guard exists for: a second claim
+    /// for the SAME campaign while the first is still held must be refused,
+    /// not queued and not silently allowed to run a duplicate digest.
+    #[test]
+    fn a_second_digest_claim_for_the_same_campaign_is_refused_until_the_first_releases() {
+        let id = "digest-claim-test-same-campaign";
+        release_digest_slot(id); // clean slate even if a prior run of this test panicked mid-claim
+        assert!(try_claim_digest_slot(id), "the first claim must succeed");
+        assert!(!try_claim_digest_slot(id), "a second claim for the same campaign, still held, must be refused");
+        release_digest_slot(id);
+        assert!(try_claim_digest_slot(id), "after release, the same campaign can be claimed again");
+        release_digest_slot(id);
+    }
+
+    /// A held claim must never block an UNRELATED campaign — this is a
+    /// per-campaign guard against re-entrancy, not a global "one digest at a
+    /// time for the whole app" lock, which would be a real regression for
+    /// anyone running two campaigns.
+    #[test]
+    fn digest_claims_are_scoped_per_campaign_not_global() {
+        let a = "digest-claim-test-campaign-a";
+        let b = "digest-claim-test-campaign-b";
+        release_digest_slot(a);
+        release_digest_slot(b);
+        assert!(try_claim_digest_slot(a));
+        assert!(try_claim_digest_slot(b), "campaign b's claim must not be blocked by campaign a's still-held one");
+        release_digest_slot(a);
+        release_digest_slot(b);
+    }
+
+    /// The RAII half of the guard: DigestSlot must release its claim when
+    /// dropped, not just when release_digest_slot is called by hand — this is
+    /// what keeps a slot from leaking forever if digest_session_at ever
+    /// returns an Err or the spawn_blocking task panics.
+    #[test]
+    fn dropping_a_digest_slot_releases_its_claim() {
+        let id = "digest-claim-test-raii-release";
+        release_digest_slot(id);
+        assert!(try_claim_digest_slot(id));
+        {
+            let _slot = DigestSlot(id.to_string());
+            assert!(!try_claim_digest_slot(id), "still held while the guard is alive");
+        }
+        assert!(try_claim_digest_slot(id), "released the moment the guard went out of scope");
+        release_digest_slot(id);
     }
 
     /// Real integration check of the whole session-digest pipeline against the
