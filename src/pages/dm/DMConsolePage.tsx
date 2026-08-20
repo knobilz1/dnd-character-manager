@@ -975,8 +975,8 @@ export function DMConsolePage() {
   const [entitiesText, setEntitiesText] = React.useState('');
   const [locationsText, setLocationsText] = React.useState('');
   // Result of the last manual "Assign NPC voices" click (see
-  // handleReconcileNpcVoices) — cleared each time History reopens so a stale
-  // result from a previous visit never lingers.
+  // handleReconcileNpcVoices) — cleared each time the Voice dialog reopens
+  // (openVoiceSettings) so a stale result from a previous visit never lingers.
   const [voiceReconcileResult, setVoiceReconcileResult] = React.useState<string | null>(null);
   const [moduleOpen, setModuleOpen] = React.useState(false);
   const [modules, setModules] = React.useState<ModuleSummary[]>([]);
@@ -3677,22 +3677,43 @@ export function DMConsolePage() {
   async function openHistory() {
     if (!activeCampaignId) return;
     try {
-      const [memory, flaggedFacts, entities, locations, voices] = await Promise.all([
+      const [memory, flaggedFacts, entities, locations] = await Promise.all([
         invoke<string>('read_campaign_memory', { id: activeCampaignId }),
         invoke<string>('read_campaign_flagged_facts', { id: activeCampaignId }),
         invoke<string>('read_campaign_entities', { id: activeCampaignId }),
         invoke<string>('read_campaign_locations', { id: activeCampaignId }),
-        invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId }),
       ]);
       setHistoryText(memory);
       setFlaggedFactsText(flaggedFacts);
       setEntitiesText(entities);
+      setLocationsText(locations);
+      setHistoryOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Opens the Voice dialog — engine choice (always available) plus, once a
+   *  campaign is active, the narrator/NPC voice picker that used to live
+   *  buried inside History (reported live as not making sense there: History
+   *  is a read-only log of what's already happened, and picking who sounds
+   *  like what is a live setting, not a record). Fetches its own copy of
+   *  entitiesText (the picker's source list of NPC names) and npc_voices.json
+   *  rather than depending on History having been opened first — the two
+   *  dialogs are now fully independent. */
+  async function openVoiceSettings() {
+    setVoiceEngineOpen(true);
+    if (!activeCampaignId) return;
+    try {
+      const [entities, voices] = await Promise.all([
+        invoke<string>('read_campaign_entities', { id: activeCampaignId }),
+        invoke<Record<string, NpcVoiceEntry>>('read_npc_voices', { id: activeCampaignId }),
+      ]);
+      setEntitiesText(entities);
       npcVoicesRef.current = voices;
       setNpcVoices(voices);
       setVoiceEdits({});
-      setLocationsText(locations);
       setVoiceReconcileResult(null);
-      setHistoryOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -5169,7 +5190,7 @@ export function DMConsolePage() {
           <Button size="sm" variant="ghost" onClick={() => setDmModelOpen(true)} title="Which engine runs the DM — Claude or a local LLM">
             <Cpu size={14} /> DM Model{dmProvider === 'local' ? ' (Local)' : ''}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setVoiceEngineOpen(true)} title="Which engine gives the DM its voice — Standard or high-quality">
+          <Button size="sm" variant="ghost" onClick={() => void openVoiceSettings()} title="Voice engine, narrator voice, and per-NPC voice overrides">
             <Volume2 size={14} /> Voice{ttsEngine === 'f5' ? ' (HQ)' : ''}
           </Button>
 
@@ -6121,33 +6142,10 @@ export function DMConsolePage() {
           </div>
           <div>
             <p className="text-xs font-bold text-slate-300 mb-1">Entities (memory/entities.md)</p>
-            <p className="text-xs text-slate-400 mb-2">Named NPCs/factions/creatures — updated in place, never summarized away.</p>
-            <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap mb-2">{entitiesText}</pre>
-            <Button size="sm" variant="outline" onClick={handleReconcileNpcVoices} disabled={!!moduleBusy}>
-              {moduleBusyLabel ?? 'Assign NPC voices'}
-            </Button>
-            <p className="text-xs text-slate-400 mt-1">
-              Runs automatically at "End session" too — this is for assigning them on demand instead of waiting.
-            </p>
-            {voiceReconcileResult && <p className="text-xs text-emerald-400 mt-1">{voiceReconcileResult}</p>}
-          </div>
-          <div>
-            <p className="text-xs font-bold text-slate-300 mb-1">Narrator voice</p>
             <p className="text-xs text-slate-400 mb-2">
-              Auto-picked once, from this campaign's tone, at the moment it was created (see the Lore dialog) — never re-evaluated after that, and campaigns created before this existed never got a pick at all. Set or change it here any time.
+              Named NPCs/factions/creatures — updated in place, never summarized away. Voice assignment moved to the Voice button in the toolbar.
             </p>
-            <div className="mb-4">{renderVoiceOverrideRow(NARRATOR_VOICE_KEY, 'Narrator')}</div>
-
-            <p className="text-xs font-bold text-slate-300 mb-1">NPC voices</p>
-            <p className="text-xs text-slate-400 mb-2">
-              The DM's own picks (live or via "Assign NPC voices" above) are a starting point, not final — preview any candidate before committing, or override one you don't like.
-            </p>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {parseEntityNamesForVoicePanel(entitiesText).map((name) => renderVoiceOverrideRow(name.trim().toLowerCase(), name))}
-              {parseEntityNamesForVoicePanel(entitiesText).length === 0 && (
-                <p className="text-xs text-slate-500">No named NPCs yet.</p>
-              )}
-            </div>
+            <pre className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 whitespace-pre-wrap">{entitiesText}</pre>
           </div>
           <div>
             <p className="text-xs font-bold text-slate-300 mb-1">Locations (memory/locations.md)</p>
@@ -6879,7 +6877,7 @@ export function DMConsolePage() {
         </div>
       </Dialog>
 
-      <Dialog open={voiceEngineOpen} onClose={() => setVoiceEngineOpen(false)} title="Voice Engine">
+      <Dialog open={voiceEngineOpen} onClose={() => setVoiceEngineOpen(false)} title="Voice" wide>
         <p className="text-xs text-slate-400 mb-3">
           Which engine gives the DM and its NPCs their voices. <span className="text-slate-200">Standard</span> runs on any computer. <span className="text-slate-200">High-quality</span> is a large, GPU-only upgrade with richer, more natural voices — worth it if you have a strong NVIDIA graphics card.
         </p>
@@ -6935,6 +6933,40 @@ export function DMConsolePage() {
             )}
           </div>
         </div>
+
+        {activeCampaignId && (
+          <div className="mt-5 pt-4 border-t border-slate-700 max-h-[50vh] overflow-y-auto space-y-4">
+            <div>
+              <Button size="sm" variant="outline" onClick={handleReconcileNpcVoices} disabled={!!moduleBusy}>
+                {moduleBusyLabel ?? 'Assign NPC voices'}
+              </Button>
+              <p className="text-xs text-slate-400 mt-1">
+                Runs automatically at "End session" too — this is for assigning them on demand instead of waiting.
+              </p>
+              {voiceReconcileResult && <p className="text-xs text-emerald-400 mt-1">{voiceReconcileResult}</p>}
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-300 mb-1">Narrator voice</p>
+              <p className="text-xs text-slate-400 mb-2">
+                Auto-picked once, from this campaign's tone, at the moment it was created (see the Lore dialog) — never re-evaluated after that, and campaigns created before this existed never got a pick at all. Set or change it here any time.
+              </p>
+              <div>{renderVoiceOverrideRow(NARRATOR_VOICE_KEY, 'Narrator')}</div>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-300 mb-1">NPC voices</p>
+              <p className="text-xs text-slate-400 mb-2">
+                The DM's own picks (live or via "Assign NPC voices" above) are a starting point, not final — preview any candidate before committing, or override one you don't like.
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {parseEntityNamesForVoicePanel(entitiesText).map((name) => renderVoiceOverrideRow(name.trim().toLowerCase(), name))}
+                {parseEntityNamesForVoicePanel(entitiesText).length === 0 && (
+                  <p className="text-xs text-slate-500">No named NPCs yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end mt-4">
           <Button onClick={() => setVoiceEngineOpen(false)}>Done</Button>
         </div>
