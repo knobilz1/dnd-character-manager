@@ -22,7 +22,30 @@ let mediaStream: MediaStream | null = null;
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
 
+/** True when this build can even ask for a microphone. Mirrors tableCamera's
+ *  `cameraApiAvailable` — cheap, synchronous, prompts nobody.
+ *
+ *  Worth checking rather than letting the call throw: when WKWebView withholds
+ *  the API the raw failure is "undefined is not an object (evaluating
+ *  'navigator.mediaDevices.getUserMedia')", which sends the reader hunting for
+ *  a frontend bug instead of a missing macOS permission. */
+export function micApiAvailable(): boolean {
+  return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+}
+
 export async function startRecording(): Promise<void> {
+  // macOS strips navigator.mediaDevices entirely when the app bundle declares no
+  // NSMicrophoneUsageDescription (see src-tauri/Info.plist) or the user has
+  // denied the app at the system level — the API's ABSENCE is the signal, so
+  // there is nothing to catch further down. Both callers surface this message.
+  if (!micApiAvailable()) {
+    throw new Error(
+      'This app can’t reach the microphone. On macOS, open System Settings → '
+      + 'Privacy & Security → Microphone, allow Tavern Sheet, then restart it. '
+      + '(If Tavern Sheet isn’t listed, you’re on a build from before microphone '
+      + 'support was declared — update and try again.)',
+    );
+  }
   mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   chunks = [];
   recorder = new MediaRecorder(mediaStream);
