@@ -268,6 +268,21 @@ pub(crate) fn is_archetype_voice(voice_id: &str) -> bool {
     ARCHETYPE_VOICES.iter().any(|(id, _)| *id == voice_id)
 }
 
+/// The catalog id to actually speak with: BLANK COUNTS AS ABSENT.
+///
+/// `unwrap_or(DEFAULT_VOICE_ID)` alone only catches `None`, so an empty string
+/// sailed past it into `catalog_kokoro_voice("")` and came back
+/// `Unknown voice id ""`. Empty is not a mistake to reject — it is what the
+/// voice panel's "(narrator default)" option stores, and the whole point of
+/// that option is to keep the default voice while overriding pitch or pace.
+/// Trimmed too: a stored " " is the same intent.
+fn resolve_voice_id(voice_id: Option<&str>) -> &str {
+    match voice_id.map(str::trim) {
+        Some(id) if !id.is_empty() => id,
+        _ => DEFAULT_VOICE_ID,
+    }
+}
+
 fn catalog_kokoro_voice(voice_id: &str) -> Result<&'static str, String> {
     // ARCHETYPE_VOICES ids have no Kokoro voice of their own — resolve to
     // their declared fallback first (a real VOICE_CATALOG id), then fall
@@ -798,7 +813,7 @@ fn synthesize_kokoro(app: &AppHandle, voice_id: &str, native_speed: f64, text: &
 #[tauri::command]
 pub async fn speak_text(app: AppHandle, text: String, voice_id: Option<String>, pitch: Option<String>, speed: Option<f64>) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let resolved_id = voice_id.as_deref().unwrap_or(DEFAULT_VOICE_ID);
+        let resolved_id = resolve_voice_id(voice_id.as_deref());
         let native_speed = kokoro_speed_from_pace_factor(speed.unwrap_or(DEFAULT_PACE_FACTOR));
 
         // Copy the engine out and release the lock before the (multi-second)
@@ -1630,6 +1645,20 @@ pub async fn install_f5_runtime(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blank_voice_id_speaks_as_the_narrator_instead_of_erroring() {
+        // "(narrator default)" in the voice panel stores an empty string, which
+        // used to reach catalog_kokoro_voice and come back Unknown voice id "".
+        assert_eq!(resolve_voice_id(None), DEFAULT_VOICE_ID);
+        assert_eq!(resolve_voice_id(Some("")), DEFAULT_VOICE_ID);
+        assert_eq!(resolve_voice_id(Some("   ")), DEFAULT_VOICE_ID);
+        // A real pick is still honoured, whitespace and all.
+        assert_eq!(resolve_voice_id(Some("male-us-1")), "male-us-1");
+        assert_eq!(resolve_voice_id(Some(" male-us-1 ")), "male-us-1");
+        // And the default it falls back to must be a voice that can be spoken.
+        assert!(catalog_kokoro_voice(resolve_voice_id(Some(""))).is_ok());
+    }
 
     #[test]
     fn parse_nvidia_smi_csv_reads_name_and_vram() {

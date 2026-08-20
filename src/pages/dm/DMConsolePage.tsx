@@ -3688,7 +3688,12 @@ export function DMConsolePage() {
    *  display) immediately, same as every other npc_voices.json write site in
    *  this file. */
   async function handleSaveVoiceOverride(name: string, voiceId: string, pitch: string, speed: string) {
-    if (!activeCampaignId || !voiceId) return;
+    // An empty voiceId is "(narrator default)", a real choice — not a missing
+    // one. Refusing to save it meant a speed or pitch change on any row still
+    // using the default voice could not be saved at all: the narrator's own
+    // row starts that way, so its pace was unchangeable (reported live).
+    // tts.rs's resolve_voice_id treats the blank id as the default voice.
+    if (!activeCampaignId) return;
     const pitchArg = pitch || undefined;
     const speedArg = speed ? Number(speed) : undefined;
     try {
@@ -3745,17 +3750,21 @@ export function DMConsolePage() {
             <option key={tag} value={tag}>{SPEED_LABELS[tag]}</option>
           ))}
         </select>
+        {/* Neither button requires a voice to be picked. "(narrator default)"
+            is a selection, and pace/pitch are independent of it — gating on a
+            voiceId made the narrator's own pace unchangeable, since that row
+            uses the default voice by definition. */}
         <Button
           size="sm"
           variant="outline"
-          disabled={!edit.voiceId || previewingKey !== null || busy}
+          disabled={previewingKey !== null || busy}
           onClick={() => handlePreviewVoice(previewKey, edit.voiceId, edit.pitch, edit.speed)}
         >
           {previewingKey === previewKey ? 'Playing…' : 'Preview'}
         </Button>
         <Button
           size="sm"
-          disabled={!edit.voiceId || busy}
+          disabled={busy}
           onClick={() => handleSaveVoiceOverride(key, edit.voiceId, edit.pitch, edit.speed)}
         >
           Save
