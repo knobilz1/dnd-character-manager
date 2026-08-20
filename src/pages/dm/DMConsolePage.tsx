@@ -9,7 +9,7 @@ import { availableMonitors, getCurrentWindow, primaryMonitor } from '@tauri-apps
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile, writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff, Users, UserCheck } from 'lucide-react';
+import { ArrowLeft, Mic, Square, Radio, Trash2, BookOpen, ScrollText, FileUp, Plus, Upload, Download, Map, ClipboardList, Cpu, Landmark, RotateCcw, Volume2, VolumeX, Swords, Tv, Camera, Archive, ArchiveRestore, Eye, EyeOff, Users, UserCheck } from 'lucide-react';
 import { Button, Card, Badge, Dialog } from '../../components/ui';
 import { usePartyStore } from '../../store/usePartyStore';
 import { useCampaignStore } from '../../store/useCampaignStore';
@@ -724,9 +724,18 @@ export function DMConsolePage() {
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  /** True for the FULL duration of wrapUpCurrentSession — including the
+   *  requireAi gate and the "nothing to digest" fast path, both of which
+   *  finish before `busy` would ever turn true. Drives the toolbar button's
+   *  own label (it used to just go grey with no text change at all — a
+   *  click that visibly did nothing was indistinguishable from a click that
+   *  never registered) and, since wrapUpCurrentSession joins rather than
+   *  duplicates a re-entrant call, this is also true from the FIRST click
+   *  onward even if the close guard's "End session & close" ends up being
+   *  the one that actually awaits it. */
+  const [endingSession, setEndingSession] = React.useState(false);
   /** Set when the user tried to close the window mid-sitting; see the close-guard effect. */
   const [closeGuardOpen, setCloseGuardOpen] = React.useState(false);
-  const [closeGuardEnding, setCloseGuardEnding] = React.useState(false);
   const [turns, setTurns] = React.useState<Turn[]>([]);
   /**
    * Errors and warnings the DM hasn't dismissed yet.
@@ -1432,6 +1441,16 @@ export function DMConsolePage() {
   const streamedAnyChunkRef = React.useRef(false);
   const sentenceQueueRef = React.useRef<{ text: string; voiceId?: string; pitch?: string; speed?: number }[]>([]);
   const drainingPromiseRef = React.useRef<Promise<void> | null>(null);
+  /** Bumped by every stop (End Session, barge-in, campaign switch, Stop DM).
+   *
+   *  Clearing the queue alone does NOT stop playback, which is why the DM kept
+   *  talking after "End session": synthesizing a line is an await of real
+   *  length (Kokoro is a subprocess), and a stop landing during it emptied the
+   *  queue and silenced nothing — there was no audio playing yet. The await
+   *  then resolved and dutifully played the line it had been asked for. The
+   *  drain loop compares this counter across that await and throws the audio
+   *  away if the world moved on, rather than trusting the queue's length. */
+  const playbackEpochRef = React.useRef(0);
   // The speaker whose `[Name]:` tag was seen most recently within the current
   // narration — the voice cue is now STICKY across sentences (see
   // enqueueSentence). Reset to null at the start of every fresh narration (a
@@ -1705,6 +1724,9 @@ export function DMConsolePage() {
         try {
         while (sentenceQueueRef.current.length > 0) {
           const next = sentenceQueueRef.current.shift()!;
+          // Which playback era this line belongs to, captured BEFORE the
+          // synthesis await that a stop can land inside.
+          const epoch = playbackEpochRef.current;
           let current: PreparedSpeech;
           try {
             current = prepared ?? (await prepareSpeech(next.text, next.voiceId, next.pitch, next.speed));
@@ -1716,6 +1738,17 @@ export function DMConsolePage() {
             continue;
           }
           prepared = null;
+          // A stop landed while this line was being synthesized, so its audio
+          // belongs to a turn nobody is listening to any more. `continue`
+          // rather than `return`: the loop re-reads the queue, so it exits on
+          // its own if the stop emptied it, and keeps serving a NEW turn that
+          // has already queued lines behind it (returning here would strand
+          // those — this drain holds drainingPromiseRef, so no second drain
+          // would ever start for them).
+          if (epoch !== playbackEpochRef.current) {
+            discardPrepared(current);
+            continue;
+          }
 
           const upcoming = sentenceQueueRef.current[0];
           const lookahead = upcoming ? prepareSpeech(upcoming.text, upcoming.voiceId, upcoming.pitch, upcoming.speed).catch(() => null) : null;
@@ -2229,6 +2262,31 @@ export function DMConsolePage() {
     return () => { unlisten.then((fn) => fn()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Deliberately separate from dm-remote-control/CONTROL_ACTIONS above: that
+   *  channel is a single claimed "table controller" the DM has to opt into
+   *  enabling. An interrupt has no business waiting on either — any player,
+   *  at any moment, from their own sheet, with nothing to turn on first (see
+   *  party_listener.rs's `/interrupt`, which skips the claim/holder dance
+   *  `/control` does). `lastInterruptedBy` is its own small, self-clearing
+   *  banner rather than reusing `lastRemoteAction`, because that state is
+   *  wiped whenever remote control is OFF (see the effect keyed on
+   *  dmRemoteControlEnabled below) — this must still say who cut the DM off
+   *  even then. */
+  const [lastInterruptedBy, setLastInterruptedBy] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const unlisten = listen<{ name: string }>('dm-remote-interrupt', (event) => {
+      stopSpeakingAndClearQueue();
+      setLastInterruptedBy(event.payload.name);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  React.useEffect(() => {
+    if (!lastInterruptedBy) return;
+    const t = setTimeout(() => setLastInterruptedBy(null), 6000);
+    return () => clearTimeout(t);
+  }, [lastInterruptedBy]);
 
   /** A Claude session id and a local-LLM session id are not interchangeable
    *  (one only means something to `claude --resume`, the other only to
@@ -2954,8 +3012,31 @@ export function DMConsolePage() {
    *  the project directory it was created in (confirmed live: resuming a
    *  session from a different cwd fails with "No conversation found"), so
    *  switching the active campaign without closing out the old one first
-   *  would make the very next turn error out. */
-  async function wrapUpCurrentSession() {
+   *  would make the very next turn error out.
+   *
+   *  RE-ENTRANT CALLS JOIN THE SAME PROMISE, never start a second one. This
+   *  is load-bearing, not tidiness: the toolbar button gave no visible sign
+   *  it was doing anything (reported live — "it's just sitting there, no
+   *  idea if it's ever going to finish"), so a player clicked it, got no
+   *  feedback, tried to close the window instead, hit the close guard, and
+   *  clicked ITS "End session & close" too — a second full wrap-up starting
+   *  while the first was still mid-digest. Both would have read the same
+   *  still-uncleared `turns`, run duplicate Opus digests and duplicate
+   *  reconciliation writes against the same campaign folder, and the close
+   *  guard destroys the window the instant ITS call resolves — killing
+   *  whichever of the two was still writing when the other finished first. */
+  const wrapUpPromiseRef = React.useRef<Promise<void> | null>(null);
+  async function wrapUpCurrentSession(): Promise<void> {
+    if (wrapUpPromiseRef.current) return wrapUpPromiseRef.current;
+    setEndingSession(true);
+    const p = wrapUpCurrentSessionImpl().finally(() => {
+      wrapUpPromiseRef.current = null;
+      setEndingSession(false);
+    });
+    wrapUpPromiseRef.current = p;
+    return p;
+  }
+  async function wrapUpCurrentSessionImpl() {
     // The digest is a model call — ask before the session is closed out,
     // not after the transcript has already been handed over.
     if (!(await requireAi('write up this session'))) return;
@@ -3127,6 +3208,9 @@ export function DMConsolePage() {
   function stopSpeakingAndClearQueue() {
     sentenceQueueRef.current = [];
     suppressNarrationRef.current = true;
+    // Invalidate any line already in synthesis — emptying the queue can't
+    // reach those, and they used to arrive and play seconds after the stop.
+    playbackEpochRef.current += 1;
     stopSpeaking();
     // Actually kill whatever `claude` turn is in flight (see dm.rs's
     // DmTurnControl/cancel_dm_turn) instead of just discarding its eventual
@@ -3180,9 +3264,12 @@ export function DMConsolePage() {
     };
   }, []);
 
-  /** "End session" from the close guard: the SAME path as the toolbar button, then actually go. */
+  /** "End session" from the close guard: the SAME path as the toolbar button, then actually go.
+   *
+   *  If the toolbar button already started this (wrapUpCurrentSession's promise-join), this call
+   *  waits on that SAME wrap-up rather than starting a second one — so the window is only ever
+   *  destroyed after the one true digest has actually finished writing, never mid-write. */
   async function closeGuardEndSession() {
-    setCloseGuardEnding(true);
     try {
       await handleEndSession();
     } catch (e) {
@@ -5038,7 +5125,9 @@ export function DMConsolePage() {
                 )}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={handleEndSession} disabled={busy}>End session</Button>
+            <Button variant="outline" size="sm" onClick={handleEndSession} disabled={busy || endingSession}>
+              {endingSession ? 'Ending session…' : 'End session'}
+            </Button>
           </div>
         </div>
 
@@ -5244,6 +5333,11 @@ export function DMConsolePage() {
               </div>
             )}
 
+            {lastInterruptedBy && (
+              <p className="mb-2 text-center text-xs text-amber-300">
+                {lastInterruptedBy} interrupted from their sheet.
+              </p>
+            )}
             {failedTurn && !busy && (
               <button
                 onClick={retryFailedTurn}
@@ -5277,6 +5371,16 @@ export function DMConsolePage() {
                         ? 'Interrupt & Talk'
                         : 'Talk'}
               </Button>
+              {/* Talk's own barge-in always starts recording right after silencing the DM —
+                  right when the player wants to speak, wrong when they just want quiet
+                  (reported live: "sometimes I don't want to respond, but it forces a
+                  listen"). This is the same stop, without the mic. */}
+              {busy && (
+                <Button size="lg" variant="outline" onClick={stopSpeakingAndClearQueue} title="Interrupt without talking">
+                  <VolumeX size={20} />
+                  Interrupt
+                </Button>
+              )}
               <Button
                 size="lg"
                 variant="outline"
@@ -6955,18 +7059,18 @@ export function DMConsolePage() {
           Ending the session asks the DM for a summary, saves it, and then closes.
         </p>
         <div className="flex justify-end gap-2 flex-wrap">
-          <Button variant="ghost" onClick={() => setCloseGuardOpen(false)} disabled={closeGuardEnding}>
+          <Button variant="ghost" onClick={() => setCloseGuardOpen(false)} disabled={endingSession}>
             Keep playing
           </Button>
           <Button
             variant="outline"
             onClick={() => { void getCurrentWindow().destroy(); }}
-            disabled={closeGuardEnding}
+            disabled={endingSession}
           >
             Close anyway
           </Button>
-          <Button onClick={() => { void closeGuardEndSession(); }} disabled={closeGuardEnding}>
-            {closeGuardEnding ? 'Ending session…' : 'End session & close'}
+          <Button onClick={() => { void closeGuardEndSession(); }} disabled={endingSession}>
+            {endingSession ? 'Ending session…' : 'End session & close'}
           </Button>
         </div>
       </Dialog>

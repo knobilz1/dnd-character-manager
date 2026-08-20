@@ -893,6 +893,27 @@ fn handle_conn(mut stream: TcpStream, app: &AppHandle) {
         return write_response(&mut stream, 200, &body, "application/json");
     }
 
+    if request_line.starts_with("POST /interrupt") {
+        // Silence the DM's speech from ANY player's own sheet, right now — no
+        // claim, no holder, no DM-side setting to turn on first. Deliberately
+        // NOT routed through /control's CONTROL_ACTIONS ("stop" already lives
+        // there): that channel is the single claimed "table controller" role,
+        // opt-in per campaign — the wrong trust model for a button meant to
+        // be always available to everyone (reported live: interrupting only
+        // existed inside the DM Console itself, and even there the only way
+        // to interrupt also forced the mic open, whether or not the player
+        // actually wanted to say anything next).
+        if !console_listening() {
+            return write_response(&mut stream, 409, CONSOLE_AWAY_BODY, "application/json");
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::Null);
+        let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        // Fire-and-forget: unlike /talk there is nothing to wait for and
+        // nothing the caller needs back beyond "the DM heard the interrupt".
+        let _ = app.emit("dm-remote-interrupt", serde_json::json!({ "name": name }));
+        return write_response(&mut stream, 200, "{\"ok\":true}", "application/json");
+    }
+
     if request_line.starts_with("POST /camera-claim") {
         // Toggle the "table camera" role. `release: true` hands it back.
         let parsed: serde_json::Value = serde_json::from_str(&body_str).unwrap_or(serde_json::Value::Null);

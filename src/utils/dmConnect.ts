@@ -97,6 +97,24 @@ export async function sendTalkToDM(text: string, characterName: string, ip: stri
   return data?.reply ?? null;
 }
 
+/** Silences the DM's speech from ANY player's own sheet — no claim, no
+ *  holder, no DM-side setting to enable first (unlike the table controller's
+ *  own "stop" button, which is one player's claimed role and off by
+ *  default). Fire-and-forget: unlike sendTalkToDM there is no reply to wait
+ *  on, just "did the DM Console hear this at all", so a failure is worth
+ *  logging but never worth showing the player a whole error dialog over —
+ *  the worst case is the DM keeps talking a little longer, exactly like
+ *  before this button existed. */
+export async function sendInterruptToDM(characterName: string, ip: string): Promise<void> {
+  const res = await tauriFetch(`${dmBaseUrl(ip)}/interrupt`, {
+    method: 'POST',
+    headers: dmHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name: characterName }),
+    connectTimeout: 5000,
+  });
+  if (!res.ok) throw await dmFailure(res);
+}
+
 /** POST one character to the DM bot. Throws on failure.
  *
  *  Deliberately does NOT ship the snapshot history any more: the listener only ever read

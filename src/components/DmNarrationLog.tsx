@@ -1,7 +1,9 @@
 import React from 'react';
-import { ScrollText } from 'lucide-react';
+import { ScrollText, VolumeX } from 'lucide-react';
 import { useDmConnection } from '../hooks/useDmConnection';
 import { useDmNarrationFeed } from '../hooks/useDmNarrationFeed';
+import { useSettingsStore } from '../store/useSettingsStore';
+import { sendInterruptToDM } from '../utils/dmConnect';
 import { cn } from '../utils/cn';
 
 /**
@@ -18,13 +20,38 @@ import { cn } from '../utils/cn';
  * network, and how a character the DM has lent this device for the evening
  * gets picked up. Optional: without it the log still works, it just doesn't
  * register presence.
+ *
+ * Also carries the interrupt button (reported live as missing from every
+ * sheet but the DM Console's own — and even there, interrupting always
+ * forced the mic open too, which isn't what someone reaching for "be quiet
+ * a second" wants). It lives here rather than as its own component because
+ * this is literally the panel showing what the DM has been saying — the
+ * natural place to reach for "stop" is right next to hearing it happen. Sits
+ * next to the toggle so it's reachable without opening the log first.
  */
 export function DmNarrationLog({ characterName }: { characterName?: string }) {
   const connected = useDmConnection();
+  const dmIp = useSettingsStore((s) => s.dmIp);
   const entries = useDmNarrationFeed(characterName);
   const [open, setOpen] = React.useState(false);
   const [lastSeenSeq, setLastSeenSeq] = React.useState(0);
+  const [interrupting, setInterrupting] = React.useState(false);
   const listRef = React.useRef<HTMLDivElement>(null);
+
+  /** Fire-and-forget by design (see sendInterruptToDM) — `interrupting` only
+   *  guards against a double-click hammering the same request, not a real
+   *  loading state worth blocking the UI over. */
+  async function handleInterrupt() {
+    if (interrupting) return;
+    setInterrupting(true);
+    try {
+      await sendInterruptToDM(characterName ?? 'A player', dmIp);
+    } catch {
+      // Nothing useful to show for this — see sendInterruptToDM's doc comment.
+    } finally {
+      setInterrupting(false);
+    }
+  }
 
   const unread = entries.filter((e) => e.seq > lastSeenSeq).length;
 
@@ -39,7 +66,15 @@ export function DmNarrationLog({ characterName }: { characterName?: string }) {
   if (!connected && entries.length === 0) return null;
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center">
+      <button
+        onClick={handleInterrupt}
+        disabled={!connected || interrupting}
+        title={connected ? "Interrupt the DM — silences them, doesn't send anything" : "Not connected to the DM"}
+        className="p-1.5 rounded text-slate-500 hover:text-amber-400 disabled:opacity-40 disabled:hover:text-slate-500 transition-colors"
+      >
+        <VolumeX size={18} />
+      </button>
       <button
         onClick={() => setOpen((o) => !o)}
         title="What the DM has said"
