@@ -15,6 +15,122 @@
  */
 import { pipeline } from '@huggingface/transformers';
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { useSettingsStore } from '../store/useSettingsStore';
+
+// ── Audio output device (speaker) selection ─────────────────────────────────
+//
+// `HTMLMediaElement.setSinkId` (Media Capture and Streams extension) is how
+// Chromium — and so WebView2, which is what every Windows Tauri window runs
+// on — routes a specific <audio>/<video> element to a chosen output device
+// instead of the OS default. It isn't in TS's default DOM lib, so it's typed
+// locally rather than pulling in a whole @types package for one method.
+// NOTE: the Web Speech API (window.speechSynthesis, dmSpeech's last-resort
+// fallback when neither TTS engine is reachable) has NO device-routing hook
+// at all — it always plays on the OS default output, full stop. So picking a
+// non-default device only affects real DM lines (Kokoro/F5 <audio> playback)
+// and the test tone below, never the emergency browser-TTS fallback.
+// Not declared via `extends HTMLAudioElement` — this TS lib target already
+// declares `setSinkId` on HTMLMediaElement as a REQUIRED method (accurate for
+// the type, not for real-world support: Firefox has none, and it's absent
+// from TS's DOM lib in plenty of other configurations), so redeclaring it
+// optional here would conflict with the parent interface instead of
+// narrowing it. A plain intersection sidesteps that inheritance check
+// entirely while keeping the call site's `.setSinkId?.(...)` optional-safe.
+type SinkableAudioElement = HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> };
+
+/** True when this browser/webview can route audio to a non-default device at
+ *  all — gates whether the picker's device list means anything, the same
+ *  "cheap capability check before asking for anything" shape as
+ *  micApiAvailable() above. */
+export function audioOutputSelectionSupported(): boolean {
+  return typeof document !== 'undefined' && 'setSinkId' in document.createElement('audio');
+}
+
+/** Lists available speaker/output devices. Device *labels* are blank until
+ *  some getUserMedia permission has been granted at least once in this
+ *  origin (a browser privacy rule, not a bug here) — this app already asks
+ *  for the microphone for push-to-talk, so by the time a DM opens the Voice
+ *  dialog and looks at this list, labels are normally already populated. */
+export async function listAudioOutputDevices(): Promise<MediaDeviceInfo[]> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return [];
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter((d) => d.kind === 'audiooutput');
+}
+
+/** Applies the persisted output-device choice to an <audio> element right
+ *  before playback — read live from the store (rather than threaded through
+ *  every call site) so changing the pick in the Voice dialog takes effect on
+ *  the very next line spoken with no extra plumbing. Empty deviceId or an
+ *  unsupported browser is a silent no-op — the element just plays on the OS
+ *  default, exactly as it always has. */
+async function applyAudioOutputDevice(audio: SinkableAudioElement): Promise<void> {
+  const deviceId = useSettingsStore.getState().dmAudioOutputDeviceId;
+  if (!deviceId || !audio.setSinkId) return;
+  try {
+    await audio.setSinkId(deviceId);
+  } catch (e) {
+    // A stale device id (unplugged headset, etc.) — fall back to system
+    // default rather than throwing and silencing the line entirely.
+    console.warn('Could not switch DM audio to the selected output device (using system default instead):', e);
+  }
+}
+
+/** Builds a short mono 16-bit PCM WAV sine-wave beep, entirely in JS — no
+ *  TTS engine involved. Exists so "Test" in the Voice dialog answers ONE
+ *  question in isolation: "is audio actually reaching the device I picked,"
+ *  without also depending on Kokoro/F5 being installed and working. If the
+ *  DM hears the beep but not the DM's voice, the problem is TTS synthesis,
+ *  not device routing — if they hear neither, it's the device/OS routing. */
+function buildBeepWav(freqHz = 880, durationMs = 500, sampleRate = 22050): Blob {
+  const frameCount = Math.floor((sampleRate * durationMs) / 1000);
+  const dataSize = frameCount * 2; // 16-bit mono
+  const buf = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buf);
+  const writeStr = (offset: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+  // Short fade in/out (same click-elimination reasoning as tts.rs's
+  // fade_wav_edges) so the beep doesn't pop at its own edges.
+  const fadeFrames = Math.min(frameCount / 2, Math.round(sampleRate * 0.02));
+  for (let i = 0; i < frameCount; i++) {
+    const t = i / sampleRate;
+    let gain = 0.4;
+    if (i < fadeFrames) gain *= i / fadeFrames;
+    else if (i > frameCount - fadeFrames) gain *= (frameCount - i) / fadeFrames;
+    const sample = Math.round(Math.sin(2 * Math.PI * freqHz * t) * gain * 32767);
+    view.setInt16(44 + i * 2, sample, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+/** Plays the test beep through whichever output device is currently
+ *  selected (or the OS default). Returns once playback finishes, rejects on
+ *  a genuine playback error (e.g. the device really is gone) — the Voice
+ *  dialog's Test button surfaces that rejection directly, since "the picked
+ *  device doesn't work" is exactly what this button exists to catch. */
+export function testAudioOutputDevice(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(buildBeepWav());
+    const audio: SinkableAudioElement = new Audio(url);
+    const cleanup = () => URL.revokeObjectURL(url);
+    audio.onended = () => { cleanup(); resolve(); };
+    audio.onerror = () => { cleanup(); reject(new Error('Playback failed on the selected output device.')); };
+    applyAudioOutputDevice(audio)
+      .then(() => audio.play())
+      .catch((e) => { cleanup(); reject(e); });
+  });
+}
 
 // ── Microphone capture ───────────────────────────────────────────────────────
 
@@ -178,12 +294,68 @@ export function warmupSTT(): Promise<unknown> {
   return sttRequest('warmup');
 }
 
+/** How many consecutive repeats of the exact same word/phrase are treated
+ *  as ordinary speech ("no, no, no!") rather than a runaway loop. Reported
+ *  live: saying "locket" about ten times came back as "lock it" fifty times
+ *  — Whisper (and STT decoders generally) getting stuck re-emitting the same
+ *  tokens is a well-documented failure mode, not something specific to this
+ *  app's audio capture, so this collapses it after the fact rather than
+ *  trying to prevent it at the model level. */
+const MAX_CONSECUTIVE_PHRASE_REPEATS = 3;
+
+/** Longest phrase (in words) checked for a repeating loop — covers a
+ *  looping single word up through a short looping phrase like "lock it lock
+ *  it lock it...". A real transcript essentially never has an identical
+ *  4+-word run repeat this many times back to back, so there's no realistic
+ *  false-positive risk at this length. */
+const MAX_LOOP_PHRASE_WORDS = 4;
+
+/** Collapses a Whisper hallucination loop — the same word or short phrase
+ *  repeated far more times than anyone would actually say it — down to
+ *  MAX_CONSECUTIVE_PHRASE_REPEATS-worth of repeats (currently `2`, the same
+ *  number used below), rather than removing the repetition entirely: a
+ *  player emphatically repeating something 2-3 times is normal speech and
+ *  must survive untouched, only the runaway case should get cut. Checks
+ *  phrase lengths shortest-first (1 word, then 2, up to
+ *  MAX_LOOP_PHRASE_WORDS) so a two-word loop collapses at its true 2-word
+ *  period instead of only ever being caught (less cleanly) at a longer,
+ *  coincidentally-also-repeating window — a shorter genuine period always
+ *  fails to match at a length that doesn't evenly divide it, so trying
+ *  short lengths first never mis-fragments a real longer phrase. */
+export function collapseHallucinatedRepeats(text: string): string {
+  const words = text.split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let i = 0;
+  while (i < words.length) {
+    let collapsed = false;
+    for (let len = 1; len <= Math.min(MAX_LOOP_PHRASE_WORDS, words.length - i); len++) {
+      const phrase = words.slice(i, i + len).join(' ').toLowerCase();
+      let repeats = 1;
+      while (
+        i + (repeats + 1) * len <= words.length &&
+        words.slice(i + repeats * len, i + (repeats + 1) * len).join(' ').toLowerCase() === phrase
+      ) {
+        repeats++;
+      }
+      if (repeats > MAX_CONSECUTIVE_PHRASE_REPEATS) {
+        const keep = Math.min(repeats, 2);
+        for (let k = 0; k < keep; k++) out.push(...words.slice(i, i + len));
+        i += repeats * len;
+        collapsed = true;
+        break;
+      }
+    }
+    if (!collapsed) { out.push(words[i]); i++; }
+  }
+  return out.join(' ');
+}
+
 /** Stops recording and transcribes it. Returns '' for silence/no speech. */
 export async function stopAndTranscribe(): Promise<string> {
   const blob = await stopRecording();
   const samples = await blobToMono16k(blob);
   if (samples.length < 1600) return ''; // < 0.1s
-  return (await sttRequest('transcribe', samples)).trim();
+  return collapseHallucinatedRepeats((await sttRequest('transcribe', samples)).trim());
 }
 
 // ── Text-to-speech ───────────────────────────────────────────────────────────
@@ -222,7 +394,7 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
  *  is still playing. */
 function playPiperUrl(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const audio = new Audio(url);
+    const audio: SinkableAudioElement = new Audio(url);
     currentAudio = audio;
     const cleanup = () => {
       URL.revokeObjectURL(url);
@@ -233,7 +405,9 @@ function playPiperUrl(url: string): Promise<void> {
     currentForceResolve = settle;
     audio.onended = settle;
     audio.onerror = () => { cleanup(); reject(new Error('Piper audio playback failed')); };
-    audio.play().catch((e) => { cleanup(); reject(e); });
+    applyAudioOutputDevice(audio)
+      .then(() => audio.play())
+      .catch((e) => { cleanup(); reject(e); });
   });
 }
 

@@ -29,7 +29,7 @@ import { ModelConnectionSettings } from '../../components/ModelConnection';
 import { requireAi } from '../../components/ModelGate';
 import type { TileStyleId } from '../../utils/battleMapRender';
 import { TILE_STYLES } from '../../data/tileStyles';
-import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared } from '../../utils/dmSpeech';
+import { startRecording, stopAndTranscribe, warmupSTT, previewVoice, stopSpeaking, prepareSpeech, playPrepared, discardPrepared, listAudioOutputDevices, testAudioOutputDevice, audioOutputSelectionSupported } from '../../utils/dmSpeech';
 import type { PreparedSpeech } from '../../utils/dmSpeech';
 import { pickEphemeralVoice, pickVoiceForGender, inferGender, inferGenderStrict } from '../../utils/dmVoices';
 import { getRace } from '../../data/races';
@@ -232,14 +232,20 @@ const NPC_PITCH_OPTIONS = ['', ...Array.from(PITCH_TAG_IDS)];
  *  Independent of pitch — this only changes pace, never tone. */
 const SPEED_LABELS: Record<string, string> = {
   '': 'Default pace',
-  // 0.65/0.55 push past what the Piper-era list offered. tts.rs inverts these
-  // into Kokoro's native scale (1/0.55 ≈ 1.82), which it accepts without
-  // clamping — kokoro_cli.py passes `speed` straight through to
-  // kokoro.create. Intelligibility at the top end is a matter of taste, so
-  // audition with the panel's Preview button before committing a voice to it.
-  '0.55': 'Fastest',
-  '0.65': 'Extremely fast',
-  '0.75': 'Very fast',
+  // 0.75/0.65/0.55 ("Very fast" and beyond) used to push past what the
+  // Piper-era list offered, converting to a native Kokoro speed as high as
+  // 1/0.55 ≈ 1.82 with no ceiling. Reported live at the table: "Very fast"
+  // (0.75) made the DM constantly drop words — a real intelligibility
+  // failure, not just a taste thing, so tts.rs's kokoro_speed_from_pace_factor
+  // now hard-clamps the native speed (MAX_NATIVE_SPEED). Removed those three
+  // presets entirely rather than leaving them in the list silently clamped
+  // to the same result as each other and as "Fast" below — an option that
+  // visibly does nothing extra is worse than no option. "Fast" (0.85, native
+  // ≈1.18) is the fastest preset that was never reported as a problem, so it
+  // stays as the genuine ceiling. A pre-existing per-NPC override saved under
+  // one of the removed values still works exactly as before (the clamp
+  // applies regardless of where the number came from) — only this dropdown's
+  // display of that saved value looks momentarily blank until re-saved.
   '0.85': 'Fast',
   '0.95': 'Faster',
   '1.05': 'Slightly faster',
@@ -247,7 +253,7 @@ const SPEED_LABELS: Record<string, string> = {
   '1.45': 'Slow',
   '1.60': 'Very slow',
 };
-const NPC_SPEED_OPTIONS = ['', '0.55', '0.65', '0.75', '0.85', '0.95', '1.05', '1.30', '1.45', '1.60'];
+const NPC_SPEED_OPTIONS = ['', '0.85', '0.95', '1.05', '1.30', '1.45', '1.60'];
 
 /** A fixed sample line for the voice-override panel's Preview button. Kept
  *  short on purpose — Kokoro synthesis time scales with text length, and this
@@ -720,7 +726,7 @@ export function DMConsolePage() {
   const navigate = useNavigate();
   const { party, upsert, remove, clear } = usePartyStore();
   const { activeCampaignId, setActiveCampaignId } = useCampaignStore();
-  const { dmProvider, localLlmBaseUrl, localLlmModel, ingestionProvider, crossCheckEnabled, crossCheckEngines, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, setTileLibraryPath } = useSettingsStore();
+  const { dmProvider, localLlmBaseUrl, localLlmModel, ingestionProvider, crossCheckEnabled, crossCheckEngines, ttsEngine, setTtsEngine, battleTileStyle, setBattleTileStyle, setTileLibraryPath, dmAudioOutputDeviceId, setDmAudioOutputDeviceId } = useSettingsStore();
 
   const [listening, setListening] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -768,6 +774,14 @@ export function DMConsolePage() {
   const [typedTurn, setTypedTurn] = React.useState('');
   const [dmModelOpen, setDmModelOpen] = React.useState(false);
   const [voiceEngineOpen, setVoiceEngineOpen] = React.useState(false);
+  /** Output (speaker) devices for the Voice dialog's device picker — fetched
+   *  when the dialog opens (device labels only populate once mic permission
+   *  has been granted at least once; the dialog opening well after
+   *  push-to-talk has been used at least once makes that the common case,
+   *  but re-fetching on each open also catches a headset plugged in mid-sitting). */
+  const [audioDevices, setAudioDevices] = React.useState<MediaDeviceInfo[]>([]);
+  const [audioTesting, setAudioTesting] = React.useState(false);
+  const [audioTestError, setAudioTestError] = React.useState<string | null>(null);
   const [cudaInfo, setCudaInfo] = React.useState<CudaInfo | null>(null);
   const [f5Installed, setF5Installed] = React.useState(false);
   const [f5ConfirmOpen, setF5ConfirmOpen] = React.useState(false);
@@ -1798,6 +1812,28 @@ export function DMConsolePage() {
     }
   }
 
+  /** Queues a whole block of text (not just one already-isolated sentence) —
+   *  the leftover-buffer flush at the end of a streamed turn, a non-streamed
+   *  local-LLM turn's entire reply, or any other "I have a finished chunk of
+   *  narration, not a live stream" caller. MUST run it through
+   *  extractCompleteSentences first rather than handing it to enqueueSentence
+   *  directly: parseSpeakerTag only strips a `[Name]:` cue sitting at
+   *  position 0 of what it's given, and a multi-sentence block routinely has
+   *  a cue buried mid-string (an NPC's interrupted line followed by
+   *  `[Narrator]: ...`, say) — passed raw, that cue neither gets stripped
+   *  (so it's literally spoken/shown) nor updates the sticky-speaker state
+   *  (so the narration keeps playing in whatever NPC's voice was sticky
+   *  before it). Splitting first guarantees every cue lands at position 0 of
+   *  its own sentence, exactly like the live streaming path already does.
+   *  The trailing space mirrors handleReplayLastResponse/the recap-reading
+   *  call site's own trick: it lets the final real sentence's punctuation
+   *  register as "complete" even though nothing follows it in the buffer. */
+  function enqueueFullText(text: string) {
+    const { sentences, remainder } = extractCompleteSentences(`${text} `);
+    for (const s of sentences) enqueueSentence(s);
+    if (remainder.trim()) enqueueSentence(remainder);
+  }
+
   /** Re-reads campaign_lore.md + the active module's plan.md into
    *  campaignPlanRef. This ref is the ONLY channel by which either file reaches
    *  the live DM (neither is a standing CLAUDE.md import — see dmPrompt.ts's
@@ -1980,6 +2016,23 @@ export function DMConsolePage() {
     );
     return () => { unlisten.then((f) => f()); };
   }, []);
+
+  // Refresh the output-device list every time the Voice dialog opens — see
+  // the audioDevices state's doc comment for why "on open" beats "once at
+  // mount" here (labels/newly-plugged devices).
+  React.useEffect(() => {
+    if (!voiceEngineOpen) return;
+    setAudioTestError(null);
+    listAudioOutputDevices().then(setAudioDevices).catch(() => setAudioDevices([]));
+  }, [voiceEngineOpen]);
+
+  const handleTestAudioOutput = () => {
+    setAudioTesting(true);
+    setAudioTestError(null);
+    testAudioOutputDevice()
+      .catch((e) => setAudioTestError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setAudioTesting(false));
+  };
 
   // Plan Next Session / module ingestion step progress — same event/listen
   // pattern as f5-install-progress just above, two separate events since
@@ -2790,9 +2843,17 @@ export function DMConsolePage() {
       const leftover = narrationBufferRef.current;
       narrationBufferRef.current = '';
       if (streamedAnyChunkRef.current) {
-        if (leftover.trim()) enqueueSentence(leftover);
+        // The streaming listener already ran everything else through
+        // extractCompleteSentences as it arrived (see the dm-narration-chunk
+        // effect) — this is only ever the final, boundary-less tail, but it
+        // can still legitimately contain more than one sentence (a short
+        // reply's very last bit might never have hit the punctuation-boundary
+        // regex even once), so it gets the same full splitting treatment
+        // rather than being handed to enqueueSentence raw — see
+        // enqueueFullText's doc comment for why that distinction matters.
+        if (leftover.trim()) enqueueFullText(leftover);
       } else {
-        enqueueSentence(narration);
+        enqueueFullText(narration);
       }
       // Ground truth for voice bugs: the RAW reply (tags intact) plus the
       // decision each sentence produced. Written AFTER the trailing-sentence
@@ -2899,8 +2960,7 @@ export function DMConsolePage() {
     voiceDebugRef.current = [];
     lastTaggedSpeakerRef.current = null;
     autoRevertedRef.current = false;
-    const { sentences } = extractCompleteSentences(lastDmNarrationRef.current);
-    for (const sentence of sentences) enqueueSentence(sentence);
+    enqueueFullText(lastDmNarrationRef.current);
   }
 
   /** Runs one DM-side turn through the queue/processing gate. One function so
@@ -4686,11 +4746,7 @@ export function DMConsolePage() {
       lastTaggedSpeakerRef.current = null;
       autoRevertedRef.current = false;
       suppressNarrationRef.current = false;
-      // A trailing space makes the last sentence a complete one to the
-      // streaming splitter; anything it still holds back gets spoken as-is.
-      const { sentences, remainder } = extractCompleteSentences(`${line} `);
-      for (const s of sentences) enqueueSentence(s);
-      if (remainder.trim()) enqueueSentence(remainder);
+      enqueueFullText(line);
       // Wait for the table to actually HEAR it, not just for the queue to accept
       // it. enqueueSentence is fire-and-forget, so this used to fall straight
       // through to the finally, re-enabling the button while the recap was still
@@ -6932,6 +6988,36 @@ export function DMConsolePage() {
               </button>
             )}
           </div>
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-slate-700">
+          <p className="text-sm text-slate-100 mb-1">Output device</p>
+          {!audioOutputSelectionSupported() ? (
+            <p className="text-xs text-slate-500">This window can't switch speakers — DM audio plays on whatever your system default output is.</p>
+          ) : (
+            <>
+              <p className="text-xs text-slate-500 mb-2">Which speaker/headset the DM's voice plays through. Doesn't affect the mic used for push-to-talk.</p>
+              <div className="flex items-center gap-2">
+                <select
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100"
+                  value={dmAudioOutputDeviceId}
+                  onChange={(e) => setDmAudioOutputDeviceId(e.target.value)}
+                >
+                  <option value="">System default</option>
+                  {audioDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>{d.label || `Output device (${d.deviceId.slice(0, 8)})`}</option>
+                  ))}
+                </select>
+                <Button size="sm" variant="outline" onClick={handleTestAudioOutput} disabled={audioTesting}>
+                  {audioTesting ? 'Playing…' : 'Test'}
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                "Test" plays a plain tone through the picked device — it doesn't use Kokoro/F5, so if you hear the tone but not the DM's voice, the problem is the voice engine, not this setting. If you hear nothing at all, it's this device/your system's audio routing.
+              </p>
+              {audioTestError && <p className="text-xs text-red-400 mt-1">{audioTestError}</p>}
+            </>
+          )}
         </div>
 
         {activeCampaignId && (

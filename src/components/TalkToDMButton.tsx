@@ -30,17 +30,37 @@ export function TalkToDMButton({ characterName }: { characterName: string }) {
   const [status, setStatus] = React.useState<string | null>(null);
   const [addressPromptOpen, setAddressPromptOpen] = React.useState(false);
   const [ipDraft, setIpDraft] = React.useState('');
+  /** Non-null while a "the DM Console just went unreachable" banner should
+   *  show. Separate from `status` (that one's for a single talk-turn's own
+   *  outcome) so a stale reply from before the drop doesn't get silently
+   *  overwritten by, or itself clobber, the disconnect notice. */
+  const [disconnectNotice, setDisconnectNotice] = React.useState<string | null>(null);
+  /** Whether useDmConnection has EVER reported true this component's
+   *  lifetime — guards against firing the notice on first mount (not
+   *  reachable yet, e.g. no dmIp set at all) or before the very first poll
+   *  resolves, both of which are "never connected," not "disconnected." */
+  const everConnectedRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (connected) warmupSTT().catch(() => {});
-  }, [connected]);
+    if (connected) {
+      everConnectedRef.current = true;
+      setDisconnectNotice(null);
+      warmupSTT().catch(() => {});
+    } else if (everConnectedRef.current) {
+      setDisconnectNotice(
+        dmIp.trim()
+          ? `Lost connection to the DM (${dmIp}) — check that the DM Console is still open.`
+          : 'Lost connection to the DM.'
+      );
+    }
+  }, [connected, dmIp]);
 
   if (!connected) {
     const reason = dmIp.trim()
       ? `Can't reach the DM at ${dmIp} — is the DM Console open? Click to change the address.`
       : 'Set a DM address to talk to the DM. Click to set one.';
     return (
-      <>
+      <div className="relative">
         <button
           onClick={() => { setIpDraft(dmIp); setAddressPromptOpen(true); }}
           title={reason}
@@ -48,6 +68,16 @@ export function TalkToDMButton({ characterName }: { characterName: string }) {
         >
           <Mic size={18} />
         </button>
+        {/* Only ever set right after a real connected→disconnected transition
+         *  (see the effect above) — a table that was never connected in the
+         *  first place just gets the quiet hover title above, not a banner
+         *  announcing a "loss" that never happened. */}
+        {disconnectNotice && (
+          <div className="absolute right-0 top-8 z-50 w-72 rounded bg-amber-950 border border-amber-800 p-2 text-[11px] text-amber-200 shadow-lg">
+            {disconnectNotice}
+            <button className="ml-2 text-amber-500 hover:text-white" onClick={() => setDisconnectNotice(null)}>✕</button>
+          </div>
+        )}
         <Dialog open={addressPromptOpen} onClose={() => setAddressPromptOpen(false)} title="DM address">
           <p className="text-slate-400 text-sm mb-4">
             On game night, whoever's running the DM Console tells you an address like
@@ -72,7 +102,7 @@ export function TalkToDMButton({ characterName }: { characterName: string }) {
             </Button>
           </div>
         </Dialog>
-      </>
+      </div>
     );
   }
 

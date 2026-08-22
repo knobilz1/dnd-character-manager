@@ -30,11 +30,21 @@ interface SettingsState {
   dmPinRequired: boolean;
   setDmPinRequired: (v: boolean) => void;
   /** DM SIDE ONLY: whether one player may hold the "table controller" role and
-   *  drive a fixed set of console buttons from their sheet. Default false; the
-   *  Rust gate resets to OFF each app start and the console re-applies this on
-   *  mount — same stance as dmPinRequired above. */
+   *  drive a fixed set of console buttons from their sheet. Default true — the
+   *  Rust gate itself resets OFF each app start and the console re-applies this
+   *  persisted value on mount (same stance as dmPinRequired above), so a fresh
+   *  install lands on-by-default rather than every table having to discover and
+   *  flip the checkbox before a player can use the feature at all. */
   dmRemoteControlEnabled: boolean;
   setDmRemoteControlEnabled: (v: boolean) => void;
+  /** Which speaker/output device DM voice audio plays through (both Kokoro/F5
+   *  `<audio>` playback and the browser-TTS fallback where supported — see
+   *  dmSpeech.ts's applyAudioOutputDevice). Empty = system default. Persisted
+   *  per-device like tableCameraDeviceId, since a DM's rig (speakers vs. a
+   *  headset vs. an HDMI monitor with no speakers) doesn't change session to
+   *  session the way campaigns do. */
+  dmAudioOutputDeviceId: string;
+  setDmAudioOutputDeviceId: (v: string) => void;
   /** Ids of characters that have been sent to the DM at least once (via the
    *  "Send to DM"/"Send All" buttons). Marks a character as "connected" —
    *  see hooks/useDmPushSync.ts, which auto-pushes further edits only for
@@ -145,7 +155,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDmPin: (v) => set({ dmPin: v.trim().toUpperCase() }),
       dmPinRequired: true,
       setDmPinRequired: (v) => set({ dmPinRequired: v }),
-      dmRemoteControlEnabled: false,
+      dmRemoteControlEnabled: true,
       setDmRemoteControlEnabled: (v) => set({ dmRemoteControlEnabled: v }),
       dmSyncedCharacterIds: [],
       addDmSyncedCharacter: (id) => {
@@ -176,16 +186,25 @@ export const useSettingsStore = create<SettingsState>()(
       setTableCameraSource: (v) => set({ tableCameraSource: v }),
       tableCameraDeviceId: '',
       setTableCameraDeviceId: (v) => set({ tableCameraDeviceId: v }),
+      dmAudioOutputDeviceId: '',
+      setDmAudioOutputDeviceId: (v) => set({ dmAudioOutputDeviceId: v }),
     }),
     {
       name: 'tavern-sheet-settings',
-      /** v1 made board photos opt-in. A default only applies to a fresh install,
+      /** v1 made board photos opt-in — a default only applies to a fresh install,
        *  so without this every console that had ever been opened would keep the
-       *  stored 'direct' and go on advertising a camera — which is the thing
-       *  turning it off was for. Touches that one key and nothing else. */
-      version: 1,
-      migrate: (persisted, from) =>
-        (from < 1 ? { ...(persisted as SettingsState), tableCameraSource: 'off' } : persisted) as SettingsState,
+       *  stored 'direct' and go on advertising a camera, which is the thing
+       *  turning it off was for. v2 turns the table-controller role ON by
+       *  default (was off) — same reasoning in reverse: an existing table that
+       *  never touched the checkbox would otherwise stay silently off forever.
+       *  Each version touches exactly the one key it's for. */
+      version: 2,
+      migrate: (persisted, from) => {
+        const s = { ...(persisted as SettingsState) };
+        if (from < 1) s.tableCameraSource = 'off';
+        if (from < 2) s.dmRemoteControlEnabled = true;
+        return s as SettingsState;
+      },
     }
   )
 );

@@ -77,6 +77,17 @@ export function HomePage({ checkForUpdates, checkStatus }: { checkForUpdates?: (
   const [driveOpen, setDriveOpen] = React.useState(false);
   const [dmStatus, setDmStatus] = React.useState<string | null>(null);
   const [dmSending, setDmSending] = React.useState(false);
+  /** Auto-dismisses the bottom-right toast once a send actually SUCCEEDED
+   *  (the "✅ ..." messages) — reported live as sitting there too long.
+   *  Errors and partial failures (no "✅" prefix) are left alone: those need
+   *  reading and possibly acting on, not clearing themselves out from under
+   *  someone. "Sending…" is in-between text that gets overwritten by the
+   *  next call anyway, so it never lives long enough for this to matter. */
+  React.useEffect(() => {
+    if (!dmStatus?.startsWith('✅')) return;
+    const timer = setTimeout(() => setDmStatus(null), 4000);
+    return () => clearTimeout(timer);
+  }, [dmStatus]);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [importError, setImportError] = React.useState<string | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);

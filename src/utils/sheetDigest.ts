@@ -1,6 +1,8 @@
 import type { AbilityKey, Character } from '../types';
 import { getSpell } from '../data/spells';
 import { lookupWeapon, damageLine } from '../data/weapons';
+import { getRace } from '../data/races';
+import { raceOptionGroups } from '../data/raceOptions';
 import { computeCharacterDerived } from '../hooks/useCharacterDerived';
 
 /**
@@ -70,6 +72,28 @@ export function buildSheetDigest(c: Character): string {
   lines.push(
     `${c.name} — L${d.totalLevel} ${classes} | AC ${d.ac} | HP ${c.currentHP}/${c.maxHP} | Speed ${d.speed} | Init ${fmt(d.initiative)} | Prof ${fmt(d.profBonus)}`
   );
+
+  // Race AND the racial CHOICES that decide real mechanics — Draconic
+  // Ancestry, Fiendish Legacy, Giant Ancestry and kin.
+  //
+  // memory/party.md already carries the bare race ("Level 5 Dragonborn
+  // Fighter") on every turn, but NOTHING has ever carried these picks to the
+  // DM — not party.md, not this digest. That gap is mechanical, not
+  // cosmetic: a dragonborn's ancestry is what decides their breath weapon's
+  // damage type, its shape, and which saving throw it calls for, so an
+  // unqualified "Dragonborn" leaves the DM unable to resolve the ability
+  // correctly even in principle. Reported live: a bronze dragonborn's breath
+  // weapon was narrated as a weapon swing and resolved as an attack roll.
+  const raceName = getRace(c.raceId)?.name ?? c.raceId;
+  const racePicks = raceOptionGroups(c.raceId, d.totalLevel)
+    .map((g) => {
+      const chosen = g.options.find((o) => o.value === c.raceOptions?.[g.key]);
+      return chosen ? `${g.label}: ${chosen.label}` : null;
+    })
+    .filter((p): p is string => !!p);
+  if (raceName?.trim()) {
+    lines.push(`Race: ${raceName}${racePicks.length ? ` (${racePicks.join('; ')})` : ''}`);
+  }
 
   lines.push(
     ABILITY_ORDER.map((k) => `${k.toUpperCase()} ${d.finalScores[k] ?? 10} (${fmt(d.mods[k] ?? 0)})`).join('  ')

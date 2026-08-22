@@ -496,17 +496,25 @@ fn list_wav_files(dir: &Path) -> HashSet<PathBuf> {
 /// Waits until `path`'s size stops changing across two checks a few ms apart
 /// (or 0-byte, which briefly happens right after Kokoro creates the file but
 /// before it's written anything) — a plain "does it exist" check can catch
-/// the file mid-write and read a truncated/empty result.
-fn wait_for_file_to_stabilize(path: &Path, deadline: Instant) {
+/// the file mid-write and read a truncated/empty result. Returns `true` once
+/// genuinely stable, `false` if the deadline hit first — the caller must
+/// treat `false` as "this file may be truncated," never read it as if it
+/// were the real, complete clip (see synthesize_once, which used to do
+/// exactly that: read-and-return regardless of this return value, so a
+/// sentence whose synthesis ran long enough to still be writing right at the
+/// 15s deadline played back with its tail chopped off — heard as the DM
+/// "randomly skipping words," worse on longer sentences under load, since
+/// those are the ones most likely to still be mid-write when time runs out).
+fn wait_for_file_to_stabilize(path: &Path, deadline: Instant) -> bool {
     let mut last_size: Option<u64> = None;
     loop {
         let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         if size > 0 && Some(size) == last_size {
-            return;
+            return true;
         }
         last_size = Some(size);
         if Instant::now() >= deadline {
-            return;
+            return false;
         }
         std::thread::sleep(Duration::from_millis(30));
     }
@@ -523,17 +531,34 @@ fn wait_for_file_to_stabilize(path: &Path, deadline: Instant) {
 /// own (inverted) speed scale at the actual synthesis call.
 const DEFAULT_PACE_FACTOR: f64 = 1.15;
 
+/// Hard ceiling on the native Kokoro/F5 speed this app will ever request,
+/// regardless of what pace_factor asked for. Reported live at the table: the
+/// "Very fast" preset (pace_factor 0.75 → native ≈1.33, previously accepted
+/// uncapped) made the DM audibly drop words CONSTANTLY, not as a rare
+/// edge case — neither engine was built/tuned for that much time-compression,
+/// and past some point the model starts skipping content rather than just
+/// sounding rushed. 1.2 sits just above the "Fast" preset (0.85 → native
+/// ≈1.18, not reported as a problem) and below every preset that WAS
+/// reported bad — a real, if imprecise, line between "sounds hurried" and
+/// "drops words," not a guess pulled from nothing. Applied at this one
+/// conversion point (not in the UI) so it holds regardless of caller: the UI
+/// dropdown, a saved npc_voices.json override from before this cap existed,
+/// or anything ever driving speech through this function.
+const MAX_NATIVE_SPEED: f64 = 1.2;
+
 /// Converts this app's stored "pace factor" (bigger = slower, the
 /// convention every UI label, saved npc_voices.json value, and
 /// DEFAULT_PACE_FACTOR already use) into Kokoro's own native `speed`
 /// parameter, which is the OPPOSITE convention (bigger = faster — confirmed
 /// empirically: speed=0.8 produced a longer clip than speed=1.3 for the
-/// same text). Keeping the stored/UI value in the app's existing convention
-/// means no data migration for anyone's already-saved npc_voices.json speed
-/// overrides and no relabeling of the History dialog's Speed dropdown —
-/// only this one call site needs to know Kokoro's scale is inverted.
+/// same text), clamped to MAX_NATIVE_SPEED on the fast end (see its own doc
+/// comment — no floor on the slow end, since a too-slow narrator was never
+/// the reported problem). Keeping the stored/UI value in the app's existing
+/// convention means no data migration for anyone's already-saved
+/// npc_voices.json speed overrides — only this one call site needs to know
+/// Kokoro's scale is inverted (and now capped).
 fn kokoro_speed_from_pace_factor(pace_factor: f64) -> f64 {
-    1.0 / pace_factor
+    (1.0 / pace_factor).min(MAX_NATIVE_SPEED)
 }
 
 /// One synthesis against the warm process, acquiring (finding or spawning)
@@ -554,8 +579,15 @@ fn synthesize_once(proc: &mut Option<PersistentKokoro>, exe: &Path, onnx: &Path,
             // Kokoro creates the file, then writes to it — reading the
             // instant it exists can race the write and return a truncated
             // (sometimes 0-byte) file. Wait for its size to stop changing
-            // across two checks before treating it as complete.
-            wait_for_file_to_stabilize(new_file, deadline);
+            // across two checks before treating it as complete; if the
+            // deadline won the race instead, this file may still be mid-write
+            // — error out (letting the caller's one-retry kick in) rather
+            // than hand back a clip that plays with its tail chopped off.
+            let stabilized = wait_for_file_to_stabilize(new_file, deadline);
+            if !stabilized {
+                let _ = std::fs::remove_file(new_file);
+                return Err("Kokoro synthesis didn't finish writing its output in time".into());
+            }
             let bytes = std::fs::read(new_file).map_err(|e| format!("couldn't read Kokoro's output: {e}"))?;
             let _ = std::fs::remove_file(new_file);
             return Ok(bytes);
@@ -2135,6 +2167,22 @@ mod tests {
         assert!(kokoro_speed_from_pace_factor(1.30) < 1.0, "a 'slower' pace factor must map to a Kokoro speed below 1.0");
         assert!(kokoro_speed_from_pace_factor(0.85) > 1.0, "a 'faster' pace factor must map to a Kokoro speed above 1.0");
         assert_eq!(kokoro_speed_from_pace_factor(1.0), 1.0, "a neutral pace factor must map to Kokoro's own neutral speed");
+    }
+
+    #[test]
+    fn kokoro_speed_from_pace_factor_clamps_the_fast_end_but_not_the_slow_end() {
+        // 0.75 ("Very fast") and faster presets uncap to well past
+        // MAX_NATIVE_SPEED — reported live to cause constant dropped words —
+        // so every one of them must land on exactly the same clamped value.
+        assert_eq!(kokoro_speed_from_pace_factor(0.75), MAX_NATIVE_SPEED);
+        assert_eq!(kokoro_speed_from_pace_factor(0.65), MAX_NATIVE_SPEED);
+        assert_eq!(kokoro_speed_from_pace_factor(0.55), MAX_NATIVE_SPEED);
+        // 0.85 ("Fast") sits just under the cap and must pass through
+        // unclamped — this is the fastest setting NOT reported as a problem.
+        assert!(kokoro_speed_from_pace_factor(0.85) < MAX_NATIVE_SPEED);
+        // The slow end has no ceiling of its own to hit — 1.60 ("Very slow")
+        // must come through exactly as computed, not silently altered.
+        assert_eq!(kokoro_speed_from_pace_factor(1.60), 1.0 / 1.60);
     }
 
     #[test]
